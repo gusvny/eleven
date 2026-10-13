@@ -43,10 +43,11 @@ const LIB = join(INTEG, "lib_pw_deps.mjs");
 // 单源消费方清单（原「八文件」）：261001 宿主令退休 sc_t01_click_no_chat_switch.mjs
 // 与其 baselines 兄弟后，本清单同步收窄——**退休一个场景必须同时扫这类在场清单**
 // （漏扫=本场景以「文件缺失」报红，2026-10-01 实案）。
+// 261012：宿主退役批 983bc0ee 再退三条（sc_t02_chat_project_tag /
+// sc_session_charter_injection_journey / sc_platform_context_fold_stacked），
+// 清单同步收窄——注释在案：退休一个场景必须同时扫这类在场清单（上一轮的
+// 实案注释说的就是这个，这一批把它做实）。
 const CONSUMERS = [
-  "t260903-07/sc_t02_chat_project_tag.mjs",
-  "t260904-07/sc_session_charter_injection_journey.mjs",
-  "t260905-09/sc_platform_context_fold_stacked.mjs",
   "t260901-24/sc_t04_gate_interlock.mjs",
   "baselines/sc_ticket_session_restore.mjs",
   "baselines/sc_ticket_evidence_images.mjs",
