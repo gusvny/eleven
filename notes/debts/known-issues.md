@@ -5470,6 +5470,8 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **纪律**：**同一份判据里，凡是"写了意图却没人调用"的函数，都要当成没写**；"红 ⇒ 动作"的每一处都要问"这类红真的是这个动作的理由吗"。
 >
 > **回归**：L1——`env_failed > 0 and failed == 0` 的红**不得**开冻结（或按 `should_freeze` 的意图具名拒绝）；L2——红轮里"是否有冻结行"必须与"是否有内容归因"一致。
+> 
+> **实证补记（261013，integration 直修落地）**：已按出路接线——`run_line_round` 的红分叉改走 `should_freeze(failed>0)`（`c381dd24`）：内容红照旧冻结+归因梯；环境-only 红只长范围、记 cert、不冻结，回执具名 `env_red_no_freeze`。回归 L1 已落（`test_r2b_env_only_red_never_freezes`；同族 R2 内容红冻结面不变）。冻结/落地/轮族 262 条全绿。
 
 ## KI-01M4P6Z4T5C1R2S8N9K7H3QWDP **认证轮判的不是修订，是跑器能给的环境**：20 条 UI/DOM 用例在线轮里**从未跑过**，多条 self-red 在交付树里却是绿的（261012 integration 岗实测）
 
