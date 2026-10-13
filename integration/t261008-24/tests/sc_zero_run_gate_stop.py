@@ -202,8 +202,10 @@ def main():
               flush=True)
         check(kind2 == "advanced",
               "相二 恢复+retry_qc → 闸真跑 ran=1 绿 → 推进 merge 族挂人审"
-              "（kind=%s stage=%s state=%s）"
-              % (kind2, snap2.get("stage"), snap2.get("stage_state")))
+              "（kind=%s stage=%s state=%s blocked=%s）"
+              % (kind2, snap2.get("stage"), snap2.get("stage_state"),
+                 str(snap2.get("blocked_reason") or snap2.get("blocked_detail")
+                     or "")[:240]))
         check(rounds2 == 1,
               "相二 arbitrate 恰 1 轮（恢复轮一判即过，无额外空转；got=%d）" % rounds2)
         ho = t09.handoff_text(snap2)
