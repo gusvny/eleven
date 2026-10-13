@@ -90,3 +90,10 @@ b3033112 l7-gate 夹具随行 ｜ 2bbe0ab3 archive 锚token ｜ 9b8c7f1c pw-path
 - **缺口②（已修）**：阅读器 `import scenario_ledger` 是死路——引擎**永不 import integration 支持层**（develop_certify 铁律），引擎进程里 ModuleNotFoundError。两处阅读器（certification_wait + 晋升）全改 stdlib 直读 JSONL。
 - **缺口③（证实在案，未修）**：线轮 face 只留计数、suite.log 重命名/保留静默 OSError 吞了——每轮 fail 名单随临时树蒸发，分诊只能靠轮在跑时读活日志。
 - **现状**：certify 机器面全通（落线→轮→绿证→promote→main），剩余唯一卡点是**线还红**（30 挂主体=轮环境/供给族＋归票产品缺口）。绿证一出现，promote 即可晋 main。
+
+## 补记 7（261013）：Certification 页签 Rounds 空表——三层根因（宿主实报）
+- **层①**：面板 spawn 认证适配器从不设 `SANDBAR_RUNS_LEDGER`（适配器合同「不设=具名拒」）→ 每次读具名拒、表空。修：面板按工程寻址补路径（6d5d40ea）。
+- **层②**：适配器对「任一被引 run 头缺席」**硬 fail 整条线**——保留窗删了老轮的临时树账，一条丢记录就把全表藏掉。修：逐轮降级（读得过、具名丢失、能读照渲），**判绿仍严**（缺 run=不绿、不晋升）（e7b8e6d6）。
+- **层③**：covering 过滤把「缺 run」当绿（unknown-as-green）——与适配器防的同类。已修。
+- **诚实**：历史两轮 run 头被保留窗删除，无法诚实恢复（不捏造校验字段）；新轮起 run 头持久化（补记6 之修），表自新轮有数据。
+- **教训**：读面的「fail-closed」要分清**判断面**（晋升/落地——必须严）与**展示面**（列表——该逐条具名降级，不该藏全部）。
