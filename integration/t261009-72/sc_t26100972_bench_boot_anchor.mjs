@@ -25,7 +25,9 @@
 // 三态（t260904-12）：fail>0 或全 na=exit 1；env_fail>0=exit 2。
 // 实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿。
 
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { join } from 'node:path'
 import {
   makeRegistryRoot, writeProjectEntry, makeTicketStub, bootConsole,
   teardownOnExit, api, makeResults, tmpRoot, REPO_ROOT,
@@ -75,13 +77,31 @@ teardownOnExit(bench.teardown);
 record('S1/boot-ready', true, `${bench.base}（宿主串入的 foreign env SANDBAR_REPO 被免疫）`);
 
 // ---- S2 锚岗 verdict 表（验收 (2)：guard 不弱化的测试化钉死） ----
+// 261012 修：断言的语境按本文件注释与 repo-anchor.mjs 的范围声明归位——锚岗只管
+// linked worktree 里的进程（isLinkedWorktree=false 的主检出/轮克隆放行）。旧写法
+// 用缺省 ownRoot=OWN_ROOT（本模块所在树=主检出/克隆），结构上恒 null ⇒ 在 main 与
+// 每一轮线轮里恒红（实案）。改为造**真 git worktree** 夹具再判，另补一条范围边界
+// 断言（非 worktree 放行），把设计范围钉成双向。
 {
   const foreign = tmpRoot('fix72-guard-foreign-');
-  let linked = false;
-  try { linked = isLinkedWorktree(OWN_ROOT); } catch { /* 判定面照给 */ }
-  const envVerdict = anchorGuardError(foreign, 'env SANDBAR_REPO');
-  record('S2/env-foreign-refused', typeof envVerdict === 'string' && envVerdict.includes('SANDBAR_ANCHOR_MISMATCH'),
+  const baseRepo = tmpRoot('fix72-guard-base-');
+  const git = (args) => execFileSync('git', args, { stdio: 'pipe' });
+  git(['init', '-q', baseRepo]);
+  git(['-C', baseRepo, 'config', 'user.email', 'fix72@it']);
+  git(['-C', baseRepo, 'config', 'user.name', 'fix72']);
+  writeFileSync(join(baseRepo, 'seed.txt'), 's\n');
+  git(['-C', baseRepo, 'add', '-A']);
+  git(['-C', baseRepo, 'commit', '-qm', 'seed']);
+  const wt = tmpRoot('fix72-guard-wt-');
+  git(['-C', baseRepo, 'worktree', 'add', '--detach', wt]);
+  const linked = isLinkedWorktree(wt);
+  const envVerdict = anchorGuardError(foreign, 'env SANDBAR_REPO', wt);
+  record('S2/env-foreign-refused', linked && typeof envVerdict === 'string' && envVerdict.includes('SANDBAR_ANCHOR_MISMATCH'),
     `linked=${linked} verdict=${JSON.stringify(envVerdict).slice(0, 120)}`);
+  const scopeVerdict = anchorGuardError(foreign, 'env SANDBAR_REPO', baseRepo);
+  record('S2/env-foreign-scope-main-passes',
+    scopeVerdict === null,
+    `非 worktree 检出放行（守卫范围声明） verdict=${JSON.stringify(scopeVerdict)}`);
   const cfgVerdict = anchorGuardError(foreign, 'config.repo');
   record('S2/config-repo-passes', cfgVerdict === null, JSON.stringify(cfgVerdict));
   const locVerdict = anchorGuardError(foreign, 'location-derived');
