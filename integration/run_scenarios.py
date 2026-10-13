@@ -4563,17 +4563,24 @@ def _reuse_plan(candidates, conc_width, root, env_fp_value=None):
         plan["disabled_reason"] = "环境指纹判不出（协议库缺席或指纹为空）"
         return plan
     plan["env_fp"] = env_fp
+    # 261012（宿主令「把 run 跑通」实证链）：HEAD 解析必须**先于** kill-switch 早退——
+    # git_head 不只是复用比对键，还是轮末 run record 的 commit 身份。此前顺序下，
+    # runner 钉 SANDBAR_LEDGER_REUSE=0（刻意关复用）⇒ 早退 ⇒ git_head 恒空 ⇒
+    # run record 被 skip（"HEAD sha could not be resolved"）⇒ summary 无 run_id ⇒
+    # 线轮 runner 合同拒收（run_id_missing_from_summary），每一轮全量都死在这。
+    # 复用语义不变：off 时依旧 disabled（名字不进复用面），只是身份照常解析。
+    head, dirty = _tree_state(root)
+    if head:
+        plan["git_head"] = head
     if str(os.environ.get(LEDGER_REUSE_ENV, "")).strip().lower() in _REUSE_OFF_WORDS:
         plan["disabled_reason"] = ("%s=%s 显式关闭复用（kill switch）"
                                    % (LEDGER_REUSE_ENV,
                                       os.environ.get(LEDGER_REUSE_ENV)))
         return plan
-    head, dirty = _tree_state(root)
     if not head:
         plan["disabled_reason"] = ("HEAD sha 判不出（git 缺席/非仓/命令失败）——"
                                    "没有可比对的提交面")
         return plan
-    plan["git_head"] = head
     if dirty:
         plan["disabled_reason"] = ("工作树脏（git status 非空）——HEAD 单独描述不了"
                                    "正在被验证的树，未提交改动不得由旧绿顶替")
