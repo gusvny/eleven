@@ -1483,9 +1483,9 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                 # means part of the suite was unavailable, not that the
                 # revision is guilty — it grows the range like any red, but
                 # freezing the line over an environment gap was exactly the
-                # "环境的问题，内容的代价" misjudgment. should_freeze's written
-                # intent is now wired (it was dead code; the docstring stays
-                # the truth of this branch).
+                # misjudgment the KI names. should_freeze's written intent is
+                # now wired (it was dead code; its docstring stays the truth
+                # of this branch).
                 _content_failed = int(header["cases"].get("failed", 0))
                 if verdict == "red" and should_freeze(_content_failed > 0):
                     batch += open_freeze_rows(cert, at_ms=now_ms)
