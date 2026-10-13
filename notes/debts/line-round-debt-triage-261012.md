@@ -97,3 +97,9 @@ b3033112 l7-gate 夹具随行 ｜ 2bbe0ab3 archive 锚token ｜ 9b8c7f1c pw-path
 - **层③**：covering 过滤把「缺 run」当绿（unknown-as-green）——与适配器防的同类。已修。
 - **诚实**：历史两轮 run 头被保留窗删除，无法诚实恢复（不捏造校验字段）；新轮起 run 头持久化（补记6 之修），表自新轮有数据。
 - **教训**：读面的「fail-closed」要分清**判断面**（晋升/落地——必须严）与**展示面**（列表——该逐条具名降级，不该藏全部）。
+
+## 补记 8（261013）：线尖红面的轮口径采样（冲绿靶子）
+- **采法纠偏**：裸 wt 跑作废（没备资产虚高）；照 runner 口径克隆线尖＋软链资产＋轮环境钉＋32 豁免才得真口径。全量串行 ~30h 不划算，采样 13 条停采。
+- **轮口径已挂（c0a8a64e，32 豁免生效）**：2 条 external（t260904-19-stage-docker、t260911-02-trigger-kinds＝docker/外部供给）＋ 11 条 self（scenario-guard-pipeline-landed、period-journey、console-paused-list、doc-face、suite-journey、sign-journey、project-identity-realchain、relocation-realchain、inspect-journey、verdict-cli、legacy-fire-redirect）。
+- **结构确认**：冲绿=「轮环境供给族手术（docker/浏览器在克隆里起得来）＋场景硬化族＋归票产品缺口」三类，与早前分诊一致。这是工程，非一改即绿。
+- **结论**：certify 机器面全通可用（晋升驱动就绪），线红是内容欠账的清账工程。绿证一出现 promote.py 即可晋 main。
