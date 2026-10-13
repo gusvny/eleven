@@ -166,6 +166,12 @@ export async function bootConsole(fixturesRoot, opts = {}) {
       base: `http://127.0.0.1:${st.ports.console}`,
       reg: '/fixtures/reg',
       toStage: (p) => '/fixtures/' + path.relative(fixturesRoot, p),
+      // 261012：补回 goto——72e010c1（260928 token 门批）把两个场景改写成
+      // `bench.goto(page, opts)`，但那是 lib_fix17（直起形态，token 兑换）的方法，
+      // 本 bench（docker 台，无 token 门——同批遗留的 page2.goto 裸导航即证）从未
+      // 提供过它，两条场景自此 `bench.goto is not a function` 恒挂。docker 台的导航
+      // 语义=旧绿版的裸 page.goto(base)。
+      goto(page, options) { return page.goto(`${this.base}/`, { waitUntil: 'domcontentloaded', ...options }); },
       tmpHome, clean,
       teardown() {
         try { stage.stageDown(st.project); } catch (e) { console.error(`[fix15] stage down：${e.message}`); }

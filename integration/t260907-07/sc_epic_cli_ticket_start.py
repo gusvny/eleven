@@ -108,7 +108,10 @@ def main():
         check(payload.get("ok") is False and eng_epics not in out,
               "N2 不串桶：engine 异名对 external 拒收且不误指 engine 目录", out[-240:])
         rc, payload, out = start_ticket(py, env0, "t26090707-cli-n3", "no-such-project", "")
-        check(payload.get("ok") is False and "拒收" in out and "no-such-project" in out,
+        # 261012（KI-01M4PX56PCD 家族）：锚承诺不锚措辞——承诺=拒收且点名未知工程；
+        # 文案已由语言闸英文化（"unknown project '...'"），双语任一措辞皆算。
+        check(payload.get("ok") is False and "no-such-project" in out
+              and ("拒收" in out or "unknown project" in out),
               "N3 未知 project 拒收（KI-032 硬闸面回归）", out[-240:])
 
         # ---- S 正路径（docker 测试台） ----

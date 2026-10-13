@@ -432,6 +432,11 @@ try:
     (regdir / "project.yaml").write_text(
         "schema: v1\nproject:\n  - key: %s\n    name: UT 拆道 13\n    dirs:\n      - %s\n"
         % (PROJ, proj_root), "utf-8")
+    # 261012：并发上限声明是 fail-closed 的——夹具不补，建票口就拒（实测：
+    # "Concurrency-limit declaration absent ... fail-closed refusal"，泳道从未
+    # 物化，T1 超时）。声明进夹具注册根，与真机面（{"version":1,"limit":N}）同形。
+    (regdir / "concurrency-limit.json").write_text(
+        json.dumps({"version": 1, "limit": 4}), "utf-8")
     FIX.update({"mixed": str(proj_root), "regroot": str(regroot)})
     if has_temporalio:
         stage_legs()

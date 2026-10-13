@@ -54,3 +54,10 @@
   - **待分诊 ~10**：zero-run-gate-stop、fast-set 三场景、ledger-reuse-round、guard-statement-level-faces、project-ui-settings-isolation、bench-boot-anchor、lane-materialization、teardown-residue-visible、executor-timings-receipt、multitab-guard-assets、pw-path-resolution、ticket-detail-overlay、executor-panel-theme-follow（先去重后分流）
   - **browser/env 族**：面板/截图族在克隆里 bench 资产/装配敏感——bench 健壮性工作（非删测）
 - 工作类型结论：**大头是改场景（夹具/锚/硬化），小头是改产品（E4/E5、拒收面），一处要合同裁决（ki067），零删测**。
+
+## 补记 2（261012 深夜，直修期）：新发现与处置
+- **pw-path-resolution 已修**（退役批在场清单收窄，`9b8c7f1c`）；**epic-cli N3 已修**（锚 token，`552275f2`）；**bench-boot-anchor 已修**（S2 断言归位到守卫声明的 worktree 语境，`b57c61d4`）。
+- **guard-statement + carrier-port-guard 转绿**——根因竟是我自己的册子落盘漂移（json.dump 非 canonical，L23 连坐），已修（`ea2dc3b8`）并实证两场景复绿。**教训：我的每次手工 JSON 落盘都必须过 canonical writer。**
+- **settings-isolation / rail-add-remove**：72e010c1 把导航改到 fix17 的 bench.goto（fix15 没有）→ 恒挂至今；lib_fix15 已补回裸导航 goto（docker 台无 token 门）。剩余红 = t261008-36 把设置入口挪进执行器面板 Settings 页签、场景锚未跟——**挂起等新版 UI 系列票（t261012-07..23）收口后再修**，届时锚不会再动。
+- **teardown-residue-visible**：T1 泳道物化超时，需读其 worker 日志深挖（冻结期无 LLM 段干扰，可复跑分诊）。
+- **zero-run-gate-stop / lane-materialization**：未诊（前者需真台，后者 376s 慢）。

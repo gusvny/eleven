@@ -122,6 +122,10 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # ---- t261013-04: the round's own shape must mint a relayable proof ----
+    ("t261013-04-line-round-run-record",
+     "A round driven the way a line round drives the suite books a proof the runner can relay, and every deviation stays honestly record-less (ticket t261013-04, the carrier ride that lands main's run-record fixes on the develop line; incident = the rounds at 01:00Z and 02:4xZ completed inside budget yet booked nothing, each as runner_failed_exit_2:run_id_missing_from_summary, because the round pins SANDBAR_LEDGER_REUSE=0, the reuse plan's early return left git_head empty, the run record was skipped, the summary carried no run id and the runner refused; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a private real git fixture tree with an injected one-entry registry, the run-scoped ledger projected through SANDBAR_SCENARIO_LEDGER_DIR, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE INCIDENT CHAIN, POSITIVE - a round with the line round's own shape (source lane:line-round, SANDBAR_LEDGER_REUSE=0, the declared pool exclusion exclusive, a run-scoped ledger) ends with a summary that carries a run id, exactly ONE header in the run-scoped ledger whose commit is the round's HEAD, the run's own case rows, and the REAL line_round_runner.read_header ACCEPTS that summary - never run_id_missing_from_summary, so the proof is relayable; B the diagnostic control - the same round with --only carries no run id and lands no header, and the skip is named on stderr (a narrowed round is not a proof); C the scope control - the same exclusion under another source carries no run id (the caliber exception belongs to the line round, not to an exclusion as such); D the honesty control - with no resolvable commit identity (a tree without a repository) the round writes no run id and no invented header, and it names the missing identity. Intent split (no intent-level duplication): the store and CLI contract (minting, refusals, legacy rows, interrupted runs) belongs to t261009-11-run-record-store; the drivers journey (executor as top driver, gate-owned round, legacy rows, gate face) belongs to t261009-11-run-record-drivers; the reuse keys and the kill-switch face belong to t260930-01-ledger-reuse-round; the runner-to-header contract, red-is-a-proof, timeout and process-group reclaim belong to t261009-77-line-round-runner; the conflict plan and the landing decision belong to the t261009-30 / t261009-28 families. The fixture technique is shared with those entries; shared steps are not shared intent. Green on the landed tree is required at the integration gate; git or the suite modules missing = ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261013-04/sc_t26101304_line_round_run_record.py", "ro"),
     # ---- t261012-02: a hung case must not eat the round — the per-case
     # budget is real (group kill, no inherited pipe) and a twice-hung
     # entry is skipped by name ----
@@ -4667,17 +4671,24 @@ def _reuse_plan(candidates, conc_width, root, env_fp_value=None):
         plan["disabled_reason"] = "环境指纹判不出（协议库缺席或指纹为空）"
         return plan
     plan["env_fp"] = env_fp
+    # 261012（宿主令「把 run 跑通」实证链）：HEAD 解析必须**先于** kill-switch 早退——
+    # git_head 不只是复用比对键，还是轮末 run record 的 commit 身份。此前顺序下，
+    # runner 钉 SANDBAR_LEDGER_REUSE=0（刻意关复用）⇒ 早退 ⇒ git_head 恒空 ⇒
+    # run record 被 skip（"HEAD sha could not be resolved"）⇒ summary 无 run_id ⇒
+    # 线轮 runner 合同拒收（run_id_missing_from_summary），每一轮全量都死在这。
+    # 复用语义不变：off 时依旧 disabled（名字不进复用面），只是身份照常解析。
+    head, dirty = _tree_state(root)
+    if head:
+        plan["git_head"] = head
     if str(os.environ.get(LEDGER_REUSE_ENV, "")).strip().lower() in _REUSE_OFF_WORDS:
         plan["disabled_reason"] = ("%s=%s 显式关闭复用（kill switch）"
                                    % (LEDGER_REUSE_ENV,
                                       os.environ.get(LEDGER_REUSE_ENV)))
         return plan
-    head, dirty = _tree_state(root)
     if not head:
         plan["disabled_reason"] = ("HEAD sha 判不出（git 缺席/非仓/命令失败）——"
                                    "没有可比对的提交面")
         return plan
-    plan["git_head"] = head
     if dirty:
         plan["disabled_reason"] = ("工作树脏（git status 非空）——HEAD 单独描述不了"
                                    "正在被验证的树，未提交改动不得由旧绿顶替")
