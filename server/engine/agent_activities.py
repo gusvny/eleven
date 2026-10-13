@@ -6189,7 +6189,21 @@ async def certification_wait(args: CertWaitArgs) -> CertWaitResult:
         return CertWaitResult(ok=False, error="no landing record for ticket %s on "
                               "line %r — nothing to wait for"
                               % (args.ticket_id, args.line_id))
-    face = cert_wait_face(rows, args.line_id, landings[-1], None,
+    # 261013 (wires the t261009-30 seam): the run-verdict reader — reads the
+    # cited run's own verdict from the scenario-runs ledger. Without it every
+    # landing on a certified line stopped named run_verdict_unreadable. An
+    # unknown/unreadable run id answers None -> not green, never guessed.
+    def _is_green(run_id):
+        try:
+            import scenario_ledger  # integration/ (engine venv path covers it)
+            headers, _ = scenario_ledger.read_runs()
+        except Exception:
+            return None
+        for h in headers:
+            if isinstance(h, dict) and h.get("id") == run_id:
+                return h.get("verdict") == "green"
+        return None
+    face = cert_wait_face(rows, args.line_id, landings[-1], _is_green,
                           int(time.time() * 1000))
     return CertWaitResult(ok=True, state=str(face.get("state") or ""),
                           covered_by=str(face.get("covered_by") or ""),
