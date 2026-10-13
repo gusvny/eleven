@@ -85,6 +85,7 @@ R1 — the pattern is integration/scenario_ledger.py and its ULID mint):
 import fcntl
 import json
 import os
+import sys
 import secrets
 import time
 from pathlib import Path
@@ -1419,7 +1420,7 @@ def refuse_delivered_checkout(tree, main_checkout):
 
 def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                    judged_by, booked_red, backstop_ms=None, now_ms=None,
-                   chain_limit=CHAIN_LIMIT, lane_reds=None):
+                   chain_limit=CHAIN_LIMIT, lane_reds=None, runs_store=None):
     """Run the line's certification round(s): at most one per tick, chained
     while anything is still waiting, bounded by ``chain_limit``.
 
@@ -1473,6 +1474,27 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
             candidate = candidate_set(rng["covered_landings"])
             try:
                 header = runner(candidate)
+                # 261013: persist the cited run header to the durable
+                # per-project runs store BEFORE building the cert. The runner's
+                # suite wrote it into the round's OWN scoped ledger dir (deleted
+                # with the temp tree); the run-verdict reader (certification_wait
+                # / the promotion driver) answers is_green from THIS store, so a
+                # certification must never cite a run nobody can read back.
+                # Measured: cert-01M4SXHB cited a run that lived only in a
+                # deleted temp dir (every landing then stopped at
+                # run_verdict_unreadable). No store pinned = no copy (legacy
+                # callers byte-unchanged); a failed persist warns, never blocks.
+                if runs_store:
+                    try:
+                        import json as _json
+                        rs = Path(runs_store)
+                        rs.parent.mkdir(parents=True, exist_ok=True)
+                        with open(str(rs), "a", encoding="utf-8") as fh:
+                            fh.write(_json.dumps(header, ensure_ascii=False)
+                                     + "\n")
+                    except Exception as _e:  # noqa: BLE001
+                        sys.stderr.write("run-record persist failed: %s\n"
+                                         % _e)
                 cert = build_certification(candidate, header, booked_red,
                                            judged_by, at_ms=now_ms, line=line)
                 verdict = run_verdict(header["cases"])
@@ -1823,7 +1845,8 @@ _atexit.register(shutdown_inflight_ticks)
 def line_round_tick(project_key, load_lines, read_rows, append_rows,
                     resolve_runner_fn, guard_path, now_ms, backstop_ms=None,
                     judged_by=TICK_JUDGED_BY, booked_red=TICK_BOOKED_RED,
-                    chain_limit=CHAIN_LIMIT, lane_reds=None, env=None):
+                    chain_limit=CHAIN_LIMIT, lane_reds=None, env=None,
+                    runs_store=None):
     """One scheduled tick's ask, per declared line (t261009-50 spec 1-5).
 
     This is the CALL SITE, not a second round: it reads the records, asks
@@ -1896,7 +1919,8 @@ def line_round_tick(project_key, load_lines, read_rows, append_rows,
             res = run_line_round(line, trigger, guard_path, runner, read_rows,
                                  append_rows, judged_by, booked_red,
                                  backstop_ms=backstop_ms, now_ms=now_ms,
-                                 chain_limit=chain_limit, lane_reds=lane_reds)
+                                 chain_limit=chain_limit, lane_reds=lane_reds,
+                                 runs_store=runs_store)
         except CertifyError as e:
             entries.append({"line": line, "state": "error", "error": str(e)})
             continue
@@ -1983,7 +2007,8 @@ def line_round_tick_activity(project_key):
             resolve_runner_fn=resolve_runner,
             guard_path=guard_path,
             now_ms=int(time.time() * 1000),
-            backstop_ms=backstop_ms_from_env())
+            backstop_ms=backstop_ms_from_env(),
+            runs_store=str(ledger.parent / "scenario-runs.jsonl"))
     finally:
         _INFLIGHT_TICKS.pop(str(project_key), None)
 
