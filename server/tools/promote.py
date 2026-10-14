@@ -91,15 +91,15 @@ def run(a):
 
 def main(argv):
     if len(argv) != 2:
-        print(json.dumps(_bad("usage: promote.py '{json}'"), ensure_ascii=False))
+        print(json.dumps(_bad("usage: promote.py '{json}'"), ensure_ascii=True))
         return 2
     try:
         args = json.loads(argv[1])
     except ValueError as e:
-        print(json.dumps(_bad("malformed JSON arg: %s" % e), ensure_ascii=False))
+        print(json.dumps(_bad("malformed JSON arg: %s" % e), ensure_ascii=True))
         return 2
     out = run(args)
-    print(json.dumps(out, ensure_ascii=False))
+    print(json.dumps(out, ensure_ascii=True))
     return 0 if out.get("ok") else 1
 
 
