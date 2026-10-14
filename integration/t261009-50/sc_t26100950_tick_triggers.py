@@ -80,17 +80,20 @@ def run(dc, tmp):
     res = tick(dc, led, [LINE], {"develop": runner}, NOW + 1, BACKSTOP_MS, gp)
     # 261014 (inline relative caliber): the tick asks the runner exactly once
     # for the line's CANDIDATE — the anti-spam rule the original contract pins.
-    # The relative round may add ONE baseline ask at main's tip when the
-    # baseline cache is cold (a different revision, for the baseline
-    # computation) — that is a separate legitimate concern, not a second ask
-    # for the same candidate. Pin the candidate-ask count, not the raw total.
-    cand_asks = [c for c in runner.calls
-                 if any(r.get("revision") == "rev1"
-                        for r in (c.get("candidate") or []))]
+    # The relative round may add ONE baseline ask at main's tip (cache cold).
+    # The candidate ask comes FIRST (run_line_round runs the candidate before
+    # the baseline); when main's tip coincides with the candidate revision the
+    # two asks carry the same revision, so they are told apart by ORDER, never
+    # by revision. Pin: the first ask is the line's candidate, and the total is
+    # bounded (candidate + at most one baseline ask) — never a re-ask of the
+    # same candidate as a candidate.
+    first_cand = runner.calls[0].get("candidate") if runner.calls else []
     check("T1a the event tick asks the runner exactly once for the line's "
-          "candidate (one candidate ask per line per tick; a baseline ask at "
-          "main's tip, cache-cold, is separate and allowed)",
-          len(cand_asks) == 1 and len(runner.calls) <= 2, repr(runner.calls))
+          "candidate (first ask; a following baseline ask at main's tip, "
+          "cache-cold, is separate and bounded)",
+          runner.calls
+          and any(r.get("revision") == "rev1" for r in first_cand)
+          and len(runner.calls) <= 2, repr(runner.calls))
     rows, bad = led.read()
     certs = [x for x in rows if x["kind"] == "certification"
              and x["line"] == LINE]

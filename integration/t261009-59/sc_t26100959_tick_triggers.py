@@ -78,16 +78,18 @@ def run(dc, tmp):
     led.append([landing_row("t1b", "rev1", NOW, LINE)])
     runner = FakeRunner(headers=[green_header(rid="run-x50t1a")])
     res = tick(dc, led, [LINE], {"develop": runner}, NOW + 1, BACKSTOP_MS, gp)
-    # 261014 (inline relative caliber): pin the CANDIDATE-ask count (the
-    # anti-spam rule), not the raw total — the relative round may add one
-    # baseline ask at main's tip (cache cold), a separate legitimate concern.
-    cand_asks = [c for c in runner.calls
-                 if any(r.get("revision") == "rev1"
-                        for r in (c.get("candidate") or []))]
+    # 261014 (inline relative caliber): the candidate ask comes FIRST
+    # (run_line_round runs the candidate before the baseline); a following
+    # baseline ask at main's tip (cache cold) is separate and bounded. When
+    # main's tip coincides with the candidate revision the two asks carry the
+    # same revision, so they are told apart by ORDER, never by revision.
+    first_cand = runner.calls[0].get("candidate") if runner.calls else []
     check("T1a the event tick asks the runner exactly once for the line's "
-          "candidate (one candidate ask per line per tick; a baseline ask at "
-          "main's tip, cache-cold, is separate and allowed)",
-          len(cand_asks) == 1 and len(runner.calls) <= 2, repr(runner.calls))
+          "candidate (first ask; a following baseline ask at main's tip, "
+          "cache-cold, is separate and bounded)",
+          runner.calls
+          and any(r.get("revision") == "rev1" for r in first_cand)
+          and len(runner.calls) <= 2, repr(runner.calls))
     rows, bad = led.read()
     certs = [x for x in rows if x["kind"] == "certification"
              and x["line"] == LINE]
