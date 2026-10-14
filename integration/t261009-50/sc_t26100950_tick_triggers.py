@@ -78,8 +78,19 @@ def run(dc, tmp):
     led.append([landing_row("t1b", "rev1", NOW, LINE)])
     runner = FakeRunner(headers=[green_header(rid="run-x50t1a")])
     res = tick(dc, led, [LINE], {"develop": runner}, NOW + 1, BACKSTOP_MS, gp)
-    check("T1a the event tick asks the runner exactly once (one ask per "
-          "line per tick)", len(runner.calls) == 1, repr(runner.calls))
+    # 261014 (inline relative caliber): the tick asks the runner exactly once
+    # for the line's CANDIDATE — the anti-spam rule the original contract pins.
+    # The relative round may add ONE baseline ask at main's tip when the
+    # baseline cache is cold (a different revision, for the baseline
+    # computation) — that is a separate legitimate concern, not a second ask
+    # for the same candidate. Pin the candidate-ask count, not the raw total.
+    cand_asks = [c for c in runner.calls
+                 if any(r.get("revision") == "rev1"
+                        for r in (c.get("candidate") or []))]
+    check("T1a the event tick asks the runner exactly once for the line's "
+          "candidate (one candidate ask per line per tick; a baseline ask at "
+          "main's tip, cache-cold, is separate and allowed)",
+          len(cand_asks) == 1 and len(runner.calls) <= 2, repr(runner.calls))
     rows, bad = led.read()
     certs = [x for x in rows if x["kind"] == "certification"
              and x["line"] == LINE]
