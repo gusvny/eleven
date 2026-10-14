@@ -391,3 +391,108 @@ def test_r8b_round_records_cite_not_restate(tmp_path):
     for stolen in ("cases", "verdict", "counts"):
         assert stolen not in cert  # the certification cites the run
     assert cert["booked_red"] == "booked-v1" and cert["judged_by"] == "round-engine"
+
+
+# ---- the inline relative caliber (261014) ------------------------------------
+
+def _rel_header(failed_names, failed=None):
+    return {"id": dc.mint_id("run"),
+            "cases": {"ran": 10, "failed": len(failed_names)
+                      if failed is None else failed, "env_failed": 0},
+            "failed_names": list(failed_names)}
+
+
+def _rel_git_repo(path):
+    import subprocess
+    g = lambda *a: subprocess.run(["git"] + list(a), cwd=str(path),
+                                  check=True, capture_output=True, text=True)
+    path.mkdir(parents=True)
+    g("init", "-q")
+    g("config", "user.email", "it@rel")
+    g("config", "user.name", "it")
+    (path / "a.txt").write_text("a\n", "utf-8")
+    g("add", "-A")
+    g("commit", "-qm", "m0")
+    return g("rev-parse", "refs/heads/main").stdout.strip()
+
+
+def _rel_setup(tmp_path, monkeypatch):
+    """Isolated project store + a real git repo as the line worktree (for the
+    baseline's main-tip resolution)."""
+    projects = tmp_path / "projects"
+    monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(projects))
+    repo = projects / "sandbar" / "data" / "develop" / "wt" / "sandbar"
+    main_tip = _rel_git_repo(repo)
+    return projects, main_tip
+
+
+def test_relative_green_when_line_carries_only_main_debt(tmp_path, monkeypatch):
+    projects, main_tip = _rel_setup(tmp_path, monkeypatch)
+    p = ledger(tmp_path)
+    seed(p, landing("sandbar", "rev1"))
+
+    def runner(cand):
+        rev = cand[0]["revision"]
+        if rev == "rev1":        # the line run
+            return _rel_header(["d1", "f1"])
+        return _rel_header(["d1"])  # the baseline run (main): has d1, not f1
+    roster = {"entries": [{"name": "f1", "verdict": "isolated"}]}
+    out = dc.run_line_round(LINE, "change", guard_path(tmp_path), runner,
+                            reader(p), writer(p), "round-engine", "booked-v1",
+                            project="sandbar", roster=roster)
+    r = out["rounds"][0]
+    assert r["verdict"] == "green"
+    rel = r["relative"]["per_repo"]["sandbar"]
+    assert rel["new_regressions"] == []
+    assert rel["carried_debt"] == ["d1"]      # main's debt, carried (not a regression)
+    assert rel["flaky_hits"] == ["f1"]        # flaky, never a regression
+    # no freeze on a relative green
+    rows, _ = dc.read_rows(p)
+    assert not [x for x in rows if x["kind"] == "freeze"]
+    # the baseline was built and cached by main's tip
+    bl = dc.read_baseline("sandbar", "sandbar", main_tip)
+    assert bl["deterministic_fails"] == ["d1"] and bl["flaky"] == ["f1"]
+
+
+def test_relative_red_names_new_regressions_and_freezes(tmp_path, monkeypatch):
+    projects, main_tip = _rel_setup(tmp_path, monkeypatch)
+    p = ledger(tmp_path)
+    seed(p, landing("sandbar", "rev1"))
+
+    def runner(cand):
+        rev = cand[0]["revision"]
+        if rev == "rev1":
+            return _rel_header(["d1", "NEW-regression"])
+        return _rel_header(["d1"])  # main does NOT have NEW-regression
+    out = dc.run_line_round(LINE, "change", guard_path(tmp_path), runner,
+                            reader(p), writer(p), "round-engine", "booked-v1",
+                            project="sandbar", roster={"entries": []})
+    r = out["rounds"][0]
+    assert r["verdict"] == "red"
+    rel = r["relative"]["per_repo"]["sandbar"]
+    assert rel["new_regressions"] == ["NEW-regression"]
+    assert rel["carried_debt"] == ["d1"]
+    # a content regression opens the freeze
+    rows, _ = dc.read_rows(p)
+    assert [x for x in rows if x["kind"] == "freeze"]
+
+
+def test_relative_baseline_cache_hit_skips_rebuild(tmp_path, monkeypatch):
+    projects, main_tip = _rel_setup(tmp_path, monkeypatch)
+    p = ledger(tmp_path)
+    seed(p, landing("sandbar", "rev1"))
+    calls = []
+
+    def runner(cand):
+        calls.append(cand[0]["revision"])
+        return _rel_header(["d1"] if cand[0]["revision"] == "rev1"
+                           else ["d1"])
+    roster = {"entries": []}
+    # pre-seed the cache for main's tip: the baseline run must NOT happen
+    dc.write_baseline("sandbar", "sandbar", main_tip, ["d1"], [])
+    out = dc.run_line_round(LINE, "change", guard_path(tmp_path), runner,
+                            reader(p), writer(p), "round-engine", "booked-v1",
+                            project="sandbar", roster=roster)
+    assert out["rounds"][0]["verdict"] == "green"
+    # only the line run happened (cache hit — no baseline rebuild)
+    assert calls == ["rev1"]
