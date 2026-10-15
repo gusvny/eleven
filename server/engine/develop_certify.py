@@ -832,19 +832,126 @@ def _repo_worktree(project, repo):
     return shared.develop_dir(project) / "wt" / repo
 
 
+# The judged surface (t261016-01): the baseline suite runs the repo checked
+# out at main's tip, so its fail set depends on the WHOLE tree — not only the
+# suite source. The criterion is therefore "whole tree unchanged, minus the
+# entries below", each excluded WITH A REASON; an entry without a reason does
+# not belong here (a wrong exclude is a false-green hole). Confirmed against
+# what the integration suite reads: scenarios and their lib_* helpers all
+# live in tracked source dirs; docs/ and notes/ are prose/ledger, .sandbar is
+# engine workspace state — no scenario reads them.
+JUDGED_SURFACE_EXCLUDES = ("docs", "notes", ".sandbar")
+
+
+def _surface_unchanged(repo_path, old_tip, new_tip):
+    """True iff the judged surface (whole tree minus JUDGED_SURFACE_EXCLUDES)
+    is identical between the two tips: one bounded ``git diff --name-only``
+    whose pathspec excludes are built from the declared constant. Any git
+    failure (non-zero exit, timeout, spawn error) -> False — fail closed to
+    REBUILD, which is always safe; an unreadable answer is never a reuse."""
+    import subprocess
+    cmd = ["git", "-C", str(repo_path), "diff", "--name-only", old_tip,
+           new_tip, "--", "."]
+    cmd += [":(exclude)%s" % e for e in JUDGED_SURFACE_EXCLUDES]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return p.returncode == 0 and not (p.stdout or "").strip()
+
+
+def _valid_full_sha(s):
+    """A 40-char lowercase hex sha — the shape ``git rev-parse`` answers."""
+    return (isinstance(s, str) and len(s) == 40
+            and all(c in "0123456789abcdef" for c in s))
+
+
+def _reusable_ancestor_baseline(project, repo, repo_path, main_tip):
+    """The NEWEST cached baseline whose tip is an ancestor of ``main_tip``
+    AND whose judged surface did not change since — the reuse candidate for
+    a main advance. Keyed on the FULL ``main_tip`` read from each cache
+    file's BODY (validated 40-hex, cross-checked against the filename's
+    12-char slice); the filename alone is never trusted. Any unreadable,
+    malformed, non-ancestor or surface-dirty candidate is skipped — the
+    caller then rebuilds (fail closed), never a guessed reuse."""
+    base_dir = _baseline_dir(project)
+    try:
+        names = sorted(base_dir.glob("%s@*.json" % repo))
+    except OSError:
+        return None
+    import subprocess
+    best = None
+    for p in names:
+        try:
+            obj = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not (isinstance(obj, dict) and _valid_full_sha(obj.get("main_tip"))
+                and p.name == "%s@%s.json" % (repo, obj["main_tip"][:12])):
+            continue
+        tip = obj["main_tip"]
+        try:
+            anc = subprocess.run(
+                ["git", "-C", str(repo_path), "merge-base", "--is-ancestor",
+                 tip, main_tip],
+                capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if anc.returncode != 0 or tip == main_tip:
+            continue
+        if not _surface_unchanged(repo_path, tip, main_tip):
+            continue
+        built = obj.get("built_at")
+        if not isinstance(built, int):
+            built = 0
+        if best is None or built > best[0]:
+            best = (built, obj, tip)
+    return None if best is None else (best[1], best[2])
+
+
 def _ensure_baseline(project, repo, runner, flaky):
-    """main's baseline for ``repo``: cached by main's exact tip, rebuilt (one
-    baseline suite run) only when main moved. Returns (baseline_dict_or_None,
-    note). A None baseline = the round cannot prove no-regression for this
-    repo (fail-closed red), never a guessed green."""
+    """main's baseline for ``repo`` (t261016-01), in a strict order, each
+    step NAMED so the round record can say which one happened (silent reuse
+    is forbidden — an unnameable reuse must rebuild):
+      1. exact-tip cache hit  -> note ``cache_hit:<repo>@<t12>``;
+      2. ancestor reuse       -> note ``baseline_reused:<repo>@<old12>:
+         for:<new12>:surface_unchanged`` — the cached tip is an ancestor of
+         the current main tip and the judged surface (whole tree minus
+         JUDGED_SURFACE_EXCLUDES) is unchanged between them, so the same
+         suite over the same tree would produce the same fail set;
+      3. rebuild              -> note ``cache_built:<repo>@<t12>``.
+    The provenance face is stamped onto the returned dict: ``baseline_source``
+    (cache|reused|rebuilt), ``baseline_tip`` (the tip the fail set was
+    measured at) and ``judged_tip`` (the tip the round judged). Every
+    ambiguity falls through to rebuild or to a None baseline (fail-closed
+    named red) — never a guessed green.
+    Flaky inheritance (explicit): both hit and reuse return the CACHED dict
+    verbatim, including its ``flaky`` list; flaky_names_from_roster seeds
+    only NEW baselines. A roster that grew is folded in at the next genuine
+    rebuild — a bounded, here-declared staleness."""
     wt = _repo_worktree(project, repo)
     main_tip = _git_main_tip(wt)
     if not main_tip:
         return None, "main_tip_unresolvable:%s" % repo
     cached = read_baseline(project, repo, main_tip)
     if cached is not None:
+        cached["baseline_source"] = "cache"
+        cached["baseline_tip"] = main_tip
+        cached["judged_tip"] = main_tip
         return cached, "cache_hit:%s@%s" % (repo, main_tip[:12])
-    # main moved (or no cache yet): run the baseline suite at main's tip
+    # main moved since the cache was written: try a NAMED ancestor reuse
+    # before paying a full baseline suite run.
+    reuse = _reusable_ancestor_baseline(project, repo, wt, main_tip)
+    if reuse is not None:
+        obj, old_tip = reuse
+        obj = dict(obj)
+        obj["baseline_source"] = "reused"
+        obj["baseline_tip"] = old_tip
+        obj["judged_tip"] = main_tip
+        return (obj,
+                "baseline_reused:%s@%s:for:%s:surface_unchanged"
+                % (repo, old_tip[:12], main_tip[:12]))
+    # no cache, no nameable reuse: run the baseline suite at main's tip
     bl_header = runner([{"repo": repo, "revision": main_tip}])
     if not (isinstance(bl_header, dict) and isinstance(bl_header.get("cases"), dict)):
         return None, "baseline_run_failed:%s" % repo
@@ -852,7 +959,8 @@ def _ensure_baseline(project, repo, runner, flaky):
     deterministic = sorted(set(bl_fails) - set(flaky))
     write_baseline(project, repo, main_tip, deterministic, flaky)
     return ({"main_tip": main_tip, "deterministic_fails": deterministic,
-             "flaky": sorted(set(flaky))},
+             "flaky": sorted(set(flaky)), "baseline_source": "rebuilt",
+             "baseline_tip": main_tip, "judged_tip": main_tip},
             "cache_built:%s@%s" % (repo, main_tip[:12]))
 
 
@@ -914,6 +1022,12 @@ def relative_round_verdict(project, candidate, header, runner, roster):
         v, detail = relative_verdict(line_fails, baseline)
         detail["note"] = note
         detail["verdict"] = v
+        # t261016-01: the record must NAME the baseline source — which tip
+        # the fail set was measured at, which tip it is judging, and whether
+        # the baseline was a cache hit, a named reuse, or a rebuild.
+        for k in ("baseline_source", "baseline_tip", "judged_tip"):
+            if k in baseline:
+                detail[k] = baseline[k]
         per_repo[name] = detail
         regressions.extend(detail["new_regressions"])
     verdict = "red" if regressions else "green"
@@ -1751,6 +1865,11 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
             return {"rounds": rounds,
                     "end": {"state": END_JOINED, "reason": "guard_held"}}
         try:
+            # t261016-01: the round's wall clock (the ticket's fourth
+            # evidence item) is owned by the round row — measured here, from
+            # guard acquisition to the row leaving, so every decision inside
+            # (baseline hit/reuse/rebuild, the suite itself) is included.
+            _t0 = time.monotonic()
             rng = derive_range(rows, line)
             covered = list(rng["covered_landings"])
             candidate = None
@@ -1854,7 +1973,8 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                 entry = {"state": STATE_CERTIFIED if verdict == "green"
                          else STATE_RED,
                          "cert": cert["id"], "run": cert["run"],
-                         "verdict": verdict, "candidate": candidate}
+                         "verdict": verdict, "candidate": candidate,
+                         "duration_ms": int((time.monotonic() - _t0) * 1000)}
                 if rel is not None:
                     # the relative caliber's own account: which repo regressed
                     # (named), the carried main debt, the flaky hits — the
@@ -1898,7 +2018,9 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                 rounds.append(entry)
             except CouldNotRun as e:
                 append_rows([could_not_run_row(line, str(e), at_ms=now_ms)])
-                rounds.append({"state": STATE_GREW, "reason": str(e)})
+                rounds.append({"state": STATE_GREW, "reason": str(e),
+                               "duration_ms":
+                                   int((time.monotonic() - _t0) * 1000)})
         finally:
             guard_release(guard_path)
         trigger = "change"  # a chained round re-evaluates as a change tick

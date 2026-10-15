@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 267,
-      "scenarios": 722
+      "engine_tests": 285,
+      "scenarios": 736
     },
     "vocab": [
       "behaviour",
@@ -1423,6 +1423,11 @@
       "anchor": "contract",
       "note": "t261009-80 KI-01M4HQ5FJ8HKGY156YCE97X0K7: pause/resume receipt honesty unit contract — landing evaluator truth table (landed/refused/pending, baseline-refusal masking, new-refusal-wins), effect statement (paused vs stuck; blocked names will-not-take-effect + slot stays held; the landed+non-effect pairing pinned), pure receipt-face builder key set (existing ticket_id/signal/who/delivered survive with delivered semantics untouched; unconfirmed keeps delivered and names the op=query re-check), bounded poll transient-jitter and budget-exhaustion paths, malformed-snapshot named degradation, and the client/ticket wording-consistency pin",
       "sync_path": "server/engine/client.py (evaluate_pause_landing / pause_effect_statement / _pause_receipt_face / _await_pause_landing); server/tools/ticket.py (_pause_effect_of)"
+    },
+    "server/engine/tests/test_t261016_01_baseline_reuse.py": {
+      "anchor": "behaviour",
+      "note": "t261016-01: main-baseline reuse across main tips, named on the record — docs-only main advance reuses the nearest surface-clean ancestor baseline (one suite run, baseline_source 'reused' + baseline_tip/judged_tip + mechanical note), a judged-surface commit (suite or product code) rebuilds at the NEW tip, every ambiguity (non-ancestor tip, git failure, malformed/filename-mismatched cache, unreadable JSON) fails closed to rebuild, newest-ancestor tie-break, and the round row carries duration_ms",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -5088,6 +5093,11 @@
     "integration/t261013-06/sc_t26101306_freeze_closure_resumes_landings.py": {
       "anchor": "behaviour",
       "note": "t261013-06: the freeze lifecycle's closing half — the recorded closure unfreezes the line and an ordinary ticket lands again through the real landing act; a closure naming another episode or another line closes nothing and the act still refuses by name; an unknown change word is refused on the write side and never closes the episode as a hand-edited ledger line; a reopened row freezes the line again",
+      "sync_path": ""
+    },
+    "integration/sc_t261016_01_baseline_reuse.py": {
+      "anchor": "behaviour",
+      "note": "t261016-01 grey-box L3: the real run_line_round face over a real tmp git repo + stub runner — A named reuse after a docs-only advance (one suite run, record names reused/old/new), B rebuild on a server/engine commit judged against the NEW fail set, C fail-closed rebuilds on corrupted cache and non-ancestor tip, D duration_ms positive int on the round row",
       "sync_path": ""
     }
   }

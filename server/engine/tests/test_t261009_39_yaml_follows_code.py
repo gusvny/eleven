@@ -59,16 +59,25 @@ def _run(generator: Path, cwd: Path, *args: str) -> subprocess.CompletedProcess:
 def _make_temp_repo(tmp_path: Path) -> Path:
     """Copy the minimum tree the generator needs into tmp_path.
 
-    server/engine (code only — the venv and caches stay behind; the
-    interpreter is inherited via sys.executable), server/tools/workflow.py
+    server/engine (CODE only — the venv, caches and RUNTIME OUTPUT stay behind;
+    the interpreter is inherited via sys.executable), server/tools/workflow.py
     (the read-back check loads it by path), and server/workflows (the
     committed snapshots under test).
+
+    Runtime output is excluded for two measured reasons (261016): ``data/`` is
+    ~1.6 GB of ledgers and a Temporal database that this case never reads, and
+    ``out/**/agent-home/**`` carries node_modules SYMLINKS whose targets have
+    been cleaned up — ``copytree`` follows them and dies with
+    ``shutil.Error: [Errno 2] No such file or directory`` BEFORE the generator
+    ever runs. That made three cases fail for a reason unrelated to what they
+    assert (the yaml-vs-code invariant is green: the generator's own --check
+    passes on the real tree), and it made them take ~7 minutes each.
     """
     repo = tmp_path / "repo"
     (repo / "server" / "tools").mkdir(parents=True)
     shutil.copytree(
         ENGINE, repo / "server" / "engine",
-        ignore=shutil.ignore_patterns(".venv", "__pycache__"),
+        ignore=shutil.ignore_patterns(".venv", "__pycache__", "out", "data"),
     )
     shutil.copy2(REPO / "server" / "tools" / "workflow.py",
                  repo / "server" / "tools" / "workflow.py")

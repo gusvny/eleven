@@ -744,7 +744,17 @@ def promote_buffer(project, line_id, signer, authority=None, on_behalf_of=None,
         repo = Path((repo_paths or {}).get(name)
                     or shared.develop_dir(project) / "wt" / name)
         crev = cert_repos[name]
-        common = _git(["rev-parse", "--absolute-git-dir"], repo)
+        # 261015: the line is a LINKED worktree of the main repository
+        # (.git/worktrees/<name>), so --absolute-git-dir names the worktree's
+        # private git dir and its parent is NOT a work tree: the fast-forward
+        # died with "main_ff_failed: ... this operation must be run in a work
+        # tree" and the promotion could not complete at all (live catch, the
+        # first promotion attempt of the merged line). The COMMON git dir's
+        # parent is the main checkout on every layout — plain checkout and
+        # linked worktree alike — and is the form this repository already uses
+        # elsewhere (git rev-parse --path-format=absolute --git-common-dir).
+        common = _git(["rev-parse", "--path-format=absolute",
+                       "--git-common-dir"], repo)
         main_co = Path(common.stdout.strip()).parent if common.returncode == 0 \
             else None
         synced_inplace = False
