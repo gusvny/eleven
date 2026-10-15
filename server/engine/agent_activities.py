@@ -6034,10 +6034,17 @@ class LandToLineResult:
     line_id: str = ""
     revisions: Dict[str, str] = field(default_factory=dict)
     error: str = ""
+    #: 261016: the ticket already has a landing row on this line, so the act had
+    #: nothing to do. A STRUCTURED flag, not a phrase to grep: the calling stage
+    #: must resume its certification wait on a re-entry (its own contract), and
+    #: keying that decision on the wording of a refusal made it brittle — the
+    #: current-main guard's text did not contain "already landed", so four
+    #: re-entries read as hard refusals instead of resumptions.
+    already_landed: bool = False
 
 
-def _land_to_line_refuse(note: str) -> LandToLineResult:
-    return LandToLineResult(ok=False, error=note)
+def _land_to_line_refuse(note: str, already_landed: bool = False) -> LandToLineResult:
+    return LandToLineResult(ok=False, error=note, already_landed=already_landed)
 
 
 @activity.defn
@@ -6075,6 +6082,24 @@ async def land_to_line(args: LandToLineArgs) -> LandToLineResult:
             "ticket %s: the proven revision is empty/malformed — refusing to "
             "land (the landing consumes the revision the gate judged, never "
             "the current tip)" % args.ticket_id)
+    # 261016: ONE LANDING PER TICKET, judged before every revision guard. A
+    # ticket whose landing is already recorded has nothing left to land, and the
+    # stage's own contract on a re-entry is to resume its certification wait —
+    # so the act must say "already landed" in a way the stage can act on (the
+    # structured flag), not die on a guard that no longer describes this ticket.
+    # Measured: after the 261016 release ruling made four merge stages'
+    # certification wait satisfiable, their retries were refused by the
+    # current-main guard instead, and the wait was never reached.
+    try:
+        _already = develop_line.has_landing(args.project_key, args.ticket_id,
+                                            args.line_id)
+    except Exception:  # noqa: BLE001 — unreadable ledger: fall through to the guards
+        _already = False
+    if _already:
+        return _land_to_line_refuse(
+            "ticket %s: already landed on line %s — one landing per ticket; the "
+            "caller resumes its certification wait" % (args.ticket_id, args.line_id),
+            already_landed=True)
     # 261015: a judged revision is a lawful landing input only while it still
     # CONTAINS the main it was judged against. The green-run face is recorded
     # once and reused while main keeps moving under it, so a landing could carry

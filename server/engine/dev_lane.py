@@ -3702,7 +3702,10 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         lr = lraw if isinstance(lraw, LandToLineResult) else LandToLineResult(
             ok=bool(lraw.get("ok")), line_id=str(lraw.get("line_id") or ""),
             revisions=dict(lraw.get("revisions") or {}),
-            error=str(lraw.get("error") or ""))
+            error=str(lraw.get("error") or ""),
+            # 261016: the structured flag is the authority; the old phrase test
+            # below stays only for histories recorded before the field existed.
+            already_landed=bool(lraw.get("already_landed")))
         if lr.ok:
             self.meta["landing"] = {
                 "line": lr.line_id, "proven_sha": proven_sha,
@@ -3710,7 +3713,8 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             self._log("develop-buffer landing recorded on line %s (proven %s)"
                       % (lr.line_id, proven_sha[:12]))
         else:
-            already = "already landed" in (lr.error or "") \
+            already = bool(getattr(lr, "already_landed", False)) \
+                or "already landed" in (lr.error or "") \
                 or "already has a landing" in (lr.error or "")
             if not already:
                 # A drifted checkout / undeclared line / duplicate landing:

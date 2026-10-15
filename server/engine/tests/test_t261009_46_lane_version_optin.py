@@ -243,6 +243,36 @@ def test_land_to_line_refuses_proven_that_lacks_current_main(env, tmp_path):
     assert not [r for r in rows if r.get("kind") == dc.KIND_LANDING]
 
 
+def test_already_landed_outranks_the_current_main_guard(env, tmp_path):
+    """261016 regression: one landing per ticket is judged BEFORE the revision
+    guards. After the 261016 release ruling made four merge stages' certification
+    wait satisfiable, their retries were refused by the current-main guard
+    instead of resuming that wait - the stage's own re-entry contract - because
+    the guard fired first and its text contains no "already landed". The act now
+    returns a STRUCTURED already_landed flag, and a ticket that already landed is
+    never refused for a revision it is not going to use."""
+    project, repo, proven = _landing_setup(env, tmp_path)
+    first = asyncio.run(aa.land_to_line(aa.LandToLineArgs(
+        ticket_id="t46", project_key=project, line_id="buffer",
+        worktree=str(repo), proven_sha=proven)))
+    assert first.ok, first.error
+    # main then moves on: the proven sha no longer contains current main, which
+    # used to be the refusal a re-entry died on
+    tree = _git("rev-parse", "main^{tree}", cwd=repo).stdout.strip()
+    moved = _git("commit-tree", tree, "-p", "main", "-m", "main moves on",
+                 cwd=repo).stdout.strip()
+    _git("update-ref", "refs/heads/main", moved, cwd=repo)
+    again = asyncio.run(aa.land_to_line(aa.LandToLineArgs(
+        ticket_id="t46", project_key=project, line_id="buffer",
+        worktree=str(repo), proven_sha=proven)))
+    assert again.already_landed is True
+    assert not again.ok
+    assert "already landed" in again.error
+    assert "does not contain current main" not in again.error
+    rows, _ = dc.read_rows(dc.ledger_path(project))
+    assert len([r for r in rows if r.get("kind") == dc.KIND_LANDING]) == 1
+
+
 def test_land_to_line_refuses_without_proven(env, tmp_path):
     project, repo, proven = _landing_setup(env, tmp_path)
     res = asyncio.run(aa.land_to_line(aa.LandToLineArgs(
