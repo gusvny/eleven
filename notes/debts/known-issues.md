@@ -5668,7 +5668,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 ## KI-01M4YGAZYSHJBHN505KNF714VJ **相对口径 fail-open：运行记录缺 failed_names 被读成「零回归」→ 假绿可直达晋 main**：模式
 （261014/t261014-04 实测；integration 岗登记；main 侧已修 a4d93058/2d951ce0）
 
-> **实测**：inline 相对裁决读 `header.get("failed_names") or []`——键缺失/畸形一律退化成空集，而空集＝「无新回归」＝**绿**。同族第二态：dict 形状的 runner 答复其 `cases` 不是 dict 时，因本批把「算裁决」提到「建 cert」之前，直接走到 `run_verdict(header["cases"])` 抛 KeyError 逃出整轮（t261009-30 的 M2 段实测）。
+> **实测**：inline 相对裁决读 `header.get("failed_names") or []`——键缺失/畸形一律退化成空集，而空集＝「无新回归」＝**绿**。同族第二态：dict 形状的 runner 答复其 `cases` 不是 dict 时，因本批把「算裁决」提到「建 cert」之前，直接走到 `run_verdict(header["cases"])` 抛 KeyError 逃出整轮（t261009-30 M2 腿实测）。
 > **根因**：runner 用空集表达的是「套件日志读不出来」（line_round_runner.failed_names 契约），消费侧却把「不可判」与「干净」当成同一形状。baseline 侧早有 fail-closed 护栏（_ensure_baseline→None→具名红），candidate 侧漏装。
 > **危害**：**假绿可直通晋 main**——一轮读不出失败名的红套件会被记成零回归绿轮、book 绿 cert、冻结不解、白车推 main；KeyError 形态还会让整轮带异常逃出。
 > **出路**：candidate 侧补同一护栏：非 list＝CouldNotRun（line_fail_set_missing）；counts 报失败而名集为空＝CouldNotRun（line_fail_set_unreadable）；`cases` 非 dict＝CouldNotRun（run_cases_missing）。三者均走 could-not-run 扩范围（goal 24），不猜绿也不臆造红。
