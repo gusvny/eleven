@@ -1665,7 +1665,16 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
         rows, bad = read_rows()
         if bad:
             raise CertifyError("ledger_has_malformed_lines:%d" % len(bad))
-        go, why = should_certify(trigger, rows, line, guard_held(guard_path),
+        # 261015: "manual" forces exactly the FIRST round; the chain's later
+        # rounds ask the ordinary question again. Forcing every iteration made
+        # `should_certify` answer manual_forced forever, so the chain never
+        # converged and its completed rounds never reached the booking point
+        # (measured: a manual round re-ran the suite to 662 rows and straight
+        # into another pass with records/delivery untouched), while the
+        # scheduled path - which forces nothing - booked normally.
+        eff_trigger = "change" if (trigger == "manual" and rounds) else trigger
+        go, why = should_certify(eff_trigger, rows, line,
+                                 guard_held(guard_path),
                                  now_ms=now_ms, backstop_ms=backstop_ms)
         if not go:
             state = END_JOINED if why == "guard_held" else END_IDLE
