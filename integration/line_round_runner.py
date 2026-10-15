@@ -414,30 +414,59 @@ def parse_integ_summary(log_path):
     return summary, None
 
 
-def failed_names(log_path):
+def failed_names(run_id):
     """The per-scenario fail set of this suite run (the relative-certification
     caliber, 261014): the names of scenarios whose row reads fail/not-checked,
     derived from the same per-scenario result lines the face counts — never
     from a second source. A round judged against a baseline compares THESE
     names, not the counts. Unreadable log -> empty set (the caller's counts
-    face still names the could-not-run; a missing name-set never invents)."""
+    face still names the could-not-run; a missing name-set never invents).
+
+    261014-fix: read the AUTHORITATIVE per-scenario ledger by run id. The
+    run-scoped ``suite.log`` retained beside the face holds only the
+    INTEG_SUMMARY line (measured: 112 bytes, zero per-scenario rows), so
+    deriving the set from it yielded ``[]`` on EVERY run while the counts
+    reported 14/28 failures — an unjudgeable proof. That is why no round could
+    ever certify: with an empty name set the relative caliber cannot say which
+    repo regressed, and the fail-closed guard (correctly) refuses to read an
+    empty-beside-failures set as "no regression". Returns None when the store
+    cannot be read at all, so the caller can fall back to the log."""
+    if not isinstance(run_id, str) or not run_id.strip():
+        return None
     try:
-        text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+        import scenario_ledger   # sibling module: the store's canonical reader
+        store = scenario_ledger.ledger_path()
+    except Exception:
+        return None
+    try:
+        text = Path(store).read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return []
+        return None
     out = set()
+    seen = 0
+    needle = run_id.strip()
     for line in text.splitlines():
         s = line.strip()
-        if not s.startswith('{"name"'):
+        # cheap prefilter: most rows belong to other runs (the store is shared
+        # and append-only), so never parse a line that cannot be this run's
+        if not s or needle not in s:
             continue
         try:
             row = json.loads(s)
         except ValueError:
             continue
-        if isinstance(row, dict) and row.get("status") in ("fail", "not-checked"):
-            name = row.get("name")
+        if not isinstance(row, dict) or row.get("run") != needle:
+            continue
+        seen += 1
+        if row.get("verdict") == "fail":
+            name = row.get("scenario")
             if isinstance(name, str) and name.strip():
                 out.add(name.strip())
+    if seen == 0:
+        # the run has no rows at all: this is not "a clean run", it is a run
+        # whose proof is not in the store. An empty set here would read as
+        # "no regression" and book a green nobody can justify — refuse instead.
+        return None
     return sorted(out)
 
 
@@ -611,9 +640,23 @@ def run(env=None):
             face.retain_log(log_path)
             face.finish("done", verdict, reason)
             # the relative-certification caliber (261014): the fail NAME set,
-            # so the engine can judge new-regressions-vs-main, not just counts
+            # so the engine can judge new-regressions-vs-main, not just counts.
+            # 261014-fix: joined by run id against the authoritative ledger —
+            # the retained suite.log cannot carry this (it holds only the
+            # summary), and without the names NO round can certify. A store
+            # that cannot be read yields None (not a list) on purpose: the
+            # engine's fail-closed guard then grows the range instead of
+            # booking a green nobody can justify.
             if isinstance(header, dict):
-                header["failed_names"] = failed_names(log_path)
+                rid = header.get("id")
+                if not isinstance(rid, str) or not rid.strip():
+                    rid = summary.get("run_id")
+                names = failed_names(rid)
+                header["failed_names"] = names
+                if names is None:
+                    header["failed_names_note"] = (
+                        "per-scenario ledger unreadable: the fail set is "
+                        "unjudgeable (no proof, never a guessed green)")
         sys.stdout.write(json.dumps(header, ensure_ascii=False) + "\n")
         sys.stdout.flush()
         return 0
