@@ -220,6 +220,29 @@ def test_land_to_line_lands_the_proven_revision(env, tmp_path):
                 cwd=repo, check=False).returncode != 0
 
 
+def test_land_to_line_refuses_proven_that_lacks_current_main(env, tmp_path):
+    """261015 regression: a judged revision is lawful only while it still
+    contains the main it was judged against. The green-run face is recorded once
+    and reused while main moves under it, so a landing could carry a tree built
+    on an older main - measured on t261014-04, where the line then read every
+    main-side fix as its own new regression (11 of them). Refuse by name; the
+    remedy is a fresh gate round, never falling back to the tip."""
+    project, repo, proven = _landing_setup(env, tmp_path)
+    # main advances AFTER the gate anchored on `proven` (same tree, new commit:
+    # the content is untouched and only the anchor moved)
+    tree = _git("rev-parse", "main^{tree}", cwd=repo).stdout.strip()
+    moved = _git("commit-tree", tree, "-p", "main", "-m", "main moves on",
+                 cwd=repo).stdout.strip()
+    _git("update-ref", "refs/heads/main", moved, cwd=repo)
+    res = asyncio.run(aa.land_to_line(aa.LandToLineArgs(
+        ticket_id="t46", project_key=project, line_id="buffer",
+        worktree=str(repo), proven_sha=proven)))
+    assert not res.ok, res.error
+    assert "does not contain current main" in res.error
+    rows, _ = dc.read_rows(dc.ledger_path(project))
+    assert not [r for r in rows if r.get("kind") == dc.KIND_LANDING]
+
+
 def test_land_to_line_refuses_without_proven(env, tmp_path):
     project, repo, proven = _landing_setup(env, tmp_path)
     res = asyncio.run(aa.land_to_line(aa.LandToLineArgs(
