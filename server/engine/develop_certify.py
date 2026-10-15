@@ -638,13 +638,13 @@ def should_certify(trigger, rows, line, guard_held, now_ms=None,
     if trigger == "change":
         return False, "range_empty"
     if trigger == "manual":
-        # 261015: a forced round asked for by a human (the manual trigger). It
-        # has no event and no elapsed backstop to justify work, and it never
-        # INVENTS work either: with the range empty there is nothing new to
-        # certify (the latest landing is already covered by a certification),
-        # and the caller's entry says exactly that. A forced round with a
-        # non-empty range already returned above ("range_non_empty").
-        return False, "range_empty"
+        # 261015: a forced round asked for by a human. Unlike the change trigger
+        # it does NOT require the range to be non-empty: a person asking for a
+        # round means "judge the line's current content again, now" - the same
+        # re-judgement the timed backstop performs on an unchanged line. The
+        # round is idempotent in content (same revision, same verdict) and writes
+        # a fresh certification row, which is exactly what re-running should do.
+        return True, "manual_forced"
     if trigger != "backstop":
         raise CertifyError("trigger_unknown:%r" % (trigger,))
     last = rng["previous_certification"]
@@ -1677,10 +1677,19 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                     "end": {"state": END_JOINED, "reason": "guard_held"}}
         try:
             rng = derive_range(rows, line)
-            if not rng["covered_landings"]:
+            covered = list(rng["covered_landings"])
+            if not covered and trigger == "manual":
+                # 261015: a human asked for a round. "Re-running should recompute"
+                # is exactly the manual trigger's meaning, so an empty range (no
+                # landing since the last certification) must not turn it into a
+                # no-op: judge the content the line actually HAS. The most recent
+                # landing - already covered by a certification - IS that content.
+                _landings = _of_kind(rows, KIND_LANDING, line)
+                covered = _landings[-1:]
+            if not covered:
                 return {"rounds": rounds,
                         "end": {"state": END_IDLE, "reason": "range_empty"}}
-            candidate = candidate_set(rng["covered_landings"])
+            candidate = candidate_set(covered)
             try:
                 header = runner(candidate)
                 # 261014 (inline relative caliber): compute the verdict FIRST,
