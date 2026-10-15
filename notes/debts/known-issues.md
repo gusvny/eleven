@@ -5797,3 +5797,14 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：①先查清并修掉（或按口径排除+在册）这 4 例；②预算按实测墙钟导出（≥2500s，仍受活动上限约束）；③这几例属「慢池」活，考虑移出每票段、交给巡检。
 > **纪律**：**闸的预算必须与它跑的活匹配**——「预算 < 实测墙钟」会伪装成产品红；凡 gate 预算，都要有实测墙钟依据（P95 而非拍脑袋）。
 > **回归**：待补（L1：闸预算由实测墙钟导出且不小于 P95；整仓套件在干净树上零失败）。
+
+## KI-01M50JQJ32MFRZKBMWJEZY2AZP **泳道里遗留的「越界改动」让此后每个阶段都被 path gate 拒，返工也清不掉**：模式
+（261016 实测定性；integration 岗登记；未修）
+
+> **实测**：t261012-04（写集只有 `integration/`）的泳道工作树带着 `MM server/engine/client.py` 与 `AD server/engine/tests/test_t261009_80_pause_honesty.py`；t261012-09（写集 `server/engine/`+`integration/`）带着 `MM notes/debts/known-issues.md`（外加它写集内的两件）。这些是**上一轮遗留的存量**，不是本轮写的。
+> **机制**：阶段起手时 path gate 拿「工作树与 HEAD 的差」当「本阶段改了什么」→ 存量里的越界文件每次都判成**本次**越界 → 具名拒 `unauthorized_path`。
+> **复现（runbook 判据②已满足）**：261016 03:34 我按引擎自陈的正门把两张票 `rework` 回 `design_integration_tests`，03:36 两张**再次同形拒**；t261012-09 的开发回执还逐字写着「REFUSAL RESPECTED: no authored notes/ content anywhere in this ticket's delivery」——它确实没写，是存量在那儿。
+> **危害**：**自锁**。返工只重跑阶段、不动工作树 → 清不掉存量；而唯一能修这个 gate 的票就是 **t261012-09 本人**（它的交付正是「gate 应恢复外来文件并点名归属」）→ 被自己要修的现象挡住。清场 runbook 也不能用（根因不属「工作空间物理不存在」，且两票交付尚未落地＝有在飞价值）。
+> **出路**：①由**有泳道权限的一方**（宿主/执行器，不是 integration——不动泳道工作树是红线）把两个泳道里的越界文件恢复成 main 版本（`notes/debts/known-issues.md`、`server/engine/client.py`、`server/engine/tests/test_t261009_80_pause_honesty.py`），随后再 rework 一次即可前进；②或让引擎在阶段起手前把越界改动**具名隔离**（即 t261012-09 的交付）。
+> **纪律**：**判定「本阶段改了什么」不能只看「工作树现在与 HEAD 差什么」**——差集里混着上一轮的存量时，每次都会把存量判成本次。凡阶段边界判定，先问「基线取的是阶段起点，还是 HEAD」。
+> **回归**：待补（L1：工作树带着越界存量时，阶段起手应具名隔离/恢复并放行，而不是每轮同拒）。
