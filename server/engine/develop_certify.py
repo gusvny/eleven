@@ -94,6 +94,9 @@ LEDGER_DIR_ENV = "SANDBAR_DELIVERY_LEDGER_DIR"
 MAIN_NAME = "delivery.jsonl"
 LOCK_NAME = ".lock"
 GUARD_NAME = "delivery-guard.json"
+#: 261015: the manual-round request marker (see line_round_tick_activity). The
+#: manual entry drops it; the next tick consumes it and runs the forced round.
+FORCE_MARKER_NAME = "line-round-force"
 
 KIND_LANDING = "landing"
 KIND_CERT = "certification"
@@ -2252,6 +2255,21 @@ def line_round_tick_activity(project_key):
 
     ledger = ledger_path(project_key)
     guard_path = str(ledger.parent / "tick-anchor")
+    # 261015: a manual round must run inside THIS long-lived engine worker, never
+    # in a short-lived client's temp worker. Measured: the client's teardown
+    # ("workflow execution already completed") cancelled the activity, and the
+    # unwind path's reap_inflight_runners then SIGTERMed the round's own runner
+    # mid-flight, so the round died with no retained evidence and only a
+    # range_growth row was booked. The manual entry therefore drops a marker;
+    # the next tick consumes it and runs the forced round here, under the same
+    # worker (and the same guard) the scheduled round uses.
+    _force = ledger.parent / FORCE_MARKER_NAME
+    if _force.exists():
+        try:
+            _force.unlink()
+        except OSError:
+            pass  # a marker that cannot be cleared must not block the tick
+        return line_round_run_now(project_key)
     # t261011-21 defect 3: registered so an activity-level abort
     # (abort_inflight_ticks) can find this tick's guard and leave the ONE
     # named row; popped the moment the body returns either way.
