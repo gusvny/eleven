@@ -28,7 +28,16 @@ lanes:
       - id: guard-3099-redline
         cmd: sh -c '! { grep -rn "pkill\|kill -9" bin/ server/ --include="*.sh" --include="*.py" 2>/dev/null; grep -n "pkill\|kill -9" sandbar 2>/dev/null; } | grep -v "^Binary" | grep 3099'
       # t260904-12 乙段：test 道（t260902-10 场景消费面）——venv 回落链，pytest 缺即红（fail-closed）。
+      # 261014: this check runs the whole engine suite (4510 items). verify_lane's
+      # default per-check budget of 600s is BELOW what this machine measures for
+      # that suite (~583s in the lane, more under load), so the merge gate went
+      # red as a TIMEOUT rather than as a failing case - a green tree could be
+      # judged red and the gate lost its judgement. An explicit 1000s budget
+      # leaves a green tree ~1.7x headroom; the 20min activity cap
+      # (MERGE_CHECK_TO) stays the outer bound, so a genuine hang is still
+      # named and reclaimed inside a budget.
       - id: test
+        timeout: 1000
         cmd: PY=server/engine/.venv/bin/python; [ -x "$PY" ] || PY=server/dsh/temporal-poc/.venv/bin/python; [ -x "$PY" ] || PY=python3; PYTHONPYCACHEPREFIX=out/pycache "$PY" -m pytest server/engine/tests -q  # engine-venv-compat（t260907-10：新路径优先、旧路径一轮回落，摘除票删旧腿）
       # 261004 宿主令（执行器请求 -0001 实测：merge_check 4/4 全绿而手工 lint 152 error）：
       # L1–L18 整条静态电池接进 code 道。此前它**不在任何合并闸里**，全靠执行器签字前手工跑——
