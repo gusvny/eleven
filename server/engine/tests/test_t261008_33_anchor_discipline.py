@@ -302,7 +302,17 @@ def test_ts_real_tree_guard_and_location_branch(monkeypatch):
                        capture_output=True, text=True, timeout=60, env=env)
     assert p.returncode == 0, p.stderr[-300:]
     out = [l for l in p.stdout.splitlines() if l.startswith('R=')][0]
-    assert out.startswith('R=guard:SANDBAR_ANCHOR_MISMATCH:'), out
+    # 261016: this case is LAYOUT-dependent, and it now pins BOTH layouts instead
+    # of assuming one. The guard is declared to cover LANE WORK only: a process
+    # whose own tree is a linked worktree (.git is a gitfile) must refuse a
+    # foreign inherited anchor, while a standalone checkout (the main checkout)
+    # keeps honouring config.repo / SANDBAR_REPO exactly as documented. The suite
+    # runs from both, and the previous single expectation turned a green tree red
+    # whenever it ran outside a lane worktree — a false red on the merge gate.
+    if (repo_root / ".git").is_file():
+        assert out.startswith('R=guard:SANDBAR_ANCHOR_MISMATCH:'), out
+    else:
+        assert out == 'R=pass:/nonexistent/foreign/checkout', out
     env2 = dict(os.environ)
     env2.pop('SANDBAR_REPO', None)
     p2 = subprocess.run([node, '--input-type=module', '-e', js_foreign],
