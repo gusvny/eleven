@@ -271,6 +271,34 @@ def test_r5_chain_retries_an_open_range_within_one_tick(tmp_path):
     assert rows[-1]["repos"] == [{"repo": "sandbar", "revision": "rev1"}]
 
 
+def test_r5d_manual_forces_exactly_one_round_then_chain_stops(tmp_path,
+                                                              monkeypatch):
+    """261015 regression: 'manual' forces exactly the FIRST round; the chain's
+    later iterations ask the ordinary question again. Forcing every iteration
+    made should_certify answer manual_forced forever, so a manual round re-ran
+    the whole suite up to chain_limit without booking (measured live: 662 rows,
+    straight into another pass, records/delivery untouched), while the scheduled
+    path booked normally."""
+    projects, main_tip = _rel_setup(tmp_path, monkeypatch)
+    p = ledger(tmp_path)
+    seed(p, landing("sandbar", "rev1"))
+    calls = []
+
+    def runner(cand):
+        rev = cand[0]["revision"]
+        calls.append(rev)
+        # the line run is clean; the baseline (main's tip) is clean too
+        return _rel_header([])
+
+    out = dc.run_line_round(LINE, "manual", guard_path(tmp_path), runner,
+                            reader(p), writer(p), "round-engine", "booked-v1",
+                            project="sandbar", roster={"entries": []})
+    assert len(out["rounds"]) == 1          # one round, not a chain
+    assert out["end"]["state"] == dc.END_IDLE
+    assert calls.count("rev1") == 1         # the suite ran once for the line
+    assert out["rounds"][0]["verdict"] == "green"
+
+
 def test_r5b_next_tick_certifies_the_new_landing(tmp_path):
     p = ledger(tmp_path)
     gp = guard_path(tmp_path)
