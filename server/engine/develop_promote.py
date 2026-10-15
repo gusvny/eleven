@@ -1073,12 +1073,16 @@ def ticket_outcome(rows, ticket, is_green=None, ticket_record=None,
         for c in certs:
             if callable(is_green) and not is_green(c.get("run")):
                 continue
-            crev = _repos_map(c["repos"])
-            if all(crev.get(repo) == rev
-                   for repo, rev in _repos_map(landing["repos"]).items()):
-                certified_by = c["id"]
-                certified_at = c.get("at")
-                break
+            # 261016 ruling (rule C): ORDER decides, revision identity does not.
+            # The per-repo equality that used to sit here was the "residual
+            # non-head divergence" t261011-23 registered as a named gap: only the
+            # range's head landing could ever equal the certified revision, so
+            # every earlier landing read as uncertified forever — the same defect
+            # the wait face's release rule fixes. A green certification recorded
+            # after the landing is a verdict on a line state that contains it.
+            certified_by = c["id"]
+            certified_at = c.get("at")
+            break
 
     proms = [r for r in rows
              if isinstance(r, dict) and r.get("kind") == KIND_PROMOTION

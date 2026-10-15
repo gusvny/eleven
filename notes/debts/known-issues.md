@@ -5747,6 +5747,16 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**（三选一，均需宿主定）：①按引擎自陈的补救开一张**线上修复票**（票面原话：the remedy … is a new fix ticket against the line）；②由人写**修复关系/冻结闭包行**（现网 `repairs` 行有人写过，且票面已记「引擎代码不写该闭包行，由人写」）；③把被牵连票**打回工作态**重验（引擎票面明说 never a return of this ticket to work，故属设计口径之外的例外，须宿主裁）。
 > **纪律**：**「等待某件事发生」的判定必须要有单调性证明**——凡 wait/block 类状态，先问「让它解除的那个事件，在这个数据结构下可能发生吗」；两套范围若取自同一前向游标，就不要指望后者覆盖前者。
 > **回归**：待补（L1：一条落线被红证吞入范围后，即便线上该 rev 已重新绿证，等待面必须给出可解除的具名状态，或具名拒绝并写明唯一出路）。
+>
+> **甲、261016 宿主裁定与修复（已修）**：宿主裁定**采纳第三条出路并明确规则**——「一条被红牵连的落线，只要它**之后**线上又被认证为绿（存在一张绿证 `seq > 那条红的 seq`），就算解除；依据是这条线只**前向推进**（落线永远建在当前线尖上、合并也建在线尖上），故后来的绿证判的那棵树**包含**该落线所代表的历史」。
+> 实现（三处，均在 main）：
+> - `develop_certify.ticket_wait_state`：红牵连段落先找吞掉该落线的那条红，再找**它之后最早的绿证**；找到 → `certified` 且**两面具名**（`covered_by` = 释放它的绿证、`released_from` = 被解除的红、`release_rule` = 规则串）；找不到 → **保持 `red_implicated`（fail-closed，不许猜）**；`reverted`（withdraws）仍最高优先，不变。
+> - 新增纯助手 `_releasing_green_cert(...)` + 常量 `RELEASE_RULE_NOTE`（把裁定与依据写进代码，规则可追溯）。
+> - `develop_promote.ticket_outcome.certified_by`：**去掉「per-repo 严格相等」**，回到同一条顺序规则——这正是 t261011-23 登记过的「残余非头部落线分歧」，本次裁定把它一并关掉（两个读面从此一致）。
+> 用例改动（`server/engine/tests/test_t261011_23_range_coverage.py`）：**反转**原钉住旧口径的
+> `test_p3_red_cert_does_not_cover_even_when_in_range`（改名为 `test_p3_red_cert_released_by_a_later_green_261016_ruling`，断言 `certified` + 两面具名）；
+> `test_r4_named_gap_non_head_outcome_divergence` 由「钉分歧」改为「**断言两面一致**（gap 关闭）」；`test_red_outranks_green_...` 改为「释放认**第一条**绿证」；新增「无更晚绿证仍红牵连」「唯绿早于红不释放」「无 run 读面绝不猜释放」三条。
+> 边界（未动）：冻结仍靠**人**写的闭包行；`withdraws → reverted` 终身阻断不变；范围口径本身仍是「这张证判了哪几条落线」的正确口径，只是**不再是唯一放行依据**。
 
 ## KI-01M4ZVGGJXPEDSP1CQ8KGS6RS3 **main 基线缓存按 main 尖端精确匹配：main 每前进一个提交，下一轮多付一整趟套件**：模式
 （261015 实测定性；integration 岗登记；未修）

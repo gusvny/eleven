@@ -119,9 +119,19 @@ def test_p3_non_head_landing_inside_green_range_is_certified():
     assert dc.landable(rows, LINE, rows[0], is_green=green) is True
 
 
-def test_p3_red_cert_does_not_cover_even_when_in_range():
-    # Green-out: the same shape with the range's cert RED implicates; a later
-    # GREEN cert whose range excludes the landing does not certify it.
+def test_p3_red_cert_released_by_a_later_green_261016_ruling():
+    """261016 host ruling (rule C), INVERTING this case's former expectation.
+
+    It used to assert that a later green whose range excludes the landing does
+    NOT certify it. That made the block permanent by construction — ranges are
+    disjoint and forward-only, so a landing a red swallowed could never be
+    reached by a later range, and four landed tickets sat blocked at their merge
+    gates while the line had been certified green several times since. The
+    ruling: a red that implicates a landing is RELEASED by the next green
+    certification recorded after it (the line advances forward, so that green
+    judged a state containing the landing), and the face names both — the
+    releasing green and the red it released.
+    """
     rows = stamped([LANDING(1, ticket="t1", revision="bad"),
                     CERT(1, revision="bad", run="run-red"),
                     LANDING(2, ticket="t2", revision="fix"),
@@ -129,7 +139,50 @@ def test_p3_red_cert_does_not_cover_even_when_in_range():
     face = dc.ticket_wait_state(rows, LINE, rows[0],
                                 by_run({"run-red": False, "run-green": True}),
                                 NOW)
+    assert face["state"] == dc.WAIT_CERTIFIED
+    assert face["covered_by"] == "cert-002"        # the releasing green
+    assert face["released_from"] == "cert-001"     # the red it released
+    assert "released_from_red" in face["release_rule"]
+
+
+def test_r4_no_later_green_keeps_red_implicated():
+    # Fail closed: a red with NO green recorded after it still blocks the
+    # landing, and says which red it is waiting behind.
+    rows = stamped([LANDING(1, ticket="t1", revision="bad"),
+                    CERT(1, revision="bad", run="run-red")])
+    face = dc.ticket_wait_state(rows, LINE, rows[0],
+                                by_run({"run-red": False}), NOW)
     assert face["state"] == dc.WAIT_RED_IMPLICATED
+    assert face["waiting_for"] == "cert-001"
+    assert face.get("released_from") is None
+
+
+def test_r4_a_green_before_the_red_does_not_release():
+    # A green that PREDATES the red proves nothing about it: the release needs
+    # the later green, strictly after the red's seq.
+    rows = stamped([LANDING(1, ticket="t1", revision="ok"),
+                    CERT(1, revision="ok", run="run-green"),
+                    LANDING(2, ticket="t2", revision="bad"),
+                    CERT(2, revision="bad", run="run-red")])
+    face = dc.ticket_wait_state(rows, LINE, rows[2],
+                                by_run({"run-green": True, "run-red": False}),
+                                NOW)
+    assert face["state"] == dc.WAIT_RED_IMPLICATED
+    assert face["waiting_for"] == "cert-002"
+
+
+def test_r4_unreadable_runs_never_guess_a_release():
+    # No run reader at all (None) with a certification on the line is refused by
+    # name, and the release helper never guesses: is_green None reads as "cannot
+    # tell", so no release is invented.
+    rows = stamped([LANDING(1, ticket="t1", revision="bad"),
+                    CERT(1, revision="bad", run="run-red"),
+                    CERT(2, revision="fix", run="run-green")])
+    with pytest.raises(dc.CertifyError, match="is_green_not_injected"):
+        dc.ticket_wait_state(rows, LINE, rows[0], None, NOW)
+    assert dc._releasing_green_cert(rows, LINE, rows[1], None) is None
+    assert dc._releasing_green_cert(rows, LINE, rows[1], by_run(
+        {"run-green": True}))["id"] == "cert-002"
 
 
 def test_p3_landing_at_prev_cert_seq_not_inside_next_range():
@@ -193,22 +246,24 @@ def test_p4_faces_agree_on_waiting_landing():
     assert out["certified_by"] is None
 
 
-def test_r4_named_gap_non_head_outcome_divergence():
-    """NAMED GAP (registered on KI-01M4N5ASATAVWP6E38NSPECCAT, t261011-23):
-    with the waiting face range-based, a NON-head landing inside a green
-    range reads certified, while ``ticket_outcome.certified_by`` — outside
-    this ticket's write set — still requires per-repo revision equality on
-    top of the seq rule and answers None. This pin documents the residual
-    divergence honestly so it cannot be absorbed silently; removing this pin
-    (and asserting agreement) is the fix once develop_promote.py enters the
-    write set."""
+def test_r4_named_gap_closed_the_two_faces_agree():
+    """The gap this case used to pin is CLOSED (261016 host ruling).
+
+    It documented that a NON-head landing inside a green range read certified on
+    the waiting face while ``ticket_outcome.certified_by`` — then outside the
+    write set — still required per-repo revision equality on top of the seq rule
+    and answered None; its own docstring said removing the pin and asserting
+    agreement IS the fix. The 261016 ruling dropped the equality: the order rule
+    is the authority on both faces, so the non-head landing reads certified
+    everywhere.
+    """
     rows = stamped([LANDING(1, ticket="t1", revision="rev1"),
                     LANDING(2, ticket="t2", revision="rev2"),
                     CERT(1, revision="rev2")])
     face = dc.ticket_wait_state(rows, LINE, rows[0], green, NOW)
     out = _outcome("t1", rows)
     assert face["state"] == dc.WAIT_CERTIFIED
-    assert out["certified_by"] is None
+    assert out["certified_by"] == face["covered_by"] == "cert-001"
 
 
 # ---- edges: run reader contract, precedence, malformed inputs --------------
@@ -226,15 +281,23 @@ def test_red_run_reader_hides_green_coverage():
     assert face["state"] == dc.WAIT_RED_IMPLICATED
 
 
-def test_red_outranks_green_when_both_ranges_contain():
+def test_red_released_by_the_FIRST_green_after_it():
+    # 261016 ruling, and this case's former expectation ("the red outranks the
+    # green when both ranges contain the landing") is inverted by it. The
+    # release names the FIRST green recorded after the red — deterministic, and
+    # the earliest proof that the line was green again — not the newest one.
     rows = stamped([LANDING(1, ticket="t1", revision="bad"),
                     LANDING(2, ticket="t2", revision="fix"),
                     CERT(1, revision="fix", run="run-red"),
-                    CERT(2, revision="fix", run="run-green")])
+                    CERT(2, revision="fix", run="run-green"),
+                    CERT(3, revision="fix", run="run-green-2")])
     face = dc.ticket_wait_state(rows, LINE, rows[0],
-                                by_run({"run-red": False, "run-green": True}),
+                                by_run({"run-red": False, "run-green": True,
+                                        "run-green-2": True}),
                                 NOW)
-    assert face["state"] == dc.WAIT_RED_IMPLICATED
+    assert face["state"] == dc.WAIT_CERTIFIED
+    assert face["covered_by"] == "cert-002"        # the first green after the red
+    assert face["released_from"] == "cert-001"
 
 
 def test_landing_not_object_raises():

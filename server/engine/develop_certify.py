@@ -623,6 +623,58 @@ def landable(rows, line, landing, is_green=None):
     return _covering_green_cert(rows, line, landing, is_green) is not None
 
 
+RELEASE_RULE_NOTE = ("released_from_red: a certification range is forward-only, so a red "
+                     "that swallowed a landing can never be covered by a later range; the "
+                     "landing is released once the line is certified GREEN again after that "
+                     "red (261016 host ruling)")
+"""Rule C of the wait face (261016): a landing implicated by a red certification
+is RELEASED by the next green certification recorded after that red.
+
+Why the ruling was needed: the range rule (t261011-23) partitions the line's
+landings across certifications, and certification ranges are disjoint and
+forward-only. A landing a red had swallowed therefore sat inside that red's
+range forever: no later certification's range could ever contain it, so the
+face read ``red_implicated`` by construction and the ticket waited for an event
+that could not happen. Measured on this line (261016): four landed tickets
+(t261009-80, t261011-25, t261013-06, t261014-04) sat blocked at their merge
+gates for that reason even though the line had been certified green several
+times since, and their content had already been delivered to main by the
+promotion that carried their landings.
+
+Why a later green is enough: the line only advances forward — every landing is
+squashed onto the current tip and every merge builds on it — so the tree a
+later green certification judged CONTAINS the landing this red implicated. That
+certification is a positive verdict on a line state that carries the landing,
+which is strictly more information than the red's verdict on the earlier state.
+
+The release stays narrow on purpose: it needs a green certification whose seq is
+STRICTLY after the red's (a green that predates the red proves nothing about
+it), it names both certifications on the face (``covered_by`` = the releasing
+green, ``released_from`` = the red), and with no such green the face keeps
+reading ``red_implicated`` — fail closed, never a guessed release. ``reverted``
+(a withdraws relation) still outranks both: a withdrawn landing is not a
+waiting landing."""
+
+
+def _releasing_green_cert(rows, line, red_cert, is_green):
+    """The FIRST green certification on ``line`` recorded after ``red_cert``, or
+    None. Order alone decides (one seq space, no revision identity check): the
+    line advances forward, so a later green's tree contains the earlier landing.
+    Returns the certification row, so the caller can name it on the face."""
+    if not isinstance(red_cert, dict) or not isinstance(red_cert.get("seq"), int):
+        return None
+    for cert in _of_kind(rows, KIND_CERT, line):
+        if not isinstance(cert.get("seq"), int):
+            continue
+        if cert["seq"] <= red_cert["seq"]:
+            continue
+        if is_green is None:
+            continue  # cannot read runs: refuse to guess (fail closed)
+        if is_green(cert.get("run")):
+            return cert
+    return None
+
+
 # ---- the tick decision -----------------------------------------------------
 
 def should_certify(trigger, rows, line, guard_held, now_ms=None,
@@ -1634,15 +1686,28 @@ def ticket_wait_state(rows, line, landing, is_green, now_ms,
                 and isinstance(rel_id, str) and rel_id.startswith("rel-")):
             return dict(base, state=WAIT_REVERTED,
                         waiting_for=rel_id, withdrawn_by=rel_id)
-    # red_implicated: in the derived range of a red certification (goal 16's
-    # "red and implicated" — distinct from plain waiting by construction).
+    # red_implicated (goal 16's "red and implicated"), RELEASED by a later green
+    # — 261016 host ruling, the release rule C below. Under the range rule alone
+    # the block was permanent by construction: certification ranges are disjoint
+    # and forward-only, so a landing a red had swallowed could never be reached
+    # by a later certification's range, and the ticket waited for an event that
+    # could not happen.
+    red = None
     for cert in certs:
         if _green(cert):
             continue
         if any(l["id"] == landing["id"]
                for l in _red_range(rows, line, cert)):
+            red = cert
+            break
+    if red is not None:
+        releaser = _releasing_green_cert(rows, line, red, is_green)
+        if releaser is None:
             return dict(base, state=WAIT_RED_IMPLICATED,
-                        waiting_for=cert["id"])
+                        waiting_for=red["id"])
+        return dict(base, state=WAIT_CERTIFIED,
+                    covered_by=releaser["id"], released_from=red["id"],
+                    release_rule=RELEASE_RULE_NOTE)
     # certified (t261011-23): range-based, the same rule as the outcome face
     # and the red path — inside a GREEN certification's range.
     covering = _covering_green_cert(rows, line, landing, is_green)
