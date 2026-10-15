@@ -5703,7 +5703,7 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **危害**：手动触发形同虚设（跑得起来、永远落不了账），且给账上灌入 `runner_signaled:15`/ENOENT 噪声，把归因引向"路径名对不上"这类假因（我当天就先误判成路径 bug）。
 > **出路**：手动轮**不在临时 worker 里跑**——投一个请求标记（`line-round-force`），由**引擎自己的长寿 worker** 在下一拍巡检消费并执行（与定时同代码路径、同守卫、同落账、不并行）。
 > **纪律**：**长命活只放在长命进程上**；"谁的生命周期决定这次工作能否完成"必须先问清，再决定把活放哪。
-> **回归**：L1 链条契约 `test_r5d_manual_forces_exactly_one_round_then_chain_stops`（手动只强制第一圈、之后收口）；标记消费路径待补用例（本票已知缺口）。
+> **回归**：L1 链条契约 `test_r5d_manual_forces_exactly_one_round_then_chain_stops`（手动只强制第一圈、之后收口）；标记消费路径已有用例 `test_force_marker_runs_the_forced_round_and_is_consumed`（以 summary 前缀区分强制路/常规路，并断言标记只消费一次）。
 
 ## KI-01M4ZNAAWXNW1SKP4WHPPFHBFR **强制轮"每圈都强制"→ 链条不收敛、跑完不落账**：模式
 （261015 实测定性；integration 岗登记；main 侧已修 03dfa9e9）

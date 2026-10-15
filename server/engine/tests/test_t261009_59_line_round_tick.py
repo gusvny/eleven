@@ -377,6 +377,35 @@ def test_activity_body_wires_real_seams(tmp_path, monkeypatch):
     assert out["lines"][0]["state"] == "runner_missing"
 
 
+def test_force_marker_runs_the_forced_round_and_is_consumed(tmp_path,
+                                                            monkeypatch):
+    """261015 regression: the manual trigger must run inside this long-lived
+    worker, not in a short-lived client's temp worker (whose teardown cancelled
+    the activity and reaped the round's own runner mid-flight: measured
+    runner_signaled:15 + a range_growth row, no certification). The manual entry
+    drops a marker; the tick consumes it and takes the FORCED path - the two
+    paths are told apart by their summary prefix, so this proves which one ran."""
+    import shared
+    monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(tmp_path / "projects"))
+    monkeypatch.setenv("SANDBAR_DELIVERY_LEDGER_DIR", str(tmp_path / "ledger"))
+    monkeypatch.delenv(dc.RUNNER_CMD_ENV, raising=False)
+    d = shared.develop_dir("proj")
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "lines.json").write_text(json.dumps(
+        [{"line_id": LINE_A, "scope": "epic", "owner": "integration",
+          "repositories": [{"name": "r", "branch": "develop"}],
+          "extra_scenarios": [], "version": 1}]), encoding="utf-8")
+    marker = dc.ledger_path("proj").parent / dc.FORCE_MARKER_NAME
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("requested_by=test\n", encoding="utf-8")
+    out = dc.line_round_tick_activity("proj")
+    assert out["summary"].startswith("line_round_run_now"), out
+    assert not marker.exists(), "the marker is consumed exactly once"
+    # without the marker the same tick takes the ordinary ask
+    out2 = dc.line_round_tick_activity("proj")
+    assert out2["summary"].startswith("line_round_tick"), out2
+
+
 def test_activity_body_missing_declaration_is_named(tmp_path, monkeypatch):
     monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(tmp_path / "projects"))
     monkeypatch.setenv("SANDBAR_DELIVERY_LEDGER_DIR", str(tmp_path / "ledger"))
