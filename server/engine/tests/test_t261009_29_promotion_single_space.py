@@ -496,6 +496,29 @@ class TestPromoteBufferDriver(unittest.TestCase):
                                  **common)
         self.assertEqual(row["tickets"], ["t1"])
 
+    def test_linked_line_worktree_still_touches_the_main_checkout(self):
+        """261015 live catch: the delivered line is a LINKED worktree of the
+        main repository, so ``--absolute-git-dir`` names
+        ``<main>/.git/worktrees/<name>`` and its parent is not a work tree —
+        the fast-forward raised ``main_ff_failed: ... this operation must be
+        run in a work tree`` and the promotion could not complete at all. The
+        common git dir's parent is the main checkout."""
+        cert_id = self._seed_ledger("green")
+        wt = self.dir / "line-wt"
+        self._git("worktree", "add", "-q", str(wt), "develop")
+        import unittest.mock as mock
+        with mock.patch.dict("os.environ", self._env, clear=False):
+            row = dp.promote_buffer("sandbar", "develop-buffer", signer="host",
+                                    note="t", repo_paths={"sandbar": wt})
+        self.assertEqual(row["certification"], cert_id)
+        self.assertEqual(row["main_after"],
+                         [{"repo": "sandbar", "revision": self.line_tip}])
+        self.assertEqual(self._git("rev-parse", "refs/heads/main"
+                                   ).stdout.strip(), self.line_tip)
+        # the main checkout followed in place: no "operator reconciles" note
+        self.assertEqual(row.get("worktree_sync_notes", []), [])
+        self.assertEqual((self.repo / "b.txt").read_text("utf-8"), "b\n")
+
     def test_red_cert_refuses_before_any_ref_moves(self):
         self._seed_ledger("red")
         main_before = self._git("rev-parse", "refs/heads/main").stdout.strip()
