@@ -496,3 +496,37 @@ def test_relative_baseline_cache_hit_skips_rebuild(tmp_path, monkeypatch):
     assert out["rounds"][0]["verdict"] == "green"
     # only the line run happened (cache hit — no baseline rebuild)
     assert calls == ["rev1"]
+
+
+@pytest.mark.parametrize("header", [
+    # no fail-name key at all: the shape an older/unreadable run record has
+    {"id": "run-no-names", "cases": {"ran": 10, "failed": 0, "env_failed": 0}},
+    # an absent-looking set whose counts DO report failures (log unreadable)
+    {"id": "run-empty-names", "cases": {"ran": 10, "failed": 3,
+                                        "env_failed": 0},
+     "failed_names": []},
+])
+def test_relative_unjudgeable_fail_set_never_books_green(tmp_path, monkeypatch,
+                                                         header):
+    """261014 regression: a run record that does not carry a readable fail set
+    is a proof that could not be judged — not a clean run. Reading it as 'no
+    regression' books a fabricated green over a red suite and can reach
+    promotion; it must grow the range (could-not-run), open no freeze, and
+    never certify."""
+    projects, main_tip = _rel_setup(tmp_path, monkeypatch)
+    p = ledger(tmp_path)
+    seed(p, landing("sandbar", "rev1"))
+
+    def runner(cand):
+        return dict(header) if cand[0]["revision"] == "rev1" \
+            else _rel_header(["d1"])
+    out = dc.run_line_round(LINE, "change", guard_path(tmp_path), runner,
+                            reader(p), writer(p), "round-engine", "booked-v1",
+                            project="sandbar", roster={"entries": []})
+    r = out["rounds"][0]
+    # the round grows the range and books NO verdict: nothing was judged, so
+    # nothing may be certified green (and no content red is invented either)
+    assert r.get("state") == dc.STATE_GREW
+    assert "verdict" not in r
+    rows, _ = dc.read_rows(p)
+    assert not [x for x in rows if x["kind"] == "freeze"]

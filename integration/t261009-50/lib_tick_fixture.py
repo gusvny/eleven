@@ -114,7 +114,12 @@ class FakeRunner:
 
 
 def green_header(ran=10, rid="run-x50fix"):
-    return {"id": rid, "cases": {"ran": ran, "failed": 0, "env_failed": 0}}
+    # The real runner always sets the fail-name set (an empty one for a clean
+    # run): line_round_runner.failed_names() documents its empty list as "the
+    # suite log was unreadable", which the relative verdict refuses to read as
+    # green. The fixture must model that output, never omit the key.
+    return {"id": rid, "cases": {"ran": ran, "failed": 0, "env_failed": 0},
+            "failed_names": []}
 
 
 class Ledger:

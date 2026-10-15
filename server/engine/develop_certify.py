@@ -868,7 +868,26 @@ def relative_round_verdict(project, candidate, header, runner, roster):
     certification must be able to say WHICH repo regressed, never just 'red'.
     A repo whose baseline cannot be established is fail-closed red for that
     repo (named), never a guessed green."""
-    line_fails = set(header.get("failed_names") or [])
+    # 261014 fix: the candidate side needs the same fail-closed guard the
+    # baseline side already has (_ensure_baseline -> None -> named red). An
+    # absent/malformed name set, or an EMPTY one whose counts report failures,
+    # is a proof that could not be judged - the runner documents its empty set
+    # as "the suite log was unreadable". Reading that as "no new regression"
+    # books a fabricated green over a red suite and can reach promotion. It is
+    # not green and not a content red either: could-not-run grows the range
+    # (design goal 24) instead of guessing.
+    counts = header.get("cases") if isinstance(header, dict) else None
+    names = header.get("failed_names") if isinstance(header, dict) else None
+    if not isinstance(names, list):
+        raise CouldNotRun("line_fail_set_missing")
+    line_fails = {x.strip() for x in names if isinstance(x, str) and x.strip()}
+    if isinstance(counts, dict):
+        try:
+            _failed_counts = int(counts.get("failed", 0))
+        except (TypeError, ValueError):
+            raise CouldNotRun("run_cases_not_counts")
+        if _failed_counts > 0 and not line_fails:
+            raise CouldNotRun("line_fail_set_unreadable:%d" % _failed_counts)
     flaky = flaky_names_from_roster(roster)
     per_repo = {}
     regressions = []
