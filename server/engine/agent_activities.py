@@ -6190,18 +6190,28 @@ async def certification_wait(args: CertWaitArgs) -> CertWaitResult:
                               "line %r — nothing to wait for"
                               % (args.ticket_id, args.line_id))
     # 261013 (wires the t261009-30 seam): the run-verdict reader — reads the
-    # cited run's own verdict from the scenario-runs ledger. Without it every
-    # landing on a certified line stopped named run_verdict_unreadable. An
+    # cited run's own verdict from the scenario-runs ledger. The engine never
+    # imports the integration support layer (develop_certify's rule), so this
+    # reads the JSONL directly (stdlib only), at the per-project store. An
     # unknown/unreadable run id answers None -> not green, never guessed.
     def _is_green(run_id):
         try:
-            import scenario_ledger  # integration/ (engine venv path covers it)
-            headers, _ = scenario_ledger.read_runs()
+            import json as _json
+            runs_file = (shared.perkey_projects_root() / args.project_key
+                         / "ledger" / "scenario-runs.jsonl")
+            with open(str(runs_file), encoding="utf-8") as fh:
+                for ln in fh:
+                    s = ln.strip()
+                    if not s:
+                        continue
+                    try:
+                        obj = _json.loads(s)
+                    except ValueError:
+                        continue
+                    if isinstance(obj, dict) and obj.get("id") == run_id:
+                        return obj.get("verdict") == "green"
         except Exception:
             return None
-        for h in headers:
-            if isinstance(h, dict) and h.get("id") == run_id:
-                return h.get("verdict") == "green"
         return None
     face = cert_wait_face(rows, args.line_id, landings[-1], _is_green,
                           int(time.time() * 1000))

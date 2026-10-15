@@ -308,5 +308,114 @@ class TestSingleSpaceProjection(TempCase):
         self.assertEqual(v["ending"], "open")
 
 
+class TestPromoteBufferDriver(unittest.TestCase):
+    """The wired driver (t261013): a green certified prefix promotes main
+    (fast-forward) and the record lands; a red/absent cert refuses before any
+    ref moves. Fixture repo + isolated ledgers via the env seams."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+        import subprocess
+        self._git = lambda *a: subprocess.run(
+            ["git"] + list(a), cwd=str(self.repo), check=True,
+            capture_output=True, text=True)
+        self.repo = self.dir / "repo"
+        self.repo.mkdir()
+        self._git("init", "-q")
+        self._git("config", "user.email", "it@t29")
+        self._git("config", "user.name", "it")
+        (self.repo / "a.txt").write_text("a\n", "utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-qm", "m0")
+        self._git("branch", "develop")
+        self._git("checkout", "-q", "develop")
+        (self.repo / "b.txt").write_text("b\n", "utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-qm", "line work")
+        self.line_tip = self._git("rev-parse", "HEAD").stdout.strip()
+        self.main_tip = self._git("rev-parse", "main").stdout.strip()
+        self._git("checkout", "-q", "main")
+        # isolated stores: projects root (line decl) + delivery ledger + runs
+        self.projects = self.dir / "projects"
+        (self.projects / "sandbar" / "data" / "develop").mkdir(parents=True)
+        (self.projects / "sandbar" / "data" / "develop" / "lines.json"
+         ).write_text(json.dumps(
+             [{"line_id": "develop-buffer", "scope": "t", "owner": "host",
+               "repositories": [{"name": "sandbar", "branch": "develop"}],
+               "extra_scenarios": [], "version": 1}]), "utf-8")
+        self.ledger_dir = self.dir / "ledger"
+        self.runs_dir = self.dir / "runs"
+        self.runs_dir.mkdir()
+        self._env = {"SANDBAR_PROJECTS_DIR": str(self.projects),
+                     "SANDBAR_DELIVERY_LEDGER_DIR": str(self.ledger_dir),
+                     "SANDBAR_SCENARIO_LEDGER_DIR": str(self.runs_dir)}
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _seed_ledger(self, verdict="green"):
+        _ldg = LANDING(1, ticket="t-fix", revision=self.line_tip)
+        _ldg["line"] = "develop-buffer"
+        # the LANDING helper's fixture repo is "r"; this driver fixture names
+        # the repo "sandbar" (the line declaration matches) — align it
+        _ldg["repos"] = [{"repo": "sandbar", "revision": self.line_tip}]
+        dc.append_rows([_ldg], self.ledger_dir / "sandbar.jsonl")
+        cert = dc.build_certification(
+            [{"repo": "sandbar", "revision": self.line_tip}],
+            {"id": "run-green", "cases": {"ran": 3, "passed": 3,
+                                          "failed": 0, "env_failed": 0}},
+            "none", judged_by="ut", at_ms=2000, line="develop-buffer")
+        dc.append_rows([cert], self.ledger_dir / "sandbar.jsonl")
+        # the run record lives at the per-project store (the shape the
+        # wired reader reads: perkey root / project / ledger)
+        runs_store = (self.projects / "sandbar" / "ledger")
+        runs_store.mkdir(parents=True, exist_ok=True)
+        (runs_store / "scenario-runs.jsonl").write_text(
+            json.dumps({"id": "run-green", "verdict": verdict,
+                        "cases": {"ran": 3, "passed": 3, "failed": 0,
+                                  "env_failed": 0},
+                        "suite": "full", "source": "line-round"})
+            + "\n", "utf-8")
+        return cert["id"]
+
+    def test_green_prefix_promotes_main_and_records(self):
+        cert_id = self._seed_ledger("green")
+        import unittest.mock as mock
+        with mock.patch.dict("os.environ", self._env, clear=False):
+            row = dp.promote_buffer("sandbar", "develop-buffer", signer="host",
+                                    note="t", repo_paths={"sandbar": self.repo})
+        self.assertEqual(row["certification"], cert_id)
+        self.assertEqual(row["signer"], "host")
+        self.assertEqual(row["tickets"], ["t-fix"])
+        # the act: main moved to the certified revision (ff-only)
+        cur = self._git("rev-parse", "refs/heads/main").stdout.strip()
+        self.assertEqual(cur, self.line_tip)
+        # and the worktree followed (main checkout was clean + on main)
+        self.assertEqual((self.repo / "b.txt").read_text("utf-8"), "b\n")
+        # the record landed in the shared ledger
+        rows, bad = dc.read_rows(self.ledger_dir / "sandbar.jsonl")
+        self.assertEqual(bad, [])
+        promos = [r for r in rows if r.get("kind") == dc.KIND_PROMOTION]
+        self.assertEqual(len(promos), 1)
+        self.assertEqual(promos[0]["certification"], cert_id)
+
+    def test_red_cert_refuses_before_any_ref_moves(self):
+        self._seed_ledger("red")
+        main_before = self._git("rev-parse", "refs/heads/main").stdout.strip()
+        import unittest.mock as mock
+        with mock.patch.dict("os.environ", self._env, clear=False):
+            with self.assertRaises(dp.PromotionRefused) as ctx:
+                dp.promote_buffer("sandbar", "develop-buffer", signer="host",
+                                  repo_paths={"sandbar": self.repo})
+        self.assertIn("no_green_certification", str(ctx.exception))
+        # nothing moved, nothing recorded
+        self.assertEqual(
+            self._git("rev-parse", "refs/heads/main").stdout.strip(),
+            main_before)
+        rows, _ = dc.read_rows(self.ledger_dir / "sandbar.jsonl")
+        self.assertFalse([r for r in rows if r.get("kind") == dc.KIND_PROMOTION])
+
+
 if __name__ == "__main__":
     unittest.main()

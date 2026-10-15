@@ -260,6 +260,48 @@ SCENARIOS = [
      "integration gate / merge. line_round_runner.py or git missing = "
      "ENV_FAIL exit 2",
      "python3 integration/t261012-01/sc_t26101201_round_face_truth.py", "ro", "fast"),
+    # ---- t261014-04: the line round judges the line RELATIVE to main ----
+    ("t261014-04-relative-round",
+     "The line round judges the line RELATIVE to main, so main's standing "
+     "debt is carried instead of reading as the line's own regression "
+     "(ticket t261014-04, host-approved model: green = no new regressions vs "
+     "main, baseline cached by main's exact tip, three-way record; the "
+     "incident = the line round could only judge absolutely and read red over "
+     "main's debt, so the line froze and its certified prefix could not "
+     "promote; grey-box L2/L3, the REAL round entry "
+     "develop_certify.run_line_round with project set over a REAL isolated "
+     "project store, a REAL git checkout carrying branch main, a REAL "
+     "delivery ledger and a REAL guard file, the suite runner as a declared "
+     "stub (the real suite is the gate's own job), offline about half a "
+     "second, zero docker/Temporal/browser, never touches 3099/7233): A "
+     "CARRIED DEBT READS GREEN AND IS NAMED - the line's fail set is main's "
+     "baseline plus one roster-listed flaky name, so the verdict is green, "
+     "the certification cites the run and restates nothing, NO freeze opens, "
+     "and the run record ON DISK carries the three-way detail "
+     "(carried_debt named, new_regressions empty, flaky_hits named); B ONE "
+     "NEW REGRESSION READS RED AND IS NAMED - new_regressions holds exactly "
+     "the new name, carried_debt still names main's debt, and exactly one "
+     "freeze episode opens keyed to that certification (A and B differ by "
+     "one name, so the pair pins the discriminator: carried debt alone never "
+     "freezes); C THE BASELINE IS KEYED BY MAIN'S EXACT TIP - the first round "
+     "runs the baseline suite once (the runner is handed main's revision) and "
+     "writes the cache at the declared path, the second round HITS the cache "
+     "and asks the runner for the candidate only, and after main moves the "
+     "baseline is rebuilt under the NEW tip, so a stale cache is never read; "
+     "D AN UNBUILDABLE BASELINE IS FAIL-CLOSED - the round reads red with the "
+     "reason named and writes NO cache entry, so a later round retries "
+     "instead of trusting a failed baseline, and a guessed green is "
+     "impossible on that path. Division of intent: the absolute round journey "
+     "(green round, red -> freeze ladder, range growth, slot/chain, "
+     "delivered-checkout refusal) belongs to t261009-30-line-round and its "
+     "siblings; the runner's own name-set derivation belongs to t261009-77 "
+     "and t261013-04; the round's live face belongs to t261011-26; the pure "
+     "truth tables of relative_verdict and the cache reader stay developer L1 "
+     "in server/engine/tests/test_t261009_30_line_round.py. Cost: the ro "
+     "pool, seconds, offline, no expensive pool. Three states: PASS exit 0 / "
+     "FAIL exit 1 / ENV_FAIL exit 2. Engine module, git, or the fixture store "
+     "unusable = ENV_FAIL exit 2",
+     "python3 integration/t261014-04/sc_t26101404_relative_round.py", "ro", "fast"),
     # ---- t261011-02: the CLI board row says what the engine row says ----
     ("t261011-02-ticket-list-projection-parity",
      "For the same ticket the CLI board face and the engine row face agree per-key (ticket t261011-02, user words 'the CLI row says what the engine row says — fix the whole seam, not just the one key'; incident = ticket.py _list rebuilt rows through fixed key whitelists twice, so lane_version/develop_line read '' for every ticket while the develop-buffer opt-in's first ticket was in flight, and the same seam had already eaten paused/paused_phase (t260908-01, t260910-04 rerouted the console instead of repairing the projection) and exec_status/close_health/close_health_reason; grey-box L3, the REAL engine row builder _row_from_meta loaded from the real client.py over real meta shapes (develop-buffer opt-in, between-segment paused, minimal closed, legacy no-key rows) fed through the declared _poc transport seam into the real CLI op entry ticket.run({'op':'list'}), offline seconds, zero docker/Temporal/browser, never touches 3099/7233): A PER-KEY AGREEMENT on the ticket's two named covers — the develop-buffer ticket's lane_version/develop_line and the paused ticket's paused/paused_phase arrive on the CLI row with the engine's exact values, and NO key of the engine row is recomputed or rename-drifted; B KEY-SET PARITY — every key of the real engine row (including the caller-added close_ts and the closed-row shape's health/exec_status keys) is carried, so the day the engine adds a key and the projection does not, this reds by name; C HONEST ABSENCE — a legacy row missing the newer keys reads honestly empty, never guessed, never a crash; D SINGLE SOURCE — the engine-formatted updated string and epoch updated_ts arrive verbatim, never re-derived from the CLI wall clock. Scope guard: the console and the engine row face are read, never modified. Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. Engine tree or ticket.py missing/unimportable = ENV_FAIL exit 2",
@@ -3467,6 +3509,34 @@ FAST_SET_CATCH = {
         "the round face saying green over ran=0, a done without a parsed "
         "summary, or publishing silent zeros beside a real INTEG_SUMMARY "
         "(the t261012-01 false-green incident class)",
+    "t261014-04-relative-round":
+        "the relative round reading an unreadable or absent line name set "
+        "as 'no new regressions' over main's standing debt (the t261014-04 "
+        "class — the mirror image of the incident, where a missing name set "
+        "books a green over a red suite), or a baseline read under a main "
+        "tip that has already moved",
+    "t261012-06-rounds-window":
+        "the retention window deleting the round's own kept evidence, or a "
+        "foreign rounds/ directory entering the prune window",
+    "t261012-06-face-dir-hygiene":
+        "the round face dir drifting from the writer's declared path "
+        "(phantom run rows, hidden real rounds)",
+    "t261012-03-rounds-table-honest-faces":
+        "the Rounds table rendering zeros or counts where a face should be "
+        "named (the silent-degrade face)",
+    "t261012-03-round-dialog-journey":
+        "the round dialog losing its per-round failure rows or the honest "
+        "more-count beside the render cap",
+    "t261011-25-journey-handshake-sweep":
+        "the ticket journey's handshake sweep face regressing (a stage "
+        "handshake the sweep must catch going unnamed)",
+    "t261011-25-prelude-receipt":
+        "the prelude receipt handshake face regressing (a prelude act "
+        "landing without its named receipt)",
+    "t261013-06-freeze-closure-resumes-landings":
+        "a frozen line staying un-landable after its closure row, or the "
+        "closure row resuming landings it must not (the false-closure "
+        "class this line paid for)",
 }
 
 

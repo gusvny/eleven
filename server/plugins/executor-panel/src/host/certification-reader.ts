@@ -25,6 +25,7 @@
 
 import { execFile as execFileCb } from 'node:child_process'
 import { enginePython } from './executor-grants.ts'
+import { concurrencyProjectsRoot } from './concurrency.ts'
 import {
   deriveCertificationFace,
   type CertificationFace,
@@ -241,6 +242,24 @@ export function parseRoundReceipt(stdout: string): RoundRead {
  * t261012-03: generalized to take the whole argv tail so the `round` mode
  * rides the SAME four settled paths — one spawn face, two modes.
  */
+/** 261013 (the empty-Rounds report): the adapter reads run headers from
+ *  $SANDBAR_RUNS_LEDGER and refuses by name when it is unset (it never guesses
+ *  a lane tree root). The panel never set it, so every certification read
+ *  failed named and the Rounds table rendered empty. Point it at the project's
+ *  runs store (the same projects root the engine reads) when the caller did
+ *  not pin one explicitly. */
+function withRunsLedger(
+  project: string,
+  opts: { env?: NodeJS.ProcessEnv },
+): { env: NodeJS.ProcessEnv } {
+  const env = { ...(opts.env ?? process.env) }
+  if (!env.SANDBAR_RUNS_LEDGER) {
+    env.SANDBAR_RUNS_LEDGER = concurrencyProjectsRoot(env)
+      + '/' + String(project) + '/ledger/scenario-runs.jsonl'
+  }
+  return { env }
+}
+
 type SpawnResult<T> = { parse: (stdout: string) => T; label: string }
 function spawnAdapter<T>(
   argvTail: string[],
@@ -280,7 +299,8 @@ export function spawnCertificationRead(
   project: string,
   opts: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
 ): Promise<CertRead> {
-  return spawnAdapter<CertRead>([project], { parse: parseCertReceipt, label: 'certification read' }, opts)
+  return spawnAdapter<CertRead>([project], { parse: parseCertReceipt, label: 'certification read' },
+    { ...opts, ...withRunsLedger(project, opts) })
 }
 
 /** t261012-03: the `round` mode — the dialog's one fetch per open. The run id
@@ -295,7 +315,8 @@ export function spawnCertificationRound(
   if (!RUN_ID_RE.test(runId) || runId.includes('..')) {
     return Promise.resolve({ ok: false, reason: `malformed run id ${JSON.stringify(runId.slice(0, 80))}` }) // LIST-CAP-OK: error-message length limit, not a list cap
   }
-  return spawnAdapter<RoundRead>(['round', project, runId], { parse: parseRoundReceipt, label: 'round read' }, opts)
+  return spawnAdapter<RoundRead>(['round', project, runId], { parse: parseRoundReceipt, label: 'round read' },
+    { ...opts, ...withRunsLedger(project, opts) })
 }
 
 /** Line choice: the query's `line` when given (unknown = named refusal), else

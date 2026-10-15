@@ -106,6 +106,7 @@ from pathlib import Path
 
 from agent_activities import _git  # noqa: E402  (borrowed, never re-implemented)
 import develop_certify as dc  # noqa: E402
+import shared  # noqa: E402  (develop_dir / perkey roots)
 
 RECORD_VERSION = 1
 
@@ -549,6 +550,177 @@ def current_relations(rows):
 #: appears (import direction: promote -> certify — the implementation lives
 #: in develop_certify, beside the ledger kinds it reads).
 relations_of = dc.relations_of
+
+
+# ---- the driver (t261013: the human-signed act, wired) -----------------------
+
+def _is_green_reader(project):
+    """The run-verdict reader: the cited run's verdict read straight from the
+    per-project scenario-runs JSONL (stdlib only — the engine never imports
+    the integration support layer, develop_certify's rule). Unknown or
+    unreadable -> not green, never guessed."""
+    import json as _json
+    runs_file = (shared.perkey_projects_root() / str(project) / "ledger"
+                 / "scenario-runs.jsonl")
+
+    def _is_green(run_id):
+        try:
+            with open(str(runs_file), encoding="utf-8") as fh:
+                for ln in fh:
+                    s = ln.strip()
+                    if not s:
+                        continue
+                    try:
+                        obj = _json.loads(s)
+                    except ValueError:
+                        continue
+                    if isinstance(obj, dict) and obj.get("id") == run_id:
+                        return obj.get("verdict") == "green"
+        except Exception:
+            return None
+        return None
+    return _is_green
+
+
+def _latest_green_cert(rows, line_id, project):
+    """The line's latest certification whose cited run reads green. None ->
+    the caller refuses (a promotion never rests on a red or unreadable cert)."""
+    is_green = _is_green_reader(project)
+    certs = [r for r in rows if isinstance(r, dict)
+             and r.get("kind") == dc.KIND_CERT and r.get("line") == line_id]
+    certs.sort(key=lambda r: r.get("seq") or 0)
+    for cert in reversed(certs):
+        if is_green(cert.get("run")):
+            return cert
+    return None
+
+
+def _covered_tickets(rows, line_id, cert_repos):
+    """The tickets whose landings sit inside the certified revision — what a
+    promotion delivers. Derived from the records' order, never stored."""
+    out = []
+    for r in rows:
+        if not (isinstance(r, dict) and r.get("kind") == dc.KIND_LANDING
+                and r.get("line") == line_id):
+            continue
+        t = r.get("ticket")
+        lrev = {x["repo"]: x["revision"] for x in r.get("repos", [])
+                if isinstance(x, dict)}
+        # carried = its landing revision IS the certified revision per repo
+        # (build_promotion enforces this equality — the v1 single-repo rule:
+        # a certified revision carries the landings sitting exactly on it)
+        if lrev and all(cert_repos.get(k) == v for k, v in lrev.items()):
+            if isinstance(t, str) and t.strip() and t not in out:
+                out.append(t)
+    return out
+
+
+def promote_buffer(project, line_id, signer, authority=None, on_behalf_of=None,
+                   note=None, at_ms=None, repo_paths=None):
+    """The human-signed promotion act (design goal 11): move main to the
+    line's latest GREEN certified revision (fast-forward only), then record.
+
+    The order is deliberate: VALIDATE everything (the cert is green, every
+    covered ticket landed inside the certified revision, no withdrawn patch
+    re-enters, fast-forward is possible) BEFORE touching any ref. A refusal
+    raises PromotionRefused with a named reason and moves nothing. The act
+    itself moves the ref via update-ref (works from any worktree) and then,
+    when the main checkout sits on main with a clean tree, follows with a
+    ``merge --ff-only`` there so the working tree tracks the new tip; a dirty
+    or not-on-main checkout is named in the record's note, never forced.
+
+    Returns the recorded promotion row."""
+    import develop_line as dl  # local: promote -> certify -> (line decl)
+    if not _valid_str(signer):
+        raise PromotionRefused("promotion_missing_signer")
+    rows, bad = dc.read_rows(dc.ledger_path(project))
+    if bad:
+        raise PromotionRefused("delivery_ledger_malformed:%d" % len(bad))
+    cert = _latest_green_cert(rows, line_id, project)
+    if cert is None:
+        raise PromotionRefused("no_green_certification:%s" % line_id)
+    line = dl.load_lines(project).get(line_id)
+    if line is None:
+        raise PromotionRefused("line_not_declared:%s" % line_id)
+    cert_repos = _repos_map(cert["repos"])
+    tickets = _covered_tickets(rows, line_id, cert_repos)
+
+    has_withdrawals = any(isinstance(r, dict)
+                          and r.get("kind") == REL_KIND_WITHDRAWS
+                          for r in rows)
+
+    main_before, main_after = [], []
+    for repo_meta in line.repositories:
+        name = repo_meta.name
+        repo = (repo_paths or {}).get(name)
+        if repo is None:
+            # the line worktree is a checkout of the shared repository —
+            # ref moves work from it (update-ref needs no checkout state)
+            repo = shared.develop_dir(project) / "wt" / name
+        repo = Path(repo)
+        crev = cert_repos.get(name)
+        if not crev:
+            raise PromotionRefused("cert_missing_repo:%s" % name)
+        cur = _git(["rev-parse", "--verify", "refs/heads/main"], repo)
+        if cur.returncode != 0:
+            raise PromotionRefused("main_unresolvable:%s" % name)
+        cur = cur.stdout.strip()
+        mb = _git(["merge-base", "refs/heads/main", crev], repo)
+        if mb.returncode != 0 or mb.stdout.strip() != cur:
+            raise PromotionRefused(
+                "promotion_not_fast_forward:%s" % name)
+        main_before.append({"repo": name, "revision": cur})
+        main_after.append({"repo": name, "revision": crev})
+
+    def _pid_fn(rev, repo_name):
+        return patch_id(rev, (repo_paths or {}).get(repo_name)
+                        or shared.develop_dir(project) / "wt" / repo_name)
+
+    row = build_promotion(
+        cert["id"], line_id, tickets, main_before, main_after, signer,
+        on_behalf_of=on_behalf_of, authority=authority, note=note,
+        at_ms=at_ms, delivery_rows=rows, is_green=_is_green_reader(project),
+        patch_id_fn=_pid_fn if has_withdrawals else None)
+    # validated — now the act, per repo. When the main checkout sits on main
+    # with a clean tree, ONE fast-forward merge moves ref AND worktree together
+    # (update-ref would strand the worktree behind the moved ref); otherwise
+    # only the ref moves (update-ref works from any worktree) and the stale
+    # worktree is named in the record, never forced.
+    sync_notes = []
+    for repo_meta in line.repositories:
+        name = repo_meta.name
+        repo = Path((repo_paths or {}).get(name)
+                    or shared.develop_dir(project) / "wt" / name)
+        crev = cert_repos[name]
+        common = _git(["rev-parse", "--absolute-git-dir"], repo)
+        main_co = Path(common.stdout.strip()).parent if common.returncode == 0 \
+            else None
+        synced_inplace = False
+        if main_co is not None:
+            cur_br = _git(["rev-parse", "--abbrev-ref", "HEAD"], main_co)
+            dirty = _git(["status", "--porcelain"], main_co)
+            if cur_br.returncode == 0 and cur_br.stdout.strip() == "main" \
+                    and not (dirty.stdout or "").strip():
+                m = _git(["merge", "--ff-only", crev], main_co)
+                if m.returncode == 0:
+                    synced_inplace = True
+                else:
+                    raise PromoteError("main_ff_failed:%s:%s"
+                                       % (name, (m.stderr or "")[-200:]))
+        if not synced_inplace:
+            u = _git(["update-ref", "refs/heads/main", crev], repo)
+            if u.returncode != 0:
+                raise PromoteError("main_ref_move_failed:%s:%s"
+                                   % (name, (u.stderr or "")[-200:]))
+            sync_notes.append("%s main checkout not on a clean main — the ref "
+                              "moved; the operator reconciles the worktree"
+                              % name)
+    res = record_promotion(row, dc.ledger_path(project))
+    if res["written"] != 1:
+        raise PromoteError("promotion_append_rejected:%r" % (res["rejected"],))
+    if sync_notes:
+        row["worktree_sync_notes"] = sync_notes
+    return row
 
 
 # ---- the withdrawal guard ---------------------------------------------------

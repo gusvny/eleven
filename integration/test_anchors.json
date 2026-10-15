@@ -5035,6 +5035,11 @@
     "integration/t261012-01/sc_t26101201_round_face_truth.py": {
       "anchor": "contract"
     },
+    "integration/t261014-04/sc_t26101404_relative_round.py": {
+      "anchor": "behaviour",
+      "note": "t261014-04: the inline relative caliber at the round level — carried debt reads green and is named, one new regression reads red and freezes, main's baseline is cached by its exact tip, and an unbuildable baseline is fail-closed",
+      "sync_path": "server/engine/develop_certify.py (relative_round_verdict / _ensure_baseline / baseline_path / run_line_round relative branch)"
+    },
     "integration/t261013-04/sc_t26101304_line_round_run_record.py": {
       "anchor": "behaviour",
       "note": "t261013-04: a round driven the way a line round drives the suite (source lane:line-round, SANDBAR_LEDGER_REUSE=0, the declared pool exclusion exclusive) mints a run record whose header the real line_round_runner.read_header accepts, while the --only diagnostic round and the other-source round stay record-less and the unresolvable-identity round stays honest",

@@ -441,10 +441,25 @@ class FaceWriter:
                     "%s note: %d foreign dir(s) under rounds/ left untouched "
                     "(retention keys on round dirs only): %s\n"
                     % (TAG, len(foreign), ",".join(sorted(foreign)[:5])))
+            removed = []
             for d in old:
                 if d.name == str(live) or d.name == str(self.run_id):
                     continue
                 shutil.rmtree(d, ignore_errors=True)
+                if not d.exists():
+                    removed.append(d.name)
+            if removed:
+                # t261011-26 leg D2: a real prune names itself on stderr,
+                # non-fatally. The prune runs at face start — before the
+                # suite — so a narrowed or could-not-run round names it too:
+                # the evidence bookkeeping stays honest on every path the
+                # face exists on. A dir with nothing to prune stays silent
+                # (leg D1).
+                sys.stderr.write(
+                    "%s note: retention pruned %d old round dir(s) beyond "
+                    "the keep window (FACE_RETAIN_ROUNDS=%d): %s\n"
+                    % (TAG, len(removed), FACE_RETAIN_ROUNDS,
+                       ",".join(removed[:5])))
         except OSError as e:
             sys.stderr.write("%s warn: retention prune failed (%s)\n"
                              % (TAG, e))

@@ -30,7 +30,7 @@ intent 分工（防 intent 级重复）：
 造的是「agent 输出」，必须契约内：中文叙述字段会让整份发现被判 unverified——复核实得
 8 进 9 出、真引文不 verified、id 面混入聚合条目（`agent:<12hex>`）、verified 门的预算面
 全塌（实得 0 条 verified）。**断言零放宽**：真引文/空白容差仍须 verified、坏证据仍须
-unverified 且逐项 reason、8 进 8 出、id 8 位且条内唯一、summary 只计新发现、recurring
+unverified 且逐项 reason、8 进 8 出、id 16 位且条内唯一、summary 只计新发现、recurring
 不占 40 预算——逐条原样保留；quote/path 是数据面不译。
 """
 import json
@@ -221,12 +221,15 @@ def main() -> int:
                 ok(not lib.entry_reason(e), "verified 条目不带复核失败 reason（%s）"
                    % str(e.get("subject"))[:30])
 
-    print("== 子用例4 id 内容哈希：8 位、同内容跨期稳定、内容变即变 ==")
+    print("== 子用例4 id 内容哈希：16 位、同内容跨期稳定、内容变即变 ==")
     def ids_of(payload):
         fs = lib.payload_findings(payload) or []
         return [str(f.get("id") or "") for f in fs if isinstance(f, dict)]
-    ok(all(len(i) == 8 for i in ids_of(payload)) and len(set(ids_of(payload))) == len(ids_of(payload)),
-       "id=8 位且条内唯一（实得 %r；若混入 `agent:<hash>` 形状=语言闸聚合条目被追加，"
+    # 260914 再钉：铸面宽度是 FINDING_ID_HEX=16（inspection_inspect.py，t261009-69
+    # 起三侧同为 16——本票合并前的线尖与 main 皆然），纪律本体不变：内容哈希、
+    # 条内唯一、同内容跨期稳定、内容变即变。旧「8 位」钉与在产铸面恒不一致。
+    ok(all(len(i) == 16 for i in ids_of(payload)) and len(set(ids_of(payload))) == len(ids_of(payload)),
+       "id=16 位且条内唯一（实得 %r；若混入 `agent:<hash>` 形状=语言闸聚合条目被追加，"
        "先查夹具 subject/why/suggestion 是否英文）" % ids_of(payload)[:3])
     r2 = full(lib.fenced_message([good_f]))
     r3 = full(lib.fenced_message([dict(good_f, subject=good_f["subject"] + " (reworded)")]))

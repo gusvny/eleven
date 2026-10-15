@@ -124,16 +124,25 @@ function adapterEnv(home, runsPath) {
   'rounds face: auto trigger, green verdict, line <sha> shape')
   n += 2
 
-  // fail-closed run-header rule: certs on the line + no runs ledger = named refusal
+  // fail-closed run-header rule: certs on the line + no READABLE runs ledger =
+  // named refusal. 261013: the panel now POINTS the adapter at the project's
+  // runs store (it used to spawn without SANDBAR_RUNS_LEDGER, so every read
+  // degraded and the Rounds table rendered empty) — so the reachable
+  // fail-closed case is "the store the panel points at is absent/unreadable",
+  // still a named refusal, never a default green.
   const noRuns = await spawnCertificationRead(P, { env: { ...process.env, SANDBAR_PROJECTS_DIR: home } })
   assert(noRuns.ok === true && noRuns.per_line['develop-buffer'].ok === false
-    && noRuns.per_line['develop-buffer'].reason.includes('SANDBAR_RUNS_LEDGER'),
+    && /run headers|SANDBAR_RUNS_LEDGER/.test(noRuns.per_line['develop-buffer'].reason),
   'absent run headers fail the line CLOSED (never a default green)')
   n += 1
 
-  // cited run missing from the headers = named refusal (never an invented verdict)
+  // cited run missing from the headers: 261013 the display DEGRADES per-round
+  // (renders the readable rounds, names the lost records) instead of refusing
+  // the whole line — the green JUDGMENT stays fail-closed (an absent run reads
+  // not-green, never promoted). Never an invented verdict.
   const other = await certificationFace({ project: P }, { env: adapterEnv(home, seedRunsOther(home)) })
-  assert(other.ok === false && other.reason.includes('run headers absent for cited round(s)'), 'cited run missing from headers refuses by name')
+  assert(other.ok === true && other.face && (other.notes || []).some((x) => /run records absent for cited round/.test(x)),
+    'a lost run record degrades the display named, never invented; green judgment stays closed')
   n += 1
 
   // malformed delivery row: the engine reader counts it, the seam refuses by name

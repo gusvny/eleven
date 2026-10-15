@@ -418,6 +418,33 @@ def parse_integ_summary(log_path):
     return summary, None
 
 
+def failed_names(log_path):
+    """The per-scenario fail set of this suite run (the relative-certification
+    caliber, 261014): the names of scenarios whose row reads fail/not-checked,
+    derived from the same per-scenario result lines the face counts — never
+    from a second source. A round judged against a baseline compares THESE
+    names, not the counts. Unreadable log -> empty set (the caller's counts
+    face still names the could-not-run; a missing name-set never invents)."""
+    try:
+        text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    out = set()
+    for line in text.splitlines():
+        s = line.strip()
+        if not s.startswith('{"name"'):
+            continue
+        try:
+            row = json.loads(s)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("status") in ("fail", "not-checked"):
+            name = row.get("name")
+            if isinstance(name, str) and name.strip():
+                out.add(name.strip())
+    return sorted(out)
+
+
 def tail(text, n=300):
     return (text or "").strip()[-n:]
 
@@ -587,6 +614,10 @@ def run(env=None):
                     pass  # keep the provisional dir; the face still lands
             face.retain_log(log_path)
             face.finish("done", verdict, reason)
+            # the relative-certification caliber (261014): the fail NAME set,
+            # so the engine can judge new-regressions-vs-main, not just counts
+            if isinstance(header, dict):
+                header["failed_names"] = failed_names(log_path)
         sys.stdout.write(json.dumps(header, ensure_ascii=False) + "\n")
         sys.stdout.flush()
         return 0

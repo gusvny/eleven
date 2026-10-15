@@ -1,0 +1,309 @@
+{
+ "version": 1,
+ "ticket": "t261014-04",
+ "what": "Accepted deviations of the develop-line sync carrier's conflict resolution. Each entry names one line that the settled result may not carry, and the reason it may be absent. Anything not listed here stays red in integration/tools/merge_loss_check.py. The four delimiter-only rows the tool reports for this resolution (the same code with a different leading run) are deliberately NOT declared: the tool never counts them as losses, so a declaration for one would read stale.",
+ "settled_revision": null,
+ "settled_revision_note": "the worker's settle mints the merge commit after this receipt; run merge_loss_check.py with --result HEAD on the settled tree",
+ "sides": {
+  "ours": "develop",
+  "theirs": "312f7fbd",
+  "base": "545c6cba0312da22b4bcddb4f57c4db6b6804870"
+ },
+ "deviations": [
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main (the t261013-06 deviation record ruled on these same nine lines)",
+   "text": "        run tree may be deleted right after — the copy happens FIRST.\"\"\""
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main (the t261013-06 deviation record ruled on these same nine lines)",
+   "text": "        \"\"\"Rolling retention keyed on run ids (review condition 1): the"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main (the t261013-06 deviation record ruled on these same nine lines)",
+   "text": "        newest FACE_RETAIN_ROUNDS run dirs survive; a dir named by the live"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main (the t261013-06 deviation record ruled on these same nine lines)",
+   "text": "        pointer on disk survives regardless of age (a concurrently running"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main (the t261013-06 deviation record ruled on these same nine lines)",
+   "text": "        round is never pruned under a finishing one).\"\"\""
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main (the t261013-06 deviation record ruled on these same nine lines)",
+   "text": "            dirs = sorted((d for d in self.rounds_dir.iterdir() if d.is_dir()),"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main (the t261013-06 deviation record ruled on these same nine lines)",
+   "text": "                          key=lambda d: d.name)"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main (the t261013-06 deviation record ruled on these same nine lines)",
+   "text": "            for d in dirs[:-FACE_RETAIN_ROUNDS] if len(dirs) > FACE_RETAIN_ROUNDS else []:"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework; the lane's variant here is the older run-id-keyed implementation, and the rework never reached main (the t261013-06 deviation record ruled on these same nine lines)",
+   "text": "                if d.name == str(live):"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the line's t261012-06 die() contract makes the round's own reason lead stderr and the face hook trail it; main's earlier prose (hook first) is superseded by the line's, whose code path the settled file carries",
+   "text": "    stdout stays empty — the engine's CouldNotRun path carries the name."
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the line's t261012-06 die() contract makes the round's own reason lead stderr and the face hook trail it; main's earlier prose (hook first) is superseded by the line's, whose code path the settled file carries",
+   "text": "    A registered face hook (run()) records the terminal failed state FIRST,"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the line's t261012-06 die() contract makes the round's own reason lead stderr and the face hook trail it; main's earlier prose (hook first) is superseded by the line's, whose code path the settled file carries",
+   "text": "    so the round's outcome stays visible on its stable face (t261011-26).\"\"\""
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "        # names chosen so \"round-1\" is the lexically NEWEST (real ids are"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "        # timestamps, so newest = greatest name); the live pointer names an"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "        # OLD dir, which must survive the prune anyway"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "            (self.dev / \"rounds\" / (\"q-old-%02d\" % i)).mkdir()"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "        (self.dev / \"rounds\" / \"q-old-00\" / \"x\").write_text(\"keep-alive\")"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "        live = lrf.FaceWriter(self.dev, \"q-old-00\", \"l\", {})"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "        (self.dev / \"rounds\" / \"current.json\").write_text("
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "            json.dumps({\"run_id\": \"q-old-00\"}))"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "        names = {d.name for d in (self.dev / \"rounds\").iterdir()}"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "        self.assertIn(\"q-old-00\", names)      # live pointer's dir survives"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "        self.assertIn(\"round-1\", names)       # newest survives"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "        self.assertNotIn(\"q-old-02\", names)   # oldest pruned"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "        self.assertLessEqual("
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "            len([n for n in names if n != \"current.json\"]),"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "the line's t261012-06 retention test (round-shaped dirs, mtime order, foreign entries untouched) supersedes the lane's earlier name-sorted variant; the settled file carries the line's test",
+   "text": "            lrf.FACE_RETAIN_ROUNDS + 1)"
+  },
+  {
+   "file": "server/engine/agent_activities.py",
+   "why": "the line's reader route imported the integration support layer, which the engine never imports (develop_certify's rule); main's stdlib read of the per-project scenario-runs.jsonl is the later form of the same fix",
+   "text": "    # cited run's own verdict from the scenario-runs ledger. Without it every"
+  },
+  {
+   "file": "server/engine/agent_activities.py",
+   "why": "the line's reader route imported the integration support layer, which the engine never imports (develop_certify's rule); main's stdlib read of the per-project scenario-runs.jsonl is the later form of the same fix",
+   "text": "    # landing on a certified line stopped named run_verdict_unreadable. An"
+  },
+  {
+   "file": "server/engine/agent_activities.py",
+   "why": "the line's reader route imported the integration support layer, which the engine never imports (develop_certify's rule); main's stdlib read of the per-project scenario-runs.jsonl is the later form of the same fix",
+   "text": "            import scenario_ledger  # integration/ (engine venv path covers it)"
+  },
+  {
+   "file": "server/engine/agent_activities.py",
+   "why": "the line's reader route imported the integration support layer, which the engine never imports (develop_certify's rule); main's stdlib read of the per-project scenario-runs.jsonl is the later form of the same fix",
+   "text": "            headers, _ = scenario_ledger.read_runs()"
+  },
+  {
+   "file": "server/engine/agent_activities.py",
+   "why": "the line's reader route imported the integration support layer, which the engine never imports (develop_certify's rule); main's stdlib read of the per-project scenario-runs.jsonl is the later form of the same fix",
+   "text": "        for h in headers:"
+  },
+  {
+   "file": "server/engine/agent_activities.py",
+   "why": "the line's reader route imported the integration support layer, which the engine never imports (develop_certify's rule); main's stdlib read of the per-project scenario-runs.jsonl is the later form of the same fix",
+   "text": "            if isinstance(h, dict) and h.get(\"id\") == run_id:"
+  },
+  {
+   "file": "server/engine/agent_activities.py",
+   "why": "the line's reader route imported the integration support layer, which the engine never imports (develop_certify's rule); main's stdlib read of the per-project scenario-runs.jsonl is the later form of the same fix",
+   "text": "                return h.get(\"verdict\") == \"green\""
+  },
+  {
+   "file": "server/engine/develop_certify.py",
+   "why": "main carries the same env-only-red fix with its own comment; the settled file keeps main's",
+   "text": "                # 261013 (design goal 24 + KI-01M4P6Z4T5C1R2S8N9K7H3QWDN):"
+  },
+  {
+   "file": "server/engine/develop_certify.py",
+   "why": "main carries the same env-only-red fix with its own comment; the settled file keeps main's",
+   "text": "                # the freeze opens only on a red that implicates CONTENT"
+  },
+  {
+   "file": "server/engine/develop_certify.py",
+   "why": "main carries the same env-only-red fix with its own comment; the settled file keeps main's",
+   "text": "                # (failed > 0). An env-only red (failed == 0, env_failed > 0)"
+  },
+  {
+   "file": "server/engine/develop_certify.py",
+   "why": "main carries the same env-only-red fix with its own comment; the settled file keeps main's",
+   "text": "                # means part of the suite was unavailable, not that the"
+  },
+  {
+   "file": "server/engine/develop_certify.py",
+   "why": "main carries the same env-only-red fix with its own comment; the settled file keeps main's",
+   "text": "                # revision is guilty — it grows the range like any red, but"
+  },
+  {
+   "file": "server/engine/develop_certify.py",
+   "why": "main carries the same env-only-red fix with its own comment; the settled file keeps main's",
+   "text": "                # freezing the line over an environment gap was exactly the"
+  },
+  {
+   "file": "server/engine/develop_certify.py",
+   "why": "main carries the same env-only-red fix with its own comment; the settled file keeps main's",
+   "text": "                # misjudgment the KI names. should_freeze's written intent is"
+  },
+  {
+   "file": "server/engine/develop_certify.py",
+   "why": "main carries the same env-only-red fix with its own comment; the settled file keeps main's",
+   "text": "                # now wired (it was dead code; its docstring stays the truth"
+  },
+  {
+   "file": "server/engine/develop_certify.py",
+   "why": "main carries the same env-only-red fix with its own comment; the settled file keeps main's",
+   "text": "                # of this branch)."
+  },
+  {
+   "file": "server/engine/develop_certify.py",
+   "why": "replaced by the fail-closed name-set guard in relative_round_verdict (the fabricated-green twin of the t261009-30 M2 red)",
+   "text": "    line_fails = set(header.get(\"failed_names\") or [])"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "the two generalized spawn call sites now pass the runs-ledger env (withRunsLedger), so the call line itself changed",
+   "text": "  return spawnAdapter<CertRead>([project], { parse: parseCertReceipt, label: 'certification read' }, opts)"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "the two generalized spawn call sites now pass the runs-ledger env (withRunsLedger), so the call line itself changed",
+   "text": "  return spawnAdapter<RoundRead>(['round', project, runId], { parse: parseRoundReceipt, label: 'round read' }, opts)"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "      // 261013 (the empty-Rounds report): the adapter reads run headers from"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "      // $SANDBAR_RUNS_LEDGER and refuses by name when it is unset (it never"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "      // guesses a lane tree root) — and the panel never set it, so every"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "      // certification read failed named and the Rounds table rendered empty."
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "      // Point it at the project's runs store (same projects root the engine"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "      // reads) when the caller did not pin one explicitly."
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "      const spawnEnv = { ...(opts.env ?? process.env) }"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "      if (!spawnEnv.SANDBAR_RUNS_LEDGER) {"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "        spawnEnv.SANDBAR_RUNS_LEDGER = concurrencyProjectsRoot(spawnEnv)"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "      }"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "      run(enginePython(spawnEnv), [certificationAdapterPath(), project],"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's 261013 env fix is relocated into the withRunsLedger() helper and applied by both generalized spawn callers; the fix is carried, its inline location is not",
+   "text": "        { timeout: opts.timeoutMs ?? 30_000, maxBuffer: 1_000_000, env: spawnEnv },"
+  },
+  {
+   "file": "integration/terminology-baseline.json",
+   "why": "the line's recorded known-issues count 16 was a stale snapshot of the old KI content; the synced tree carries main's known-issues.md, in which the guarded term occurs 0 times — the host's terminology snapshot ruling (e30d30a0) takes main's current snapshot, and the pre-ruling staged edit was discarded in its favor",
+   "text": "    \"notes/debts/known-issues.md\": 16,"
+  }
+ ]
+}

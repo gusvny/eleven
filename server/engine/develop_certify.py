@@ -85,6 +85,7 @@ R1 — the pattern is integration/scenario_ledger.py and its ULID mint):
 import fcntl
 import json
 import os
+import sys
 import secrets
 import time
 from pathlib import Path
@@ -708,6 +709,206 @@ def run_verdict(counts):
     failed = int(counts.get("failed", 0))
     env_failed = int(counts.get("env_failed", 0))
     return "green" if (ran > 0 and failed == 0 and env_failed == 0) else "red"
+
+
+# ---- the relative-certification baseline (261014, inline relative caliber) ----
+#
+# The certification's question changed from "is the line's full suite green"
+# (absolute) to "does the line introduce NEW regressions vs main" (relative).
+# The baseline records main's own fail set per repo, keyed by main's exact
+# tip — it is a CACHE of "this main revision's deterministic fails", refreshed
+# only when main moves, never a stale guess. Multi-repo safe: one baseline per
+# (repo, main tip), line-level (project store), no repo directory owns it.
+#
+# Two categories per baseline:
+#   deterministic_fails — scenarios main fails deterministically (carried
+#       debt the line may share without being a regression);
+#   flaky — scenarios that cannot be judged deterministically (seeded from
+#       the known-red roster's isolated family); a flaky fail on the line is
+#       never counted as a new regression.
+
+def _baseline_dir(project):
+    import shared  # local: certify -> shared, no cycle
+    return shared.develop_dir(project) / "main-baseline"
+
+
+def baseline_path(project, repo, main_tip):
+    return _baseline_dir(project) / ("%s@%s.json" % (repo, main_tip[:12]))
+
+
+def read_baseline(project, repo, main_tip):
+    """The cached baseline for (repo, main_tip), or None on a miss. A
+    malformed/absent cache is a miss (the caller rebuilds), never a guessed
+    baseline."""
+    p = baseline_path(project, repo, main_tip)
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not (isinstance(obj, dict)
+            and obj.get("main_tip") == main_tip
+            and isinstance(obj.get("deterministic_fails"), list)
+            and isinstance(obj.get("flaky"), list)):
+        return None
+    return obj
+
+
+def write_baseline(project, repo, main_tip, deterministic_fails, flaky):
+    """Persist the baseline (atomic: write-temp-then-rename, never a torn
+    cache a concurrent round could half-read)."""
+    p = baseline_path(project, repo, main_tip)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    obj = {"main_tip": main_tip,
+           "deterministic_fails": sorted(set(deterministic_fails)),
+           "flaky": sorted(set(flaky)),
+           "built_at": int(time.time() * 1000)}
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(str(tmp), str(p))
+    return p
+
+
+def flaky_names_from_roster(roster):
+    """The non-deterministic scenario names (the baseline's flaky list): the
+    known-red roster's ``isolated`` family (deterministic ``booked`` known-reds
+    are ABSORBED by the inline comparison — main fails them too — so they are
+    not excluded here)."""
+    if not isinstance(roster, dict):
+        return []
+    out = []
+    for e in roster.get("entries") or []:
+        if isinstance(e, dict) and e.get("verdict") == "isolated" \
+                and isinstance(e.get("name"), str) and e["name"].strip():
+            out.append(e["name"].strip())
+    return sorted(set(out))
+
+
+def _git_main_tip(repo_path):
+    """refs/heads/main's sha, resolved with a bounded git subprocess (never a
+    guessed tip). Empty on failure — the caller treats it as a baseline it
+    cannot key."""
+    import subprocess
+    try:
+        p = subprocess.run(["git", "-C", str(repo_path), "rev-parse",
+                            "--verify", "refs/heads/main"],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return (p.stdout or "").strip() if p.returncode == 0 else ""
+
+
+def relative_verdict(failed_names, baseline):
+    """The relative-caliber roll-up over a round's fail NAME set and main's
+    baseline. Returns (verdict, detail): green iff the line introduces NO new
+    regression; red names every new regression. carried_debt (shared with main)
+    and flaky_hits are recorded either way — the certification must be able to
+    say "green, carrying N of main's debt" distinctly from "clean", and a red
+    must name the regressions, never just 'red'."""
+    line_set = set(failed_names or [])
+    det = set((baseline or {}).get("deterministic_fails") or [])
+    flaky = set((baseline or {}).get("flaky") or [])
+    new_regressions = sorted(line_set - det - flaky)
+    carried = sorted(line_set & det)
+    flaky_hits = sorted(line_set & flaky)
+    detail = {"new_regressions": new_regressions,
+              "carried_debt": carried,
+              "flaky_hits": flaky_hits}
+    return ("red" if new_regressions else "green"), detail
+
+
+def _repo_worktree(project, repo):
+    import shared
+    return shared.develop_dir(project) / "wt" / repo
+
+
+def _ensure_baseline(project, repo, runner, flaky):
+    """main's baseline for ``repo``: cached by main's exact tip, rebuilt (one
+    baseline suite run) only when main moved. Returns (baseline_dict_or_None,
+    note). A None baseline = the round cannot prove no-regression for this
+    repo (fail-closed red), never a guessed green."""
+    wt = _repo_worktree(project, repo)
+    main_tip = _git_main_tip(wt)
+    if not main_tip:
+        return None, "main_tip_unresolvable:%s" % repo
+    cached = read_baseline(project, repo, main_tip)
+    if cached is not None:
+        return cached, "cache_hit:%s@%s" % (repo, main_tip[:12])
+    # main moved (or no cache yet): run the baseline suite at main's tip
+    bl_header = runner([{"repo": repo, "revision": main_tip}])
+    if not (isinstance(bl_header, dict) and isinstance(bl_header.get("cases"), dict)):
+        return None, "baseline_run_failed:%s" % repo
+    bl_fails = bl_header.get("failed_names") or []
+    deterministic = sorted(set(bl_fails) - set(flaky))
+    write_baseline(project, repo, main_tip, deterministic, flaky)
+    return ({"main_tip": main_tip, "deterministic_fails": deterministic,
+             "flaky": sorted(set(flaky))},
+            "cache_built:%s@%s" % (repo, main_tip[:12]))
+
+
+def _known_red_roster():
+    """The maintained known-red roster (the flaky list's seed): this checkout's
+    integration/known-red-baseline.json. Absent/unreadable -> {} (no flaky
+    names; the comparison then treats every line fail as a potential
+    regression, fail-closed), never a guessed roster."""
+    p = (Path(__file__).resolve().parents[2]
+         / "integration" / "known-red-baseline.json")
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def relative_round_verdict(project, candidate, header, runner, roster):
+    """The round's relative verdict across every repo in the candidate set:
+    per repo, compare the line's fail names against main's baseline (cached by
+    main tip, rebuilt on main change). Green iff EVERY repo introduces no new
+    regression. Returns (verdict, detail): detail carries, per repo, the
+    new_regressions / carried_debt / flaky_hits and the baseline note — the
+    certification must be able to say WHICH repo regressed, never just 'red'.
+    A repo whose baseline cannot be established is fail-closed red for that
+    repo (named), never a guessed green."""
+    # 261014 fix: the candidate side needs the same fail-closed guard the
+    # baseline side already has (_ensure_baseline -> None -> named red). An
+    # absent/malformed name set, or an EMPTY one whose counts report failures,
+    # is a proof that could not be judged — the runner documents its empty set
+    # as "the suite log was unreadable". Reading that as "no new regression"
+    # books a fabricated green over a red suite and can reach promotion. It is
+    # not green and not a content red either: could-not-run grows the range
+    # (design goal 24) instead of guessing.
+    counts = header.get("cases") if isinstance(header, dict) else None
+    names = header.get("failed_names") if isinstance(header, dict) else None
+    if not isinstance(names, list):
+        raise CouldNotRun("line_fail_set_missing")
+    line_fails = {x.strip() for x in names if isinstance(x, str) and x.strip()}
+    if isinstance(counts, dict):
+        try:
+            _failed_counts = int(counts.get("failed", 0))
+        except (TypeError, ValueError):
+            raise CouldNotRun("run_cases_not_counts")
+        if _failed_counts > 0 and not line_fails:
+            raise CouldNotRun("line_fail_set_unreadable:%d" % _failed_counts)
+    flaky = flaky_names_from_roster(roster)
+    per_repo = {}
+    regressions = []
+    for r in candidate:
+        name = r.get("repo")
+        baseline, note = _ensure_baseline(project, name, runner, flaky)
+        if baseline is None:
+            per_repo[name] = {"verdict": "red", "note": note,
+                              "new_regressions": sorted(line_fails),
+                              "carried_debt": [], "flaky_hits": []}
+            regressions.extend(sorted(line_fails))
+            continue
+        v, detail = relative_verdict(line_fails, baseline)
+        detail["note"] = note
+        detail["verdict"] = v
+        per_repo[name] = detail
+        regressions.extend(detail["new_regressions"])
+    verdict = "red" if regressions else "green"
+    detail = {"per_repo": per_repo,
+              "new_regressions": sorted(set(regressions))}
+    return verdict, detail
 
 
 def build_certification(candidate_repos, run_header, booked_red, judged_by,
@@ -1419,7 +1620,8 @@ def refuse_delivered_checkout(tree, main_checkout):
 
 def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                    judged_by, booked_red, backstop_ms=None, now_ms=None,
-                   chain_limit=CHAIN_LIMIT, lane_reds=None):
+                   chain_limit=CHAIN_LIMIT, lane_reds=None, runs_store=None,
+                   project=None, roster=None):
     """Run the line's certification round(s): at most one per tick, chained
     while anything is still waiting, bounded by ``chain_limit``.
 
@@ -1473,20 +1675,74 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
             candidate = candidate_set(rng["covered_landings"])
             try:
                 header = runner(candidate)
+                # 261014 (inline relative caliber): compute the verdict FIRST,
+                # so the persisted run record carries the ROUND'S judgment
+                # (relative green/red + the three-way detail), not just the
+                # suite's absolute roll-up. With a project, the verdict is
+                # RELATIVE — green iff the line introduces no new regression vs
+                # main (per-repo baseline, cached by main tip); the record must
+                # be able to say "green carrying N of main's debt" and a red
+                # must NAME the regressions. With no project (legacy callers)
+                # the absolute roll-up stands.
+                # 261014 fix: the verdict is computed from `cases`, so a header
+                # whose `cases` is not the dict the run contract promises is a
+                # proof that could not run — never a KeyError out of the round
+                # and never green. Computing the verdict BEFORE the
+                # certification (this batch) moved the shape check that
+                # build_certification used to do first; measured on the
+                # t261009-30 M2 leg, where a dict-shaped garbage runner answer
+                # reached `run_verdict(header["cases"])` and escaped.
+                if isinstance(header, dict) and not isinstance(
+                        header.get("cases"), dict):
+                    raise CouldNotRun("run_cases_missing")
+                if project is not None and isinstance(header, dict):
+                    verdict, rel = relative_round_verdict(
+                        project, candidate, header, runner, roster)
+                    rel_new = rel.get("new_regressions") or []
+                    # content guilt IS the new-regression set (carried debt is
+                    # folded into green, so it never reaches the freeze branch)
+                    _content_failed = len(rel_new)
+                    header["verdict"] = verdict
+                    header["relative"] = rel
+                elif isinstance(header, dict):
+                    verdict = run_verdict(header["cases"])
+                    rel = None
+                    _content_failed = int(header["cases"].get("failed", 0))
+                else:
+                    # could-not-run (header absent/malformed): no verdict here —
+                    # build_certification raises CouldNotRun, which is the
+                    # range-growth path, never a red (design goal 24)
+                    verdict, rel, _content_failed = "no_proof", None, 0
+                # 261013: persist the cited run header to the durable
+                # per-project runs store BEFORE building the cert. The runner's
+                # suite wrote it into the round's OWN scoped ledger dir (deleted
+                # with the temp tree); the run-verdict reader (certification_wait
+                # / the promotion driver) answers is_green from THIS store, so a
+                # certification must never cite a run nobody can read back.
+                # Measured: cert-01M4SXHB cited a run that lived only in a
+                # deleted temp dir (every landing then stopped at
+                # run_verdict_unreadable). No store pinned = no copy (legacy
+                # callers byte-unchanged); a failed persist warns, never blocks.
+                if runs_store:
+                    try:
+                        import json as _json
+                        rs = Path(runs_store)
+                        rs.parent.mkdir(parents=True, exist_ok=True)
+                        with open(str(rs), "a", encoding="utf-8") as fh:
+                            fh.write(_json.dumps(header, ensure_ascii=False)
+                                     + "\n")
+                    except Exception as _e:  # noqa: BLE001
+                        sys.stderr.write("run-record persist failed: %s\n"
+                                         % _e)
                 cert = build_certification(candidate, header, booked_red,
                                            judged_by, at_ms=now_ms, line=line)
-                verdict = run_verdict(header["cases"])
                 batch = [cert]
-                # 261013 (design goal 24 + KI-01M4P6Z4T5C1R2S8N9K7H3QWDN):
-                # the freeze opens only on a red that implicates CONTENT
-                # (failed > 0). An env-only red (failed == 0, env_failed > 0)
-                # means part of the suite was unavailable, not that the
-                # revision is guilty — it grows the range like any red, but
-                # freezing the line over an environment gap was exactly the
-                # misjudgment the KI names. should_freeze's written intent is
-                # now wired (it was dead code; its docstring stays the truth
-                # of this branch).
-                _content_failed = int(header["cases"].get("failed", 0))
+                # the freeze opens only on a red that implicates CONTENT. Under
+                # the relative caliber that IS the new-regression set (carried
+                # debt already folded into green, so it never reaches here); an
+                # env-only red (failed == 0, env_failed > 0) means part of the
+                # suite was unavailable, not that the revision is guilty.
+                # should_freeze's written intent is wired (it was dead code).
                 if verdict == "red" and should_freeze(_content_failed > 0):
                     batch += open_freeze_rows(cert, at_ms=now_ms)
                 res = append_rows(batch)
@@ -1497,6 +1753,12 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                          else STATE_RED,
                          "cert": cert["id"], "run": cert["run"],
                          "verdict": verdict, "candidate": candidate}
+                if rel is not None:
+                    # the relative caliber's own account: which repo regressed
+                    # (named), the carried main debt, the flaky hits — the
+                    # round's record must be able to say "green carrying N of
+                    # main's debt" and a red must name the regressions
+                    entry["relative"] = rel
                 if verdict == "red":
                     # Re-read: the ladder is judged from the records' order
                     # (seq), which only exists after the append.
@@ -1823,7 +2085,8 @@ _atexit.register(shutdown_inflight_ticks)
 def line_round_tick(project_key, load_lines, read_rows, append_rows,
                     resolve_runner_fn, guard_path, now_ms, backstop_ms=None,
                     judged_by=TICK_JUDGED_BY, booked_red=TICK_BOOKED_RED,
-                    chain_limit=CHAIN_LIMIT, lane_reds=None, env=None):
+                    chain_limit=CHAIN_LIMIT, lane_reds=None, env=None,
+                    runs_store=None):
     """One scheduled tick's ask, per declared line (t261009-50 spec 1-5).
 
     This is the CALL SITE, not a second round: it reads the records, asks
@@ -1896,7 +2159,10 @@ def line_round_tick(project_key, load_lines, read_rows, append_rows,
             res = run_line_round(line, trigger, guard_path, runner, read_rows,
                                  append_rows, judged_by, booked_red,
                                  backstop_ms=backstop_ms, now_ms=now_ms,
-                                 chain_limit=chain_limit, lane_reds=lane_reds)
+                                 chain_limit=chain_limit, lane_reds=lane_reds,
+                                 runs_store=runs_store,
+                                 project=project_key,
+                                 roster=_known_red_roster())
         except CertifyError as e:
             entries.append({"line": line, "state": "error", "error": str(e)})
             continue
@@ -1983,7 +2249,8 @@ def line_round_tick_activity(project_key):
             resolve_runner_fn=resolve_runner,
             guard_path=guard_path,
             now_ms=int(time.time() * 1000),
-            backstop_ms=backstop_ms_from_env())
+            backstop_ms=backstop_ms_from_env(),
+            runs_store=str(ledger.parent / "scenario-runs.jsonl"))
     finally:
         _INFLIGHT_TICKS.pop(str(project_key), None)
 

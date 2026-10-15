@@ -141,8 +141,9 @@ def seed(tmp, layout):
 def engine_python():
     """The interpreter the panel itself spawns the adapter under: the engine
     venv first, a plain python3 fallback (verify.yaml's chain)."""
-    for cand in (REPO / "server" / "engine" / ".venv" / "bin" / "python",
-                 REPO / "server" / "dsh" / "temporal-poc" / ".venv" / "bin" / "python"):
+    # 261014: the retired server/dsh fallback leg is gone (t260907-10's
+    # retirement removed the old path; sys.executable stays the fallback).
+    for cand in (REPO / "server" / "engine" / ".venv" / "bin" / "python",):
         if cand.exists():
             return str(cand)
     return sys.executable

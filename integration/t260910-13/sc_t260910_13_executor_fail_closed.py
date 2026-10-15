@@ -104,11 +104,19 @@ ok("FAIL [__executor__]" in out and "池级异常" in out,
 # 造成假红）。解耦证据=B0 两子用例：注入点命中条目 spawn 调用点 + 故障顺序归属首条目。
 rs = load_rs()
 rs.SCENARIOS = [STUB_OK, STUB2_OK]
-_real_subprocess_run = rs.subprocess.run
-_calls2 = {"entry": 0, "other": 0}   # entry=条目面 spawn；other=preflight 等非条目面（观测）
+# t261012-02 (landing 61555c85) moved the entry spawn from subprocess.run to
+# subprocess.Popen (temp-file capture + start_new_session group kill); the
+# injection anchor follows the spawn site — the entry face is now the Popen
+# call (argv=["/bin/sh", "-c", <cmd>]). The OSError raises out of Popen and
+# _run_entry's spawn branch classifies it exactly as before (-8 → not-checked
+# × external), so the B-layer contract is unchanged; only the patched
+# attribute moved. The preflight family (_docker_hygiene, _sweep_residue_
+# stages) still spawns via subprocess.run and is untouched by this patch.
+_real_subprocess_popen = rs.subprocess.Popen
+_calls2 = {"entry": 0, "other": 0}   # entry=条目面 spawn；other=其他 Popen（观测）
 
 
-def _oserror_run(*a, **kw):
+def _oserror_popen(*a, **kw):
     argv = a[0] if a else kw.get("args")
     is_entry_spawn = (isinstance(argv, (list, tuple)) and len(argv) >= 2
                       and argv[0] == "/bin/sh" and argv[1] == "-c")
@@ -118,14 +126,14 @@ def _oserror_run(*a, **kw):
             raise OSError("spawn 失败面：资源暂时不可用")
     else:
         _calls2["other"] += 1
-    return _real_subprocess_run(*a, **kw)
+    return _real_subprocess_popen(*a, **kw)
 
 
-rs.subprocess.run = _oserror_run
+rs.subprocess.Popen = _oserror_popen
 try:
     code, out = run_main(rs)
 finally:
-    rs.subprocess.run = _real_subprocess_run
+    rs.subprocess.Popen = _real_subprocess_popen
 ok(_calls2["entry"] >= 1,
    "B0a 注入点命中条目 spawn 调用点（实得 %d 次；preflight 面 %d 次未注入）"
    % (_calls2["entry"], _calls2["other"]))

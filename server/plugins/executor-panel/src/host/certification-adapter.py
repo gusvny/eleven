@@ -487,7 +487,7 @@ def main(argv):
              "repos": h.get("repos")} for h in headers]
 
     now_ms = int(time.time() * 1000)
-    per_line, meta_notes = {}, []
+    per_line, meta_notes, lost_runs_notes = {}, [], []
     all_tickets = sorted({str(r.get("ticket")) for r in allrows
                           if r.get("kind") == dc.KIND_LANDING})
     meta, meta_notes = ticket_meta(project, all_tickets)
@@ -496,17 +496,25 @@ def main(argv):
             certs = [r for r in allrows if r.get("kind") == dc.KIND_CERT
                      and r.get("line") == line_id]
             if certs:
-                # Fail-closed run-header rule: once the line carries
-                # certifications, a caller that cannot read runs must say so,
-                # and a cited run missing from the headers is a named refusal —
-                # never a default green (develop_certify.ticket_wait_state's
-                # own is_green contract, kept loud at the boundary).
+                # Fail-closed GREEN JUDGMENT (unchanged): a run absent from the
+                # headers reads not-green via ``is_green`` (run in green_ids) —
+                # a certification whose run record is lost is never promoted.
+                # 261013: but a lost run record must not hide EVERY round from
+                # the DISPLAY (measured: the retention window deleted old rounds'
+                # headers, and the hard refusal here emptied the whole Rounds
+                # table). The read degrades per-round instead: the absent runs
+                # are named on the receipt, the line still renders, and the green
+                # judgment stays strict (absent -> not green, below).
                 if hwhy:
                     raise dc.CertifyError(hwhy)
                 missing = sorted({c["run"] for c in certs} - set(by_id))
                 if missing:
-                    raise dc.CertifyError(
-                        "run headers absent for cited round(s): %s" % ", ".join(missing))
+                    # not a refusal: the face names the lost records and renders
+                    # the rounds that ARE readable; is_green stays fail-closed
+                    lost_runs_notes.append(
+                        "run records absent for cited round(s): %s (lost to "
+                        "the retention window — those rounds read not-green, "
+                        "never green)" % ", ".join(missing))
                 is_green = lambda run: run in green_ids  # noqa: E731
             else:
                 is_green = None  # engine contract: no certs yet, None is honest
@@ -527,7 +535,7 @@ def main(argv):
                   for l in lines.values()],
         "per_line": per_line,
         "meta_notes": meta_notes,
-        "runs_note": hwhy or "",
+        "runs_note": "; ".join(x for x in ([hwhy or ""] + lost_runs_notes) if x),
         # t261012-03: the Rounds table's own source — the faces the runner
         # publishes at the stable path. A section-level error (unreadable
         # path) degrades the TABLE by name while the rest of the tab's

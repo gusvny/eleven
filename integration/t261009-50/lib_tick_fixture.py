@@ -99,7 +99,18 @@ class FakeRunner:
         if self._error is not None:
             e, self._error = self._error, None
             raise e
-        return self._headers.pop(0)
+        if self._headers:
+            return self._headers.pop(0)
+        # 261014 (inline relative caliber): the round may call the runner ONE
+        # MORE time per round than the scripted headers — the baseline run at
+        # main's tip. That call is not the scenario-under-test (the scripted
+        # headers drive the line runs); answer it with a clean empty baseline
+        # (no deterministic fails, no flaky), so the relative comparison sees
+        # the scripted line header's fails as the whole story. A scenario that
+        # wants to exercise the baseline queues an extra header.
+        return {"id": "run-baseline-fixture",
+                "cases": {"ran": 10, "failed": 0, "env_failed": 0},
+                "failed_names": []}
 
 
 def green_header(ran=10, rid="run-x50fix"):

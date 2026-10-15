@@ -83,3 +83,36 @@ b3033112 l7-gate 夹具随行 ｜ 2bbe0ab3 archive 锚token ｜ 9b8c7f1c pw-path
 ## 补记 5（261013）：一次纪律自我纠察
 - integration 岗直修的「死指针回落」（1fca1f8b）**破坏了钉住的合同**（t261011-18 钉：死指针=fail-closed 具名拒、绝不静默回落）——已回滚（50d4bf61），场景复绿。**教训：修「能跑通」时绝不能越过钉住的合同；合同面要改先改册子/打招呼。**
 - **运维腐叶（待清）**：worker 环境链上的 `SANDBAR_POC_PYTHON` 指向已清场的临时目录（asset_missing 的根源）。合同是对的（死指针该具名拒），腐叶该清——清法=控制台/监督器重启动（其环境链刷新）。**在清之前，快轮会具名挂 asset_missing——这是诚实的红，不是产品病。**
+
+## 补记 6（261013）：certify 链收官——晋升驱动接线 + 两个真缺口
+- **certify 最后一段（认证前缀→晋 main）此前不存在**：`build_promotion` 是纯库函数、全仓无人调用。已接线：`develop_promote.promote_buffer` 驱动（校验全过→干净检出一次 ff 合并动 ref+工作区，否则只动 ref+具名；拒红具名零副作用）＋ `server/tools/promote.py` 宿主入口（promotable 探针 + promote 人签）。夹具实证：绿前缀真快进 main+落账；探针如实回「当前无绿前缀」（线红）。
+- **缺口①（已修）**：线轮的 run 头没落持久库（只活在临时树）——轮引用的 run 没人读得回 → 每个落地卡 run_verdict_unreadable。已在 run_line_round 补持久化（runs_store 穿三层）。
+- **缺口②（已修）**：阅读器 `import scenario_ledger` 是死路——引擎**永不 import integration 支持层**（develop_certify 铁律），引擎进程里 ModuleNotFoundError。两处阅读器（certification_wait + 晋升）全改 stdlib 直读 JSONL。
+- **缺口③（证实在案，未修）**：线轮 face 只留计数、suite.log 重命名/保留静默 OSError 吞了——每轮 fail 名单随临时树蒸发，分诊只能靠轮在跑时读活日志。
+- **现状**：certify 机器面全通（落线→轮→绿证→promote→main），剩余唯一卡点是**线还红**（30 挂主体=轮环境/供给族＋归票产品缺口）。绿证一出现，promote 即可晋 main。
+
+## 补记 7（261013）：Certification 页签 Rounds 空表——三层根因（宿主实报）
+- **层①**：面板 spawn 认证适配器从不设 `SANDBAR_RUNS_LEDGER`（适配器合同「不设=具名拒」）→ 每次读具名拒、表空。修：面板按工程寻址补路径（6d5d40ea）。
+- **层②**：适配器对「任一被引 run 头缺席」**硬 fail 整条线**——保留窗删了老轮的临时树账，一条丢记录就把全表藏掉。修：逐轮降级（读得过、具名丢失、能读照渲），**判绿仍严**（缺 run=不绿、不晋升）（e7b8e6d6）。
+- **层③**：covering 过滤把「缺 run」当绿（unknown-as-green）——与适配器防的同类。已修。
+- **诚实**：历史两轮 run 头被保留窗删除，无法诚实恢复（不捏造校验字段）；新轮起 run 头持久化（补记6 之修），表自新轮有数据。
+- **教训**：读面的「fail-closed」要分清**判断面**（晋升/落地——必须严）与**展示面**（列表——该逐条具名降级，不该藏全部）。
+
+## 补记 8（261013）：线尖红面的轮口径采样（冲绿靶子）
+- **采法纠偏**：裸 wt 跑作废（没备资产虚高）；照 runner 口径克隆线尖＋软链资产＋轮环境钉＋32 豁免才得真口径。全量串行 ~30h 不划算，采样 13 条停采。
+- **轮口径已挂（c0a8a64e，32 豁免生效）**：2 条 external（t260904-19-stage-docker、t260911-02-trigger-kinds＝docker/外部供给）＋ 11 条 self（scenario-guard-pipeline-landed、period-journey、console-paused-list、doc-face、suite-journey、sign-journey、project-identity-realchain、relocation-realchain、inspect-journey、verdict-cli、legacy-fire-redirect）。
+- **结构确认**：冲绿=「轮环境供给族手术（docker/浏览器在克隆里起得来）＋场景硬化族＋归票产品缺口」三类，与早前分诊一致。这是工程，非一改即绿。
+- **结论**：certify 机器面全通可用（晋升驱动就绪），线红是内容欠账的清账工程。绿证一出现 promote.py 即可晋 main。
+
+## 补记 9（261013）：冲绿病因实证定性（逐类取样诊断）
+- **滞后假设否证**：采样挂在 main 上也挂（如 doc-face）——不是「线追 main」能清，是真欠账。
+- **三类实证**：
+  ① 环境供给族（stage-docker/trigger-kinds＝docker/外部在克隆起不来）；
+  ② 负载敏感族（scenario-guard-pipeline-landed＝整条 engine pytest 走廊，单跑绿并发挤红）；
+  ③ 产品/引擎缺口族（doc-face＝inspect→落账链缺发现行；ki067/teardown/lane 物化/UI 锚）。
+- **结论**：冲绿=测试环境保真（①②）＋产品缺口清账（③）的**多日工程**，跨测试基建与引擎开发。certify 机器面已全通（晋升驱动就绪）；绿证是唯一剩余项，且属清账工程非机器问题。
+
+## 补记 10（261014）：inline 相对认证口径落地＋依赖图后做（多仓余量在案）
+- **相对口径已建**（3bb4e6b5）：绿=线无新回归（线挂⊆main挂）；基准按 main 尖缓存（平时~1×）；三类明写（新回归→红拦/main存量→绿带/抖动→绿注）；冻结只在新回归。3 条端到端回归测试绿。
+- **依赖图（blast-radius 范围收窄）后做**：多仓项目有依赖（多 app 依赖 sharerepo），认证范围该收窄到「变更仓+下游依赖」而非全仓。design goal 18/19/20 有概念（修订集/耦合一体落/边界归属随共享工件），但 lines.json 的 schema 还没 depends_on 字段。**后做**：加 depends_on 声明字段＋按依赖图收窄认证范围。
+- **多仓余量已留**：相对口径是 per-repo 架构（基准 per 仓+main尖、对照 per repo），依赖图收窄可在此结构上直接加，不需重写。**开发纪律：不要单仓想当然，凡涉及认证范围/基准/裁决，按修订集（per-repo）想。**

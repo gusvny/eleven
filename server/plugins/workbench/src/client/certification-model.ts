@@ -344,7 +344,10 @@ export function deriveCertificationFace(input: CertificationInput): Certificatio
     .filter((c) => coveredIds.has(str(c.id)))
     .filter((c) => {
       const run = runs.find((r) => str(r.id) === str(c.run))
-      return !run || verdictFace(run.cases).verdict === 'green'
+      // 261013: an absent run record is NOT green (it used to pass `!run`,
+      // which would let a cert whose run record was lost count as covering —
+      // the same fail-closed rule the adapter keeps). Unknown is never green.
+      return !!run && verdictFace(run.cases).verdict === 'green'
     })
     .sort((a, b) => (num(a.at) || 0) - (num(b.at) || 0))
   const boundaryCert = covering[covering.length - 1] ?? null
