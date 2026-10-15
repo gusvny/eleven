@@ -290,6 +290,13 @@ def test_r5d_manual_forces_exactly_one_round_then_chain_stops(tmp_path,
         # the line run is clean; the baseline (main's tip) is clean too
         return _rel_header([])
 
+    # 261015: the manual trigger's candidate is the line's CURRENT head, which
+    # this fixture cannot resolve (no declaration). The chain property is what
+    # this case pins, so the head resolver is injected on that fixed revision.
+    monkeypatch.setattr(dc, "line_head_candidate",
+                        lambda project, line: ([{"repo": "sandbar",
+                                                 "revision": "rev1"}], ""))
+
     out = dc.run_line_round(LINE, "manual", guard_path(tmp_path), runner,
                             reader(p), writer(p), "round-engine", "booked-v1",
                             project="sandbar", roster={"entries": []})
@@ -297,6 +304,97 @@ def test_r5d_manual_forces_exactly_one_round_then_chain_stops(tmp_path,
     assert out["end"]["state"] == dc.END_IDLE
     assert calls.count("rev1") == 1         # the suite ran once for the line
     assert out["rounds"][0]["verdict"] == "green"
+
+
+# ---- the manual trigger judges the line's CURRENT head (261015) --------------
+
+def _declared_line_setup(tmp_path, monkeypatch):
+    """Isolated project store with a declared line + a real worktree repo.
+    The worktree is deliberately left on ANOTHER branch, so a candidate taken
+    from ``HEAD`` would be exposed as the wrong revision."""
+    import subprocess
+    projects = tmp_path / "projects"
+    monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(projects))
+    dev = projects / "sandbar" / "data" / "develop"
+    dev.mkdir(parents=True)
+    (dev / "lines.json").write_text(json.dumps(
+        [{"line_id": LINE, "scope": "t", "owner": "host",
+          "repositories": [{"name": "sandbar", "branch": "develop"}],
+          "extra_scenarios": [], "version": 1}]), "utf-8")
+    repo = dev / "wt" / "sandbar"
+    _rel_git_repo(repo)
+    g = lambda *a: subprocess.run(["git"] + list(a), cwd=str(repo),  # noqa: E731
+                                  check=True, capture_output=True, text=True)
+    g("branch", "develop")
+    g("checkout", "-q", "develop")
+    (repo / "b.txt").write_text("b\n", "utf-8")
+    g("add", "-A")
+    g("commit", "-qm", "line work")
+    tip = g("rev-parse", "refs/heads/develop").stdout.strip()
+    g("checkout", "-q", "main")             # HEAD is NOT the declared branch
+    return repo, tip
+
+
+def test_manual_candidate_is_the_declared_branch_tip_not_head(tmp_path,
+                                                              monkeypatch):
+    repo, tip = _declared_line_setup(tmp_path, monkeypatch)
+    cand, why = dc.line_head_candidate("sandbar", LINE)
+    assert why == ""
+    assert cand == [{"repo": "sandbar", "revision": tip}]
+
+
+def test_manual_round_judges_the_line_tip_not_the_last_landing(tmp_path,
+                                                               monkeypatch):
+    """261015 live shape: main merged into the line, so the line's tip sat
+    ahead of its last landing (and the landing's range was already closed by
+    a certification). The forced round checked out the landing's revision and
+    spent 55 minutes certifying a tree ``promote`` could never fast-forward
+    to. A manual trigger must judge the tip."""
+    repo, tip = _declared_line_setup(tmp_path, monkeypatch)
+    p = ledger(tmp_path)
+    seed(p, landing("sandbar", "rev-old"))       # the last landing: stale
+    # close the range: a scheduled round books the landing's certification
+    first = dc.run_line_round(LINE, "change", guard_path(tmp_path),
+                              lambda c: _rel_header([]), reader(p), writer(p),
+                              "round-engine", "booked-v1")
+    assert len(first["rounds"]) == 1
+    calls = []
+
+    def runner(cand):
+        calls.append(cand[0]["revision"])
+        return _rel_header([])
+
+    out = dc.run_line_round(LINE, "manual", guard_path(tmp_path), runner,
+                            reader(p), writer(p), "round-engine", "booked-v1",
+                            project="sandbar", roster={"entries": []})
+    assert tip in calls
+    assert "rev-old" not in calls                # the stale revision is not judged
+    rows, _ = dc.read_rows(p)
+    certs = [x for x in rows if x["kind"] == "certification"]
+    assert certs and certs[-1]["repos"] == [{"repo": "sandbar", "revision": tip}]
+
+
+def test_manual_round_with_unresolvable_head_is_named_idle(tmp_path,
+                                                           monkeypatch):
+    """No declaration: the manual trigger must NOT fall back to the
+    landing-derived revision (a silent fallback certifies the wrong content
+    and looks like success). Named idle, nothing booked."""
+    monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(tmp_path / "projects"))
+    p = ledger(tmp_path)
+    seed(p, landing("sandbar", "rev-old"))
+    first = dc.run_line_round(LINE, "change", guard_path(tmp_path),
+                              lambda c: _rel_header([]), reader(p), writer(p),
+                              "round-engine", "booked-v1")
+    assert len(first["rounds"]) == 1
+    out = dc.run_line_round(LINE, "manual", guard_path(tmp_path),
+                            lambda c: _rel_header([]), reader(p), writer(p),
+                            "round-engine", "booked-v1", project="sandbar",
+                            roster={"entries": []})
+    assert out["rounds"] == []
+    assert out["end"]["state"] == dc.END_IDLE
+    assert out["end"]["reason"].startswith("manual_head_unresolvable:")
+    rows, _ = dc.read_rows(p)
+    assert len([x for x in rows if x["kind"] == "certification"]) == 1
 
 
 def test_r5b_next_tick_certifies_the_new_landing(tmp_path):

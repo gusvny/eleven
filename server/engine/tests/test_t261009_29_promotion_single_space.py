@@ -400,6 +400,102 @@ class TestPromoteBufferDriver(unittest.TestCase):
         self.assertEqual(len(promos), 1)
         self.assertEqual(promos[0]["certification"], cert_id)
 
+    # ---- 261015: a certified TIP carries the landings it contains -----------
+
+    def _advance_line_and_certify_the_tip(self):
+        """The buffer shape a line reaches after being advanced past its last
+        landing: ``develop`` gets another commit (the merge/fix), the last
+        landing still points at the OLD tip, and the certification covers the
+        NEW tip. Returns (landed_rev, tip_rev)."""
+        landed = self.line_tip
+        self._git("checkout", "-q", "develop")
+        (self.repo / "c.txt").write_text("c\n", "utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-qm", "advance past the landing")
+        tip = self._git("rev-parse", "refs/heads/develop").stdout.strip()
+        self._git("checkout", "-q", "main")
+        ldg = LANDING(1, ticket="t-fix", revision=landed)
+        ldg["line"] = "develop-buffer"
+        ldg["repos"] = [{"repo": "sandbar", "revision": landed}]
+        dc.append_rows([ldg], self.ledger_dir / "sandbar.jsonl")
+        cert = dc.build_certification(
+            [{"repo": "sandbar", "revision": tip}],
+            {"id": "run-green", "cases": {"ran": 3, "passed": 3,
+                                          "failed": 0, "env_failed": 0}},
+            "none", judged_by="ut", at_ms=2000, line="develop-buffer")
+        dc.append_rows([cert], self.ledger_dir / "sandbar.jsonl")
+        runs_store = (self.projects / "sandbar" / "ledger")
+        runs_store.mkdir(parents=True, exist_ok=True)
+        (runs_store / "scenario-runs.jsonl").write_text(
+            json.dumps({"id": "run-green", "verdict": "green",
+                        "cases": {"ran": 3, "passed": 3, "failed": 0,
+                                  "env_failed": 0},
+                        "suite": "full", "source": "line-round"}) + "\n",
+            "utf-8")
+        return landed, tip
+
+    def test_certified_tip_carries_the_landings_its_ancestry_contains(self):
+        landed, tip = self._advance_line_and_certify_the_tip()
+        import unittest.mock as mock
+        with mock.patch.dict("os.environ", self._env, clear=False):
+            row = dp.promote_buffer("sandbar", "develop-buffer", signer="host",
+                                    note="t", repo_paths={"sandbar": self.repo})
+        # the landed ticket is delivered by this promotion (contained, and main
+        # did not have it) — before 261015 the exact-equality rule carried
+        # nothing and the promotion of an advanced line was impossible
+        self.assertEqual(row["tickets"], ["t-fix"])
+        self.assertEqual(row["main_after"],
+                         [{"repo": "sandbar", "revision": tip}])
+        self.assertEqual(self._git("rev-parse", "refs/heads/main"
+                                   ).stdout.strip(), tip)
+
+    def test_landing_the_certified_revision_does_not_contain_is_omitted(self):
+        landed, tip = self._advance_line_and_certify_the_tip()
+        self._git("checkout", "-q", "-b", "side", "main")
+        (self.repo / "side.txt").write_text("s\n", "utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-qm", "side work never merged")
+        side = self._git("rev-parse", "HEAD").stdout.strip()
+        self._git("checkout", "-q", "main")
+        ldg = LANDING(2, ticket="t-side", revision=side)
+        ldg["line"] = "develop-buffer"
+        ldg["repos"] = [{"repo": "sandbar", "revision": side}]
+        dc.append_rows([ldg], self.ledger_dir / "sandbar.jsonl")
+        import unittest.mock as mock
+        with mock.patch.dict("os.environ", self._env, clear=False):
+            row = dp.promote_buffer("sandbar", "develop-buffer", signer="host",
+                                    note="t", repo_paths={"sandbar": self.repo})
+        # the side landing is NOT inside the certified revision: this promotion
+        # does not deliver it, and the row must not claim it
+        self.assertEqual(row["tickets"], ["t-fix"])
+        self.assertEqual(self._git("rev-parse", "refs/heads/main"
+                                   ).stdout.strip(), tip)
+
+    def test_builder_refuses_a_carried_ticket_the_seam_rejects(self):
+        """The builder re-checks every carried ticket; the caller's list is
+        never trusted, and the default (no seam) keeps the v1 equality rule."""
+        rows = [dict(LANDING(1, ticket="t1", revision="rev1"), seq=1),
+                dict(CERT(1, revision="rev2", run="run-a"), seq=2)]
+        common = dict(delivery_rows=rows, is_green=lambda rid: True,
+                      signer="host",
+                      main_before=[{"repo": "r", "revision": "rev1"}],
+                      main_after=[{"repo": "r", "revision": "rev2"}])
+        # no seam: the v1 equality rule refuses (the landing is not the cert's rev)
+        with self.assertRaises(dp.PromotionRefused) as ctx:
+            dp.build_promotion("cert-001", "default", ["t1"], **common)
+        self.assertIn("tickets_not_covered:t1", str(ctx.exception))
+        # seam says "not contained": still refused
+        with self.assertRaises(dp.PromotionRefused) as ctx:
+            dp.build_promotion("cert-001", "default", ["t1"],
+                               tickets_contained_fn=lambda rev, repo: False,
+                               **common)
+        self.assertIn("tickets_not_covered:t1", str(ctx.exception))
+        # seam says "contained": accepted
+        row = dp.build_promotion("cert-001", "default", ["t1"],
+                                 tickets_contained_fn=lambda rev, repo: True,
+                                 **common)
+        self.assertEqual(row["tickets"], ["t1"])
+
     def test_red_cert_refuses_before_any_ref_moves(self):
         self._seed_ledger("red")
         main_before = self._git("rev-parse", "refs/heads/main").stdout.strip()

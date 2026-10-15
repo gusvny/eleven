@@ -1617,6 +1617,69 @@ def candidate_set(covered_landings):
     return [{"repo": k, "revision": v} for k, v in head.items()]
 
 
+def _git_ref(repo_path, ref):
+    """A ref's sha through a bounded git subprocess (never a guessed tip).
+    Empty on any failure — the caller names the degrade."""
+    import subprocess
+    try:
+        p = subprocess.run(["git", "-C", str(repo_path), "rev-parse",
+                            "--verify", ref],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return (p.stdout or "").strip() if p.returncode == 0 else ""
+
+
+def line_head_candidate(project, line):
+    """The line's CURRENT head per declared repository — what a manual round
+    must judge (261015 host order).
+
+    The scheduled round derives its revision set from the records' order, so
+    it certifies the last landing's revision. That is right for the scheduled
+    trigger (it certifies what the line landed) and wrong for a human asking
+    to judge the line now: measured live on 261015, a forced round checked out
+    the pre-merge revision after main had been merged into the line, so the
+    round judged a tree ``promote`` could never fast-forward to — 55 minutes
+    of machine for a certificate that carried nothing new. The line's content
+    now is its declared branch's tip, and only that tip answers the question a
+    manual trigger asks.
+
+    Returns ``(candidate, "")`` or ``(None, why)``: an unresolvable line is a
+    NAMED degrade, never a silent fallback to the landing-derived revision —
+    falling back is exactly the confusion this entry removes. The declared
+    branch (not ``HEAD``) is resolved, so a worktree left on some other branch
+    cannot mislabel another revision as the line's content.
+    """
+    if not isinstance(project, str) or not project.strip():
+        return None, "project_unknown"
+    try:
+        from develop_line import load_line  # local: develop_line imports us
+        import shared
+    except Exception as e:  # noqa: BLE001
+        return None, "import_failed:%s" % type(e).__name__
+    try:
+        decl = load_line(project, line)
+    except Exception as e:  # noqa: BLE001
+        return None, "line_undeclared:%s" % type(e).__name__
+    try:
+        wt_root = shared.develop_dir(project) / "wt"
+    except Exception as e:  # noqa: BLE001
+        return None, "develop_dir_unresolved:%s" % type(e).__name__
+    out = []
+    for repo_meta in getattr(decl, "repositories", []) or []:
+        name = getattr(repo_meta, "name", "")
+        branch = getattr(repo_meta, "branch", "")
+        if not name or not branch:
+            return None, "declaration_incomplete:%s" % (name or "?")
+        rev = _git_ref(wt_root / name, "refs/heads/%s" % branch)
+        if not rev:
+            return None, "line_head_unresolvable:%s@%s" % (name, branch)
+        out.append({"repo": name, "revision": rev})
+    if not out:
+        return None, "line_declares_no_repository"
+    return out, ""
+
+
 def refuse_delivered_checkout(tree, main_checkout):
     """Upfront constraint: the whole-suite run lives where its own output
     cannot touch the delivered checkout. The runner seam carries this in its
@@ -1690,18 +1753,28 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
         try:
             rng = derive_range(rows, line)
             covered = list(rng["covered_landings"])
-            if not covered and trigger == "manual":
+            candidate = None
+            if trigger == "manual":
                 # 261015: a human asked for a round. "Re-running should recompute"
-                # is exactly the manual trigger's meaning, so an empty range (no
-                # landing since the last certification) must not turn it into a
-                # no-op: judge the content the line actually HAS. The most recent
-                # landing - already covered by a certification - IS that content.
-                _landings = _of_kind(rows, KIND_LANDING, line)
-                covered = _landings[-1:]
-            if not covered:
-                return {"rounds": rounds,
-                        "end": {"state": END_IDLE, "reason": "range_empty"}}
-            candidate = candidate_set(covered)
+                # is exactly the manual trigger's meaning, so it must judge the
+                # content the line actually HAS — the declared branch's tip.
+                # The scheduled path keeps certifying the landings it derives
+                # from the records' order; on a line that has landed normally
+                # the two are the same revision, and they differ exactly when
+                # the line was advanced past its last landing (a merge, a fix) —
+                # where re-judging the landing proves nothing about the tip
+                # (measured: 55 minutes for a certificate main could never
+                # fast-forward to).
+                candidate, why = line_head_candidate(project, line)
+                if candidate is None:
+                    return {"rounds": rounds,
+                            "end": {"state": END_IDLE,
+                                    "reason": "manual_head_unresolvable:%s" % why}}
+            if candidate is None:
+                if not covered:
+                    return {"rounds": rounds,
+                            "end": {"state": END_IDLE, "reason": "range_empty"}}
+                candidate = candidate_set(covered)
             try:
                 header = runner(candidate)
                 # 261014 (inline relative caliber): compute the verdict FIRST,

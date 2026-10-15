@@ -360,7 +360,8 @@ def _ticket_landing(delivery_rows, ticket):
 
 def build_promotion(cert_id, line, tickets, main_before, main_after, signer,
                     on_behalf_of=None, authority=None, note=None, at_ms=None,
-                    delivery_rows=(), is_green=None, patch_id_fn=None):
+                    delivery_rows=(), is_green=None, patch_id_fn=None,
+                    tickets_contained_fn=None):
     """Build one promotion row, or raise PromotionRefused with a named
     reason. Every check answers a spec sentence:
 
@@ -396,7 +397,15 @@ def build_promotion(cert_id, line, tickets, main_before, main_after, signer,
             raise PromotionRefused("tickets_not_covered:%s" % t)
         lrev = _repos_map(landing["repos"])
         for repo, rev in lrev.items():
-            if cert_repos.get(repo) != rev:
+            carried = cert_repos.get(repo) == rev
+            if not carried and tickets_contained_fn is not None:
+                # 261015: the rule this function's own docstring states
+                # ("a landing CONTAINED in the certified revision"), injected
+                # by the caller that can do git work. Without the seam the
+                # exact-equality rule stands, so every existing caller and
+                # test keeps the previous semantics.
+                carried = bool(tickets_contained_fn(rev, repo))
+            if not carried:
                 raise PromotionRefused("tickets_not_covered:%s" % t)
             if has_withdrawals:
                 # t261009-64: the withdrawal guard fires HERE, on the real
@@ -595,9 +604,21 @@ def _latest_green_cert(rows, line_id, project):
     return None
 
 
-def _covered_tickets(rows, line_id, cert_repos):
+def _covered_tickets(rows, line_id, cert_repos, contained_fn=None):
     """The tickets whose landings sit inside the certified revision — what a
-    promotion delivers. Derived from the records' order, never stored."""
+    promotion delivers. Derived from the records' order, never stored.
+
+    ``contained_fn(rev, repo) -> bool`` is the general rule the builder's own
+    docstring states ("every ticket carried has a landing CONTAINED in the
+    certified revision"). Without it the v1 exact-equality rule stands (a
+    certified revision is itself a landing revision, so exactly that landing
+    is carried) — byte-for-byte the previous behaviour, which is why the
+    default is unchanged. With it, a certification of the line's tip carries
+    every landing its ancestry contains and main does not have yet — the shape
+    a buffer line reaches once it has been advanced past its last landing
+    (261015: main merged into the line, all eight of the line's landings
+    still undelivered).
+    """
     out = []
     for r in rows:
         if not (isinstance(r, dict) and r.get("kind") == dc.KIND_LANDING
@@ -606,12 +627,16 @@ def _covered_tickets(rows, line_id, cert_repos):
         t = r.get("ticket")
         lrev = {x["repo"]: x["revision"] for x in r.get("repos", [])
                 if isinstance(x, dict)}
-        # carried = its landing revision IS the certified revision per repo
-        # (build_promotion enforces this equality — the v1 single-repo rule:
-        # a certified revision carries the landings sitting exactly on it)
-        if lrev and all(cert_repos.get(k) == v for k, v in lrev.items()):
-            if isinstance(t, str) and t.strip() and t not in out:
-                out.append(t)
+        if not lrev:
+            continue
+        if contained_fn is not None:
+            carried = all(contained_fn(v, k) for k, v in lrev.items())
+        else:
+            # carried = its landing revision IS the certified revision per repo
+            # (build_promotion enforces the same rule on the same rows)
+            carried = all(cert_repos.get(k) == v for k, v in lrev.items())
+        if carried and isinstance(t, str) and t.strip() and t not in out:
+            out.append(t)
     return out
 
 
@@ -643,7 +668,6 @@ def promote_buffer(project, line_id, signer, authority=None, on_behalf_of=None,
     if line is None:
         raise PromotionRefused("line_not_declared:%s" % line_id)
     cert_repos = _repos_map(cert["repos"])
-    tickets = _covered_tickets(rows, line_id, cert_repos)
 
     has_withdrawals = any(isinstance(r, dict)
                           and r.get("kind") == REL_KIND_WITHDRAWS
@@ -676,11 +700,39 @@ def promote_buffer(project, line_id, signer, authority=None, on_behalf_of=None,
         return patch_id(rev, (repo_paths or {}).get(repo_name)
                         or shared.develop_dir(project) / "wt" / repo_name)
 
+    # 261015: what this promotion delivers is every landing the certified
+    # revision CONTAINS that main does not carry yet. The v1 exact-equality
+    # rule only ever carried the landing sitting exactly on the certified
+    # revision, so a line advanced past its last landing (a merge, a fix)
+    # could not be promoted at all: its tip was certified but carried nothing.
+    main_before_map = _repos_map(main_before)
+
+    def _contained_fn(rev, repo_name, _paths=repo_paths, _cert=cert_repos,
+                      _main=main_before_map):
+        path = (_paths or {}).get(repo_name) \
+            or shared.develop_dir(project) / "wt" / repo_name
+        cert_rev = _cert.get(repo_name)
+        main_rev = _main.get(repo_name)
+        if not cert_rev or not main_rev:
+            return False
+        if _git(["merge-base", "--is-ancestor", rev, cert_rev],
+                path).returncode != 0:
+            return False
+        # already inside main (delivered by an earlier promotion): not carried
+        # again — a promotion row names the tickets it delivers, and a repeat
+        # would claim work main already had.
+        return _git(["merge-base", "--is-ancestor", rev, main_rev],
+                    path).returncode != 0
+
+    tickets = _covered_tickets(rows, line_id, cert_repos,
+                               contained_fn=_contained_fn)
+
     row = build_promotion(
         cert["id"], line_id, tickets, main_before, main_after, signer,
         on_behalf_of=on_behalf_of, authority=authority, note=note,
         at_ms=at_ms, delivery_rows=rows, is_green=_is_green_reader(project),
-        patch_id_fn=_pid_fn if has_withdrawals else None)
+        patch_id_fn=_pid_fn if has_withdrawals else None,
+        tickets_contained_fn=_contained_fn)
     # validated — now the act, per repo. When the main checkout sits on main
     # with a clean tree, ONE fast-forward merge moves ref AND worktree together
     # (update-ref would strand the worktree behind the moved ref); otherwise
