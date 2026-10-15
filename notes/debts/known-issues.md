@@ -5664,3 +5664,23 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：票号永不复用（序号单调不回退，或终止票的号永久保留）；或对账面一律按「存活票」过滤终态同号。
 > **纪律**：**按 id 串历史记录的系统，id 必须单调不复用**——复用等于让新实体背旧实体的账。
 > **回归**：L1——终止一票后立即建票，断言新票号≠终态票号；L3——真台复现「终止→重建」，断言新票的落线等待读不到旧票的落地行。
+
+## KI-01M4YGAZYSHJBHN505KNF714VJ **相对口径 fail-open：运行记录缺 failed_names 被读成「零回归」→ 假绿可直达晋 main**：模式
+（261014/t261014-04 实测；integration 岗登记；main 侧已修 a4d93058/2d951ce0）
+
+> **实测**：inline 相对裁决读 `header.get("failed_names") or []`——键缺失/畸形一律退化成空集，而空集＝「无新回归」＝**绿**。同族第二态：dict 形状的 runner 答复其 `cases` 不是 dict 时，因本批把「算裁决」提到「建 cert」之前，直接走到 `run_verdict(header["cases"])` 抛 KeyError 逃出整轮（t261009-30 M2 腿实测）。
+> **根因**：runner 用空集表达的是「套件日志读不出来」（line_round_runner.failed_names 契约），消费侧却把「不可判」与「干净」当成同一形状。baseline 侧早有 fail-closed 护栏（_ensure_baseline→None→具名红），candidate 侧漏装。
+> **危害**：**假绿可直通晋 main**——一轮读不出失败名的红套件会被记成零回归绿轮、book 绿 cert、冻结不解、白车推 main；KeyError 形态还会让整轮带异常逃出。
+> **出路**：candidate 侧补同一护栏：非 list＝CouldNotRun（line_fail_set_missing）；counts 报失败而名集为空＝CouldNotRun（line_fail_set_unreadable）；`cases` 非 dict＝CouldNotRun（run_cases_missing）。三者均走 could-not-run 扩范围（goal 24），不猜绿也不臆造红。
+> **纪律**：**「不可判」必须与「干净」分形状**——凡把外部产出（runner/LLM/文件/网络）折成集合再做判定的口径，先问「键缺失/畸形/空但计数报错」三态各落哪。
+> **回归**：L1——t261009-30 新增参数化 `test_relative_unjudgeable_fail_set_never_books_green`（缺键、空名集+计数报错两态：轮 grew、不落 verdict、不开冻结）＋ R3 增补 `cases` 非 dict 形态；两处开关面 fixture 补 `failed_names: []`（绿头不带键＝不忠实模型）。
+
+## KI-01M4YGAZYSBKKFP59244FQ5F0Q **code 道 test 检查缺省预算 600s 低于引擎全量用例实测（~583s）→ 合并闸按超时变红，绿树也可能被判红**：模式
+（261014/t261014-04 实测；integration 岗登记；main 侧已修 051d1fe8）
+
+> **实测**：verify.yaml 的 `test` 检查跑的是 `pytest server/engine/tests` 全量（4510 项）且**未声明 timeout**，落到 verify_lane 的缺省 600s；本机泳道内实测该套件 ~583s（负载下更高），merge_check 因此以「test 超时（600s），进程已终态回收」变红——**红的原因是预算而不是用例**，且与当轮改动无关（同签名在修与未修的树上都出现）。
+> **根因**：verify_lane 的 600s 是通用缺省，从未按本仓「engine 全量用例」这道检查的实测时长标定；声明面（verify.yaml）也没给这道检查显式预算。
+> **危害**：**合并闸失去判据**——绿树可能被判红（假红），开发者按红去找不存在的用例失败；闸变成按机器负载抛硬币；且红文案（超时）与真失败（用例名）同形，归因被引向错误方向。
+> **出路**：该检查显式声明 `timeout: 1000`（对 ~583s 实测留 ~1.7 倍余量）；活动级 `MERGE_CHECK_TO=20min` 仍为外层封顶，真卡死仍在预算内点名回收。若套件继续增长，正确出路是**削套件**而不是继续抬预算。
+> **纪律**：**闸的预算必须对着被闸对象的实测时长标定**——凡「整体跑一遍」的检查，先测一次再定预算；红文案必须能区分「超时」与「用例失败」。
+> **回归**：L2——断言 verify.yaml 的 `test` 检查声明了显式 timeout 且不低于实测余量（以声明面固化，防回退成缺省）。
