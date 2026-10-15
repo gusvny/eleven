@@ -185,7 +185,13 @@ def test_r2b_env_only_red_never_freezes(tmp_path):
 @pytest.mark.parametrize("bad_header", [None, "not a dict",
                                         {"id": "not-run", "cases": {}},
                                         {"id": dc.mint_id("run"),
-                                         "cases": {"ran": 0}}])
+                                         "cases": {"ran": 0}},
+                                        # 261014: a dict-shaped answer whose
+                                        # `cases` is not the promised dict is a
+                                        # proof that could not run — it must not
+                                        # escape the round as a KeyError
+                                        {"id": dc.mint_id("run"),
+                                         "cases": "garbage"}])
 def test_r3_could_not_run_grows_range(tmp_path, bad_header):
     p = ledger(tmp_path)
     ldg = landing("sandbar", "r1")

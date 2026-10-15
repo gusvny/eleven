@@ -871,7 +871,7 @@ def relative_round_verdict(project, candidate, header, runner, roster):
     # 261014 fix: the candidate side needs the same fail-closed guard the
     # baseline side already has (_ensure_baseline -> None -> named red). An
     # absent/malformed name set, or an EMPTY one whose counts report failures,
-    # is a proof that could not be judged - the runner documents its empty set
+    # is a proof that could not be judged — the runner documents its empty set
     # as "the suite log was unreadable". Reading that as "no new regression"
     # books a fabricated green over a red suite and can reach promotion. It is
     # not green and not a content red either: could-not-run grows the range
@@ -1684,6 +1684,17 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                 # be able to say "green carrying N of main's debt" and a red
                 # must NAME the regressions. With no project (legacy callers)
                 # the absolute roll-up stands.
+                # 261014 fix: the verdict is computed from `cases`, so a header
+                # whose `cases` is not the dict the run contract promises is a
+                # proof that could not run — never a KeyError out of the round
+                # and never green. Computing the verdict BEFORE the
+                # certification (this batch) moved the shape check that
+                # build_certification used to do first; measured on the
+                # t261009-30 M2 leg, where a dict-shaped garbage runner answer
+                # reached `run_verdict(header["cases"])` and escaped.
+                if isinstance(header, dict) and not isinstance(
+                        header.get("cases"), dict):
+                    raise CouldNotRun("run_cases_missing")
                 if project is not None and isinstance(header, dict):
                     verdict, rel = relative_round_verdict(
                         project, candidate, header, runner, roster)
