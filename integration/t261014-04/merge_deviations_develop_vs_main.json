@@ -1,0 +1,213 @@
+{
+ "version": 1,
+ "ticket": "t261014-04",
+ "what": "Accepted deviations of the develop-buffer merge of main into the line. Each entry names one line of a conflicted file that the settled result does not carry, with the reason it may be absent. This is a NEW record beside merge_deviations.json (that file rules the earlier develop-vs-312f7fbd resolution): its rows do not match this merge's loss set. Anything not listed here stays red in integration/tools/merge_loss_check.py.",
+ "settled_revision": "53f1b8a1",
+ "sides": {
+  "ours": "801c5304",
+  "theirs": "7d9e6448",
+  "base": "545c6cba0312da22b4bcddb4f57c4db6b6804870"
+ },
+ "deviations": [
+  {
+   "file": "integration/known-red-baseline.json",
+   "why": "the line's roster meta is a strict subset of main's: main's entry list is a superset (every line-side entry is present in the merged file) and main's raised max_entries ratchet is the live value, so only the line's stale lower counter is absent.",
+   "text": "    \"max_entries\": 32,"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework: the lane's variant here is the older run-id-keyed implementation that sorted plain directory names (the very bug the rework fixes, and that main still carried). The t261013-06 deviation record ruled on these same nine lines.",
+   "text": "        run tree may be deleted right after — the copy happens FIRST.\"\"\""
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework: the lane's variant here is the older run-id-keyed implementation that sorted plain directory names (the very bug the rework fixes, and that main still carried). The t261013-06 deviation record ruled on these same nine lines.",
+   "text": "        \"\"\"Rolling retention keyed on run ids (review condition 1): the"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework: the lane's variant here is the older run-id-keyed implementation that sorted plain directory names (the very bug the rework fixes, and that main still carried). The t261013-06 deviation record ruled on these same nine lines.",
+   "text": "        newest FACE_RETAIN_ROUNDS run dirs survive; a dir named by the live"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework: the lane's variant here is the older run-id-keyed implementation that sorted plain directory names (the very bug the rework fixes, and that main still carried). The t261013-06 deviation record ruled on these same nine lines.",
+   "text": "        pointer on disk survives regardless of age (a concurrently running"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework: the lane's variant here is the older run-id-keyed implementation that sorted plain directory names (the very bug the rework fixes, and that main still carried). The t261013-06 deviation record ruled on these same nine lines.",
+   "text": "        round is never pruned under a finishing one).\"\"\""
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework: the lane's variant here is the older run-id-keyed implementation that sorted plain directory names (the very bug the rework fixes, and that main still carried). The t261013-06 deviation record ruled on these same nine lines.",
+   "text": "            dirs = sorted((d for d in self.rounds_dir.iterdir() if d.is_dir()),"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework: the lane's variant here is the older run-id-keyed implementation that sorted plain directory names (the very bug the rework fixes, and that main still carried). The t261013-06 deviation record ruled on these same nine lines.",
+   "text": "                          key=lambda d: d.name)"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework: the lane's variant here is the older run-id-keyed implementation that sorted plain directory names (the very bug the rework fixes, and that main still carried). The t261013-06 deviation record ruled on these same nine lines.",
+   "text": "            for d in dirs[:-FACE_RETAIN_ROUNDS] if len(dirs) > FACE_RETAIN_ROUNDS else []:"
+  },
+  {
+   "file": "integration/lib_round_face.py",
+   "why": "superseded by the line's t261012-06 shape/mtime retention rework: the lane's variant here is the older run-id-keyed implementation that sorted plain directory names (the very bug the rework fixes, and that main still carried). The t261013-06 deviation record ruled on these same nine lines.",
+   "text": "                if d.name == str(live):"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the line's docstring on the runner's terminal path supersedes main's shorter one, and main's in-block face-hook call is carried by the merged file as a single call site just after that block (verified: one _FACE_HOOK call in die()), so the behaviour is kept while the duplicated body is dropped.",
+   "text": "    stdout stays empty — the engine's CouldNotRun path carries the name."
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the line's docstring on the runner's terminal path supersedes main's shorter one, and main's in-block face-hook call is carried by the merged file as a single call site just after that block (verified: one _FACE_HOOK call in die()), so the behaviour is kept while the duplicated body is dropped.",
+   "text": "    A registered face hook (run()) records the terminal failed state FIRST,"
+  },
+  {
+   "file": "integration/line_round_runner.py",
+   "why": "the line's docstring on the runner's terminal path supersedes main's shorter one, and main's in-block face-hook call is carried by the merged file as a single call site just after that block (verified: one _FACE_HOOK call in die()), so the behaviour is kept while the duplicated body is dropped.",
+   "text": "    so the round's outcome stays visible on its stable face (t261011-26).\"\"\""
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "        # names chosen so \"round-1\" is the lexically NEWEST (real ids are"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "        # timestamps, so newest = greatest name); the live pointer names an"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "        # OLD dir, which must survive the prune anyway"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "            (self.dev / \"rounds\" / (\"q-old-%02d\" % i)).mkdir()"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "        (self.dev / \"rounds\" / \"q-old-00\" / \"x\").write_text(\"keep-alive\")"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "        live = lrf.FaceWriter(self.dev, \"q-old-00\", \"l\", {})"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "        (self.dev / \"rounds\" / \"current.json\").write_text("
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "            json.dumps({\"run_id\": \"q-old-00\"}))"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "        names = {d.name for d in (self.dev / \"rounds\").iterdir()}"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "        self.assertIn(\"q-old-00\", names)      # live pointer's dir survives"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "        self.assertIn(\"round-1\", names)       # newest survives"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "        self.assertNotIn(\"q-old-02\", names)   # oldest pruned"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "        self.assertLessEqual("
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "            len([n for n in names if n != \"current.json\"]),"
+  },
+  {
+   "file": "integration/tests/test_t261011_26_round_face.py",
+   "why": "main's older wording of the prune-test bodies. The merged file keeps every test name of both sides (all 40 of main's tests are present, plus the line's t261012-06 additions that cover these same cases), so only superseded bodies are absent.",
+   "text": "            lrf.FACE_RETAIN_ROUNDS + 1)"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "      // 261013 (the empty-Rounds report): the adapter reads run headers from"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "      // $SANDBAR_RUNS_LEDGER and refuses by name when it is unset (it never"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "      // guesses a lane tree root) — and the panel never set it, so every"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "      // certification read failed named and the Rounds table rendered empty."
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "      // Point it at the project's runs store (same projects root the engine"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "      // reads) when the caller did not pin one explicitly."
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "      const spawnEnv = { ...(opts.env ?? process.env) }"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "      if (!spawnEnv.SANDBAR_RUNS_LEDGER) {"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "        spawnEnv.SANDBAR_RUNS_LEDGER = concurrencyProjectsRoot(spawnEnv)"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "      }"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "      run(enginePython(spawnEnv), [certificationAdapterPath(), project],"
+  },
+  {
+   "file": "server/plugins/executor-panel/src/host/certification-reader.ts",
+   "why": "main's inline spawn-env default for $SANDBAR_RUNS_LEDGER is superseded by the line's shared withRunsLedger() helper, which sets the same value from the same projects root and is used by BOTH spawn paths (lines 303 and 319) instead of one.",
+   "text": "        { timeout: opts.timeoutMs ?? 30_000, maxBuffer: 1_000_000, env: spawnEnv },"
+  }
+ ]
+}

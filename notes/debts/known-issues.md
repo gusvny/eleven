@@ -5724,3 +5724,16 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：落线前判 `main` 是否为 proven sha 的祖先，**不是就具名拒落并要求重验**（重验的面自然含当前 main），绝不退回用尖端凑合。
 > **纪律**：**"被验证过"是有时效的**——凡消费"验证结果"的动作，都要问"验证时对的前提现在还成立吗"。
 > **回归**：L1 `test_land_to_line_refuses_proven_that_lacks_current_main`（主干前进一个提交后落线必须具名拒绝且不落账）。
+
+## KI-01M4ZS7G73R588AC0BHG4D8F0B **merge_loss_check 的声明回执不写文件名**：模式
+（261015 实测定性；integration 岗登记；未修）
+
+> **实测**：带 `--declared` 跑通时（退出码 0、40 条声明全部匹配、零 stale），人读回执逐行打印成
+> `None: <理由>`——`declared` 行由各文件的丢失行拷出，而丢失行带 `side/line/text/kind`、
+> **不带 `file`**；打印处（`integration/tools/merge_loss_check.py` 的 `item.get("file")`）
+> 因此一律取到 `None`。
+> **危害**：合并门的证据面上丢了「这行属于哪个文件」——一个理由串无法回指文件，复核人只能
+> 回 JSON 里按嵌套结构自己数行。属「报错必须精确」同族：回执不能只说「接受了 40 条」。
+> **出路**：`apply_declarations` 拷 accepted 行时补一句 `item["file"] = file_name`，回执即带文件名。
+> **纪律**：证据面每行都要能唯一定位来源；凡「从批处理行里拷出再打印」，先问该行带不带身份字段。
+> **回归**：待补（L1：带 `--declared` 时回执每行必须含文件名，断言 `None:` 不出现）。
