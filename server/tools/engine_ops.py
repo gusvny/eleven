@@ -80,7 +80,7 @@ except Exception as _e:  # noqa: BLE001
     _TEMPORAL_ERR = "%s: %s" % (type(_e).__name__, str(_e)[:160])
 
 _ACTIVITY_NAMES = ("prepare_conflict_resolution", "settle_conflict_resolution",
-                   "line_round_tick_engine")
+                   "line_round_run_now_engine")
 if _TEMPORAL_OK:
     @_wf.defn
     class _EngineOpsOneShot:
@@ -101,21 +101,29 @@ if _TEMPORAL_OK:
                                                         ConflictPrepArgs),
                         "settle_conflict_resolution": (_aa.settle_conflict_resolution,
                                                        ConflictSettleArgs),
-                        # 261015: the SAME activity the scheduled dispatcher tick
-                        # calls, so a manual trigger has exactly the scheduled
-                        # effect (run record + relative verdict + certification).
-                        # Hand-running integration/line_round_runner.py cannot do
-                        # that: the judgement and the record are the engine's.
-                        "line_round_tick_engine": (_acts.line_round_tick_engine, None)}
+                        # 261015: the SAME round the scheduled tick runs, but
+                        # forced - the scheduled ask is event-tick-or-backstop,
+                        # so on a quiet line a manual trigger was a no-op
+                        # ("backstop_not_elapsed"). Hand-running
+                        # integration/line_round_runner.py cannot put a landing
+                        # into certification either: the judgement and the
+                        # record are the engine's.
+                        "line_round_run_now_engine": (_acts.line_round_run_now_engine, None)}
             name = str(req.get("name") or "")
             fn, args_cls = registry[name]
-            arg = None if args_cls is None else args_cls(**dict(req.get("payload") or {}))
             to_s = int(req.get("timeout_s") or 300)
-            res = await _wf.execute_activity(
-                fn, arg,
-                start_to_close_timeout=datetime.timedelta(seconds=to_s),
-                retry_policy=_wf.RetryPolicy(maximum_attempts=1)
-                if hasattr(_wf, "RetryPolicy") else None)
+            kw = {"start_to_close_timeout": datetime.timedelta(seconds=to_s),
+                  "retry_policy": _wf.RetryPolicy(maximum_attempts=1)
+                  if hasattr(_wf, "RetryPolicy") else None}
+            if args_cls is None:
+                # zero-argument activity by contract: passing None would still
+                # be ONE positional argument and raise TypeError (measured on
+                # the first forced round: "takes 0 positional arguments but 1
+                # was given")
+                res = await _wf.execute_activity(fn, **kw)
+            else:
+                res = await _wf.execute_activity(
+                    fn, args_cls(**dict(req.get("payload") or {})), **kw)
             if dataclasses.is_dataclass(res):
                 return dataclasses.asdict(res)
             return res if isinstance(res, dict) else {"result": str(res)}
@@ -131,7 +139,7 @@ def cmd_round(args) -> dict:
     host = args.host or shared.TARGET_HOST
     ns = args.ns or shared.NAMESPACE
     to_s = int(getattr(args, "timeout", 0) or 3600)
-    return _run_activity(host, ns, "line_round_tick_engine", {},
+    return _run_activity(host, ns, "line_round_run_now_engine", {},
                          timeout_s=to_s)
 
 

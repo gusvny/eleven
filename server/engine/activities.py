@@ -39,6 +39,8 @@ from executor_delivery import delivery_activity as _executor_delivery_activity
 # develop_line imports this module family, so develop_certify must not depend
 # back at module level — this import direction is safe).
 from develop_certify import line_round_tick_engine as _line_round_tick_engine
+# 261015: the FORCED round body (manual trigger; skips the tick's idle gate).
+from develop_certify import line_round_run_now as _line_round_run_now
 # t261011-21: the reap/abort faces live in the same body-truth module (the
 # import-direction comment above applies — develop_certify never imports us).
 import develop_certify as _develop_certify
@@ -215,6 +217,33 @@ async def line_round_tick_engine() -> Dict[str, Any]:
     except BaseException:
         # abort rows BEFORE the reap: the rows name the in-flight lines,
         # which only the still-populated registry knows
+        _develop_certify.abort_inflight_ticks("activity_unwinding")
+        _develop_certify.reap_inflight_runners(reason="activity_unwinding")
+        raise
+
+
+@activity.defn
+async def line_round_run_now_engine() -> Dict[str, Any]:
+    """261015: the FORCED variant of the tick activity — run one round NOW on
+    every declared line, whatever the idle gate would answer.
+
+    Why it exists: the scheduled ask is "event tick OR 24h backstop", so on a
+    quiet line both the scheduled trigger and a manual one were no-ops
+    (measured: "backstop_not_elapsed", 0.1s). A manual trigger that cannot run
+    a round is not a trigger. This calls the same round the tick calls, tagged
+    trigger="manual"; the round still owns the run record and the certification,
+    and the integration-run singleflight keeps it from overlapping a scheduled
+    round. Same cancellation discipline as the tick wrapper: abort rows first,
+    then reap the runner process group, then re-raise the original exception."""
+    def _all():
+        out = {}
+        for pk in _develop_certify.declared_line_projects():
+            out[pk] = _line_round_run_now(pk)
+        return {"projects": out,
+                "summary": "line_round_run_now: %d projects" % len(out)}
+    try:
+        return await asyncio.to_thread(_all)
+    except BaseException:
         _develop_certify.abort_inflight_ticks("activity_unwinding")
         _develop_certify.reap_inflight_runners(reason="activity_unwinding")
         raise
@@ -1384,6 +1413,9 @@ ALL_ACTIVITIES = [
     # event trigger + scheduled backstop, the round owns all records; body
     # truth develop_certify.line_round_tick_engine).
     line_round_tick_engine,
+    # 261015: the forced round (manual trigger; body truth
+    # develop_certify.line_round_run_now).
+    line_round_run_now_engine,
     # KI-122①（260926 宿主直修令）：已知红名册只读面（裁决采纳判据的名册归属）
     read_known_red_roster,
     write_scan_report,

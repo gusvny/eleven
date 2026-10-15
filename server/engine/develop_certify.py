@@ -637,6 +637,14 @@ def should_certify(trigger, rows, line, guard_held, now_ms=None,
         return True, "range_non_empty"
     if trigger == "change":
         return False, "range_empty"
+    if trigger == "manual":
+        # 261015: a forced round asked for by a human (the manual trigger). It
+        # has no event and no elapsed backstop to justify work, and it never
+        # INVENTS work either: with the range empty there is nothing new to
+        # certify (the latest landing is already covered by a certification),
+        # and the caller's entry says exactly that. A forced round with a
+        # non-empty range already returned above ("range_non_empty").
+        return False, "range_empty"
     if trigger != "backstop":
         raise CertifyError("trigger_unknown:%r" % (trigger,))
     last = rng["previous_certification"]
@@ -2253,6 +2261,50 @@ def line_round_tick_activity(project_key):
             runs_store=str(ledger.parent / "scenario-runs.jsonl"))
     finally:
         _INFLIGHT_TICKS.pop(str(project_key), None)
+
+
+def line_round_run_now(project_key):
+    """One FORCED line round, now (261015 host order: a manual trigger must be
+    able to run a round, with the scheduled trigger's effect).
+
+    The scheduled tick asks ``should_certify``, which answers idle whenever no
+    landing happened and the 24h backstop has not elapsed — measured on this
+    line: a manual trigger and the scheduled trigger were both no-ops for
+    exactly that reason ("backstop_not_elapsed", 0.1s). This entry skips that
+    gate and calls the SAME round the tick calls, tagging it ``trigger=manual``
+    so the record keeps the two trigger shapes distinguishable. Bookkeeping
+    stays where it belongs: the round owns the run record and the certification;
+    nothing else is written here. Failures stay per-line named entries, never
+    raised (same contract as the tick)."""
+    from develop_line import load_lines  # local: develop_line imports us
+
+    ledger = ledger_path(project_key)
+    guard_path = str(ledger.parent / "tick-anchor")
+    entries = []
+    for line in sorted(load_lines(project_key)):
+        runner = resolve_runner(line, None)
+        if runner is None:
+            entries.append({"line": line, "state": "runner_missing"})
+            continue
+        try:
+            res = run_line_round(line, "manual", guard_path, runner,
+                                 lambda: read_rows(ledger),
+                                 lambda batch: append_rows(batch, ledger),
+                                 TICK_JUDGED_BY, TICK_BOOKED_RED,
+                                 backstop_ms=backstop_ms_from_env(),
+                                 now_ms=int(time.time() * 1000),
+                                 runs_store=str(ledger.parent / "scenario-runs.jsonl"),
+                                 project=project_key,
+                                 roster=_known_red_roster())
+        except CertifyError as e:
+            entries.append({"line": line, "state": "error", "error": str(e)})
+            continue
+        entries.append({"line": line, "state": res["end"]["state"],
+                        "trigger": "manual", "rounds": res["rounds"]})
+    forced = len([e for e in entries if "rounds" in e])
+    return {"lines": entries,
+            "summary": "line_round_run_now: %d lines, forced %d"
+                       % (len(entries), forced)}
 
 
 # ---- the bounded red ladder (goal 9 / goal 10) -----------------------------
