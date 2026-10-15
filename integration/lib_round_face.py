@@ -174,6 +174,13 @@ def snapshot_progress(text):
     a quiet round — the caller publishes a ``counts_note``, never the zeros
     alone (t261012-01 spec 3)."""
     counts = {"ran": 0, "pass": 0, "fail": 0, "env_fail": 0}
+    # 261015: the suite prints a scenario's row in BOTH vocabularies (its JSON
+    # row and a text line). Counting both doubled every round (measured:
+    # 641 scenarios -> ran=1282). Keep them apart and prefer the machine
+    # readable one when it is present.
+    jcounts = {"ran": 0, "pass": 0, "fail": 0, "env_fail": 0}
+    json_seen = False
+    jlast = None
     last = None
     pool = "unknown"
     summary_seen = False
@@ -196,6 +203,38 @@ def snapshot_progress(text):
         m = _POOL_EXCLUDED_RE.match(line)
         if m:
             continue  # exclusion names what did NOT run; pool stays honest
+        # 261015: the suite writes its per-scenario rows as JSON
+        # ({"name": …, "status": "pass"|"fail"|"env_fail"|"not-checked"}). The
+        # text vocabulary below alone left EVERY JSON row unrecognized, and the
+        # measured cost was severe: a round that judged hundreds of scenarios
+        # published counts of ran=1 (taken from the suite's own summary) and
+        # could reach green on them. Recognise the JSON shape too — one
+        # vocabulary for the counts, whichever way the suite prints it.
+        if line.startswith('{"name"'):
+            try:
+                row = json.loads(line)
+            except ValueError:
+                row = None
+            if isinstance(row, dict) and row.get("name"):
+                status = str(row.get("status") or "").strip().lower()
+                name = str(row["name"])
+                if status in ("pass", "ok", "passed"):
+                    jcounts["pass"] += 1
+                    jlast = {"name": name, "verdict": "PASS"}
+                elif status in ("fail", "failed"):
+                    jcounts["fail"] += 1
+                    jlast = {"name": name, "verdict": "FAIL"}
+                elif status in ("env_fail", "env-fail", "not-checked",
+                                "not_checked"):
+                    # a row that was not judged is not a pass either: it is the
+                    # "could not be checked" family the env count already names
+                    jcounts["env_fail"] += 1
+                    jlast = {"name": name, "verdict": "ENV_FAIL"}
+                else:
+                    continue  # unknown status: never a counted row
+                jcounts["ran"] += 1
+                json_seen = True
+            continue
         m = _POOL_RE.match(line)
         if m:
             pool = m.group(2)
@@ -220,6 +259,12 @@ def snapshot_progress(text):
             counts["ran"] += 1
             counts["pass"] += 1
             last = {"name": m.group(1), "verdict": "PASS"}
+    if json_seen:
+        # the machine-readable rows are the authoritative per-scenario vocabulary
+        counts = jcounts
+        if jlast is not None:
+            last = jlast
+        scenario_lines_seen = True
     out = {"counts": counts, "pool": pool,
            "last_scenario": last, "summary_seen": summary_seen,
            "scenario_lines_seen": scenario_lines_seen,
