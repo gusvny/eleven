@@ -79,7 +79,8 @@ except Exception as _e:  # noqa: BLE001
     _TEMPORAL_OK = False
     _TEMPORAL_ERR = "%s: %s" % (type(_e).__name__, str(_e)[:160])
 
-_ACTIVITY_NAMES = ("prepare_conflict_resolution", "settle_conflict_resolution")
+_ACTIVITY_NAMES = ("prepare_conflict_resolution", "settle_conflict_resolution",
+                   "line_round_run_now_engine")
 if _TEMPORAL_OK:
     @_wf.defn
     class _EngineOpsOneShot:
@@ -92,26 +93,104 @@ if _TEMPORAL_OK:
         async def run(self, req: dict) -> dict:
             with _wf.unsafe.imports_passed_through():
                 import agent_activities as _aa
+                import activities as _acts
                 from shared import ConflictPrepArgs, ConflictSettleArgs
+            # name -> (activity fn, args class). None = zero-argument by
+            # contract (the engine tick reads its own context).
             registry = {"prepare_conflict_resolution": (_aa.prepare_conflict_resolution,
                                                         ConflictPrepArgs),
                         "settle_conflict_resolution": (_aa.settle_conflict_resolution,
-                                                       ConflictSettleArgs)}
+                                                       ConflictSettleArgs),
+                        # 261015: the SAME round the scheduled tick runs, but
+                        # forced - the scheduled ask is event-tick-or-backstop,
+                        # so on a quiet line a manual trigger was a no-op
+                        # ("backstop_not_elapsed"). Hand-running
+                        # integration/line_round_runner.py cannot put a landing
+                        # into certification either: the judgement and the
+                        # record are the engine's.
+                        "line_round_run_now_engine": (_acts.line_round_run_now_engine, None)}
             name = str(req.get("name") or "")
             fn, args_cls = registry[name]
-            res = await _wf.execute_activity(
-                fn, args_cls(**dict(req.get("payload") or {})),
-                start_to_close_timeout=datetime.timedelta(seconds=300),
-                retry_policy=_wf.RetryPolicy(maximum_attempts=1)
-                if hasattr(_wf, "RetryPolicy") else None)
-            return dataclasses.asdict(res)
+            to_s = int(req.get("timeout_s") or 300)
+            kw = {"start_to_close_timeout": datetime.timedelta(seconds=to_s),
+                  "retry_policy": _wf.RetryPolicy(maximum_attempts=1)
+                  if hasattr(_wf, "RetryPolicy") else None}
+            if args_cls is None:
+                # zero-argument activity by contract: passing None would still
+                # be ONE positional argument and raise TypeError (measured on
+                # the first forced round: "takes 0 positional arguments but 1
+                # was given")
+                res = await _wf.execute_activity(fn, **kw)
+            else:
+                res = await _wf.execute_activity(
+                    fn, args_cls(**dict(req.get("payload") or {})), **kw)
+            if dataclasses.is_dataclass(res):
+                return dataclasses.asdict(res)
+            return res if isinstance(res, dict) else {"result": str(res)}
+
+
+def cmd_round(args) -> dict:
+    """请求立刻跑一轮线轮（261015 宿主令：手动与定时必须**同效果**）。
+
+    做法=**投一个请求标记，让引擎自己的长寿 worker 去跑**，绝不在本进程的临时
+    worker 里跑完整一轮。实测教训：走临时 worker 时，客户端一收尾（回执 "workflow
+    execution already completed"）临时 worker 关闭 → 活动被取消 → 引擎收尾路径的
+    reap_inflight_runners 把在飞的 runner SIGTERM 掉 → 轮死在半路、无保留证据，
+    只落一条 range_growth、**永远出不了认证**。
+
+    所以这里只落标记；下一拍巡检（≤20 分钟）或其他触发会消费它，并在引擎 worker
+    里跑强制轮——与定时轮同一条代码路径、同一把守卫、同一份落账。**手动与定时因此
+    真正同效果**，且互不并行。"""
+    return _write_force_marker(args)
+
+
+def _ledger_dir_for(project_key):
+    """<projects>/<key>/ledger — the very dir the engine's tick reads and writes
+    (single source: develop_certify.ledger_path, never a second convention)."""
+    import pathlib
+    try:
+        if str(ENGINE) not in sys.path:
+            sys.path.insert(0, str(ENGINE))
+        import develop_certify as _dc
+        return pathlib.Path(_dc.ledger_path(str(project_key))).parent
+    except Exception:  # noqa: BLE001 — caller reports the named refusal
+        return None
+
+
+def _write_force_marker(args) -> dict:
+    """Drop the manual-round marker where the engine's tick will find it."""
+    ledger = _ledger_dir_for(getattr(args, "project", "") or "sandbar")
+    if ledger is None:
+        return {"ok": False, "exit": ENV_EXIT,
+                "error": "项目账本目录不可得：无法投递手动轮请求标记"}
+    marker = ledger / "line-round-force"
+    try:
+        ledger.mkdir(parents=True, exist_ok=True)
+        marker.write_text("requested_by=engine_ops.round\n", encoding="utf-8")
+    except OSError as e:
+        return {"ok": False, "exit": ENV_EXIT,
+                "error": "写手动轮请求标记失败：%s" % e}
+    return {"ok": True,
+            "result": {"marker": str(marker), "project": args.project,
+                       "note": "标记已投递：下一拍巡检（≤20 分钟）将在引擎 worker 里"
+                               "跑一轮强制线轮（与定时同路径、同守卫、同落账）"}}
 
 
 def _activity_registry():
     """临时 worker 要注册的 activity 对象（引擎既有单点本体）。"""
     with _wf.unsafe.imports_passed_through():
         import agent_activities as _aa
-    return {n: getattr(_aa, n) for n in _ACTIVITY_NAMES}
+        import activities as _acts
+    out = {}
+    for n in _ACTIVITY_NAMES:
+        # the conflict-resolution pair lives in agent_activities; the line-round
+        # tick lives in activities (261015) - resolve either, refuse loudly if a
+        # whitelisted name has no implementation.
+        obj = getattr(_aa, n, None) or getattr(_acts, n, None)
+        if obj is None:
+            raise AttributeError("whitelisted activity has no implementation: %s" % n)
+        out[n] = obj
+    return out
 
 
 # ---------------------------------------------------------------- 基础面
@@ -674,7 +753,8 @@ def _run_activity(host: str, ns: str, activity_name: str, payload: dict,
                           activities=list(registry.values()),
                           workflow_runner=UnsandboxedWorkflowRunner()):
             return await c.execute_workflow(_EngineOpsOneShot.run,
-                                            {"name": activity_name, "payload": payload},
+                                            {"name": activity_name, "payload": payload,
+                                             "timeout_s": int(timeout_s)},
                                             id=wf_id, task_queue=queue)
 
     try:
@@ -1414,6 +1494,12 @@ def build_parser() -> argparse.ArgumentParser:
     s2.add_argument("ticket")
     s2.add_argument("--dry-run", action="store_true")
     s2.add_argument("--abort", action="store_true", help="复位半合并态（走既有 settle 单点）")
+    rd = sub.add_parser("round", parents=[common],
+                        help="请求跑一轮线轮（投标记；引擎 worker 执行，与定时同效果）")
+    rd.add_argument("--project", default="sandbar",
+                    help="项目键（缺省 sandbar）——标记投到该项目的账本目录")
+    rd.add_argument("--timeout", type=int, default=3600,
+                    help="兼容保留：强制轮由引擎 worker 跑，不再受本进程超时约束")
     r = sub.add_parser("restart", parents=[common],
                        help="换手 worker（**只 kill**，等 supervisor 自动拉起并自证）")
     r.add_argument("--scope", required=True, help="central | lane:<ticket>")
@@ -1461,7 +1547,7 @@ def main() -> int:
         # worker（离线夹具实测踩到：真仓 data/ 下多了一颗 worker-t-*.pid 与活进程）。
         tw.set_root(ENGINE)
     table = {"workers": cmd_workers, "who": cmd_who, "drift": cmd_drift,
-             "sync": cmd_sync, "restart": cmd_restart}
+             "sync": cmd_sync, "restart": cmd_restart, "round": cmd_round}
     try:
         return _print(table[args.cmd](args))
     except Exception as e:  # noqa: BLE001——工具绝不裸崩：结构化报错

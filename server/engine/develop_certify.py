@@ -94,6 +94,9 @@ LEDGER_DIR_ENV = "SANDBAR_DELIVERY_LEDGER_DIR"
 MAIN_NAME = "delivery.jsonl"
 LOCK_NAME = ".lock"
 GUARD_NAME = "delivery-guard.json"
+#: 261015: the manual-round request marker (see line_round_tick_activity). The
+#: manual entry drops it; the next tick consumes it and runs the forced round.
+FORCE_MARKER_NAME = "line-round-force"
 
 KIND_LANDING = "landing"
 KIND_CERT = "certification"
@@ -637,6 +640,14 @@ def should_certify(trigger, rows, line, guard_held, now_ms=None,
         return True, "range_non_empty"
     if trigger == "change":
         return False, "range_empty"
+    if trigger == "manual":
+        # 261015: a forced round asked for by a human. Unlike the change trigger
+        # it does NOT require the range to be non-empty: a person asking for a
+        # round means "judge the line's current content again, now" - the same
+        # re-judgement the timed backstop performs on an unchanged line. The
+        # round is idempotent in content (same revision, same verdict) and writes
+        # a fresh certification row, which is exactly what re-running should do.
+        return True, "manual_forced"
     if trigger != "backstop":
         raise CertifyError("trigger_unknown:%r" % (trigger,))
     last = rng["previous_certification"]
@@ -1654,7 +1665,16 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
         rows, bad = read_rows()
         if bad:
             raise CertifyError("ledger_has_malformed_lines:%d" % len(bad))
-        go, why = should_certify(trigger, rows, line, guard_held(guard_path),
+        # 261015: "manual" forces exactly the FIRST round; the chain's later
+        # rounds ask the ordinary question again. Forcing every iteration made
+        # `should_certify` answer manual_forced forever, so the chain never
+        # converged and its completed rounds never reached the booking point
+        # (measured: a manual round re-ran the suite to 662 rows and straight
+        # into another pass with records/delivery untouched), while the
+        # scheduled path - which forces nothing - booked normally.
+        eff_trigger = "change" if (trigger == "manual" and rounds) else trigger
+        go, why = should_certify(eff_trigger, rows, line,
+                                 guard_held(guard_path),
                                  now_ms=now_ms, backstop_ms=backstop_ms)
         if not go:
             state = END_JOINED if why == "guard_held" else END_IDLE
@@ -1669,10 +1689,19 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                     "end": {"state": END_JOINED, "reason": "guard_held"}}
         try:
             rng = derive_range(rows, line)
-            if not rng["covered_landings"]:
+            covered = list(rng["covered_landings"])
+            if not covered and trigger == "manual":
+                # 261015: a human asked for a round. "Re-running should recompute"
+                # is exactly the manual trigger's meaning, so an empty range (no
+                # landing since the last certification) must not turn it into a
+                # no-op: judge the content the line actually HAS. The most recent
+                # landing - already covered by a certification - IS that content.
+                _landings = _of_kind(rows, KIND_LANDING, line)
+                covered = _landings[-1:]
+            if not covered:
                 return {"rounds": rounds,
                         "end": {"state": END_IDLE, "reason": "range_empty"}}
-            candidate = candidate_set(rng["covered_landings"])
+            candidate = candidate_set(covered)
             try:
                 header = runner(candidate)
                 # 261014 (inline relative caliber): compute the verdict FIRST,
@@ -2235,6 +2264,21 @@ def line_round_tick_activity(project_key):
 
     ledger = ledger_path(project_key)
     guard_path = str(ledger.parent / "tick-anchor")
+    # 261015: a manual round must run inside THIS long-lived engine worker, never
+    # in a short-lived client's temp worker. Measured: the client's teardown
+    # ("workflow execution already completed") cancelled the activity, and the
+    # unwind path's reap_inflight_runners then SIGTERMed the round's own runner
+    # mid-flight, so the round died with no retained evidence and only a
+    # range_growth row was booked. The manual entry therefore drops a marker;
+    # the next tick consumes it and runs the forced round here, under the same
+    # worker (and the same guard) the scheduled round uses.
+    _force = ledger.parent / FORCE_MARKER_NAME
+    if _force.exists():
+        try:
+            _force.unlink()
+        except OSError:
+            pass  # a marker that cannot be cleared must not block the tick
+        return line_round_run_now(project_key)
     # t261011-21 defect 3: registered so an activity-level abort
     # (abort_inflight_ticks) can find this tick's guard and leave the ONE
     # named row; popped the moment the body returns either way.
@@ -2253,6 +2297,50 @@ def line_round_tick_activity(project_key):
             runs_store=str(ledger.parent / "scenario-runs.jsonl"))
     finally:
         _INFLIGHT_TICKS.pop(str(project_key), None)
+
+
+def line_round_run_now(project_key):
+    """One FORCED line round, now (261015 host order: a manual trigger must be
+    able to run a round, with the scheduled trigger's effect).
+
+    The scheduled tick asks ``should_certify``, which answers idle whenever no
+    landing happened and the 24h backstop has not elapsed — measured on this
+    line: a manual trigger and the scheduled trigger were both no-ops for
+    exactly that reason ("backstop_not_elapsed", 0.1s). This entry skips that
+    gate and calls the SAME round the tick calls, tagging it ``trigger=manual``
+    so the record keeps the two trigger shapes distinguishable. Bookkeeping
+    stays where it belongs: the round owns the run record and the certification;
+    nothing else is written here. Failures stay per-line named entries, never
+    raised (same contract as the tick)."""
+    from develop_line import load_lines  # local: develop_line imports us
+
+    ledger = ledger_path(project_key)
+    guard_path = str(ledger.parent / "tick-anchor")
+    entries = []
+    for line in sorted(load_lines(project_key)):
+        runner = resolve_runner(line, None)
+        if runner is None:
+            entries.append({"line": line, "state": "runner_missing"})
+            continue
+        try:
+            res = run_line_round(line, "manual", guard_path, runner,
+                                 lambda: read_rows(ledger),
+                                 lambda batch: append_rows(batch, ledger),
+                                 TICK_JUDGED_BY, TICK_BOOKED_RED,
+                                 backstop_ms=backstop_ms_from_env(),
+                                 now_ms=int(time.time() * 1000),
+                                 runs_store=str(ledger.parent / "scenario-runs.jsonl"),
+                                 project=project_key,
+                                 roster=_known_red_roster())
+        except CertifyError as e:
+            entries.append({"line": line, "state": "error", "error": str(e)})
+            continue
+        entries.append({"line": line, "state": res["end"]["state"],
+                        "trigger": "manual", "rounds": res["rounds"]})
+    forced = len([e for e in entries if "rounds" in e])
+    return {"lines": entries,
+            "summary": "line_round_run_now: %d lines, forced %d"
+                       % (len(entries), forced)}
 
 
 # ---- the bounded red ladder (goal 9 / goal 10) -----------------------------

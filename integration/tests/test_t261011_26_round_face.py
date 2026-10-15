@@ -783,5 +783,38 @@ class TruthfulTerminalFace(RoundFaceEndToEnd):
         self.assertIn("integ_summary_missing", face["outcome"]["reason"])
 
 
+class SuiteJsonRows(unittest.TestCase):
+    """261015 regression: the suite prints each scenario BOTH as its JSON row and
+    as a text line. Counting both doubled every round (measured: 641 scenarios ->
+    ran=1282), while the text vocabulary alone left the JSON rows unrecognized -
+    and that fallback published the suite's own summary, measured live at
+    {"ran": 1} beside hundreds of judged scenarios. When the JSON rows are
+    present they ARE the vocabulary: counted once, never from the summary."""
+
+    def test_json_rows_win_and_are_counted_once(self):
+        import json as _json
+        import os as _os
+        import sys as _sys
+        _sys.path.insert(0, _os.path.dirname(
+            _os.path.dirname(_os.path.abspath(__file__))))
+        import lib_round_face as _f
+        log = "\n".join([
+            _json.dumps({"name": "s-a", "status": "pass"}),
+            _json.dumps({"name": "s-b", "status": "fail"}),
+            _json.dumps({"name": "s-c", "status": "not-checked"}),
+            # the same three scenarios again, in the text vocabulary
+            "PASS s-a",
+            "FAIL s-b",
+            "ENV_FAIL s-c",
+            "INTEG_SUMMARY " + _json.dumps({"ran": 1, "passed": 1,
+                                            "failed": 0, "env_failed": 0}),
+        ])
+        snap = _f.snapshot_progress(log)
+        self.assertEqual(snap["counts"], {"ran": 3, "pass": 1, "fail": 1,
+                                          "env_fail": 1})
+        self.assertTrue(snap["scenario_lines_seen"])
+        self.assertEqual(snap["summary_counts"]["ran"], 1)  # summary unused
+
+
 if __name__ == "__main__":
     unittest.main()

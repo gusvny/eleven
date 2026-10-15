@@ -5664,3 +5664,63 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：票号永不复用（序号单调不回退，或终止票的号永久保留）；或对账面一律按「存活票」过滤终态同号。
 > **纪律**：**按 id 串历史记录的系统，id 必须单调不复用**——复用等于让新实体背旧实体的账。
 > **回归**：L1——终止一票后立即建票，断言新票号≠终态票号；L3——真台复现「终止→重建」，断言新票的落线等待读不到旧票的落地行。
+
+## KI-01M4YGAZYSHJBHN505KNF714VJ **相对口径 fail-open：运行记录缺 failed_names 被读成「零回归」→ 假绿可直达晋 main**：模式
+（261014/t261014-04 实测；integration 岗登记；main 侧已修 a4d93058/2d951ce0）
+
+> **实测**：inline 相对裁决读 `header.get("failed_names") or []`——键缺失/畸形一律退化成空集，而空集＝「无新回归」＝**绿**。同族第二态：dict 形状的 runner 答复其 `cases` 不是 dict 时，因本批把「算裁决」提到「建 cert」之前，直接走到 `run_verdict(header["cases"])` 抛 KeyError 逃出整轮（t261009-30 的 M2 段实测）。
+> **根因**：runner 用空集表达的是「套件日志读不出来」（line_round_runner.failed_names 契约），消费侧却把「不可判」与「干净」当成同一形状。baseline 侧早有 fail-closed 护栏（_ensure_baseline→None→具名红），candidate 侧漏装。
+> **危害**：**假绿可直通晋 main**——一轮读不出失败名的红套件会被记成零回归绿轮、book 绿 cert、冻结不解、白车推 main；KeyError 形态还会让整轮带异常逃出。
+> **出路**：candidate 侧补同一护栏：非 list＝CouldNotRun（line_fail_set_missing）；counts 报失败而名集为空＝CouldNotRun（line_fail_set_unreadable）；`cases` 非 dict＝CouldNotRun（run_cases_missing）。三者均走 could-not-run 扩范围（goal 24），不猜绿也不臆造红。
+> **纪律**：**「不可判」必须与「干净」分形状**——凡把外部产出（runner/LLM/文件/网络）折成集合再做判定的口径，先问「键缺失/畸形/空但计数报错」三态各落哪。
+> **回归**：L1——t261009-30 新增参数化 `test_relative_unjudgeable_fail_set_never_books_green`（缺键、空名集+计数报错两态：轮 grew、不落 verdict、不开冻结）＋ R3 增补 `cases` 非 dict 形态；两处开关面 fixture 补 `failed_names: []`（绿头不带键＝不忠实模型）。
+
+## KI-01M4YGAZYSBKKFP59244FQ5F0Q **code 道 test 检查缺省预算 600s 低于引擎全量用例实测（~583s）→ 合并闸按超时变红，绿树也可能被判红**：模式
+（261014/t261014-04 实测；integration 岗登记；main 侧已修 051d1fe8）
+
+> **实测**：verify.yaml 的 `test` 检查跑的是 `pytest server/engine/tests` 全量（4510 项）且**未声明 timeout**，落到 verify_lane 的缺省 600s；本机泳道内实测该套件 ~583s（负载下更高），merge_check 因此以「test 超时（600s），进程已终态回收」变红——**红的原因是预算而不是用例**，且与当轮改动无关（同签名在修与未修的树上都出现）。
+> **根因**：verify_lane 的 600s 是通用缺省，从未按本仓「engine 全量用例」这道检查的实测时长标定；声明面（verify.yaml）也没给这道检查显式预算。
+> **危害**：**合并闸失去判据**——绿树可能被判红（假红），开发者按红去找不存在的用例失败；闸变成按机器负载抛硬币；且红文案（超时）与真失败（用例名）同形，归因被引向错误方向。
+> **出路**：该检查显式声明 `timeout: 1000`（对 ~583s 实测留 ~1.7 倍余量）；活动级 `MERGE_CHECK_TO=20min` 仍为外层封顶，真卡死仍在预算内点名回收。若套件继续增长，正确出路是**削套件**而不是继续抬预算。
+> **纪律**：**闸的预算必须对着被闸对象的实测时长标定**——凡「整体跑一遍」的检查，先测一次再定预算；红文案必须能区分「超时」与「用例失败」。
+> **回归**：L2——断言 verify.yaml 的 `test` 检查声明了显式 timeout 且不低于实测余量（以声明面固化，防回退成缺省）。
+
+## KI-01M4ZNAAWXXZ4ZHDW7JVP7AHTJ **计数面词表漂移：套件写 JSON 逐场景行、面只认文字行 → 拿 summary 的 ran=1 判绿**：模式
+（261015 实测定性；integration 岗登记；main 侧已修 81ba6a35）
+
+> **实测**：`lib_round_face.snapshot_progress` 只认文字词表（`PASS/FAIL/ENV_FAIL <名字>`），而套件实际写的是 JSON 逐场景行（`{"name":…,"status":"pass"|"fail"|"not-checked"}`）。于是整轮判了几百条，面却报 `counts_note="per-scenario result lines unrecognized in suite.log"`，计数退化成套件自己的 `INTEG_SUMMARY`——**现场实测那份 summary 是 `{"ran":1,"pass":1}`**，却据此判出 `verdict=green`。**跑一条场景就敢判整条线绿。**
+> **根因**：两套词表各写各的，没有任何一处断言它们必须一致；退化成 summary 的路径只拦「双方不一致」，没拦「逐场景行压根不认得」。
+> **危害**：①假绿（ran=1 判绿，可直达晋 main）；②假红（同一轮两边算法不同，红名单与计数互相打架）；③认证落账被判成 no_proof/growth，链路看似"跑完不落账"。
+> **出路**：面同时认两种词表，**有 JSON 行就以 JSON 行为准**；两套都在时**只数一遍**（实测同一批 641 条场景被数成 1282 条）。
+> **纪律**：**同一事实的两套表达必须有一处断言它们一致**——消费面认不出生产面的形状时，退化成"信另一份摘要"是假绿入口，不是降级。
+> **回归**：L1——`test_json_rows_win_and_are_counted_once`（两套词表同时在场 + 与 summary 故意不一致的同批场景：只数 3 条、不用 summary 的 1 条）。
+
+## KI-01M4ZNAAWXTA85C3TGDMN4AVP0 **手动轮跑在短命临时 worker 上：客户端一收尾就把在飞的 runner 杀掉**：模式
+（261015 实测定性；integration 岗登记；main 侧已修 07144011）
+
+> **实测**：`engine_ops round` 早先把手动轮放在**本进程的临时 Temporal worker**里跑。客户端一收尾（回执 `workflow execution already completed`）临时 worker 关闭 → 活动被取消 → 引擎收尾路径的 `reap_inflight_runners(reason="activity_unwinding")` 把**这一轮自己的 runner** SIGTERM 掉 → 轮死在半路（19–45 分钟白跑）、证据没落盘 → 只落一条 `range_growth`（`runner_signaled:15` + `ENOENT …/<round-id>/suite.log`）→ **认证永远出不来**。今天账上这类行有两条。
+> **根因**：长活（30–45 分钟一轮）挂在一个生命周期由"客户端调用"决定的进程上；取消/异常收尾与"杀掉在飞 runner"耦合成一条路径，于是**任何一次收尾都等价于杀掉本轮**。
+> **危害**：手动触发形同虚设（跑得起来、永远落不了账），且给账上灌入 `runner_signaled:15`/ENOENT 噪声，把归因引向"路径名对不上"这类假因（我当天就先误判成路径 bug）。
+> **出路**：手动轮**不在临时 worker 里跑**——投一个请求标记（`line-round-force`），由**引擎自己的长寿 worker** 在下一拍巡检消费并执行（与定时同代码路径、同守卫、同落账、不并行）。
+> **纪律**：**长命活只放在长命进程上**；"谁的生命周期决定这次工作能否完成"必须先问清，再决定把活放哪。
+> **回归**：L1 链条契约 `test_r5d_manual_forces_exactly_one_round_then_chain_stops`（手动只强制第一圈、之后收口）；标记消费路径已有用例 `test_force_marker_runs_the_forced_round_and_is_consumed`（以 summary 前缀区分强制路/常规路，并断言标记只消费一次）。
+
+## KI-01M4ZNAAWXNW1SKP4WHPPFHBFR **强制轮"每圈都强制"→ 链条不收敛、跑完不落账**：模式
+（261015 实测定性；integration 岗登记；main 侧已修 03dfa9e9）
+
+> **实测**：`trigger="manual"` 在 `run_line_round` 的**每一圈**都让 `should_certify` 回 `manual_forced` → 链条每圈都重跑整套件；实测跑满 662 行后**直接又起一遍**，而 `records/delivery` 一行未动。对照：定时路（不强制）同条件下正常落账。
+> **根因**：把"人要求跑一轮"实现成了"永久要求跑"——强制语义是**一次请求**，不是**每圈条件**。
+> **危害**：轮时长×N（链上限 4），且落账看似失效，误导定位到"落账路径坏了"。
+> **出路**：强制只作用于第一圈，之后回到常规判定（change/backstop），链条据此正常收口。
+> **纪律**：**"强制"是一次性请求，不能实现成循环条件**；凡带链/重试的控制流，都要问"这个强制会不会被每一圈重新读到"。
+> **回归**：L1 `test_r5d_manual_forces_exactly_one_round_then_chain_stops`。
+
+## KI-01M4ZNAAWXE995FSD22B7TKY1R **落线消费"旧绿面"：线永远缺 main，main 侧修被误判成"线的新回归"**：模式
+（261015 实测定性；integration 岗登记；main 侧已修 c5d836dc）
+
+> **实测**：`land_to_line` 消费 `meta.last_green_run.sha`（gate 判过的那棵树），而该面**记录一次、长期复用**，main 在其后继续前进。实测 t261014-04 落线用的 rev 里**不含当前 main**，于是 develop 上永远没有 main 的修；相对口径便把 11 条"main 已修、线还没吃到"的场景判成**线的新回归**（其中 5 条离线确定性场景的文件两侧逐字节相同——差异在引擎代码）。
+> **根因**：`land_to_line` 的纪律是"只落被验证过的树"，但**没有断言那棵树仍包含它被验证时所对的那份 main**；同步票因此送不进 main。
+> **危害**：线永远落后于 main；相对裁决把版本差误报成回归；同步票看起来"落线成功"却毫无同步效果。
+> **出路**：落线前判 `main` 是否为 proven sha 的祖先，**不是就具名拒落并要求重验**（重验的面自然含当前 main），绝不退回用尖端凑合。
+> **纪律**：**"被验证过"是有时效的**——凡消费"验证结果"的动作，都要问"验证时对的前提现在还成立吗"。
+> **回归**：L1 `test_land_to_line_refuses_proven_that_lacks_current_main`（主干前进一个提交后落线必须具名拒绝且不落账）。

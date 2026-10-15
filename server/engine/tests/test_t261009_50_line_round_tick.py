@@ -49,8 +49,12 @@ def landing(repo, rev, ticket="t1", at=1, line=LINE_A):
 
 
 def green_header(ran=10):
+    # A green run record always carries the fail-name set (empty when clean):
+    # the relative verdict refuses to read an absent key as "no regression",
+    # because an unreadable suite log also yields an empty set.
     return {"id": dc.mint_id("run"), "cases": {"ran": ran, "failed": 0,
-                                               "env_failed": 0}}
+                                               "env_failed": 0},
+            "failed_names": []}
 
 
 def runner_ok(calls):

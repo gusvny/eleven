@@ -6075,6 +6075,27 @@ async def land_to_line(args: LandToLineArgs) -> LandToLineResult:
             "ticket %s: the proven revision is empty/malformed — refusing to "
             "land (the landing consumes the revision the gate judged, never "
             "the current tip)" % args.ticket_id)
+    # 261015: a judged revision is a lawful landing input only while it still
+    # CONTAINS the main it was judged against. The green-run face is recorded
+    # once and reused while main keeps moving under it, so a landing could carry
+    # a tree built on an older main. Measured on t261014-04: the landed revision
+    # did not contain current main, so the line read every main-side fix as its
+    # OWN new regression (11 of them). Below the proven sha means: re-verify
+    # (a fresh gate round anchors the face on a tree that contains main), then
+    # land. Never falls back to the current tip.
+    try:
+        _p = _git(["merge-base", "--is-ancestor", "main",
+                   args.proven_sha.strip()], Path(args.worktree))
+        _contains_main = _p.returncode == 0
+    except Exception:  # noqa: BLE001 — unanswerable is not licence to land
+        _contains_main = False
+    if not _contains_main:
+        return _land_to_line_refuse(
+            "ticket %s: proven revision %s does not contain current main — "
+            "refusing to land (a landing must carry the main it was judged "
+            "against; run a fresh gate round so the face re-anchors on a tree "
+            "that contains main, then land). Never falls back to the tip."
+            % (args.ticket_id, args.proven_sha[:12]))
     try:
         line = develop_line.load_line(args.project_key, args.line_id)
     except Exception as e:  # noqa: BLE001 — the named refusal travels in the receipt
