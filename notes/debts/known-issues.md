@@ -5839,14 +5839,3 @@ UT i3（test_paths_contract.py）/ 场景 G6（sc_paths_contract_doc_guard.py）
 > **出路**：应答统一走面板既有的写入函数（`answerRequest` / `setThreadState` / `dismissRequest`，它们按类型落形状）；手写时按读者判据自查（`at` 数字、`by` 非空、`state` 取值在白名单内）。
 > **纪律**：**账本行的形状就是它的可读性**——凡手写追加，先把读者的 `isXxxRow` 判据当契约读一遍；「我写了」不等于「它生效了」。
 > **回归**：待补（L1：手写/写入器产出的每类行都过读者判据；畸形行必须被具名计数而不是静默丢弃）。
-
-## KI-01M513Z49NZGVC4EZXPPK558XN **面板读接口不解包 `{ok,result}` 信封：整库被读成空**：模式
-（261016 宿主实报「Docs tab 显示 The library is empty for this scope.，什么 doc 都看不到」；**已修** `e3daebe7`）
-
-> **实测**：宿主在 executor panel 的 Docs tab 看到「本 scope 库是空的」，而**后端一直是好的**——直连实测 `GET /sandbar-workbench/api/wf/docs/tree?scope=docs|notes&project=sandbar` 返回 `empty:false` + 完整 `groups`（docs/ 与 notes/ 都有几十篇）✓。也就是**没有丢数据，纯显示缺陷**。
-> **根因**：面板的 `loadDocs` 把**整个信封** `{ok,result,resolved}` 存进 `state.docs`，再在顶层读 `d.empty` / `d.groups` → 永远读不到 → `groups=[]` → 落到兜底文案「The library is empty for this scope.」。同文件另有 5 处 fetch **都**正确解包 `j.result`（927/1601/1846/2139 行）——**只有这一处漏了**，所以是单点、不是全族。
-> **危害**：整库看起来是空的（读者据此以为「这台机器上什么都没有/文档没搬过来」）；而真相是显示面把内容吞了——**面说谎比缺数据更贵**。
-> **出路**：加载器解包 `j.result`；畸形信封按「取不到」（具名 banner）处理，**不许**降级成「空库」；计数面 `countDocsTree` 只吃**解包后的树**，其它一律 `null`（绝不伪造 0）。回归已进面板契约测试（计数面 + 源码面双钉），面板套件 58/58。
-> **纪律**：**「空」是结论，不是兜底**——凡拿不到的输入，先问「这是真的空，还是我没读到」；解包层错一格，读者看到的是「什么都没有」而不是「读失败」。
-> **时机**：该缺陷由**今晚首次晋升**（线侧 `7a1fa3d7` 的面板代码，随 `2d8118c1` 进 main）引入；线自己的门没覆盖这个 tab 的解包——现已补上。
-> **回归**：`tests/t261005-10-page-contract.test.mjs`（解包后的树计数 3、信封本身必须 `null`、空树计 0、加载器源码必须解包 `j.result`）。
