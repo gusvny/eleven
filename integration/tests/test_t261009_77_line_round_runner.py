@@ -22,6 +22,8 @@ Legs:
 - F run tree must not overlap the source checkout (named refusal).
 - G SIGTERM reclaims the process group and the run tree (no orphan suite).
 """
+import contextlib
+import io
 import json
 import os
 import shlex
@@ -36,6 +38,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "integration" / "line_round_runner.py"
+
+sys.path.insert(0, str(RUNNER.parent))
+import line_round_runner as runner  # noqa: E402
 
 ENV_FP = "a" * 64
 
@@ -337,6 +342,60 @@ class Leg(unittest.TestCase):
         self.assertFalse(run_root.exists(), "run tree not reclaimed")
         with self.assertRaises(OSError):
             os.kill(stub_pid, 0)  # the suite did not outlive the runner
+
+
+class ExclusionDefaultT26101612(unittest.TestCase):
+    """t261016-12: the pool-exclusion default is "run every pool".
+
+    The docstring always said exclusion is opt-in diagnostics; the constant
+    said "exclusive", so every round without the env var was narrowed and
+    wrote no run record — no header, no certification, ever. These legs pin
+    the contract at the pure-function level (no subprocess):
+    (a) env var ABSENT  -> exclusion "" (a full round, not a narrowed one);
+    (b) env var = pool  -> that pool, and the suite argv narrows + the
+        stderr announcement still names the narrowing (stable substrings
+        only — the copy is a surface, not the contract);
+    (c) env var = ""    -> byte-identical argv and stderr to (a);
+    (d) env var = "   " -> stripped to "" (whitespace is not a pool name).
+    """
+
+    def env(self, **kw):
+        return dict(kw)
+
+    def test_a_absent_env_var_is_full_pool(self):
+        self.assertEqual(runner.exclude_pools_value(self.env()), "")
+
+    def test_b_named_pool_narrows_and_announces(self):
+        env = self.env(**{runner.EXCLUDE_POOLS_ENV: "exclusive"})
+        self.assertEqual(runner.exclude_pools_value(env), "exclusive")
+        argv = runner.suite_argv(env)
+        self.assertIn("--exclude-pools", argv)
+        self.assertEqual(argv[argv.index("--exclude-pools") + 1], "exclusive")
+        captured = io.StringIO()
+        with contextlib.redirect_stderr(captured):
+            runner.suite_argv(env)
+        err = captured.getvalue()
+        self.assertIn("NARROWED", err)
+        self.assertIn("NO certification", err)
+
+    def test_c_empty_value_matches_absent_byte_for_byte(self):
+        empty = self.env(**{runner.EXCLUDE_POOLS_ENV: ""})
+        absent = self.env()
+        self.assertEqual(runner.exclude_pools_value(empty), "")
+        argv = runner.suite_argv(absent)
+        self.assertNotIn("--exclude-pools", argv)
+        self.assertEqual(runner.suite_argv(empty), argv)
+        for env in (empty, absent):
+            captured = io.StringIO()
+            with contextlib.redirect_stderr(captured):
+                runner.suite_argv(env)
+            self.assertEqual(captured.getvalue(), "")
+
+    def test_d_whitespace_value_is_stripped_to_full_pool(self):
+        env = self.env(**{runner.EXCLUDE_POOLS_ENV: "   "})
+        self.assertEqual(runner.exclude_pools_value(env), "")
+        argv = runner.suite_argv(env)
+        self.assertNotIn("--exclude-pools", argv)
 
 
 if __name__ == "__main__":

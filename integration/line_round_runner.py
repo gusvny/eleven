@@ -55,32 +55,29 @@ from pathlib import Path
 
 CANDIDATES_ENV = "SANDBAR_LINE_ROUND_CANDIDATES"
 SUITE_CMD_ENV = "SANDBAR_LINE_ROUND_SUITE_CMD"
-#: Pools the line round does not run by default (host order 261011): the
-#: exclusive pool nests whole suites/consoles and made every round hit the cap.
-#: Overridable with the same key; an empty value runs every pool.
-#: PROTECTIVE default (261012): keep rounds DIAGNOSTIC until the round's
-#: environment is faithful enough to judge the revision.
+#: Pools the line round does not run — DEFAULT: none (run every pool).
+#: Host order 261016 flips the protective 261012 default ("exclusive") back
+#: to the declared intent: the exclusion is opt-in diagnostics, never the
+#: default. The protective default made every round NARROWED without any
+#: operator asking for it, and a narrowed round writes no run record, so no
+#: round could ever mint a certification (t261016-12). An operator sets
+#: SANDBAR_LINE_ROUND_EXCLUDE_POOLS to narrow a diagnostic round; an empty
+#: value runs every pool, and a narrowed round says so on stderr.
 #:
-#: Why not full: a full round is the only kind that can mint a certification
-#: (a narrowed round writes no run record ⇒ no header ⇒ the engine can only
-#: record range growth), but a round that ends RED mints a RED certification
-#: and a red certification OPENS A FREEZE — `develop_certify.run_line_round`
-#: appends `open_freeze_rows` on any red, and a frozen line refuses every
-#: landing except a `fix` carrying a `repairs` relation. The measured red set
-#: at the line head is not the revision's fault: of the 32 self-fails and 20
-#: environment cases, several PASS in the delivered tree (t260930-01,
-#: t261004-28 measured 261012) and 20 UI/DOM cases never ran at all
-#: (`not-checked/external`) because the round cannot boot the console it would
-#: inspect. Freezing the line over that would block the very landings this
-#: work exists to move. Note also `develop_certify.should_freeze()` — dead
-#: code today — says a freeze "opens only when the red implicates content".
+#: Know what a full default costs: a full round is the only kind that can
+#: mint a certification, but a round that ends RED mints a RED
+#: certification and a red certification OPENS A FREEZE —
+#: `develop_certify.run_line_round` appends `open_freeze_rows` on any red,
+#: and a frozen line refuses every landing except a `fix` carrying a
+#: `repairs` relation. That trade is accepted: a line that can never mint
+#: a certification is worth less than one that can (and may). The measured
+#: red set at the line head is largely environment-induced (t260930-01,
+#: t261004-28 measured 261012), not the revision's fault; a worker whose
+#: operator wants a diagnostic round still sets the env var.
 #:
-#: Flip condition (the certification round): once the round's UI/DOM cases
-#: actually run and the environment-induced self-reds are gone, set
-#: SANDBAR_LINE_ROUND_EXCLUDE_POOLS="" for the tick's environment — or change
-#: this default — and the round becomes a proof again. Diagnostic mode is
-#: always announced on stderr; it is never silent.
-EXCLUDE_POOLS_DEFAULT = "exclusive"
+#: Note also `develop_certify.should_freeze()` — dead code today — says a
+#: freeze "opens only when the red implicates content".
+EXCLUDE_POOLS_DEFAULT = ""
 EXCLUDE_POOLS_ENV = "SANDBAR_LINE_ROUND_EXCLUDE_POOLS"
 REPO_PATH_PREFIX = "SANDBAR_LINE_ROUND_REPO_PATH_"
 RUN_ROOT_ENV = "SANDBAR_LINE_ROUND_RUN_ROOT"

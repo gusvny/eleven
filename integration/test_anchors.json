@@ -5099,6 +5099,11 @@
       "anchor": "behaviour",
       "note": "t261016-01 grey-box L3: the real run_line_round face over a real tmp git repo + stub runner — A named reuse after a docs-only advance (one suite run, record names reused/old/new), B rebuild on a server/engine commit judged against the NEW fail set, C fail-closed rebuilds on corrupted cache and non-ancestor tip, D duration_ms positive int on the round row",
       "sync_path": ""
+    },
+    "integration/t261016-12/sc_t26101612_line_round_full_pool_default.py": {
+      "anchor": "behaviour",
+      "note": "t261016-12: a bare worker environment (var absent) yields a FULL certifiable round - empty declared exclusion, no --exclude-pools, no NARROWED announcement - while an explicit pool name narrows and still names NO certification, an empty value stays byte-identical to absent, and a whitespace-only value narrows nothing",
+      "sync_path": "integration/run_scenarios.py; integration/line_round_runner.py"
     }
   }
 }
