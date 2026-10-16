@@ -5033,6 +5033,18 @@ def _run_entry(entry):
     # 勿误以为两层面同宽，也不要随手扩本层半径（防双层过滤面漂移出新撒谎注释）。
     child_env = {k: v for k, v in os.environ.items()
                  if k not in ("SANDBAR_TASK_QUEUE", "SANDBAR_WATCH_WORKFLOW")}
+    # 261016 provisioning (host order: 补环境): scenarios that create tickets
+    # against a Docker test Temporal refuse to run on an UNSTATED target
+    # ("refusing to create tickets on an unclear target"), so with a deployment
+    # whose workers carry no SANDBAR_TARGET_HOST their env-half was a permanent
+    # ENV_FAIL - t261012-05 measured exactly that across four rounds and its
+    # acceptance face never moved. The suite states the TEST target for its
+    # children: explicit, named once on the run's log, never the production
+    # default (the scenario's own guard checks both conditions, so a deployment
+    # that already states a target keeps it verbatim).
+    if not str(child_env.get(TEST_TARGET_ENV) or "").strip():
+        child_env[TEST_TARGET_ENV] = TEST_TARGET_DEFAULT
+        _note_test_target_once()
     # 批台注入（t260921-06）：恰批消费者条目拿 SANDBAR_STAGE_BATCH=批台工程名——
     # 消费缝（lib_gate.require_stage / with_stage.sh）据此走 ns 面；例外条目与
     # 非消费者条目零注入（例外通道显式化，env 缺席=逐字旧行为）。
@@ -5915,6 +5927,25 @@ def reprobe_main(names) -> int:
 # 首字符 {/[ 的行当规范行候选、解析失败计红（malformed 非空=闸红），明细行规则另收
 # `ENV_FAIL [` 起首行为幻影条目——故通告一律 `batch-stage: ` 起首、环境红一律
 # `ENV_FAIL: ` 形（不带 `[`）。看守 t260912-01-summary-count-purity S2b 机械执法此面。
+
+#: 261016 provisioning: the target the suite STATES for its scenario children when
+#: the ambient environment states none. The scenarios that need it refuse to run
+#: on an unstated target (never a production default), and they manage their own
+#: Docker test Temporal - they only need to be told the address is a TEST one.
+#: 127.0.0.1:17233 is the address their own refusal message names.
+TEST_TARGET_ENV = "SANDBAR_TARGET_HOST"
+TEST_TARGET_DEFAULT = "127.0.0.1:17233"
+_TEST_TARGET_NOTED = {"done": False}
+
+
+def _note_test_target_once() -> None:
+    """Say ONCE that the suite stated the test target (never silently)."""
+    if _TEST_TARGET_NOTED["done"]:
+        return
+    _TEST_TARGET_NOTED["done"] = True
+    sys.stderr.write("[provision] %s=%s for scenario children (ambient env "
+                     "states none; the target is a TEST Temporal)\n"
+                     % (TEST_TARGET_ENV, TEST_TARGET_DEFAULT))
 
 BATCH_ENV = "SANDBAR_STAGE_BATCH"                # 消费缝注入键（lib_gate/with_stage.sh）
 BATCH_MANIFEST_ENV = "SANDBAR_BATCH_MANIFEST"    # 例外清单路径覆盖（看守桩测缝）

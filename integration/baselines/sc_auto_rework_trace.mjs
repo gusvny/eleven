@@ -155,8 +155,17 @@ ns = {
         # 桩语义=已打过补丁（True）：让 patched 分支照常执行，本场景要验的是补丁后的行为。
         # 注意：本段在 JS 模板字符串里，注释里不得出现反引号（会截断 PY 字符串）。
         patched=lambda *a, **k: True,
-        logger=SimpleNamespace(info=lambda *a, **k: None)),
+        # 261016 (同族第四次踩坑，同款根治在下方常量/方法抽取): _persist_stage_memo
+        # 现在真写 Temporal memo（workflow.upsert_memo），失败路径经
+        # workflow.logger.warning 记账。桩面缺这两个面 → 每次跑都在 pure half 里
+        # AttributeError（先是 upsert_memo，异常处理里再是 logger.warning），
+        # 一条判断都没走到。桩语义：记录调用（下面的自证锁住接线确实发生）+ 静默日志。
+        upsert_memo=lambda *a, **k: MEMO_CALLS.append((a, k)),
+        logger=SimpleNamespace(info=lambda *a, **k: None,
+                               warning=lambda *a, **k: None,
+                               error=lambda *a, **k: None)),
 }
+MEMO_CALLS = []
 exec(m_chain.group(0), ns)
 exec(m_roles.group(0), ns)
 # 261001 修（同族第三次踩坑的根治）：_auto_rework 里会引用**模块级补丁门常量**
@@ -165,7 +174,13 @@ exec(m_roles.group(0), ns)
 # 于是引擎每加一个新门就再红一次。改为**通用抽取**：把 dev_lane.py 里所有
 # 「模块级、单行字符串常量」与「模块级 frozenset 常量」一并 exec 进桩命名空间——
 # 这类常量都是惰性字面量，抽取零风险；仍缺的名字会在下面的自证里显式点名。
-_extra_consts = re.findall(r"""^([A-Z][A-Z0-9_]*)\s*=\s*(?:"[^"\n]*"|'[^'\n]*')\s*$""", src, re.M)
+# 261016: the pattern used to accept ONLY string literals, so an integer
+# module constant (STAGE_MEMO_HISTORY_CAP = 50, used by _persist_stage_memo's
+# history slice) never reached the stub namespace and every run died with
+# NameError before a single judgement - the same "engine grows a surface, the
+# stub drifts" trap this block already records twice. Integer literals are as
+# lazy as string ones, so they are extracted verbatim too.
+_extra_consts = re.findall(r"""^([A-Z][A-Z0-9_]*)\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|\d+)\s*$""", src, re.M)
 for _name in _extra_consts:
     _m = re.search(r'^%s\s*=\s*(.+)$' % re.escape(_name), src, re.M)
     if _m:
@@ -225,6 +240,16 @@ EXEC_LEDGER_STUB = (
     '        self.__class__._ledger_calls.append((a, k))\n'
     '    _ledger_calls = []\n')
 exec('class FakeLane:\n' + ''.join(methods) + EXEC_LEDGER_STUB, ns)
+# 261016 自证：_persist_stage_memo 的 memo 写入真的接上了（判据不是 memo 内容，
+# 而是「接线发生了」——同 _ledger_enqueue 那条的绑浅口径）。
+ns['FakeLane']()
+_lane0 = ns['FakeLane']()
+try:
+    _lane0._persist_stage_memo('create_plan', 'harness memo wiring probe')
+    ok(len(MEMO_CALLS) >= 1, 'stage memo 接线发生（workflow.upsert_memo 被调用 %d 次）' % len(MEMO_CALLS))
+except Exception as _e:
+    ok(False, 'stage memo 接线探针抛异常：%s: %s' % (type(_e).__name__, _e))
+
 ok(hasattr(ns['FakeLane'], '_ledger_enqueue'),
    'FakeLane 提供事件台账发射桩（t260928-13 起 _mark/_touch 会调 _ledger_enqueue）')
 
