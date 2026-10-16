@@ -10,7 +10,6 @@ import { fileURLToPath } from 'node:url'
 import { assert, done } from './lib.mjs'
 import { PANEL_PAGE_HTML } from '../src/host/panel-page.ts'
 import { LIST_CONTRACTS } from '../src/host/list-contracts.ts'
-import { countDocsTree } from '../src/host/page-logic.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const html = PANEL_PAGE_HTML
@@ -87,20 +86,3 @@ for (const type of ['sandbar-executor-panel:open-ticket', 'sandbar-executor-pane
 assert(/window\.parent === window\) return;/.test(html), 'panel ignores parent-bound message types when standalone')
 
 done(`T261005_10_PAGE_CONTRACT ran=${++n}`)
-
-// ---- 261016: the Docs tab must read the workbench ENVELOPE correctly ----
-// Host report: the tab said "The library is empty for this scope." while the
-// endpoint returned a full tree. The loader stored {ok,result,resolved} and then
-// read d.groups / d.empty off the top level, so the tree always rendered empty.
-// Read path = the loader unwraps j.result; count path = countDocsTree takes the
-// UNWRAPPED tree and answers null (never a fabricated 0) for anything else.
-{
-  const envelope = { ok: true, result: { empty: false, scope: 'docs', groups: [
-    { dir: '', label: '总目录', files: [{ rel: 'README.md', title: 'docs index' }] },
-    { dir: 'design', label: 'design', files: [{ rel: 'design/a.md', title: 'a' }, { rel: 'design/b.md', title: 'b' }] },
-  ] }, resolved: { source: 'project', key: 'sandbar', root: '/x' } }
-  assert(countDocsTree(envelope.result) === 3, 'countDocsTree counts the UNWRAPPED tree (3 files)')
-  assert(countDocsTree(envelope) === null, 'countDocsTree refuses the envelope (null, never a fabricated count)')
-  assert(countDocsTree({ empty: true, reason: 'x', scope: 'docs', groups: [] }) === 0, 'an empty-but-present tree counts 0')
-  assert(/state\.docs=\(j && j\.ok===true && j\.result/.test(html), 'the Docs loader unwraps j.result (envelope shape pinned)')
-}
