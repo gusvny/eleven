@@ -1772,11 +1772,18 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var scope=state.docsScope;
     var url='/sandbar-workbench/api/wf/docs/tree?scope='+scope+'&project='+encodeURIComponent(state.project);
     fetch(url).then(function(r){ return r.json(); }).then(function(j){
-      state.docs=j;
+      // 261016 fix (host report: the Docs tab said "The library is empty for this
+      // scope." over a full library). The workbench answers with its {ok,result,
+      // resolved} envelope - every other loader on this page unwraps it; this one
+      // stored the ENVELOPE and then read d.groups / d.empty off the top level, so
+      // the tree always rendered empty and the fallback copy was shown. Unwrap, and
+      // treat a malformed envelope as "unreachable" (the named banner) rather than
+      // as an empty library.
+      state.docs=(j && j.ok===true && j.result && typeof j.result==='object') ? j.result : null;
       // t261008-19: remember the real page count per scope (malformed → null, shown
       // as '— pages'; never a fabricated count).
       state.docsCounts=state.docsCounts||{};
-      state.docsCounts[scope]=countDocsTree(j);
+      state.docsCounts[scope]=countDocsTree(state.docs);
       renderDocs();
     }).catch(function(){ state.docs=null; renderDocs(); });
   }
