@@ -5045,6 +5045,21 @@ def _run_entry(entry):
     if not str(child_env.get(TEST_TARGET_ENV) or "").strip():
         child_env[TEST_TARGET_ENV] = TEST_TARGET_DEFAULT
         _note_test_target_once()
+    # 261016 executive finding (req-1792107950368-0001): a scenario that runs the
+    # inspection period inside its own fixture wrote engine EVENT rows into the
+    # PRODUCTION events ledger - between 23:45:06Z and 23:45:18Z four phantom
+    # period rows attached themselves to REAL ticket ids (t261016-01/-02/-04/-05),
+    # one of them into a closed ticket's history. The executor named the seam: the
+    # harness passes the ambient environment through and pins no ledger directory.
+    # Narrow fix, deliberately: the EVENT ledger seam only - it is the one these
+    # rows use, it is a flat-directory override the engine already honours, and a
+    # scenario that needs the real events states its own dir (verbatim, never
+    # overridden here). The delivery / runs seams are NOT pinned by the harness:
+    # scenarios that read them as real data (the live-check tool among them) must
+    # keep working, and their own writers already pin per-case.
+    if not str(child_env.get(EVENT_LEDGER_PIN_ENV) or "").strip():
+        child_env[EVENT_LEDGER_PIN_ENV] = _suite_event_ledger_dir()
+        _note_event_ledger_pin_once()
     # 批台注入（t260921-06）：恰批消费者条目拿 SANDBAR_STAGE_BATCH=批台工程名——
     # 消费缝（lib_gate.require_stage / with_stage.sh）据此走 ns 面；例外条目与
     # 非消费者条目零注入（例外通道显式化，env 缺席=逐字旧行为）。
@@ -5933,6 +5948,43 @@ def reprobe_main(names) -> int:
 #: on an unstated target (never a production default), and they manage their own
 #: Docker test Temporal - they only need to be told the address is a TEST one.
 #: 127.0.0.1:17233 is the address their own refusal message names.
+#: 261016 executive finding (req-1792107950368-0001): the ONE ledger seam the
+#: harness pins for its children. A flat-directory override the engine already
+#: honours, so a fixture-run inspection's event rows land in a throwaway dir
+#: instead of the project's own events ledger. Chosen narrowly on purpose: the
+#: delivery/runs seams stay untouched because scenarios read them as real data.
+EVENT_LEDGER_PIN_ENV = "SANDBAR_EVENT_LEDGER_DIR"
+_EVENT_PIN_STATE = {"dir": "", "noted": False}
+
+
+def _suite_event_ledger_dir() -> str:
+    """One throwaway events dir per suite process (created once, cleaned at exit)."""
+    if _EVENT_PIN_STATE["dir"]:
+        return _EVENT_PIN_STATE["dir"]
+    import atexit
+    import shutil
+    import tempfile
+    d = tempfile.mkdtemp(prefix="sandbar-suite-events-")
+
+    def _clean() -> None:
+        try:
+            shutil.rmtree(d, ignore_errors=True)
+        except Exception:  # noqa: BLE001 - cleanup is best effort, never fatal
+            pass
+
+    atexit.register(_clean)
+    _EVENT_PIN_STATE["dir"] = d
+    return d
+
+
+def _note_event_ledger_pin_once() -> None:
+    if _EVENT_PIN_STATE["noted"]:
+        return
+    _EVENT_PIN_STATE["noted"] = True
+    sys.stderr.write("[provision] %s pinned for scenario children (ambient env "
+                     "states none; fixture-run event rows must not reach the "
+                     "project ledger)\n" % EVENT_LEDGER_PIN_ENV)
+
 TEST_TARGET_ENV = "SANDBAR_TARGET_HOST"
 TEST_TARGET_DEFAULT = "127.0.0.1:17233"
 _TEST_TARGET_NOTED = {"done": False}
