@@ -3,7 +3,7 @@
 """epic_fixture.py —— t260907-07 共享夹具（不带 sc_ 前缀=共享代码，不登记清单）。
 
 per-key 注册表条目（<root>/<key>/project.yaml，契约①a schema v1 固定形状）+
-各项目主目录 notes/epics/ 立项单落盘 + env 现场守卫（SANDBAR_PROJECTS_DIR 指临时根、
+各项目主目录 docs/epics/ 立项单落盘（t261019-12 前沿形状：front-matter code/retired/summary/started） + env 现场守卫（SANDBAR_PROJECTS_DIR 指临时根、
 SANDBAR_PROJECTS_YAML 必清——legacy 模式优先级会压过 per-key 模式）。
 
 夹具卫生（方案 C3）：两项目桶均注册临时目录，绝不往真仓 worktree 根落任何文件；
@@ -26,18 +26,23 @@ GUARD_KEYS = ("SANDBAR_PROJECTS_DIR", "SANDBAR_PROJECTS_YAML", "SANDBAR_EPICS_DI
 
 
 def make_project(root, key, name=None):
-    """注册一个项目条目（临时主目录 + notes/epics/ 就绪），返回主目录 Path。"""
+    """注册一个项目条目（临时主目录 + docs/epics/ 就绪），返回主目录 Path。"""
     pdir = pathlib.Path(root) / key
-    (pdir / "notes" / "epics").mkdir(parents=True, exist_ok=True)
+    (pdir / "docs" / "epics").mkdir(parents=True, exist_ok=True)
     (pdir / "project.yaml").write_text(
         PROJECT_YAML % (key, name or (key + " 项目"), pdir), "utf-8")
     return pdir
 
 
+def fm_epic(code):
+    """A minimal docs/epics front-matter document (t261019-12 registry contract)."""
+    return ("---\ncode: %s\nretired: false\nsummary: fixture entry %s.\nstarted: 2026-09-07\n---\n\n# %s\n" % (code, code, code))
+
+
 def write_epic(pdir, code, body=None):
-    """在项目主目录 notes/epics/ 落一张立项单，返回档案 Path。"""
-    p = pathlib.Path(pdir) / "notes" / "epics" / (code + ".md")
-    p.write_text(body or ("# 立项单 %s\n\n验收标准：略。\n" % code), "utf-8")
+    """在项目主目录 docs/epics/ 落一张立项单（front-matter，retired:false 接单），返回档案 Path。"""
+    p = pathlib.Path(pdir) / "docs" / "epics" / (code + ".md")
+    p.write_text(body or fm_epic(code), "utf-8")
     return p
 
 

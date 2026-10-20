@@ -91,7 +91,7 @@ instances:
   # 空转开关**不摘给本实例**：test_260929_inspection_no_change_skip.py 有一条契约
   # 「生产声明里只有 simplify-face 开 skip_when_unchanged（别的实例必须真跑）」——
   # 那是 260929 明确定下的口径，不随本次改频随手扩。要不要给文档面破例（整仓没动就
-  # 不重读）已记入 notes/discussions/261004-文档面巡检-设计稿.md 的未决项，等宿主拍。
+  # 不重读）已记入 notes/discussions/261004-docs-face-inspection-design.md 的未决项，等宿主拍。
   # 261004 同批修：这条 schedule 的 action 身份字段此前全空（instance/face/project_key/
   # repo_root 都是 ""）→ 从来没产出过一期（台账只有 20260915）；本次 schedule-up 一并重铸。
   - id: docs-sync

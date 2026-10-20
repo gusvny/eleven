@@ -3,7 +3,7 @@
  * sc_epic_anchor_same_source.mjs — UI×CLI 立项目录同源同规（t260907-07 验收③）。
  *
  * intent（用户可感知）：同一立项单、工单台列得出、CLI 开票也认——同一注册表真源
- * +同一拼装规则 <主目录>/notes/epics。断言：双项目夹具下
+ * +同一拼装规则 <主目录>/docs/epics（t261019-12 换库）。断言：双项目夹具下
  * Py resolve_epics_dir(key) === TS resolveEpicsDir(primaryDir(findProject(key)))
  * 且各指各自主目录（非引擎仓锚）；SANDBAR_EPICS_DIR 覆盖两侧同款（同指 env 目录）。
  * 口径边界（方案 C4）：断言的是「同规」——不覆盖「工单台起在非项目注册主目录」
@@ -17,13 +17,23 @@
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveEpicsDir } from '../../server/plugins/workbench/src/host/epics.ts'
+// t261019-12: the TS production reader moved into node.ts (epicDocsDir = env ?? <root>/docs/epics);
+// the old epics.ts resolveEpicsDir default is retired with the status vocabulary. The TS side
+// here rides the SAME public anchor seam node.ts uses (resolveProjectAnchor) + the new tail.
+import { resolveProjectAnchor } from '../../server/plugins/workbench/src/host/project-anchor.ts'
 import { findProject, primaryDir } from '../../server/project-registry.ts'
 import { makeEpicFixture, runPython } from './epic_fixture.mjs'
 
 const { ok, envFail, done } = (await import('../t260903-09/lib_integration.mjs')).makeChecker()
 
 const POC = new URL('../../server/engine', import.meta.url).pathname
+
+/** TS side of the same-source check: the anchor seam node.ts consumes + the docs/epics tail. */
+function tsEpicsDir(key, fallbackRepo) {
+  const a = resolveProjectAnchor(key, fallbackRepo)
+  if (!a.ok) throw new Error('anchor refused: ' + a.error)
+  return process.env.SANDBAR_EPICS_DIR || join(a.root, 'docs', 'epics')
+}
 
 /** 子进程跑 Py 侧解析（同一次夹具、同一份注册表），返回 {engine, external} 或 null。 */
 function pyResolveDirs(regRoot, extraEnv = {}) {
@@ -49,12 +59,12 @@ try {
   const py = pyResolveDirs(fx.regRoot)
   if (py) {
     for (const p of [fx.engine, fx.external]) {
-      const tsDir = resolveEpicsDir(primaryDir(findProject(p.key)))
-      ok(tsDir === p.epicsDir, `A TS ${p.key} 锚项目主目录 notes/epics`, tsDir)
-      ok(py[p.key] === p.epicsDir, `B Py ${p.key} 锚项目主目录 notes/epics`, py[p.key])
+      const tsDir = tsEpicsDir(p.key, p.dir)
+      ok(tsDir === p.epicsDir, `A TS ${p.key} 锚项目主目录 docs/epics`, tsDir)
+      ok(py[p.key] === p.epicsDir, `B Py ${p.key} 锚项目主目录 docs/epics`, py[p.key])
       ok(tsDir === py[p.key], `C 同源：${p.key} Py==TS`, `${py[p.key]} vs ${tsDir}`)
     }
-    ok(resolveEpicsDir(primaryDir(findProject('engine'))) !== fx.external.epicsDir,
+    ok(tsEpicsDir('engine', fx.engine.dir) !== fx.external.epicsDir,
        'D 不串桶：engine 锚 ≠ external 桶')
   }
 
@@ -67,7 +77,7 @@ try {
   const pyEnv = pyResolveDirs(fx.regRoot, { SANDBAR_EPICS_DIR: envDir })
   if (pyEnv) {
     for (const p of [fx.engine, fx.external]) {
-      const tsDir = resolveEpicsDir(primaryDir(findProject(p.key)))
+      const tsDir = tsEpicsDir(p.key, p.dir)
       ok(tsDir === envDir && pyEnv[p.key] === envDir && tsDir === pyEnv[p.key],
          `E env 覆盖同源：${p.key} Py==TS==env 目录`, `${pyEnv[p.key]} vs ${tsDir}`)
     }

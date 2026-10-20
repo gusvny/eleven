@@ -3,7 +3,7 @@
  * epic_anchor_same_source.mjs —— t260907-07 验收③同源断言（灰盒）。
  *
  * 口径边界（方案 C4）：断言的是「同规」——同一注册表真源 + 同一拼装规则
- * <主目录>/notes/epics；不是「全部署形态同源」（工单台 config.repo 起在别处时
+ * <主目录>/docs/epics；不是「全部署形态同源」（工单台 config.repo 起在别处时
  * UI 仍锚其 repo，该部署形态不在本断言范围）。
  *
  * 断言：夹具两项目下，Python shared.resolve_epics_dir(key) 与
@@ -31,8 +31,8 @@ print(json.dumps({k: str(shared.resolve_epics_dir(k)) for k in ('engine', 'exter
 
   for (const p of [fx.engine, fx.external]) {
     const tsDir = resolveEpicsDir(primaryDir(findProject(p.key)))
-    ok(tsDir === p.epicsDir, `TS ${p.key} 锚项目主目录 notes/epics`, tsDir)
-    ok(py[p.key] === p.epicsDir, `Py ${p.key} 锚项目主目录 notes/epics`, py[p.key])
+    ok(tsDir === p.epicsDir, `TS ${p.key} 锚项目主目录 docs/epics`, tsDir)
+    ok(py[p.key] === p.epicsDir, `Py ${p.key} 锚项目主目录 docs/epics`, py[p.key])
     ok(tsDir === py[p.key], `同源：${p.key} Py==TS`, `${py[p.key]} vs ${tsDir}`)
   }
   // 不串桶：external 的异名只在 external 桶放行

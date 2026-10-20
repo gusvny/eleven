@@ -4,7 +4,7 @@
  *
  * 两项目（engine 桶 + external 桶）均注册进**临时** SANDBAR_PROJECTS_DIR 根，
  * dirs[0] 均指临时目录——被测的是解析代码路径，不往 worktree 根落任何夹具文件；
- * teardown 整树删除。每项目 notes/epics 放同名（gap-b.md）+ 异名（各自独有）立项单。
+ * teardown 整树删除。每项目 docs/epics 放同名（t261019-12：front-matter 形状）（gap-b.md）+ 异名（各自独有）立项单。
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
@@ -12,6 +12,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /** 生成 per-key 注册条目（与 shared._mk_registry 同构的严格 YAML 子集）。 */
+/** A minimal docs/epics front-matter document (t261019-12 registry contract). */
+function fmEpic(code, summary) {
+  return `---\ncode: ${code}\nretired: false\nsummary: ${summary}\nstarted: 2026-09-07\n---\n\n# ${code}\n`
+}
+
 function writeProjectYaml(regRoot, key, name, primary) {
   const d = join(regRoot, key)
   mkdirSync(d, { recursive: true })
@@ -29,17 +34,17 @@ export function makeEpicFixture() {
   mkdirSync(regRoot, { recursive: true })
   const mk = (key, name) => {
     const dir = join(root, key)
-    const epicsDir = join(dir, 'notes', 'epics')
+    const epicsDir = join(dir, 'docs', 'epics')
     mkdirSync(epicsDir, { recursive: true })
     writeProjectYaml(regRoot, key, name, dir)
     // 同名立项单：两桶都有（各自可各自读）
-    writeFileSync(join(epicsDir, 'gap-b.md'), '# 立项单：gap-b\n\n同名单', 'utf8')
+    writeFileSync(join(epicsDir, 'gap-b.md'), fmEpic('gap-b', 'same-code fixture entry.'), 'utf8')
     return { key, dir, epicsDir }
   }
   const engine = mk('engine', '引擎项目')
   const external = mk('external', '外部项目')
   // 异名立项单：各自独有（对方桶读不到=不串桶断言面）
-  writeFileSync(join(engine.epicsDir, 'engine-only.md'), '# 立项单：engine-only\n', 'utf8')
+  writeFileSync(join(engine.epicsDir, 'engine-only.md'), fmEpic('engine-only', 'engine-bucket only entry.'), 'utf8')
   writeFileSync(join(external.epicsDir, 'external-only.md'), '# 立项单：external-only\n', 'utf8')
   return {
     root, regRoot, engine, external,

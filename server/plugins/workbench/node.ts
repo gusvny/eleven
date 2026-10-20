@@ -78,22 +78,24 @@
  *                                                 工具调用名+目标路径）；无会话文件/解压失败走
  *                                                 {exists:false,reason} 降级；工单字段 ../ 逃逸 → 400
  *
- * 立项单只读 API（epic-linkage Tier 2，t260825-04；真源=notes/epics/*.md + Temporal
- * 查询，UI 不存状态——立项单关键决策 5；代号存在性=文件存在性强校验——决策 2）：
- *   GET  /sandbar-workbench/api/epics            → 列 notes/epics/*.md：代号（文件名主名）/
- *                                                 标题（首个 # 行）/状态（字段表格「状态」行）/
- *                                                 立项日期；目录不存在/无文件 → 空数组不报错
- *   GET  /sandbar-workbench/api/epics/<code>     → 单份立项单 Markdown 全文；代号形状白名单
- *                                                 （shared.EPIC_CODE_RE 同款）+ 路径防穿双保险，
- *                                                 非法 400 / 不存在 404 人话
+ * 立项单只读 API（epic-linkage Tier 2，t260825-04；t261019-12 起真源=docs/epics/*.md
+ * 英文 front-matter 档（code/retired/summary/started），retired 布尔是唯一状态——
+ * design=docs/design/epic-registry-v1.md；状态真源仍=Temporal 查询，UI 不存状态）：
+ *   GET  /sandbar-workbench/api/epics            → 列 docs/epics/*.md：{code, retired, summary,
+ *                                                 started, defect?}；目录不存在 → 具名 500（硬切换，
+ *                                                 绝不返回空表冒充「无立项」）；单档 front-matter
+ *                                                 缺失/畸形 → 该行 retired:true + defect（fail-closed）
+ *   GET  /sandbar-workbench/api/epics/<code>     → 单份立项 front-matter 元信息（不回 Markdown 全文
+ *                                                 ——summary 是唯一上台面的档内文字）；形状 400 /
+ *                                                 不存在 404 人话（shared.validate_epic_code 同风格）
  *   GET  /sandbar-workbench/api/epics/<code>/tickets
  *                                               → 该立项全部工单实时状态聚合（复用 ticket list
  *                                                 --epic 通路）：按 status 分桶计数 + 工单行
  *                                                 （id/title/status/stage/stage_state）；Temporal
  *                                                 不可达 → {degraded:true, reason} 降级不 502
- *   （t260910-14 退役注记：原 POST/GET <code>/suggest-next[/<jobId>] 建议 job 两支
- *     随 suggest_next 整链退役删除。）
- *   归档快照 POST /epics/<code>/archive 本工单不做（无调用方，留给归档动作真正发生时的工单）。
+ *   （t261019-12 退役注记：POST /epics/<code>/close 与 /status 两支状态改写路由随
+ *     「retired 布尔是唯一状态」整链删除——retiring = 在 git 里改 docs/epics/<code>.md
+ *     的 retired 行，不再有机器改写入口；原 suggest-next 两支随 suggest_next 退役（t260910-14）。）
  *
  * PR 式审批台（M9，t260821-m9-pr-approval）：
  *   GET  /sandbar-workbench/api/wf/tickets/<id>/diff
@@ -145,7 +147,7 @@ import { runAdminCli } from '../../sandbar-tools.ts'
 import { findProject, loadProjects, loadRegistry, primaryDir, type ProjectEntry } from '../../project-registry.ts'
 // 项目锚解析器（t260907-11 KI-057）：请求层按 ?project= 解析项目根，六处静态锚穿参的
 // 单一收口（取舍清单/env 覆盖闸/显式报错口径见该模块头注）。
-import { anchorEnv, anchorEpicsDir, resolveProjectAnchor, resolvedMark, type ProjectAnchor } from './src/host/project-anchor.ts'
+import { anchorEnv, resolveProjectAnchor, resolvedMark, type ProjectAnchor } from './src/host/project-anchor.ts'
 // 项目生命周期 CLI 薄壳（票③面D：写路径单源=安装器 CLI，读注册表仍走 TS 装载器；
 // 票据/体检数据=CLI 独有面，spawn 恰是同源——取舍清单见 src/host/project-admin.ts 头注）。
 import { ProjectCliError, runProjectCli } from './src/host/project-admin.ts'
@@ -193,7 +195,7 @@ import { computeHostFingerprint, type HostFingerprint } from './src/host/build-i
 // ——列表 enrichment（title_or_first）与详情头部两条通道一个口径。
 import { deriveTitleOrFirst } from './src/host/enrich.ts'
 import { SESSION_CHARTER_PATH, composeSessionCharter } from './src/host/session-charter.ts'
-import { closeEpic, isEvidenceFileName, listEpics, readEpicMarkdown, setEpicStatus } from './src/host/epics.ts'
+import { isEvidenceFileName } from './src/host/epics.ts'
 import {
   CONCLUDES, appendReviewRound, loadReview,
   type ReviewBlockEntry, type ReviewConclude, type ReviewRound,
@@ -626,7 +628,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    *  工单按 ProjectKey search attribute 过滤（Temporal 侧）；workflow 模板表是全局的，不过滤。 */
   /** 新建工单（epic-linkage Tier 3，t260826-02）：立项单详情页「新建工单」入口的落点——
    *  代号由界面传值（UI 无手输框），本层只透传不重复校验：epic 强校验单点在
-   *  client.py validate_epic_code（notes/epics/<代号>.md 存在性），拒收错误经 admin.py
+   *  client.py validate_epic_code（docs/epics/<代号>.md 存在性+retired 布尔），拒收错误经 admin.py
    *  ok:false 原样透传给 UI。审计=admin.py run-id 机制（与面板其他写操作同口径）。
    *  注意：本改动属 host 半，需重启 dsh 才生效。 */
   async function handleTicketCreate(req: IncomingMessage, res: ServerResponse, projectKey: string): Promise<void> {
@@ -1814,21 +1816,147 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   }
 
 
-  /* ---------------------------------- 立项单只读 API（epic-linkage Tier 2） */
+  /* ---------------------------------- 立项单只读 API（epic-linkage Tier 2；t261019-12 docs/epics 面孔） */
+
+  // ---- front-matter 读取（自含于本文件：epics.ts 的表格刮取/状态改写面已随
+  // 「retired 布尔是唯一状态」退役；正则口径与 shared.parse_epic_front_matter 互指，
+  // 改一边必须同步另一边）。
+
+  /** 立项代号形状白名单：镜像 shared.py EPIC_CODE_RE（互指，勿单边漂移）。本文件自含
+   *  定义——旧的 src/host/epics.ts 再出口随状态改写面退役，不再 import（t261019-12）。 */
+  const EPIC_CODE_RE = /^[a-z0-9][a-z0-9-]{0,40}$/
+
+  /** 立项档目录：env SANDBAR_EPICS_DIR 优先（shared._epics_dir 同款先例），缺省 <项目根>/docs/epics。
+   *  t261019-12 硬切换：不再回落 notes/epics（双真源=本票要杀的漂移）。 */
+  function epicDocsDir(anchor: ProjectAnchor): string {
+    const env = anchorEnv(anchor, 'SANDBAR_EPICS_DIR')
+    return env ?? join(anchor.root, 'docs', 'epics')
+  }
+
+  /** 解析一份 front-matter 块（--- ... --- 之间的 key: value 行）。块缺失/不闭合/行畸形
+   *  → throw（调用方决定降级口径；enforcement 面按 fail-closed 处置）。 */
+  function parseEpicFrontMatter(markdown: string): Record<string, string> {
+    if (!markdown.startsWith('---')) throw new Error("no front-matter block (file must start with '---')")
+    const lines = markdown.split('\n')
+    let end = -1
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i].trim() === '---') { end = i; break }
+    }
+    if (end === -1) throw new Error("unterminated front-matter block (no closing '---')")
+    const fields: Record<string, string> = {}
+    for (let i = 1; i < end; i++) {
+      const line = lines[i].trim()
+      if (line === '') continue
+      const idx = line.indexOf(':')
+      if (idx <= 0) throw new Error(`malformed front-matter line (no 'key: value'): ${JSON.stringify(line)}`)
+      fields[line.slice(0, idx).trim().toLowerCase()] = line.slice(idx + 1).trim()
+    }
+    return fields
+  }
+
+  interface EpicDocMeta {
+    code: string
+    retired: boolean
+    summary: string
+    started: string
+    /** front-matter 缺失/畸形时的具名缺陷（fail-closed：defect 行一律按 retired 呈现）。 */
+    defect?: string
+  }
+
+  /** 单档元信息：retired 严格取字面 'false'/'true'，其余（缺 key/其他值/解析失败）一律
+   *  retired:true + defect（与 shared.validate_epic_code 的 fail-closed 同一口径）。 */
+  function epicDocMeta(code: string, markdown: string): EpicDocMeta {
+    let fields: Record<string, string>
+    try {
+      fields = parseEpicFrontMatter(markdown)
+    } catch (err) {
+      return { code, retired: true, summary: '', started: '', defect: String(err instanceof Error ? err.message : err) }
+    }
+    const retired = fields.retired ?? ''
+    const defect = retired !== 'false' && retired !== 'true'
+      ? `front-matter 'retired' must be exactly 'false' or 'true' (found: ${retired === '' ? '(missing)' : JSON.stringify(retired)})`
+      : undefined
+    return {
+      code,
+      retired: retired !== 'false',
+      summary: fields.summary ?? '',
+      started: fields.started ?? '',
+      defect,
+    }
+  }
+
+  /** 列 docs/epics/*.md（只读）。目录不存在 → throw 具名错误（硬切换：绝不空表冒充「无立项」）；
+   *  单档读失败跳过不拖垮整列（与旧 listEpics 同款容错），但该档缺席在 enforcement 面
+   *  （shared.validate_epic_code）仍 fail-closed。 */
+  async function listEpicDocs(dir: string): Promise<EpicDocMeta[]> {
+    let names: string[]
+    try {
+      names = await readdir(dir)
+    } catch {
+      throw new Error(`epic registry directory not found: ${dir} (docs/epics — the store moved from notes/epics in t261019-12; hard cut, no fallback)`)
+    }
+    const out: EpicDocMeta[] = []
+    for (const name of names.sort()) {
+      if (!name.endsWith('.md')) continue
+      const code = name.slice(0, -'.md'.length)
+      if (!EPIC_CODE_RE.test(code)) continue
+      try {
+        out.push(epicDocMeta(code, await readFile(join(dir, name), 'utf8')))
+      } catch { /* 单文件读失败跳过 */ }
+    }
+    return out
+  }
+
+  /** 读单份立项 front-matter 元信息。形状/路径防穿/不存在 404（人话附现有代号清单，
+   *  shared.validate_epic_code 同风格）。 */
+  async function readEpicDoc(dir: string, code: string):
+    Promise<{ ok: true; meta: EpicDocMeta; path: string } | { ok: false; status: number; error: string }> {
+    if (!EPIC_CODE_RE.test(code)) {
+      return {
+        ok: false, status: 400,
+        error: `epic code shape is illegal: '${code}' (required ^[a-z0-9][a-z0-9-]{0,40}$, lowercase letters/digits/hyphens)`,
+      }
+    }
+    const root = resolve(dir)
+    const abs = resolve(root, code + '.md')
+    if (abs !== root && !abs.startsWith(root + sep)) {
+      return { ok: false, status: 400, error: `path escapes the epic registry (refused): '${code}'` }
+    }
+    let markdown: string
+    try {
+      markdown = await readFile(abs, 'utf8')
+    } catch (err: any) {
+      if (err?.code === 'ENOENT') {
+        let existing: string[] = []
+        try {
+          existing = (await readdir(root))
+            .filter((f) => f.endsWith('.md') && EPIC_CODE_RE.test(f.slice(0, -'.md'.length)))
+            .map((f) => f.slice(0, -'.md'.length))
+            .sort()
+        } catch { /* 目录不可读则不给清单 */ }
+        return {
+          ok: false, status: 404,
+          error: `epic code not found: '${code}' (docs/epics/ has no such file). Existing codes: ${existing.join(', ') || '(directory empty or missing)'}`,
+        }
+      }
+      return { ok: false, status: 500, error: `epic document read failed: ${String(err?.message ?? err)}` }
+    }
+    return { ok: true, meta: epicDocMeta(code, markdown), path: `docs/epics/${code}.md` }
+  }
 
   /**
-   * 立项单列表：列 notes/epics/*.md（目录不存在/无文件 → 空数组不报错）。
-   * KI-057：epics 目录与预跑缓存目录随 ?project= 项目根走（env 闸见 project-anchor.ts）。
+   * 立项单列表：列 docs/epics/*.md（t261019-12 front-matter 面孔）。目录不存在 → 具名 500
+   * （硬切换；KI-057：epics 目录随 ?project= 项目根走）。
    */
   async function handleEpics(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (req.method !== 'GET') {
-      sendJson(res, 405, { ok: false, error: '立项单列表只支持 GET' })
+      sendJson(res, 405, { ok: false, error: 'epic list supports GET only' })
       return
     }
     const anchor = anchorGuard(res, anchorOf(new URL(req.url ?? '/', 'http://x')))
     if (anchor === null) return
     try {
-      const epics = await listEpics(anchorEpicsDir(anchor))
+      const epics = await listEpicDocs(epicDocsDir(anchor))
       sendJson(res, 200, { ok: true, result: { count: epics.length, epics }, resolved: resolvedMark(anchor) })
     } catch (err) {
       sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
@@ -1837,10 +1965,10 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
 
   /** 立项单工单聚合（只读）：复用 ticket list --epic 通路（handleTickets 同款 callTool）。
    *  前置与详情路由同口径：形状 400 / 不存在 404（拦住后 ticket.py 侧强校验不会再以
-   *  引擎错误冒出）；其后 callTool 抛错或回 ok:false 一律降级 {degraded:true, reason}
-   *  （reason 透传底层 error 原文，不吞成空泛「不可用」），不 502。 */
+   *  引擎错误冒出）；retired 立项照常可查（读历史，不是开新票）；其后 callTool 抛错或
+   *  回 ok:false 一律降级 {degraded:true, reason}（reason 透传底层 error 原文），不 502。 */
   async function handleEpicTickets(res: ServerResponse, code: string, anchor: OkAnchor): Promise<void> {
-    const chk = await readEpicMarkdown(anchorEpicsDir(anchor), code)
+    const chk = await readEpicDoc(epicDocsDir(anchor), code)
     if (!chk.ok) {
       sendJson(res, chk.status, { ok: false, error: chk.error })
       return
@@ -1871,8 +1999,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
   }
 
   /** 立项单详情/工单聚合：prefix 路由，<code> 或 <code>/tickets（只读 GET）。
-   *  （t260910-14 退役注记：原详情准态「下一步建议」hint 函数与建议 job
-   *   启动/轮询两支一并删除。） */
+   *  （t261019-12 退役注记：POST <code>/close 与 <code>/status 两支状态改写路由随
+   *   「retired 布尔是唯一状态」删除——retiring = 在 git 里改 docs/epics/<code>.md；
+   *   原「下一步建议」hint 两支随 suggest_next 退役（t260910-14）。） */
   async function handleEpicRoute(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://x')
     let rest: string
@@ -1886,56 +2015,21 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     // KI-057：项目锚在分支前解析（?project= 缺省回落默认仓；未知/隔离显式 400/502）。
     const anchor = anchorGuard(res, anchorOf(url))
     if (anchor === null) return
-    // 结项动作（t260828-08）：POST /epics/<code>/close——立项目标达成后人审确认，
-    // 外科改写 notes/epics/<code>.md 状态表行为「已完结」（写前备份 /tmp）。须在
-    // 下面的 GET-only 405 之前分支。
-    if (parts.length === 2 && parts[1] === 'close') {
-      if (req.method !== 'POST') {
-        sendJson(res, 405, { ok: false, error: '结项动作只支持 POST（人审确认语义）' })
-        return
-      }
-      const r = await closeEpic(anchorEpicsDir(anchor), parts[0])
-      if (!r.ok) {
-        sendJson(res, r.status, { ok: false, error: r.error })
-        return
-      }
-      sendJson(res, 200, { ok: true, result: { code: r.code, status: r.status } })
-      return
-    }
-    // 状态编辑动作（t260831-05）：POST /epics/<code>/status {status, note?}——枚举白名单
-    // 校验 + 外科改写状态行 + 可选更新备注列 + 写前 /tmp 备份（setEpicStatus 与 close
-    // 单点共用骨架）。须在下面的 GET-only 405 之前分支。note 语义：缺省/null=不动备注，
-    // ''=清空，非空=写入（形状校验在 setEpicStatus/validateEpicNote 单口径）。
-    if (parts.length === 2 && parts[1] === 'status') {
-      if (req.method !== 'POST') {
-        sendJson(res, 405, { ok: false, error: '状态编辑只支持 POST（写动作语义）' })
-        return
-      }
-      let body: any
-      try {
-        body = await readJsonBody(req)
-      } catch {
-        sendJson(res, 400, { ok: false, error: '请求体必须是合法 JSON（readJsonBody 64KB 封顶）' })
-        return
-      }
-      if (body === null || typeof body !== 'object' || typeof body.status !== 'string') {
-        sendJson(res, 400, { ok: false, error: '请求体必须是 {"status": "<四值枚举>", "note"?: <单行字符串>}，status 必填字符串' })
-        return
-      }
-      const r = await setEpicStatus(anchorEpicsDir(anchor), parts[0], body.status, body.note)
-      if (!r.ok) {
-        sendJson(res, r.status, { ok: false, error: r.error })
-        return
-      }
-      sendJson(res, 200, { ok: true, result: { code: r.code, status: r.status, note: r.note } })
+    // 状态改写路由已删（t261019-12）：close/status 一律 410 具名指路（不是静默 404——
+    // 旧调用方要能一眼看出「这入口是随 retired 布尔退役的，改法=编辑 docs/epics 档」）。
+    if (parts.length === 2 && (parts[1] === 'close' || parts[1] === 'status')) {
+      sendJson(res, 410, {
+        ok: false,
+        error: `POST /epics/<code>/${parts[1]} was removed in t261019-12: 'retired' is the only epic state now — retire an epic by editing docs/epics/${parts[0]}.md in git`,
+      })
       return
     }
     if (req.method !== 'GET') {
-      sendJson(res, 405, { ok: false, error: '立项单路由只支持 GET（只读）' })
+      sendJson(res, 405, { ok: false, error: 'epic routes support GET only (read-only)' })
       return
     }
     if (parts.length === 1) {
-      const r = await readEpicMarkdown(anchorEpicsDir(anchor), parts[0])
+      const r = await readEpicDoc(epicDocsDir(anchor), parts[0])
       if (!r.ok) {
         sendJson(res, r.status, { ok: false, error: r.error })
         return
@@ -1943,13 +2037,12 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       sendJson(res, 200, {
         ok: true,
         result: {
-          code: r.code,
-          path: `notes/epics/${r.code}.md`,
-          title: r.title,
-          status: r.status,
-          note: r.note,
-          created: r.created,
-          markdown: r.markdown,
+          code: r.meta.code,
+          path: r.path,
+          retired: r.meta.retired,
+          summary: r.meta.summary,
+          started: r.meta.started,
+          ...(r.meta.defect !== undefined ? { defect: r.meta.defect } : {}),
         },
       })
       return
@@ -1958,7 +2051,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       await handleEpicTickets(res, parts[0], anchor)
       return
     }
-    sendJson(res, 404, { ok: false, error: '路径不合法：/sandbar-workbench/api/epics/<代号>[/tickets | /close | /status]' })
+    sendJson(res, 404, { ok: false, error: '路径不合法：/sandbar-workbench/api/epics/<code>[/tickets]' })
   }
 
   /** 工单 agent 日志（M12，只读）：show 工单 → 定 .suyou 目录 → 列 agent_*.log / stage_*.json。

@@ -1578,7 +1578,8 @@ export function WorkbenchSidebar(props: SidebarProps) {
               <ExecutorView
                 projectKey={viewProject}
                 openExecutorSession={openExecutorSessionById}
-                openTicketOverlay={(id) => handleTicketClick({ id } as Ticket, viewProject)} />
+                openTicketOverlay={(id) => handleTicketClick({ id } as Ticket, viewProject)}
+                closeTicketOverlay={() => setListNonce(n => n + 1)} />
             </>
           )}
         </div>

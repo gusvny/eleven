@@ -146,18 +146,18 @@ class PollerLiveCountTest(unittest.TestCase):
 
     def test_live_stale_and_unverifiable_are_separated(self):
         me = os.getpid()
-        pollers = [self._P("%d@192.0.2.132" % me),      # 活（就是本进程）
-                   self._P("999999@192.0.2.132"),       # 已死 ⇒ 历史残留，不算活
+        pollers = [self._P("%d@192.168.5.132" % me),      # 活（就是本进程）
+                   self._P("999999@192.168.5.132"),       # 已死 ⇒ 历史残留，不算活
                    self._P("no-pid@host")]                # 无 pid ⇒ 无法验活
-        live, stale_hist, unver = eo.classify_pollers(pollers, {"192.0.2.132"}, shared.pid_alive)
-        self.assertEqual([x["identity"] for x in live], ["%d@192.0.2.132" % me])
-        self.assertEqual([x["identity"] for x in stale_hist], ["999999@192.0.2.132"])
+        live, stale_hist, unver = eo.classify_pollers(pollers, {"192.168.5.132"}, shared.pid_alive)
+        self.assertEqual([x["identity"] for x in live], ["%d@192.168.5.132" % me])
+        self.assertEqual([x["identity"] for x in stale_hist], ["999999@192.168.5.132"])
         self.assertEqual([x["identity"] for x in unver], ["no-pid@host"])
         self.assertIn("历史残留", stale_hist[0]["note"])
         self.assertIn("无法验活", unver[0]["note"])
 
     def test_foreign_host_alias_is_annotation_only(self):
-        """host 段不在本机别名集里**不**等于不可验：实测 identity 用 192.0.2.132，
+        """host 段不在本机别名集里**不**等于不可验：实测 identity 用 192.168.5.132，
         而我们连的是 127.0.0.1:7233 —— 若按 host 判就会把活 poller 读成 0（假红）。"""
         me = os.getpid()
         live, _s, unver = eo.classify_pollers([self._P("%d@10.0.0.9" % me)], set(),

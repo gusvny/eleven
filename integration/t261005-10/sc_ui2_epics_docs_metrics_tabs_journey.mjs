@@ -61,7 +61,9 @@ const REPO = process.cwd()
 //   (src/host/metrics.ts frozen four fields). The pre-implement draft stubbed guessed
 //   shapes; implement landed on the real ones and the fixtures were aligned (not the
 //   other way round — the page must not bend to a fixture).
-const EPIC = { code: 'console-ui', title: 'console-ui rework', status: 'active', note: '', created: '2026-10-04' }
+// t261019-12 wire shape: the retired boolean + the English summary are the only
+// document prose the API serves (title/status/created retired with the vocabulary).
+const EPIC = { code: 'console-ui', retired: false, summary: 'The console rebuild: three columns, ticket detail as an overlay.', started: '2026-10-04' }
 const EPIC_TICKETS = {
   code: 'console-ui', count: 2, buckets: { running: 1, settled: 1 },
   tickets: [
@@ -215,6 +217,12 @@ async function main() {
     if (!(await clickTab(frame, 'epics'))) {
       results.record('U1 epics tab', 'fail', 'no [data-tab="epics"] on the panel face (pre-implement red expected)')
     } else {
+      // t261019-12: the row IS the epic (collapsed = code + badge + summary);
+      // ticket rows render inside the expanded row, so expand first.
+      const expandOK = await waitFor(page, async () => {
+        const head = frame.locator('[data-epic-head="console-ui"]').first()
+        try { await head.click({ timeout: 2000 }); return true } catch { return false }
+      })
       const okList = await waitFor(page, async () => {
         const t = await frame.textContent('body').catch(() => '')
         return t.includes('console-ui') && t.includes('tab consolidation fixture')
@@ -242,17 +250,18 @@ async function main() {
             fabricated === 0 && alive ? 'standalone click no-ops: no fabricated overlay, page alive' : `fabricated overlays: ${fabricated}, page alive: ${alive}`)
         }
       }
-      // U2 epic detail inside the tab with a Back walk-back
-      const backOK = await waitFor(page, async () => {
+      // U2 epic detail expands IN PLACE (t261019-12 mock): the expanded row carries
+      // the started/counts strip and the document link — no separate detail page.
+      const inPlaceOK = await waitFor(page, async () => {
         const t = await frame.textContent('body').catch(() => '')
-        return t.includes('← Back') || t.includes('←')
+        return t.includes('waiting on you') && t.includes('landed today')
       }, 6000)
       const bodyText = await frame.textContent('body').catch(() => '')
-      if (!backOK) {
-        results.record('U2 epic detail in-tab with Back', 'fail',
-          `no in-tab epic detail / Back affordance (epic iron rule); epics tab text head: ${JSON.stringify(bodyText.slice(0, 200))}`)
+      if (!inPlaceOK) {
+        results.record('U2 epic detail expands in place', 'fail',
+          `no in-place expansion face (started/counts strip); epics tab text head: ${JSON.stringify(bodyText.slice(0, 200))}`)
       } else {
-        results.record('U2 epic detail in-tab with Back', 'pass', 'in-tab detail with a back affordance')
+        results.record('U2 epic detail expands in place', 'pass', 'expanded row carries the counts strip in place (no separate detail page)')
       }
     }
 

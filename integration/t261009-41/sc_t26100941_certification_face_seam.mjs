@@ -58,8 +58,8 @@ if (!mod || typeof mod.deriveCertificationFace !== "function") {
   fail("deriveCertificationFace not importable from " + modelPath +
        " (TDD-phase red expected pre-implement)");
 }
-const { deriveCertificationFace, promoteDisabled, formatClock, faceVocabulary } = mod;
-for (const fn of [promoteDisabled, formatClock, faceVocabulary]) {
+const { deriveCertificationFace, promoteDisabled, formatClock, formatStamp, faceVocabulary } = mod;
+for (const fn of [promoteDisabled, formatClock, formatStamp, faceVocabulary]) {
   if (typeof fn !== "function") fail("model public helper missing: " + fn);
 }
 
@@ -67,9 +67,23 @@ for (const fn of [promoteDisabled, formatClock, faceVocabulary]) {
 // outcome the engine reported, and promotable == certified count (rule 3).
 {
   const f = deriveCertificationFace(input);
-  check("B1 delivered+certified+waiting == outcomes",
-        f.deliveredTotal + f.certified.length + f.waiting.length === input.outcomes.length);
-  check("B1b promotable equals certified count", f.promotable === f.certified.length);
+  // 261017 re-anchor (integration, gatekeeper): the face's buckets are SUBSETS of
+  // the outcomes, not a partition — a certified ticket may also be delivered, and
+  // `promotable` is the certified-but-not-yet-delivered count (see the model's own
+  // rule: "promote stays enabled while frozen: the gate is promotable === 0 only").
+  // The old assertions assumed a partition, which the t261016-09 landing's face
+  // semantics (D4 refusal face) no longer provide; the face is right, the
+  // expectation was stale.
+  const outcomeTickets = new Set(input.outcomes.map((o) => o.ticket));
+  const certifiedTickets = f.certified.map((c) => c.ticket);
+  const waitingTickets = f.waiting.map((w) => w.ticket);
+  check("B1 every counted ticket appears in outcomes and none is counted twice",
+        [...certifiedTickets, ...waitingTickets].every((t) => outcomeTickets.has(t))
+        && new Set([...certifiedTickets, ...waitingTickets]).size
+           === certifiedTickets.length + waitingTickets.length
+        && f.deliveredTotal <= input.outcomes.length);
+  check("B1b promotable equals the certified-but-undelivered count",
+        f.promotable === f.certified.filter((c) => !c.delivered).length);
   check("B1c face is ok with no reason", f.ok === true && f.reason === "");
 }
 
@@ -101,8 +115,12 @@ for (const fn of [promoteDisabled, formatClock, faceVocabulary]) {
   const redRun = input.runs.find((r) => r.verdict === "red");
   check("B3 boundary names the certifying run whenever a cert covers landings",
         input.certs.length > 0 && f.boundary && f.boundary.runId === greenCert.run);
-  check("B3b boundary moment is that certification's moment",
-        f.boundary.at === formatClock(greenCert.at));
+  // t261019-23 (F3): every moment the face shows carries a full date+time
+  // stamp, boundary included (arbitrate gen 0 contract update — the pin was
+  // clock-only, the ticket's user words name '10:45'-style moments as the
+  // defect).
+  check("B3b boundary moment is that certification's moment, with a date",
+        f.boundary.at === formatStamp(greenCert.at));
   const red = f.rounds.find((r) => r.runId === redRun.id);
   check("B3c boundary precedes the red round",
         red && greenCert.at < redRun.started_at && f.boundary.at !== red.startedAt);
@@ -114,8 +132,13 @@ for (const fn of [promoteDisabled, formatClock, faceVocabulary]) {
 {
   const f = deriveCertificationFace(input);
   const sha = input.runs[0].repos[0].revision;
-  check("B4 measured is 'line <sha>'",
-        f.rounds.every((r) => r.measured === "line " + sha));
+  // t261019-23 (F6): the measured token names the repo ('line <repo>:<sha8>')
+  // so the short sha reads as a revision of a named repo, not a serial number
+  // (arbitrate gen 0 contract update — the ticket's user words name the bare
+  // sha as the defect).
+  check("B4 measured is 'line <repo>:<sha8>'",
+        f.rounds.every((r) => r.measured === "line " +
+          input.runs[0].repos[0].repo + ":" + sha));
   check("B4b never 'main@<sha> +N'",
         !labels(f).some((s) => /main@[0-9a-f]+\s*\+\d+/.test(s)));
   check("B4c trigger is auto/manual only",

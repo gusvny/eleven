@@ -305,49 +305,64 @@ def _settle(wt: Path, stage_id: str, **kw):
         face=kw.pop("face", "agent"), **kw)
 
 
-def test_b_modified_unauthorized_is_reverted_with_diff(lane):
-    """M 子用例（实案形态）：tracked 越权修改 → 回滚+diff 留档 → 二次 settle 绿，
-    分支零删除落盘，agent 修改可从 diff 还原。"""
+def test_b_modified_unauthorized_reverted_with_archive(lane):
+    """M sub-case (261017 reconciliation, host ruling): a tracked out-of-write-set
+    edit is diff-archived and then reverted to HEAD. This reverses the t261016-19
+    Face 2a expectation, which the delivered t26091619-incident-replay contract
+    contradicts (a shared tool must not end up committed by the settle); the
+    integration gatekeeper reconciled the two: the revert wins because the archived
+    diff keeps the change recoverable (`git apply`), and the sanctioned way out of
+    the loop Face 2a was patching is a rework, not engine leniency. The engine
+    runtime (lane venv) and a write_set_missing refusal still leave the file in
+    place untouched."""
     root, wt = lane
     f = wt / "integration" / "lint_tests.py"
+    before = f.read_text(encoding="utf-8")
     f.write_text("HACKED=1\n", encoding="utf-8")
+    auto_note = "\u5df2\u81ea\u52a8\u5904\u7f6e"  # engine's auto-remediation note key
     note = _settle(wt, "arbitrate")
-    # 处置全清出口：点名回滚、不含机读键（非拒绝回执——主链据此可继续，不卡闸）
-    assert "lint_tests.py 已回滚" in note and "diff 留档" in note
-    assert "path_gate_reason" not in note and "已自动处置" in note
-    # 工作区恢复基线、状态干净、无 commit（零删除落盘）
-    assert f.read_text(encoding="utf-8") == "BASE=1\n"
-    assert _status(wt) == ""
-    assert _head_count(wt) == _head_count(wt)  # 占位防误读；真实断言在二次 settle 后
-    # diff 留档在档且可 apply 还原 agent 修改
+    # the refusal names the file and the auto-remediation happened
+    assert "lint_tests.py" in note
+    assert auto_note in note
+    # the worktree is back to HEAD for that path, and the change is archived
+    assert f.read_text(encoding="utf-8") == before
+    assert " M integration/lint_tests.py" not in _status(wt)
     batches = _quarantine_batches(wt)
     assert len(batches) == 1
-    diffs = list(batches[0].glob("*.diff"))
+    diffs = sorted(batches[0].glob("*.diff"))
     assert len(diffs) == 1
+    assert "HACKED=1" in diffs[0].read_text(encoding="utf-8")
     manifest = json.loads((batches[0] / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["items"][0]["action"] == "reverted"
     assert manifest["items"][0]["path"] == "integration/lint_tests.py"
-    f.write_text("BASE=1\n", encoding="utf-8")  # 基线内容下 apply（-R 为反向，此处正向重放）
-    p = _git(wt, "apply", str(diffs[0]), check=False)
-    assert p.returncode == 0, p.stderr
-    assert f.read_text(encoding="utf-8") == "HACKED=1\n"
-    _git(wt, "checkout", "--", "integration/lint_tests.py")  # 复位给后续断言
-    # 二次 settle 转绿（工作区干净 → 幂等 note，不再复判同红）
+    assert manifest["items"][0]["diff"] == diffs[0].name
+    # nothing was committed behind the remediation
+    assert _head_count(wt) == int(_git(root, "rev-list", "--count", "main").stdout.strip())
+    # a second settle finds a clean worktree and says so
     note2 = _settle(wt, "arbitrate")
-    assert note2 == CLEAN_NOTE
+    assert auto_note not in note2
+    assert f.read_text(encoding="utf-8") == before
 
 
-def test_b_reverted_no_deletion_reaches_design_stage(lane):
-    """M+换段子用例：处置后换 design_integration_tests 面（prefixes integration），
-    无 D 出现、无删除可落盘——v1 挪档方案的外漏险被状态分流堵死。"""
+def test_b_design_stage_accepts_reapplied_edit(lane):
+    """M + stage-switch sub-case (261017 reconciliation): at the arbitrate stage the
+    out-of-write-set edit is reverted with an archive; at a stage that allows
+    integration/ a re-applied edit lands normally. That is the sanctioned way out
+    the contract names - the engine does not keep an illegal edit alive across
+    stages for a later stage to bless it."""
     root, wt = lane
     (wt / "integration" / "lint_tests.py").write_text("HACKED=1\n", encoding="utf-8")
     note = _settle(wt, "arbitrate")
-    assert "已回滚" in note
+    # the edit is remediated (archived + reverted), so the settle reports the
+    # auto-remediation rather than a bare structured refusal
+    assert "\u5df2\u81ea\u52a8\u5904\u7f6e" in note and "lint_tests.py" in note
     assert " D" not in _status(wt)
+    # the sanctioned path: re-apply the change at the stage that accepts it
+    (wt / "integration" / "lint_tests.py").write_text("HACKED=1\n", encoding="utf-8")
     note2 = _settle(wt, "design_integration_tests")
-    assert note2 == CLEAN_NOTE
-    assert _head_count(wt) == int(_git(root, "rev-list", "--count", "main").stdout.strip())
+    assert "worker" in note2 and "commit" in note2
+    assert (wt / "integration" / "lint_tests.py").read_text(encoding="utf-8") == "HACKED=1\n"
+    assert _head_count(wt) == int(_git(root, "rev-list", "--count", "main").stdout.strip()) + 1
 
 
 def test_b_untracked_moved_to_quarantine(lane):
@@ -446,11 +461,16 @@ def test_b_judged_files_in_structured_refusal(lane):
     refusal: dict = {}
     note = _settle(wt, "arbitrate", refusal=refusal)
     assert refusal.get("reason_code") == "unauthorized_path"
-    assert refusal.get("files") == ["integration/lib_env.py"]
+    # 261017 reconciliation: the M file is auto-remediated (archived + reverted), so
+    # the remaining violation list carries the D entry; the M half is named in the
+    # note/evidence and is still in judged_files (that face is unchanged)
+    assert "integration/lib_env.py" in set(refusal.get("files") or [])
+    auto_note = "\u5df2\u81ea\u52a8\u5904\u7f6e"  # engine's auto-remediation note key
+    assert "lint_tests.py" in note and auto_note in note
     judged = refusal.get("judged_files")
     assert isinstance(judged, list) and set(judged) >= {
         "integration/lib_env.py", "integration/sc_ok.py"}
-    assert "lint_tests.py 已回滚" in note           # M 半已处置，摘要随拒绝 note
+    assert "lint_tests.py" in note                  # the M half is still named (refusal face)
     assert note
     assert refusal.get("evidence") == note
 
@@ -516,3 +536,27 @@ def test_d_gate_red_detail_judged_files_shapes():
     # sanitize 透传新键（消费端 blocked_detail 面保真）
     s = pg.sanitize_gate_refusal(d)
     assert s["judged_files"] == d["judged_files"] and s["files"] == d["files"]
+
+
+def test_b_engine_runtime_venv_never_staged(lane):
+    """t261016-19 Face 1 / KI-020 (2) A5 regression pin: beyond the judge
+    exemption, the venv must also stay out of the commit - the fixture's
+    .gitignore does not cover the venv, so `add -A` stages it whole; after the
+    settle HEAD carries only the in-write-set deliverable, and the venv is on
+    disk, untracked, unstaged."""
+    root, wt = lane
+    venv = wt / ".venv-t26101619ut" / "lib" / "python3.9" / "site-packages" / "pkg"
+    venv.mkdir(parents=True)
+    (venv / "__init__.py").write_text("x = 1\n", encoding="utf-8")
+    (wt / "integration" / "sc_good.py").write_text("GOOD=1\n", encoding="utf-8")
+    note = _settle(wt, "arbitrate")
+    # the deliverable still lands; the venv enters NO commit (KI-020 (2): the
+    # exemption filters the judge, it never widens the add)
+    commit_files = _git(wt, "show", "--name-only", "--format=", "HEAD").stdout.split()
+    assert commit_files == ["integration/sc_good.py"]
+    # venv untouched on disk, nothing staged behind the commit, named exemption
+    assert (venv / "__init__.py").read_text(encoding="utf-8") == "x = 1\n"
+    staged = _git(wt, "diff", "--cached", "--name-only").stdout.split()
+    assert staged == []                       # nothing left staged behind the commit
+    assert ".venv-t26101619ut" not in " ".join(commit_files)
+    assert "engine-runtime writes exempt" in note

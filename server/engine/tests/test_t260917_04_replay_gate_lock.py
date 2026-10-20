@@ -390,6 +390,10 @@ BRANCH_REGISTRY = {
     "dev_lane.py#run#await self._blocked_over_limit(tests_exempt_cap_blocked_text(tests_exempt_rounds, audit=tests_fault_cap_audit_text(tests_rounds, MAX_TESTS_FAULT_ROUNDS, tests_e#1":
         "同上（并行汇合侧 arb_acc_parallel 同形分支，t260917-09 连续豁免超限封面；"
         "260926 同款具名审计尾注实参）。",
+    # t261019-02's close-out guard no longer sits in workflow code: 261019 moved it into the
+    # merge ACTIVITY (the Temporal sandbox refused the in-workflow ledger read), so the old
+    # registration entry is gone with the call it described. Nothing replaces it here: an
+    # activity reading the ledger is not a workflow-replay concern.
 }
 
 

@@ -153,7 +153,15 @@ total_calls = len(re.findall(r"phase = self\._auto_rework\(", src))
 # escapes via _auto_rework back to implement instead of stopping for a human
 # (KI-01M4FKAWY0EP59PY0V0QZWWGV5); the new call sites live in the two dev_lane
 # settle-failure branches (main-sync and merge_check families).
-ok(total_calls == 11, "自动打回点 11 处（t261009-17 基线 10 + 主同步 no-human-info 形状自动重跑点 1）（实测 %d）" % total_calls)
+# t261019-24 仲裁（261019）：main 侧 declaration-driven self-heal 批
+# （ea3def75 + b3d8e5e4）新增合法自动打回点 1（stale DECLARED build output
+# 自愈 + 通用 declaration-driven remedy）→ 11→12；下一处新增须再次具名到此。
+# t261019-25 arbitrate gen2: baseline 11 -> 12 — main b3d8e5e4 (261019 merge_check
+# self-healing, merged into this lane at f787cc8) added one more legitimate
+# _auto_rework escape (the declaration-driven mechanically-remediable-red path
+# in the merge_check family); same bump convention as t261009-17.
+# (conflict resolution: both sides bumped to the SAME value 12 — both provenances kept.)
+ok(total_calls == 12, "自动打回点 12 处（t261009-17 基线 10 + no-human-info 形状 1 + 261019 主同步 declaration-driven self-heal 1，来源 main b3d8e5e4）（实测 %d）" % total_calls)
 # The merge point no longer stuffs self._rework (one rework must not land two timeline records)
 merge_block = src[src.find('if not mr.ok:'):src.find('if not mr.ok:') + 2000]
 ok("self._rework = ReworkRequest(" not in merge_block,

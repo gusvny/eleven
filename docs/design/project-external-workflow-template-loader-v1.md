@@ -10,7 +10,7 @@ updated: 2026-09-28
 
 > Source: nusuyou's "Requirements for sandbar: project external workflow templates" (§six,
 > interface shape) and the design draft
-> (`notes/discussions/260924-项目外置工作流模板-设计稿.md`). This document is the **loader's
+> (`notes/discussions/260924-external-project-workflow-templates.md`). This document is the **loader's
 > implementation contract**: interface shape, rejection semantics, and the coding rules and
 > evolution discipline that consumers must follow.
 > For the paths key table of contract v1 see [sandbar project onboarding contract v1](sandbar-project-onboarding-contract-v1.md) ①d.
@@ -163,4 +163,4 @@ failure" rejection that likewise reaches the ticket-creation text, never silentl
 ## Related documents
 
 - [sandbar project onboarding contract v1](sandbar-project-onboarding-contract-v1.md) (①d paths key table)
-- Design draft: `notes/discussions/260924-项目外置工作流模板-设计稿.md`
+- Design draft: `notes/discussions/260924-external-project-workflow-templates.md`

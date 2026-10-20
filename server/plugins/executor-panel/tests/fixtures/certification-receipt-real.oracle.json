@@ -1,0 +1,118 @@
+{
+ "note": "engine oracle: develop_certify.ticket_wait_state driven with develop_promote._is_green_reader over the live sandbar delivery ledger (read-only capture, 261016)",
+ "waitStates": [
+  {
+   "ticket": "t261009-80",
+   "state": "certified",
+   "covered_by": "cert-01M4ZG293G9CD5K9MQ75MKFCY3",
+   "waiting_since": 1791697828221
+  },
+  {
+   "ticket": "t261011-25",
+   "state": "certified",
+   "covered_by": "cert-01M4ZG293G9CD5K9MQ75MKFCY3",
+   "waiting_since": 1791726647736
+  },
+  {
+   "ticket": "t261012-02",
+   "state": "certified",
+   "covered_by": "cert-01M4ZG293G9CD5K9MQ75MKFCY3",
+   "waiting_since": 1791792709403
+  },
+  {
+   "ticket": "t261012-03",
+   "state": "certified",
+   "covered_by": "cert-01M4ZG293G9CD5K9MQ75MKFCY3",
+   "waiting_since": 1791807662599
+  },
+  {
+   "ticket": "t261012-06",
+   "state": "certified",
+   "covered_by": "cert-01M4ZG293G9CD5K9MQ75MKFCY3",
+   "waiting_since": 1791852024951
+  },
+  {
+   "ticket": "t261013-04",
+   "state": "certified",
+   "covered_by": "cert-01M4ZG293G9CD5K9MQ75MKFCY3",
+   "waiting_since": 1791871438313
+  },
+  {
+   "ticket": "t261013-06",
+   "state": "certified",
+   "covered_by": "cert-01M4ZG293G9CD5K9MQ75MKFCY3",
+   "waiting_since": 1791911741718
+  },
+  {
+   "ticket": "t261014-04",
+   "state": "certified",
+   "covered_by": "cert-01M4ZG293G9CD5K9MQ75MKFCY3",
+   "waiting_since": 1792025129276
+  },
+  {
+   "ticket": "t261016-01",
+   "state": "certified",
+   "covered_by": "cert-01M50JCXETVV4KJRB3PQRRWAK0",
+   "waiting_since": 1792094061359
+  },
+  {
+   "ticket": "t261012-09",
+   "state": "waiting",
+   "covered_by": null,
+   "waiting_since": 1792115556487
+  },
+  {
+   "ticket": "t261016-07",
+   "state": "waiting",
+   "covered_by": null,
+   "waiting_since": 1792116543177
+  }
+ ],
+ "certs": [
+  {
+   "id": "cert-01M4SXHBZXHEPR0E34TVEJAJPG",
+   "run": "run-01M4T2WTCYDA7SDDCBN63BSBGP",
+   "at": 1791871201277
+  },
+  {
+   "id": "cert-01M4V4EG8TSN6Q5R0PPR3ZZYB8",
+   "run": "run-01M4V72NR35TXPTNT3E3Z6NGWZ",
+   "at": 1791912001818
+  },
+  {
+   "id": "cert-01M4YH5FXH8C6PQY286Q9Z5VWT",
+   "run": "run-01M4YVAJPGSX6NAPCSGXYV96C5",
+   "at": 1792026001329
+  },
+  {
+   "id": "cert-01M4ZC7EVWJ9SFECYS9D1RG40M",
+   "run": "run-01M4ZDT6XNH6T5WHTDD0VE97J1",
+   "at": 1792054377340
+  },
+  {
+   "id": "cert-01M4ZG293G9CD5K9MQ75MKFCY3",
+   "run": "run-01M4ZHMBJKS9810B499RC2PGZ0",
+   "at": 1792058401904
+  },
+  {
+   "id": "cert-01M4ZKG3ZN8FW1G1RXG6WMWPGT",
+   "run": "run-01M4ZN2KM7828QSN00X1V7RTSB",
+   "at": 1792062001141
+  },
+  {
+   "id": "cert-01M503GTS7F1T8HXTQHXRFXNM6",
+   "run": "run-01M5052VJFEVCQ1NZB4GJ8JT4S",
+   "at": 1792078801703
+  },
+  {
+   "id": "cert-01M50JCXETVV4KJRB3PQRRWAK0",
+   "run": "run-01M50KYT961ZVW6E8V9NARC857",
+   "at": 1792094402010
+  },
+  {
+   "id": "cert-01M50NTRCJWJV832M2Q6MG66T3",
+   "run": "run-01M50QCSMNG29HWD6V7RPT6KKX",
+   "at": 1792098001298
+  }
+ ]
+}

@@ -182,6 +182,178 @@ TICKET_TEST_FACE_NOTE = "lawful deliverable outside the write set (ticket-test-f
 BUNDLE_OUT_FACE_NOTE = ("lawful build-chain deliverable outside the write set "
                         "(bundle-out-face rule, declared in server/merge-checks.yaml)")
 
+# ---- merge_check auto-rework policy (261019) -------------------------------
+#: The declaration key that opts a project INTO self-healing merge_check reds.
+#: Design: the ENGINE owns the closed set of red classes whose remedy is a
+#: mechanical, idempotent act (REMEDIABLE_RED_CODES) - it is the only party that
+#: knows a red is machine-actionable. The PROJECT owns the policy (which of those
+#: classes it wants auto-routed, to which stage, with what bound). Neither side
+#: can invent the other: an undeclared class is never auto-routed, and a declared
+#: class the engine does not know is refused by name (fail-closed, never "try
+#: something anyway"). An absent key keeps the previous behaviour (every red
+#: blocks for a human), so a project that says nothing is byte-unchanged.
+AUTO_REWORK_POLICY_KEY = "merge_check_auto_rework"
+
+#: The engine's closed registry: red code -> what the remedy mechanically IS.
+#: `stage` is where the remedy can be performed; `remedy` is written into the
+#: ticket's own reason (the lane agent reads it as the instruction); `sole_red`
+#: means the route fires only when NO other red is present in the round, so a
+#: self-heal can never mask a second, human-worthy problem.
+REMEDIABLE_RED_CODES = {
+    "bundle_stale": {
+        "stage": "implement",
+        "max_rounds": 2,
+        "sole_red": False,
+        "remedy": ("run the declared build entry of the pair named in "
+                   "server/merge-checks.yaml (bundle_pairs entry:) and commit the "
+                   "paired out prefix, then return to merge_check. The write set "
+                   "already admits the out prefix (bundle-out-face widening); no "
+                   "envelope change is needed."),
+    },
+    # 261019 second entry, and the reason the registry exists: the LANE
+    # SELF-CHECK (the in-lane verify_lane code face) is feedback, not the
+    # delivery judgment - the same property is re-judged by run_integration_tests
+    # and by merge_check on the delivered tree. Measured on t261019-09: one test
+    # of 5,335 failed inside the lane self-check (isolated rerun of that file:
+    # 24 passed), and the ticket stopped needing a human to press retry although
+    # the lane could look at the red and act. Routing it back to implement is the
+    # same mechanical shape as a stale bundle: no human decision is encoded.
+    "verify_red": {
+        "stage": "implement",
+        "max_rounds": 2,
+        "sole_red": False,
+        "remedy": ("read the named red(s) in the lane self-check detail, reproduce "
+                   "them in the lane, and act on what they actually say: fix the "
+                   "code, or - when the red is a load/flake artefact - prove it by a "
+                   "quiet isolated rerun and let the following merge_check re-judge "
+                   "the delivered tree."),
+    },
+}
+
+#: Hard ceiling on a declared max_rounds: a policy can ask for fewer, never for
+#: an unbounded loop (a build that never stabilises must reach a human).
+AUTO_REWORK_MAX_ROUNDS_CEILING = 3
+
+
+def parse_auto_rework_policy(text):
+    """Parse the optional `merge_check_auto_rework:` section of merge-checks.yaml.
+
+    Shape (all values bare tokens, one entry per line, no nesting):
+
+        merge_check_auto_rework:
+          - code: bundle_stale
+            stage: implement        # optional: default = the registry's stage
+            max_rounds: 2           # optional: default = the registry's bound
+
+    Returns (policy, diag): `policy` maps red code -> {"stage", "max_rounds"};
+    `diag` is "" on success and a NAMED reason otherwise. Fail-closed rules -
+    every one of them measured as a refusal, never a silent skip:
+      * a line inside the section that is not one of the three keys is refused;
+      * a code the engine has no remedy for is refused (a typo must not read as
+        "the project asked for nothing");
+      * a stage outside the closed rework vocabulary (`implement`, the only
+        stage where a mechanical rebuild belongs today) is refused;
+      * max_rounds that is not a positive int is refused, and anything above
+        AUTO_REWORK_MAX_ROUNDS_CEILING is CLAMPED DOWN (with the clamp named in
+        the returned policy) rather than honoured.
+    An absent section returns ({}, "") - no policy, no behaviour change.
+    """
+    if not isinstance(text, str):
+        return {}, "policy text is not a string (fail-closed: no auto-rework)"
+    entries = []
+    cur = None
+    in_section = False
+    for raw in text.splitlines():
+        ln = raw.replace("\t", "  ").rstrip()
+        s = ln.strip()
+        if not s or s.startswith("#"):
+            continue
+        if not ln.startswith(" "):
+            in_section = (s == AUTO_REWORK_POLICY_KEY + ":")
+            cur = None
+            continue
+        if not in_section:
+            continue
+        if s.startswith("- code:"):
+            cur = {"code": s[len("- code:"):].strip()}
+            entries.append(cur)
+            continue
+        if cur is None:
+            return {}, "%s: a line before the first '- code:' entry: %s" % (
+                AUTO_REWORK_POLICY_KEY, s)
+        if s.startswith("stage:"):
+            cur["stage"] = s[len("stage:"):].strip()
+        elif s.startswith("max_rounds:"):
+            cur["max_rounds"] = s[len("max_rounds:"):].strip()
+        else:
+            return {}, "%s: unparseable line inside the section: %s" % (
+                AUTO_REWORK_POLICY_KEY, s)
+    if not in_section and not entries:
+        return {}, ""
+    policy = {}
+    for ent in entries:
+        code = str(ent.get("code") or "").strip()
+        if code not in REMEDIABLE_RED_CODES:
+            return {}, ("%s: red code %r has no mechanical remedy in this engine "
+                        "(known: %s)" % (AUTO_REWORK_POLICY_KEY, code,
+                                         ", ".join(sorted(REMEDIABLE_RED_CODES))))
+        spec = REMEDIABLE_RED_CODES[code]
+        stage = str(ent.get("stage") or spec["stage"]).strip()
+        if stage != spec["stage"]:
+            return {}, ("%s: stage %r is outside the rework vocabulary for code %r "
+                        "(only %r)" % (AUTO_REWORK_POLICY_KEY, stage, code,
+                                       spec["stage"]))
+        try:
+            rounds = int(ent.get("max_rounds") or spec["max_rounds"])
+        except (TypeError, ValueError):
+            return {}, ("%s: max_rounds %r for code %r is not an integer"
+                        % (AUTO_REWORK_POLICY_KEY, ent.get("max_rounds"), code))
+        if rounds < 1:
+            return {}, ("%s: max_rounds %d for code %r is not positive"
+                        % (AUTO_REWORK_POLICY_KEY, rounds, code))
+        policy[code] = {"stage": stage,
+                        "max_rounds": min(rounds, AUTO_REWORK_MAX_ROUNDS_CEILING)}
+    return policy, ""
+
+
+def auto_rework_plan(checks, policy):
+    """The round's auto-rework decision, as data the WORKFLOW can act on.
+
+    Fires only when every red of the round is covered by an opted-in remediable
+    code (and, for `sole_red` codes, when it is the round's only red) - one
+    stage for the whole batch, because a rework has one target. Returns
+    {"stage", "code", "note"} or None. The note carries what the gate measured
+    so the lane agent reads a remedy, not a symptom.
+    """
+    reds = [c for c in (checks or []) if isinstance(c, dict) and not c.get("green")]
+    if not reds or not isinstance(policy, dict) or not policy:
+        return None
+    stage = None
+    codes = []
+    lines = []
+    for c in reds:
+        code = str(c.get("reason_code") or "")
+        spec = policy.get(code)
+        if spec is None:
+            return None                       # an un-opted-in red: a human decides
+        if spec["stage"] != (stage or spec["stage"]):
+            return None                       # two different targets: no single route
+        stage = spec["stage"]
+        if code not in codes:
+            codes.append(code)
+        files = c.get("files") or []
+        lines.append("%s%s%s" % (
+            code,
+            (" (%s -> %s)" % (files[0], files[1])) if len(files) >= 2 else "",
+            (" — " + str(c.get("detail"))) if c.get("detail") else ""))
+    for code in codes:
+        if REMEDIABLE_RED_CODES[code].get("sole_red") and len(reds) > 1:
+            return None                       # a sole-red remedy must not batch
+    remedy = " ".join(REMEDIABLE_RED_CODES[c]["remedy"] for c in codes)
+    return {"stage": stage, "code": ",".join(codes),
+            "note": ("merge_check sent this back for mechanical self-heal: %s. "
+                     "What to do: %s" % ("; ".join(lines), remedy))}
+
 
 def parse_bundle_pairs(text: str) -> List[Tuple[str, str]]:
     """Minimal parser for the bundle_pairs section of merge-checks.yaml — the

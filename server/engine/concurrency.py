@@ -41,6 +41,14 @@ after the signature it continues without re-queueing. The 60 s re-poll backstop
 in the workflow gate protects WAITERS (a missed promotion resolves within one
 poll); it is NOT leak protection — a holder whose workflow died mid-stage is
 cleared by `ticket.py {"op":"concurrency","reconcile":true}` (named output).
+#
+# t261019-31 (KI-01M533EHPA0AYQ2Y2GCNGXS4SD): the terminal-ending leak has two
+# structural closes — (a) the engine-side cancel/terminate/close-out entries in
+# client.py release the slot by name (CAUSE_TERMINATED) right after the
+# workflow dies (host-side code survives the kill); (b) a stale-holder backstop
+# in acquire (HOLDER_STALE_S, RUNNING holders only) mirrors the queue-corpse
+# sweep for kills that bypass every client.py entry. An over-limit holder count
+# is named on both faces (over_limit_face) — never a silent 12/7.
 
 State file: <projects_root>/<key>/concurrency-state.json, guarded by a sibling
 concurrency-state.lock (fcntl.flock) so claim/release/read are atomic across
@@ -426,6 +434,13 @@ def acquire(project_key: str, ticket: str, priority: bool = False) -> Dict[str, 
         queue = doc["queue"]
         held = next((h for h in holders if h.get("ticket") == t), None)
         if held is not None:
+            # t261019-31: the already-holding early return is also the holder
+            # HEARTBEAT — every stage start re-acquires, so refreshing `since`
+            # here (atomic, same locked step) is what lets the stale-holder
+            # sweep tell a live running holder from a corpse. A human-hold
+            # holder is exempt from the sweep by design (its hold needs no
+            # heartbeat); refreshing `since` is still correct bookkeeping.
+            held["since"] = now
             return {"granted": True, "already_holding": True,
                     "reason": held.get("reason"), "position": 0,
                     "limit": limit, "holders": len(holders),
@@ -436,16 +451,66 @@ def acquire(project_key: str, ticket: str, priority: bool = False) -> Dict[str, 
                 queue.insert(0, dict(entry))
             else:
                 queue.append(dict(entry))
+        else:
+            # 261019: the entry's `since` is a HEARTBEAT, not "queued at".
+            # A waiter re-polls on its backoff, so refreshing here is what
+            # lets a promoter tell a live waiter from a corpse (QUEUE_STALE_S).
+            for e in queue:
+                if e.get("ticket") == t:
+                    e["since"] = now
+        # Clear corpses ahead of this waiter, so a dead head can never block
+        # the queue for the hours it takes somebody to notice (261019: four
+        # dead heads blocked nine live tickets).
+        dropped_stale: List[str] = []
+        if any(_is_stale(e, now) and e.get("ticket") != t for e in queue):
+            kept = []
+            for e in queue:
+                if e.get("ticket") != t and _is_stale(e, now):
+                    dropped_stale.append(e.get("ticket"))
+                else:
+                    kept.append(e)
+            doc["queue"] = queue = kept
         pos = _queue_pos(queue, t)
         unlimited = limit is None
+        # The room judgement uses the PRE-sweep holder count: acquire never
+        # grants on holders it is itself about to condemn (the t261019-29
+        # contract, main-green — its fixtures seed long-idle holders and pin
+        # the refusal). The sweep still runs and names its drops; the freed
+        # slot serves this waiter on its NEXT poll, bounded by the waiter's
+        # declared backoff (5 s..120 s) — a bounded one-poll delay instead of
+        # a same-call jackpot.
         room = unlimited or len(holders) < limit
+        # t261019-31: sweep stale RUNNING holders in the same locked step.
+        # HUMAN-HOLD holders are NEVER judged — a gate waiter does not
+        # re-acquire until after the signature, so it has no heartbeat by
+        # design, and its hold is deliberate (rule 3); the sweep must never
+        # release it, whatever its age.
+        dropped_stale_holders: List[str] = []
+        if any(_holder_is_stale(h, now) for h in holders
+               if h.get("ticket") != t):
+            kept_h: List[Dict[str, Any]] = []
+            for h in holders:
+                if h.get("ticket") != t and _holder_is_stale(h, now):
+                    dropped_stale_holders.append(h.get("ticket"))
+                else:
+                    kept_h.append(h)
+            doc["holders"] = holders = kept_h
         if room and pos == 1:
             queue.pop(0)
             holders.append({"ticket": t, "since": now, "reason": REASON_RUNNING})
             return {"granted": True, "already_holding": False, "position": 0,
-                    "limit": limit, "holders": len(holders), "waiting": len(queue)}
-        return {"granted": False, "already_holding": False, "position": pos,
-                "limit": limit, "holders": len(holders), "waiting": len(queue)}
+                    "limit": limit, "holders": len(holders), "waiting": len(queue),
+                    "dropped_stale": dropped_stale,
+                    "dropped_stale_holders": dropped_stale_holders}
+        out = {"granted": False, "already_holding": False, "position": pos,
+               "limit": limit, "holders": len(holders), "waiting": len(queue),
+               "dropped_stale": dropped_stale,
+               "dropped_stale_holders": dropped_stale_holders}
+        # t261019-31: name the over-limit state on the gate refusal too, so the
+        # gate and the panel face read ONE judgement (never a silent 12/7).
+        if not unlimited and len(holders) > limit:
+            out["over_limit"] = over_limit_face(limit, len(holders))
+        return out
 
 
 def renew(project_key: str, ticket: str, reason: str) -> Dict[str, Any]:
@@ -471,6 +536,91 @@ def renew(project_key: str, ticket: str, reason: str) -> Dict[str, Any]:
         held["reason"] = reason
         held["since"] = now
         return {"renewed": True, "holding": True, "reason": reason}
+
+
+#: How long a queue entry may go without a heartbeat before the promoter
+#: treats it as a corpse (261019 measured starvation loop): a WAITER re-polls
+#: `acquire` on a bounded backoff (dev_lane.CONC_GATE_POLL ..
+#: CONC_GATE_POLL_MAX, 5 s .. 120 s) and every poll refreshes the entry's
+#: `since`. The old code put the entry in the queue once and never touched it
+#: again, so promoting "the queue head" could hand a slot to a workflow that
+#: no longer existed. Measured cost: four queued tickets (t261019-16/-18/-19/
+#: -27) were killed by Temporal's history limit after ~5 h of 5-second polls;
+#: each promotion then parked a slot on a corpse, and five of the seven slots
+#: were held by dead tickets while nine live tickets queued for hours.
+#: Ten missed heartbeats at the slowest declared backoff is a generous margin:
+#: a live waiter can never exceed 120 s between polls.
+QUEUE_STALE_S = 900
+
+
+def _is_stale(entry: Dict[str, Any], now: float) -> bool:
+    """A queue entry's heartbeat expired (its waiter is gone). A missing or
+    non-numeric `since` counts as stale: an entry that cannot prove it is
+    alive never takes a slot (fail-closed — the same stance reconcile takes
+    for a holder it cannot prove)."""
+    try:
+        since = float(entry.get("since"))
+    except (TypeError, ValueError):
+        return True
+    return now - since > QUEUE_STALE_S
+
+
+#: How long a RUNNING holder may go without a heartbeat before the next
+#: `acquire` treats it as a corpse (t261019-31, backstop arm of the terminal-
+#: release fix). Measured cost of the leak this backstops: five cancelled
+#: tickets (t261017-04/-03, t261016-14/-15, t261019-05) kept their slots for
+#: 1.6 h to 66 h while live tickets queued. A running holder's heartbeat is
+#: every stage start (the already-holding branch of `acquire` refreshes
+#: `since`), and stages are separated by minutes-to-hours, so the window is
+#: generous where the queue window (QUEUE_STALE_S) is tight: six hours clears
+#: every observed corpse within half a day. Judgement is restricted to
+#: `reason == REASON_RUNNING`: a human-hold holder waits for a signature and
+#: does NOT re-acquire until after it, so it has no heartbeat by design and its
+#: hold is deliberate (rule 3) — the sweep must never release it at any age.
+HOLDER_STALE_S = 6 * 3600
+
+
+def _holder_is_stale(holder: Dict[str, Any], now: float) -> bool:
+    """A RUNNING holder's heartbeat expired (its workflow is gone — cancelled,
+    terminated, or killed by the server without passing a release path).
+    Fail-closed on freshness exactly like `_is_stale`: a running holder that
+    cannot prove it is alive (missing / non-numeric `since`) counts stale.
+    A `human-hold` holder is exempt at any age: the hold is by design (rule 3)
+    and the gate waiter has no heartbeat to expire — see HOLDER_STALE_S."""
+    if holder.get("reason") == REASON_HUMAN_HOLD:
+        return False
+    try:
+        since = float(holder.get("since"))
+    except (TypeError, ValueError):
+        return True
+    return now - since > HOLDER_STALE_S
+
+
+def over_limit_face(limit: int, holders: int) -> Dict[str, Any]:
+    """The named over-limit state (t261019-31 root cause 2): `at_work` exceeds
+    the declared limit — reachable when the limit is lowered under existing
+    holders and/or slots leaked past a terminal ending without a release path.
+    Both consumers (the panel's read_state face and the gate's acquire refusal)
+    call THIS one function, so the face and the gate read one judgement."""
+    return {"limit": limit, "at_work": holders, "surplus": holders - limit}
+
+
+def _promote_live_head(doc: Dict[str, Any], now: float) -> Dict[str, Any]:
+    """Pop the first LIVE queue entry into a holder record, naming every stale
+    entry dropped on the way. Shared by release / reconcile so the two call
+    sites can never disagree about what "the queue head" is."""
+    dropped: List[str] = []
+    while doc["queue"]:
+        head = doc["queue"][0]
+        if _is_stale(head, now):
+            dropped.append(head.get("ticket"))
+            doc["queue"].pop(0)
+            continue
+        doc["queue"].pop(0)
+        doc["holders"].append({"ticket": head.get("ticket"),
+                               "since": now, "reason": REASON_RUNNING})
+        return {"promoted": head.get("ticket"), "dropped_stale": dropped}
+    return {"promoted": None, "dropped_stale": dropped}
 
 
 def release(project_key: str, ticket: str, cause: str) -> Dict[str, Any]:
@@ -499,14 +649,15 @@ def release(project_key: str, ticket: str, cause: str) -> Dict[str, Any]:
         doc["queue"] = [e for e in doc["queue"] if e.get("ticket") != t]
         released = len(doc["holders"]) < before
         promoted = None
+        dropped_stale: List[str] = []
         limit = load_limit(k)
         room = limit is None or len(doc["holders"]) < limit
         if room and doc["queue"]:
-            head = doc["queue"].pop(0)
-            doc["holders"].append({"ticket": head.get("ticket"),
-                                   "since": now, "reason": REASON_RUNNING})
-            promoted = head.get("ticket")
+            hop = _promote_live_head(doc, now)
+            promoted = hop["promoted"]
+            dropped_stale = hop["dropped_stale"]
         return {"released": released, "cause": cause, "promoted": promoted,
+                "dropped_stale": dropped_stale,
                 "holders": len(doc["holders"]), "waiting": len(doc["queue"])}
 
 
@@ -544,6 +695,14 @@ def read_state(project_key: str) -> Dict[str, Any]:
     face.update({"project": k, "limit": limit,
                  "unlimited": limit is None,
                  "decl": declaration_path(k)})
+    # t261019-31: name the split judgement — a holder count above the declared
+    # limit (leaked slots, or a lowered limit under holders) is a machine-
+    # readable flag on the face, never a silent 12/7. Same single judgement
+    # source as the gate refusal (over_limit_face).
+    if limit is not None and len(face["holders"]) > limit:
+        face["over_limit"] = over_limit_face(limit, len(face["holders"]))
+    else:
+        face["over_limit"] = None
     return face
 
 
@@ -579,14 +738,15 @@ def reconcile(project_key: str, alive_tickets: Iterable[str],
                    and h.get("ticket") not in unknown]
         doc["holders"] = keep
         promoted = None
+        dropped_stale: List[str] = []
         limit = load_limit(k)
         room = limit is None or len(doc["holders"]) < limit
         if room and doc["queue"]:
-            head = doc["queue"].pop(0)
-            doc["holders"].append({"ticket": head.get("ticket"),
-                                   "since": now, "reason": REASON_RUNNING})
-            promoted = head.get("ticket")
+            hop = _promote_live_head(doc, now)
+            promoted = hop["promoted"]
+            dropped_stale = hop["dropped_stale"]
         return {"dropped": dropped, "promoted": promoted,
+                "dropped_stale": dropped_stale,
                 "draining": [h.get("ticket") for h in doc["holders"]
                              if h.get("ticket") in draining],
                 "holders": len(doc["holders"]), "waiting": len(doc["queue"])}

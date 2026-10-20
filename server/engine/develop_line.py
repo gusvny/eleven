@@ -633,6 +633,29 @@ def pin_lane_revision(wt_dir: Path, proven_sha: str) -> str:
     return pinned
 
 
+def pin_lane_revisions(pins: List[Tuple[str, Path, str]]) -> None:
+    """Pin EVERY repository of a multi-repository lane at its own declared
+    proven revision (t261019-41), before any landing work starts. Each entry
+    is (repository name, lane scope tree, proven sha); the name travels so a
+    refusal names the repository.
+
+    Honesty note (review condition 1, t261019-41): a pin detaches a LANE
+    worktree's HEAD and is not reversible in kind — if pinning repo B fails
+    after repo A pinned, repo A's lane scope stays detached at its proven
+    sha. That is scratch state on the LANE side only: no line branch moved,
+    no record written, nothing on the line side changed. The caller's
+    all-or-nothing claim is therefore "no line-side state moved", and this
+    helper's contract is to run every pin BEFORE the landing act so a pin
+    failure can never reach the merges."""
+    for name, tree, proven in pins:
+        try:
+            pin_lane_revision(tree, proven)
+        except LandNotPinnedError as e:
+            raise LandNotPinnedError(
+                "repository %r: %s — the landing refuses; no line-side state "
+                "moved" % (name, e)) from e
+
+
 def _check_inputs(ticket_id: Any, performed_by: Any, repo_paths: Dict[str, Path]) -> None:
     if not isinstance(ticket_id, str) or not ticket_id.strip():
         raise LandingError("malformed ticket_id: %r" % (ticket_id,))
@@ -670,6 +693,16 @@ def land_ticket(line: DevelopLine, project_key: str,
     missing = sorted(set(repo_paths) - set(declared))
     if missing:
         raise LandingError("repositories not declared on line %r: %s" % (line.line_id, missing))
+    # The completeness half of all-or-nothing (t261019-41): a DECLARED
+    # repository without a lane checkout is a named refusal BEFORE the lock,
+    # never an uncaught KeyError mid-loop — a multi-repository landing is
+    # every declared repository through the same act, or none of them.
+    unprovided = [r.name for r in line.repositories if r.name not in repo_paths]
+    if unprovided:
+        raise LandingError(
+            "repositories declared on line %r but without a lane checkout: %s "
+            "— a landing is all declared repositories or none"
+            % (line.line_id, unprovided))
     if has_landing(project_key, ticket_id, line.line_id):
         raise LandingDuplicateError(
             "ticket %r already landed on line %r — one landing per ticket" % (ticket_id, line.line_id))

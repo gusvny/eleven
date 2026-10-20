@@ -9,3 +9,17 @@ bundle_pairs:
     out: server/plugins/workbench/lib/
     entry: server/plugins/workbench/build-client.sh
     budget_s: 600
+
+# 机械红的自愈策略（261019）。引擎掌握"哪些红有机械补救动作"的封闭清单，
+# 项目在这里声明"愿意把哪些交给自动回路、交到哪一段、最多几轮"：
+# 未声明的红照旧停票等人；声明了引擎没有补救动作的 code 会被具名拒收（fail-closed）。
+# 目前引擎清单里只有 bundle_stale（产物过期 ⇒ 跑声明的 entry、提交 out 前缀）。
+merge_check_auto_rework:
+  - code: bundle_stale
+    stage: implement
+    max_rounds: 2
+  # 泳道自检（verify_lane code）是反馈面，不是交付判定：交付面在 merge_check
+  # 与 run_integration_tests 上重判。它红了就自动打回 implement，由泳道自己看红项处理。
+  - code: verify_red
+    stage: implement
+    max_rounds: 2

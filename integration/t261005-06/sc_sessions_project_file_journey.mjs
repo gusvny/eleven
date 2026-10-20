@@ -6,7 +6,7 @@
  * User story: a multi-project user restarts the console / switches port /
  * switches origin — their project sessions SURVIVE, because the ledger now
  * lives in <projects_root>/<key>/sessions.json (design note
- * notes/discussions/261004-chat项目身份与会话句柄.md §2.2), each session carries
+ * notes/discussions/261004-chat-project-identity-and-session-handle.md §2.2), each session carries
  * a stable short-code handle (§2.3), and the project executor session — which
  * the workspace index never surfaces (implementer note, KI-198 neighbour
  * finding) — becomes visible in the list with the fixed handle `executor`.

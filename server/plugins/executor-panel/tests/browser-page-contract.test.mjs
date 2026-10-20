@@ -62,6 +62,11 @@ async function openPage(rowsOverride) {
     if (u.pathname.endsWith('/api/actions')) return json({ ok: true, source: 'stub', actions: [{ at: NOW, action: 'Sign', ticket: 't1', result: 'ok', permission: 'merge' }], malformed_rows: 0, unmapped_rows: 0 })
     if (u.pathname.endsWith('/api/bridge/status')) return json({ ok: true, mounted: true, counters: { mirrored: 2 }, last_events: [{ at: NOW, kind: 'mirrored', detail: '' }], at: NOW })
     if (u.pathname.endsWith('/api/status')) return json({ ok: true, result: { declared: true, enabled: true, heartbeat: { alive: true, age_seconds: 12 }, ledger: { path: '/x', unreadable: false, counts: { lines: 3, duplicates: 0, bad: 0, gaps: 0 } }, liveness: { executor: { alive: true } } } })
+    // t261019-43: the overview also pulls the concurrency face on load (twice:
+    // render + limit row). Without this stub the X1 zero-console-error check saw
+    // two 404s from stub drift, not from the page (probe: on a plain load these
+    // are the only two 404 paths).
+    if (u.pathname.endsWith('/api/concurrency')) return json({ ok: true, declared: true, limit: 2, running: 0, waiting: 0 })
     res.writeHead(404); res.end('{}')
   })
   await new Promise(r => stub.listen(0, '127.0.0.1', r))

@@ -276,8 +276,10 @@ def test_settle_success_points_reset_counter():
     src = Path(dev_lane.__file__).read_text("utf-8")
     # Reset-site census: run() init x1, abort paths x2, helper settle-success x1,
     # auto-escape x1, merge_check green x1, merge_check settle-success x1, human
-    # signals x2 (rework/retry_qc) = 9.
-    assert src.count("self._conflict_rounds = 0") == 9, \
+    # signals x2 (rework/retry_qc) = 9; +1 = t261019-32's quickmanual
+    # _run_quickmanual init (its own per-attempt guard-state init, mirroring the
+    # parent's run() init; the lane has no fork edges of its own) = 10.
+    assert src.count("self._conflict_rounds = 0") == 10, \
         "reset-site count drifted = some path misses a reset or double-resets; audit each"
     # On the success path the reset must precede the _auto_rework advance.
     helper = src.split("async def _main_sync_before_gate(", 1)[1].split(

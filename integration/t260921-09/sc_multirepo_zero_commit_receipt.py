@@ -103,8 +103,16 @@ def main():
                 rb_b is not None and rb_b.get("green") is False
                 and rb_b.get("reason_code") == "no_commits",
                 json.dumps(rb_b, ensure_ascii=False)[:240] if rb_b else "repo_b 项缺失")
-        L.check("② 文案=「实现未落盘」+互指「工作区干净」项（越界脏文件出路可达）",
-                "未落盘" in txt_b and "工作区干净" in txt_b)
+        # t261019-03: the copy was translated to English by t261018-05 (the red now
+        # names the change and the stage that should have persisted it). The intent
+        # stays: the red says the change was never persisted AND cross-references the
+        # clean-workspace item for dirty files outside the write set. Assert the
+        # intent, not one language: either wording counts.
+        _persisted = ("not persisted" in txt_b) or ("never landed" in txt_b) \
+            or ("未落盘" in txt_b)
+        _crossref = ("clean-workspace" in txt_b) or ("工作区干净" in txt_b)
+        L.check("② 文案=实现未落盘 + 互指「工作区干净」项（越界脏文件出路可达）",
+                _persisted and _crossref)
         ra_b = by_repo(res_b, "repo_a")
         L.check("② 红项不拖垮他仓：repo_a 项仍绿（票面读得出哪个仓坏了）",
                 ra_b is not None and ra_b.get("green") is True)

@@ -1,13 +1,14 @@
 // sc_executor_entry_console.mjs — t260929-22 console 左栏执行器入口（灰盒 L3，真浏览器+隔离台+API 桩）。
 //
-// Intent（用户可感知行为；真源=notes/discussions/260927-项目执行器-设计稿.md §界面与命名 + 工单 scope①）：
+// Intent（用户可感知行为；真源=notes/discussions/260927-project-executor-design.md §界面与命名 + 工单 scope①）：
 //   E1 入口=项目名行本身：左栏一个项目一组，点**项目名行**（组头，不是组内某个图标）
 //      → 中列打开该项目的执行器面板（面板带该项目的 project 标识）。
 //   E2 （t261003-09 改写为退场负脸）顶部 Executor / Chat 切换器行整体退役——
 //      两段锚与 tablist 形状不得再现；行移除后唯一面板视图保持挂载。
 //   E3 设计负形：没有单独的「Tick 行」、没有单独「打开对话」按钮——入口就是项目名行
 //      （E1 已证），左栏项目组内不得再出现第二个执行器入口形状。
-//   E4 既有五视图图标零回归：点组内板视图图标仍出工单列表（夹具行在）。
+//   E4 视图图标簇零残留（t261012-05 改写为退役负脸）：组内 .wb-view-icon 计数==0
+//      且组头仍渲染——t261008-36 退役面不得回潮（板面唯一家=执行器面板内，归其 F5）。
 //   E5 全旅程零 pageerror / console.error（渲染链卫生）。
 //
 // 分层与 intent 分工（防重复）：
@@ -229,29 +230,35 @@ async function scenarioNoSeparateEntry(page) {
   return null
 }
 
-// ---- E4 既有视图图标零回归
+// ---- E4 视图图标簇零残留（t261012-05 改写：t261008-36/gen4 宿主令退役了五视图
+// 图标簇——"one face, one home; no second door"，组头只剩 caret+身份点+执行器入口；
+// 板面唯一家=执行器面板内部，图标缺席面归 t261008-36 F5 钉死。本子用例与其同向：
+// 断夹具项目组内 .wb-view-icon 计数==0 且组头本体仍渲染——退役面不得回潮，
+// 也不能因改写而放松组头渲染链的可见性。）
 
 async function scenarioBoardIconStillWorks(page) {
   const head = await projectRow(page)
-  if (!head) return 'project row not rendered (cannot run regression leg)'
-  const icon = head.locator('.wb-view-icon').first()
-  if (!(await icon.count())) return 'no view icon inside the project row (existing five-view regression face broke)'
-  // gen3 图标簇=悬停现形（静止 opacity:0 + pointer-events:none）——按用户方式来：
-  // 先悬停行现形条，再正常点击（force 点击静止态坐标会打到条下方的行内容=误触）。
-  await head.hover()
-  await page.waitForTimeout(400)
-  await icon.click({ timeout: 8000 })
-  const ok = await waitFor(async () =>
-    (await page.locator('.wb-card[data-ticket-id]', { hasText: FIXTURE_TICKET.id }).count()) > 0, 8000)
-  if (!ok) return `board view icon click no longer shows the ticket list @ ${await snap(page)}`
+  if (!head) return 'project row not rendered (cannot run retirement leg)'
+  const icons = await head.locator('.wb-view-icon').count()
+  if (icons !== 0) {
+    return `${icons} .wb-view-icon element(s) inside the project row — the view-icon cluster was retired by t261008-36 and must not reappear`
+  }
   return null
 }
 
 // ---- E5 渲染链卫生
 
-async function scenarioHygiene(pageErrors, consoleErrors) {
+// t261012-05: URL-aware hygiene exemption (precedent: baselines/sc_ticket_session_restore.mjs
+// S9 ghost-row exemption). The shared stage registry does not hold every
+// host-registry project, so the engine-channel endpoints answer 4xx/502 for
+// them (/wf/concurrency, host-shell /sessions) and the browser logs the failed
+// resource load. That is stage provisioning, not this ticket's entry face; the
+// dropped entries are counted and reported by the caller as a named env leg.
+const STAGE_CHANNEL = /\/(api\/wf\/concurrency|sessions)(\?|$)/
+function scenarioHygiene(pageErrors, consoleErrors) {
   if (pageErrors.length) return `pageerror(s): ${JSON.stringify(pageErrors.slice(0, 3))}`
-  if (consoleErrors.length) return `console.error(s): ${JSON.stringify(consoleErrors.slice(0, 3))}`
+  const real = consoleErrors.filter((t) => !(STAGE_CHANNEL.test(t) && /Failed to load resource/.test(t)))
+  if (real.length) return `console.error(s): ${JSON.stringify(real.slice(0, 3))}`
   return null
 }
 
@@ -297,8 +304,13 @@ async function run() {
   await run1('E1 project-name row opens the executor panel', scenarioEntryOpensPanel)
   await run1('E2 Executor/Chat switcher flips both ways', scenarioSwitcherFlips)
   await run1('E3 no separate Tick row / open-conversation button', scenarioNoSeparateEntry)
-  await run1('E4 existing board view icon still works', scenarioBoardIconStillWorks)
+  await run1('E4 view-icon cluster stays retired (zero in project group)', scenarioBoardIconStillWorks)
   await run1('E5 zero pageerror / console.error', () => scenarioHygiene(pageErrors, consoleErrors))
+  {
+    const dropped = consoleErrors.filter((t) => STAGE_CHANNEL.test(t) && /Failed to load resource/.test(t))
+    if (dropped.length) record('E5a stage-channel face', 'env_fail',
+      `${dropped.length} x failed resource load on engine-channel endpoints (exempted by name: /api/wf/concurrency, /sessions) — stage registry does not hold every host project`)
+  }
 
   await bctx.close().catch(() => {})
   await ctx.browser.close().catch(() => {})

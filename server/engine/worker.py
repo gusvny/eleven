@@ -54,7 +54,13 @@ Graceful stop:
     grace period (graceful_shutdown_timeout) to finish before cancelling whatever
     is still running. Grace comes from env SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC
     (default 1800s; explicit "0" = the old cancel-immediately behavior; malformed
-    values fall back to the default). At shutdown the worker names every in-flight
+    values fall back to the default). Fast idle exit (t261019-42): when the
+    shutdown roll-call is empty on ALL faces (guard registry, owned spawns, AND
+    the SDK-introspected running-activity count), shutdown is raced against env
+    SANDBAR_WORKER_IDLE_SHUTDOWN_DEADLINE_SEC (default 10s; "0" disables) — an
+    SDK-idle worker settles in well under a second, so a timeout is a named
+    anomaly and the exit is forced instead of pinning the process for the full
+    grace window. At shutdown the worker names every in-flight
     agent activity (ticket/stage/gen/attempt) in the log, and after shutdown it
     logs the final disposition (finished vs interrupted) — a cancelled activity is
     converted by agent_activities.worker_termination_guard into a typed
@@ -163,6 +169,58 @@ def graceful_shutdown_timeout_sec(raw: "str | None" = None) -> float:
     return val
 
 
+IDLE_SHUTDOWN_ENV = "SANDBAR_WORKER_IDLE_SHUTDOWN_DEADLINE_SEC"
+IDLE_SHUTDOWN_DEFAULT_SEC = 10.0
+
+
+def idle_shutdown_deadline_sec(raw: "str | None" = None) -> float:
+    """Deadline, in seconds, for the fast idle-exit path at shutdown (t261019-42).
+
+    Used ONLY when the worker proves idle on ALL THREE faces: the guard registry
+    (in-flight agent activities), the owned-spawn registry, and the SDK-side
+    introspected running-activity count. An SDK-idle worker settles shutdown in
+    well under a second (measured, t261019-42), so anything past this deadline is
+    a named anomaly and the exit is forced instead of pinning the process for the
+    full graceful window. Fault tolerance mirrors graceful_shutdown_timeout_sec:
+    unset/blank/malformed/NaN/Inf/negative all fall back to the default; the
+    explicit escape hatch is "0" (= the fast path is OFF, old behavior only)."""
+    if raw is None:
+        raw = os.environ.get(IDLE_SHUTDOWN_ENV) or ""
+    raw = str(raw).strip()
+    if not raw:
+        return IDLE_SHUTDOWN_DEFAULT_SEC
+    try:
+        val = float(raw)
+    except ValueError:
+        return IDLE_SHUTDOWN_DEFAULT_SEC
+    if val != val or val in (float("inf"), float("-inf")) or val < 0:
+        return IDLE_SHUTDOWN_DEFAULT_SEC
+    return val
+
+
+def sdk_running_activity_count(worker) -> "int | None":
+    """Best-effort count of activities the temporalio SDK itself still considers
+    running, read from the worker's private state (t261019-42).
+
+    The guard-registry roll-call only sees the four long agent activities that
+    pass through worker_termination_guard; short activities (merge_check,
+    inspection, lane, executor) are invisible to it — exactly the blindness that
+    let a "nothing in flight" worker linger for the full 30-minute grace window
+    (261019 incidents). The SDK's own running-activity set is the authoritative
+    count. Returns None when the private shape is unreadable (SDK upgrade, wrong
+    object) — callers MUST treat None as NOT idle (fail-safe: worst case is
+    today's slow shutdown, never a wrong fast cut)."""
+    try:
+        acts = worker._activity_worker._running_activities
+        return len(acts)
+    except AttributeError:
+        return None
+    except Exception as e:  # noqa: BLE001 — any introspection surprise is a degrade, never a crash
+        logging.debug("sdk running-activity introspection degraded: %s: %s",
+                      type(e).__name__, e)
+        return None
+
+
 def _worker_extra_kwargs() -> dict:
     """Single source of the Worker(...) kwargs this ticket owns (t260916-29):
     the explicit graceful shutdown timeout. Both the production constructor and
@@ -188,11 +246,18 @@ def install_stop_signal_handlers() -> asyncio.Event:
     return stop
 
 
-def _log_shutdown_disposition() -> None:
-    """停机点名与终态清单（t260916-29 要求①）：signal 时点在飞 agent 活动逐个点名
-    （票/段/gen/attempt/已运行时长），shutdown 完成后按 outcome 汇总（在飞快照来自
-    agent_activities 的注册表——只有走 worker_termination_guard 的四个长活动汇聚点
-    在册；merge_check 等短活动不在册，见 README §8.3.1 已知边界）。"""
+def _log_shutdown_disposition(workers=None) -> None:
+    """Shutdown roll-call and final-outcome ledger (t260916-29 requirement 1):
+    name every in-flight agent activity at signal time (ticket/stage/gen/attempt/
+    elapsed), then summarize by outcome after shutdown completes (the in-flight
+    snapshot comes from the agent_activities registry — only the four long
+    activity chokepoints that pass through worker_termination_guard register;
+    short activities like merge_check are not in it, a known boundary documented
+    in README §8.3.1).
+    t261019-42: the registry face is known-blind to short activities, so when the
+    worker objects are available the SDK-side running-activity count is printed
+    next to it — the log can no longer claim "no in-flight agent activities"
+    while the SDK is waiting on something (the 261019 incident shape)."""
     inflight = inflight_stage_snapshot()
     grace = graceful_shutdown_timeout_sec()
     if inflight:
@@ -217,6 +282,19 @@ def _log_shutdown_disposition() -> None:
                      len(spawns))
     else:
         logging.info("shutdown roll-call: 0 owned child process groups")
+    # t261019-42: the SDK-side face. Printed whether or not the registry looks
+    # empty; the fast-idle-exit gate reads the same helper.
+    sdk_counts = [sdk_running_activity_count(w) for w in (workers or [])]
+    if any(c is None for c in sdk_counts) or not sdk_counts:
+        if workers:
+            logging.info("shutdown roll-call: sdk_running_activities=? "
+                         "(introspection unavailable — treated as NOT idle, "
+                         "fail-safe)")
+        sdk_total = None
+    else:
+        sdk_total = sum(sdk_counts)
+        logging.info("shutdown roll-call: sdk_running_activities=%d", sdk_total)
+    return sdk_total
 
 
 def _log_shutdown_outcome() -> None:
@@ -275,6 +353,67 @@ def merge_worker_meta_extras(meta_path: "str | None", extras: dict) -> bool:
         return False
 
 
+# t261019-24: consecutive stale ticks required before a self-stop. Two ticks mean the
+# worst case a stale worker can still claim new work is ~2x watch_interval after the
+# code change lands on disk — bounded, and named in the self-stop log line so a
+# residual stale claim is diagnosable rather than surprising.
+STALE_TURNOVER_TICKS = 2
+
+
+def stale_modules_for_self(mtime_fn=None, started_at=None, repo_root=None) -> list:
+    """Stale worker-loaded modules for THIS process (t261019-24).
+
+    Thin, injectable wrapper over shared.worker_code_stamp — the SAME pure function
+    the gate receipt uses, so this check never re-implements (and can never weaken)
+    the stamp judgment: stale = module file mtime newer than this process's start
+    baseline; unreadable/malformed mtime is never stale (conservative, never
+    over-reports). verify_lane is excluded by the stamp itself (gate subprocess role).
+
+    Returns the stale module-name list; an empty list means the process is current.
+    All inputs are injectable so the unit tests pin every shape without touching disk.
+    Raises whatever shared.worker_code_stamp raises (the caller owns the retry)."""
+    import shared as _shared
+    stamp = _shared.worker_code_stamp(mtime_fn=mtime_fn, started_at=started_at,
+                                      pid=os.getpid(), repo_root=repo_root)
+    return [str(x) for x in (stamp.get("stale") or [])]
+
+
+def record_self_stop(meta_path: "str | None", reason: str, stale: list) -> bool:
+    """Persist WHY this worker stopped itself (t261019-24): a ``self_stop`` extra in
+    the ownership meta. The loud log line is the human copy; this is the machine-
+    readable postmortem face — see keep_meta_on_self_stop for why the meta file must
+    survive the exit for the record to be readable. Best-effort, never a gate."""
+    ok = merge_worker_meta_extras(meta_path, {
+        "self_stop": {"reason": str(reason), "stale": [str(x) for x in (stale or [])],
+                      "ts": int(time.time())},
+    })
+    if not ok:
+        logging.warning("self-stop: meta extra write failed (meta=%s) — the log line "
+                        "above is the surviving record", meta_path)
+    return ok
+
+
+def keep_meta_on_self_stop(meta_path: "str | None") -> bool:
+    """Exit-time guard (t261019-24, review comment 1): main's finally unlinks our own
+    meta on a normal exit — which a self-stop IS, so the self_stop record would be
+    erased before anyone reads it. When the meta carries a self_stop marker (and still
+    names OUR pid — a taken-over meta is never touched), keep the file: a dead-pid meta
+    is read as such by the ensure side, and the supervisor's replacement overwrites it
+    through its own ownership write. True = keep the meta (caller must not unlink)."""
+    if not meta_path:
+        return False
+    try:
+        import shared as _shared
+        meta, state, _detail = _shared.read_worker_meta_state(meta_path)
+        if state != "ok" or not isinstance(meta, dict):
+            return False
+        if int(meta.get("pid") or 0) != os.getpid():
+            return False
+        return bool(meta.get("self_stop"))
+    except Exception:  # noqa: BLE001 — the keep-decision must never break the exit path
+        return False
+
+
 def console_boot_id() -> str:
     """This worker's console boot generation (t261009-55): whatever the console
     already knows about itself (supervisor pid + process start ms), passed at
@@ -308,9 +447,22 @@ def mark_meta_draining(meta_path: "str | None") -> bool:
                          "(pid=%s != this process %d) — not rewritten",
                          meta_path, (meta or {}).get("pid"), os.getpid())
             return False
+        # t261019-24: a self-stop reason recorded before the drain must survive the
+        # rewrite (write_worker_meta builds a fixed payload and would drop it) —
+        # carry it over, pid-guarded, or the postmortem face is erased at exit.
+        self_stop = (meta or {}).get("self_stop")
         _shared.write_worker_meta(
             meta_path, repo_root=str((meta or {}).get("repo_root") or REPO_ROOT),
             pid=os.getpid(), state=_shared.WORKER_META_STATE_DRAINING)
+        if self_stop is not None:
+            meta2, _st2, _dt2 = _shared.read_worker_meta_state(meta_path)
+            if isinstance(meta2, dict) and int(meta2.get("pid") or 0) == os.getpid():
+                merged = dict(meta2)
+                merged["self_stop"] = self_stop
+                p = pathlib.Path(meta_path)
+                tmp = p.with_name("%s.tmp.merge.%d" % (p.name, os.getpid()))
+                tmp.write_text(_shared._json.dumps(merged, ensure_ascii=False), "utf-8")
+                os.replace(tmp, p)
         logging.info("drain handover: meta state=draining written (pid=%d meta=%s) — "
                      "guard/ensure may admit the replacement at once",
                      os.getpid(), meta_path)
@@ -323,17 +475,52 @@ def mark_meta_draining(meta_path: "str | None") -> bool:
 
 
 async def _graceful_shutdown(workers, run_tasks, watch_task,
-                             meta_path: "str | None" = None) -> None:
+                             meta_path: "str | None" = None,
+                             stamp_task: "asyncio.Task | None" = None) -> None:
     """Shutdown epilogue (extracted verbatim from run_worker's tail): hand over the
     slot (meta state=draining, t261005-03) → name the in-flight activities →
     Worker.shutdown() per worker (the SDK waits graceful_shutdown_timeout for the
     in-flight activities) → reap the runner/watch tasks → log the outcome ledger.
-    selfcheck_worker_graceful_stop drives the same real shutdown path."""
+    selfcheck_worker_graceful_stop drives the same real shutdown path.
+
+    t261019-42 fast idle exit: when the roll-call is empty on ALL THREE faces
+    (guard registry, owned spawns, SDK-introspected running activities), the
+    shutdown phase is raced against idle_shutdown_deadline_sec(). A proven-idle
+    worker settles in well under a second (measured), so expiry is a named
+    anomaly: the pending shutdown wait is cancelled and the epilogue (outcome
+    ledger, spawn reap) still runs — the process exits instead of pinning for
+    the full grace window. When NOT proven idle, the unbounded graceful path
+    runs verbatim: full grace window, SDK grace-expiry cancel, and the typed
+    "worker terminated externally" classification all unchanged."""
     mark_meta_draining(meta_path)
-    _log_shutdown_disposition()
-    await asyncio.gather(*(w.shutdown() for w in workers))
+    inflight_idle = not inflight_stage_snapshot()
+    spawns_idle = not owned_spawn_snapshot()
+    sdk_total = _log_shutdown_disposition(workers)
+    idle = inflight_idle and spawns_idle and sdk_total == 0
+    shutdown_phase = asyncio.gather(*(w.shutdown() for w in workers))
+    if idle:
+        deadline = idle_shutdown_deadline_sec()
+        if deadline > 0:
+            logging.info("fast idle exit armed: registry empty, spawns empty, "
+                         "sdk_running_activities=0 — shutdown must settle in %ss "
+                         "(env %s)", deadline, IDLE_SHUTDOWN_ENV)
+            try:
+                await asyncio.wait_for(shutdown_phase, timeout=deadline)
+            except asyncio.TimeoutError:
+                logging.warning("fast idle exit fired: worker proven idle on all "
+                                "three faces yet shutdown did not settle in %ss "
+                                "(expected <1s) — forcing exit instead of pinning "
+                                "for the full graceful window (t261019-42); the "
+                                "roll-call above names every face we could see",
+                                deadline)
+        else:
+            await shutdown_phase  # deadline "0": fast path explicitly off
+    else:
+        await shutdown_phase
     if watch_task is not None:
         watch_task.cancel()
+    if stamp_task is not None:
+        stamp_task.cancel()
     try:
         await asyncio.gather(*run_tasks)
     except asyncio.CancelledError:
@@ -625,6 +812,33 @@ def daemonize(pidfile: str, logfile: str, replace: bool = False) -> bool:
     return False
 
 
+def process_stale_tick(ticks: int, stale: list, meta_path: "str | None",
+                       watch_interval: float, stop_event) -> int:
+    """One tick of the code-stamp watch (t261019-24), split out of run_worker's async
+    loop so the unit tests can drive every shape without Temporal. ``ticks`` is the
+    previous consecutive-stale count; ``stale`` the stamp verdict for THIS tick.
+    Returns the new count. When the count reaches STALE_TURNOVER_TICKS the self-stop
+    fires: loud bounded-worst-case log line, self_stop meta record, then the caller's
+    stop event (the SAME event SIGTERM sets — the drain path is the existing graceful
+    one)."""
+    if not stale:
+        return 0
+    ticks = int(ticks) + 1
+    if ticks < STALE_TURNOVER_TICKS:
+        return ticks
+    logging.info(
+        "self-stop: code stamp stale on %d consecutive tick(s): %s — draining "
+        "in-flight activities (bounded by graceful_shutdown_timeout=%ss) then "
+        "exiting; the console supervisor starts a fresh worker. Worst case this "
+        "process could still claim work for ~%dx watch_interval (%.0fs) after the "
+        "code change landed (t261019-24)",
+        ticks, ",".join(stale), graceful_shutdown_timeout_sec(),
+        STALE_TURNOVER_TICKS, STALE_TURNOVER_TICKS * watch_interval)
+    record_self_stop(meta_path, "stale-code", stale)
+    stop_event.set()
+    return ticks
+
+
 async def run_worker(args: argparse.Namespace) -> None:
     logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
     # Write the ownership fingerprint early (KI-033): before Client.connect, so
@@ -805,6 +1019,33 @@ async def run_worker(args: argparse.Namespace) -> None:
     meta_refresher_task: "asyncio.Task | None" = None
     if meta_path:
         meta_refresher_task = asyncio.create_task(_meta_refresher())
+
+    # t261019-24: self-turnover on stale code. A worker imports the engine once at
+    # startup; after a fix lands, a stale worker keeps taking new work as if it were
+    # current (the 261019 mixed-fleet incidents). Consequence, drain-first: when the
+    # shared code stamp names stale worker-loaded modules on STALE_TURNOVER_TICKS
+    # consecutive ticks, record the reason and set the SAME stop event SIGTERM uses —
+    # the existing _graceful_shutdown then stops the pollers from claiming, drains
+    # in-flight activities within graceful_shutdown_timeout, and the console
+    # supervisor's keepalive replaces the process. This code never starts or signals
+    # any other process, and never cancels an in-flight activity to speed things up
+    # (the graceful cap stays t261019-19's subject). Detection stays owned by
+    # shared.worker_code_stamp / engine_ops drift — this only consumes their verdict.
+    async def _code_stamp_watch() -> None:
+        stale_ticks = 0
+        while not stop.is_set():
+            await asyncio.sleep(watch_interval)
+            try:
+                stale = stale_modules_for_self()
+            except Exception as e:  # noqa: BLE001 — a stamp failure must not kill the worker; retry next tick
+                logging.warning("code stamp watch: stamp computation failed (next "
+                                "tick retries): %s: %s", type(e).__name__, e)
+                stale_ticks = 0
+                continue
+            stale_ticks = process_stale_tick(stale_ticks, stale, meta_path,
+                                             watch_interval, stop)
+
+    stamp_task: "asyncio.Task | None" = asyncio.create_task(_code_stamp_watch())
     await stop.wait()
     if meta_refresher_task is not None:
         meta_refresher_task.cancel()
@@ -812,7 +1053,8 @@ async def run_worker(args: argparse.Namespace) -> None:
             await meta_refresher_task
         except asyncio.CancelledError:
             pass
-    await _graceful_shutdown(workers, run_tasks, watch_task, meta_path=meta_path)
+    await _graceful_shutdown(workers, run_tasks, watch_task, meta_path=meta_path,
+                             stamp_task=stamp_task)
 
 
 def main() -> None:
@@ -826,6 +1068,9 @@ def main() -> None:
     try:
         import shared as _shared
         _shared.note_process_start()
+        # 261019: pin the delivery ledger root here (this file is NOT sandboxed) so the
+        # in-workflow close-out guard never reads the environment.
+        _shared.note_delivery_ledger_dir(os.environ.get("SANDBAR_DELIVERY_LEDGER_DIR", ""))
     except Exception:  # noqa: BLE001——身份面故障绝不拦 worker 启动
         pass
     # 信号面运输自检（t260913-01）在 daemonize 之前跑：坏 worker 在前台 loud 死掉，
@@ -860,7 +1105,9 @@ def main() -> None:
         # t261005-03: ownership-guarded — after a takeover the meta may already
         # belong to the replacement worker; only unlink when it still names OUR pid
         # (unconditional unlink used to erase the new owner's fingerprint).
-        if meta_path:
+        # t261019-24: but a self-stop meta is the postmortem face — keeping it (with
+        # the self_stop reason) is the point; see keep_meta_on_self_stop.
+        if meta_path and not keep_meta_on_self_stop(meta_path):
             try:
                 import shared as _shared
                 meta, _st, _dt = _shared.read_worker_meta_state(meta_path)

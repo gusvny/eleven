@@ -47,6 +47,15 @@ def commit_files(repo, files: dict, msg: str, author="fixture <fx@example.invali
     return git("rev-parse", "HEAD", cwd=repo).stdout.strip()
 
 
+def lane_branch(ticket):
+    """The lane branch name for a ticket ("lane/<ticket>") — single naming point.
+
+    t261016-13: the main-sync guard judges the NAMED branch (unreadable or behind
+    HEAD = refused by name), so any caller injecting prepare/settle must pass the
+    lane's real branch, never a hardcoded literal."""
+    return "lane/" + ticket
+
+
 def make_repo(path):
     """新项目仓：git init + 初始提交（README.md）。返回仓路径。"""
     path = Path(path)

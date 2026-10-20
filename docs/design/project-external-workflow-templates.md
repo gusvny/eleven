@@ -11,7 +11,7 @@ updated: 2026-09-28
 > Source: the nusuyou project document "Requirements for sandbar: project external workflow
 > templates" (the host's verbatim 260924 ruling: "don't chisel the gate open directly; write an
 > explanatory document and I'll send it to sandbar to open a ticket and do it").
-> This document graduated from `notes/discussions/260924-项目外置工作流模板-设计稿.md` (registered
+> This document graduated from `notes/discussions/260924-external-project-workflow-templates.md` (registered
 > with ticket t260924-04);
 > four points ruled in the host's 260924 session: isolation strength = process pooling for fault
 > containment (with ticket 2); blast radius of a bad template = per-template isolated rejection;
@@ -175,5 +175,5 @@ cross-project reuse".
 
 - [Design doc writing guide](design-doc-writing-guide.md)
 - Requirements (source, nusuyou repo): `notes/discussions/260924-给sandbar需求说明-项目外置工作流模板.md`（that source note lives in the nusuyou repo, not in this one）
-- Discussion draft (the original before graduation): [Project external workflow templates (design draft)](../../notes/discussions/260924-项目外置工作流模板-设计稿.md)
+- Discussion draft (the original before graduation): [Project external workflow templates (design draft)](../../notes/discussions/260924-external-project-workflow-templates.md)
 - [Known issues (KI)](../../notes/debts/known-issues.md) — KI-113 (worker frozen code topology) is directly related to the "effective granularity" item of this document

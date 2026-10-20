@@ -147,7 +147,7 @@ section('M chat- 会话入账回归（t260831-04 缺陷①防线）')
   // render" — any link that keeps it out of the tab (gate false-kill / filter false-kill)
   // goes red here. The production registration surface is currently the single project suyou.
   const sid = 'chat-20260831-120000-abcd'
-  const ledger = touchEntry([], { id: sid, project: 'suyou', cwd: '/Users/user/Documents/sandbar', lastOpenedAt: 1, seq: 1 })
+  const ledger = touchEntry([], { id: sid, project: 'suyou', cwd: '/Users/xingu/Documents/sandbar', lastOpenedAt: 1, seq: 1 })
   ok(ledger.length === 1 && ledger[0].id === sid, 'chat- 会话入账不被 isGlobalSessionId 门错杀')
   const rows = pickProjectTabs(ledger, { project: 'suyou' })
   ok(rows.length >= 1 && rows[0].id === sid, '账册有货 → 项目行 tab 数 ≥1（缺陷①回归锚）')

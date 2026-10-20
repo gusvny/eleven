@@ -53,6 +53,6 @@
 
 ## 五、附：同族已记账
 
-- 260917 夜事故记录（`notes/discussions/260917-夜间摘要与事故记录.md` §4.4）已记
+- 260917 夜事故记录（`notes/discussions/260917-night-summary-and-incidents.md` §4.4）已记
   「dsh 判 torn 严于引擎探针 → 引擎 spawn 前隔离漏放」，属同族但那是"判据不一致"；
 - 本稿新增的是**恢复失败后的静默失忆重建**，此前未入账。

@@ -137,14 +137,19 @@ def main():
     cases.append(("B2 .lane 条目集与目录集不变", lanes_before == lane_snapshot()))
 
     # C/D live 交叉验证（真票查询可达才有判据；不可达=N/A，audit 自身的 unknown 降级不算红）
+    # 261017 fix (integration, direct): `verd` used to be defined INSIDE the
+    # statuses-is-not-None branch while the E check below reads it on every path —
+    # when the real ticket query is unreachable (the suite pins a test Temporal, so
+    # that is the suite's normal path) this raised NameError and the case reddened
+    # for a scoping bug, not for the tool. One definition, before the branch.
+    def verd(e):
+        return str(e.get("verdict", ""))
+
     statuses = real_statuses(sorted({e.get("ticket") for e in entries if e.get("ticket")}))
     if statuses is None:
         cases.append(("C live 交叉验证", None))
         cases.append(("D 本票泳道 keep", None))
     else:
-        def verd(e):
-            return str(e.get("verdict", ""))
-
         # 词表契约（断言词表必须与工具词表对齐）：lane_audit 的 verdict 是
         # 「家族:可选后缀」形状——keep 家族=keep / keep:unknown-owner（query
         # 不可达时的 fail-closed 保守 keep），只有 prune:* 才是可剪。按家族判，

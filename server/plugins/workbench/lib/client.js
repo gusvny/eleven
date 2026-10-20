@@ -7228,6 +7228,29 @@ function executorPanelUrl(projectKey, theme = "light") {
 *  executor-view.tsx). */
 const PANEL_FACES = ["routes", "project-settings"];
 /**
+* t261019-09: the panel's close request. One new panel-to-console type — when the
+* panel switches its own content (showTab) or asks for a read face, the console's
+* ticket-detail overlay must not keep floating over content the panel replaced.
+* Paired with CLOSE_OVERLAY_MSG_TYPE in panel-page.ts (declared once here; the
+* page's copy must stay byte-identical, unit-anchored on both sides).
+*/
+const CLOSE_OVERLAY_MSG_TYPE = "sandbar-executor-panel:close-overlay";
+/**
+* Judge one close-overlay message payload: the message is payload-less by design.
+* Fault modes carried over from panelFaceFromMessage: non-object/null -> false,
+* wrong type -> false, never throws. Dropped by design: the face whitelist and the
+* projectKey equality — an empty payload has nothing to whitelist and no identity
+* to carry, because the sender is already pinned by the stronger existing layer,
+* the same-origin + e.source === frame.contentWindow guards in the message
+* effect. true means the caller may close the host overlay; every other shape
+* returns false and the caller ignores the message (the accepted surface does not
+* grow). Closing when nothing is open is the caller's no-op.
+*/
+function closeOverlayFromMessage(data) {
+	if (!data || typeof data !== "object") return false;
+	return data.type === CLOSE_OVERLAY_MSG_TYPE;
+}
+/**
 * Judge one open-face message payload: valid -> return the face; every other shape
 * -> null (the caller ignores it). expectedProjectKey is the projectKey prop this
 * view (the host) holds — byte-for-byte equality is required. The type field is
@@ -8496,7 +8519,7 @@ function RoutesTableSection({ providers, projectKey }) {
 }
 /** 宿主 → 面板的结果回执（面板只渲染一行 STE 文案，不做轮询/重试/状态条）。 */
 const OPEN_SESSION_RESULT_MSG_TYPE = "sandbar-executor-panel:open-session-result";
-function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }) {
+function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay, closeTicketOverlay }) {
 	const [panelState, setPanelState] = (0, react.useState)({
 		ok: false,
 		detail: "checking…"
@@ -8584,6 +8607,10 @@ function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }) {
 				}
 				return;
 			}
+			if (d.type === "sandbar-executor-panel:close-overlay") {
+				if (closeOverlayFromMessage(d) && closeTicketOverlay) closeTicketOverlay();
+				return;
+			}
 		};
 		window.addEventListener("message", onMessage);
 		return () => window.removeEventListener("message", onMessage);
@@ -8591,6 +8618,7 @@ function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }) {
 		openExecutorSession,
 		openTicketOverlay,
 		openTicketWins,
+		closeTicketOverlay,
 		projectKey
 	]);
 	const theme = consoleThemeName();
@@ -10206,7 +10234,8 @@ function WorkbenchSidebar(props) {
 						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExecutorView, {
 							projectKey: viewProject,
 							openExecutorSession: openExecutorSessionById,
-							openTicketOverlay: (id) => handleTicketClick({ id }, viewProject)
+							openTicketOverlay: (id) => handleTicketClick({ id }, viewProject),
+							closeTicketOverlay: () => setListNonce((n) => n + 1)
 						})] })]
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {

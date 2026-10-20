@@ -8,7 +8,7 @@ updated: 2026-09-28
 
 # Inspection Produce-Face Extension (doc/simplify produce change) and Inspection workflow Generalization
 
-> This document graduated from `notes/discussions/260924-巡检产出面扩展-设计稿.md` (filed with ticket t260925-01).
+> This document graduated from `notes/discussions/260924-inspection-produce-face-extension.md` (filed with ticket t260925-01).
 
 > Origin: the host's verbatim request in the 260924 session — "besides integration's inspection, I also need doc
 > inspection, and code simplify inspection"; four follow-up rulings: **①doc change is limited to documents under the docs

@@ -1088,12 +1088,150 @@ def _main_side_face(red_names, baseline_answers, targeted, capped_out,
     }
 
 
+# ---- t261019-45: named multi-root declaration resolution --------------------
+#: The lane's multi-repo manifest, read READ-ONLY by the gate. The single
+#: source of the name and the resolution rules lives in the engine's shared.py
+#: (repo_worktrees.json under the resolved coordination directory, legacy
+#: fallback per t260914-01); the gate must not import the engine, so both
+#: relative paths are pinned here and a unit test locks the two spellings
+#: together. The legacy name is a legacy-read face only — it never appears in
+#: any new identifier or receipt string.
+_INTEG_MANIFEST_RELPATHS = ('.sandbar/repo_worktrees.json',
+                            '.suyou/repo_worktrees.json')
+
+
+def _integ_manifest_repos(root):
+    """Read the lane's multi-repo manifest read-only. Returns (repos, err):
+    repos = repo-relative path strings from the manifest; a present-but-
+    malformed manifest is a named error (fail-closed, never guessed), an
+    absent manifest is ([], None) — the lane may legitimately be single-repo."""
+    for rel in _INTEG_MANIFEST_RELPATHS:
+        f = root / rel
+        if not f.is_file():
+            continue
+        try:
+            entries = json.loads(f.read_text('utf-8'))
+        except Exception as e:
+            return None, ('multi-repo lane manifest malformed (%s: %s) — '
+                          'fail-closed, not guessed' % (f, e))
+        if not isinstance(entries, list) or not entries:
+            return None, ('multi-repo lane manifest is empty or not a list '
+                          '(%s) — fail-closed, not guessed' % f)
+        repos = []
+        for e in entries:
+            if not isinstance(e, dict) or not isinstance(e.get('repo'), str):
+                return None, ('multi-repo lane manifest entries must be objects '
+                              'with a string repo field (%s) — fail-closed, '
+                              'not guessed' % f)
+            repos.append(e['repo'])
+        return repos, None
+    return [], None
+
+
+def _integ_root_candidates(root, args):
+    """Ordered, named candidate roots for the integ declaration (t261019-45).
+
+    Candidate 1 is always the caller's root. Container-first is the STATED
+    semantic, not an accident: a multi-repo lane whose container carries the
+    project-level declaration is judged on it, and member declarations stay
+    merge_check's per-scope territory (the same single-judgment split the
+    engine already draws). Candidates 2..n are the member trees the write set
+    touches, from the lane manifest and from existing directory top segments
+    of the write set; each candidate carries why it is here. A top segment
+    that is not an existing directory (measured: `integration/README.md` in a
+    lane without an integration tree) is skipped by this explicit rule —
+    never guessed, never a crash. Returns (candidates, err); candidates =
+    [{'tree': Path, 'why': str}]."""
+    cands = [{'tree': root,
+              'why': 'explicit path' if args.get('path')
+              else 'cwd default (no path given)'}]
+
+    def _add(tree, why):
+        try:
+            rp = Path(tree).resolve()
+        except OSError:
+            rp = Path(tree)
+        if rp == root or any(c['tree'] == rp for c in cands):
+            return
+        if not rp.is_dir():
+            return
+        cands.append({'tree': rp, 'why': why})
+
+    repos, err = _integ_manifest_repos(root)
+    if err:
+        return None, err
+    seen = set()
+    for repo in repos:
+        r = repo.strip().rstrip('/')
+        if not r or r in ('.', '..'):
+            continue
+        seen.add(r)
+        _add(root / r, 'manifest repo %s' % r)
+    for i, entry in enumerate(args.get('write_set') or []):
+        # Fail-closed on malformed entries: the engine payload always carries
+        # strings, so a non-string entry means a malformed caller — a NAMED
+        # red, never a silent str() coercion into an anonymous judgment
+        # (t261019-45, the input-and-precedence face P4).
+        if not isinstance(entry, str):
+            return None, ('write_set entry %d is not a string (%r) — '
+                          'fail-closed, not guessed' % (i, entry))
+        text = entry.strip()
+        seg = text.split('/')[0] if text else ''
+        if not seg or seg in ('.', '..') or seg in seen:
+            continue
+        if (root / seg).is_dir():
+            seen.add(seg)
+            _add(root / seg, 'write set segment %s' % seg)
+    return cands, None
+
+
+def _integ_cfg_resolve(cands, raw_path):
+    """Judge the declaration over the named candidates, in order.
+
+    The first candidate whose verify.yaml is present and well-formed wins; a
+    MALFORMED one at any candidate is an immediate named red naming that tree
+    (never a silent fallback past a malformed declaration); missing everywhere
+    is a named red listing every candidate tree, the file looked for and the
+    RAW caller path — so "the caller pointed at the wrong tree" and "the tree
+    genuinely has no declaration" are distinguishable in one round. Returns
+    (cfg, judged_root, root_source, err)."""
+    missing = []
+    for c in cands:
+        cfg, err = _cfg_load(c['tree'])
+        if cfg is not None:
+            return cfg, c['tree'], c['why'], None
+        if err:
+            return None, c['tree'], c['why'], \
+                '%s [judged at: %s]' % (err, c['tree'])
+        missing.append(str(c['tree']))
+    names = ', '.join(missing) if missing else '(no candidate resolved)'
+    judged = cands[0]['tree'] if cands else Path('.').resolve()
+    return None, judged, 'resolution exhausted', \
+        ('verify.yaml missing at every candidate root (looked for verify.yaml '
+         'at: %s); the integ lane fails closed (no declaration-level off '
+         'state; any call is judged; contract 2b) [caller path: %r]'
+         % (names, raw_path))
+
+
 def _integ(args):
+    """集成道入口（t261019-45 包裹）：不论走哪条返回路径，回执恒带判定树面
+    （root / root_source / root_candidates）——「回执点名判定树」是全回执不变式，
+    不是只有解析红才带。实现体在 _integ_impl。"""
+    _face = {}
+    res = _integ_impl(args, _face)
+    if isinstance(res, dict):
+        for k, v in _face.items():
+            res.setdefault(k, v)
+    return res
+
+
+def _integ_impl(args, _face):
     """集成道（薄壳化，宿主令 t260902）：执行项目声明的 integration.cmd 并解析输出契约
     （PASS/FAIL 行 + 末行 SCENARIOS ran=N pass=N fail=N）。执行与解析全天下唯此一份——
     引擎 activity 只下单（spawn 本工具）+ 翻译 JSON。红绿=退出码+契约解析，引擎零项目策略。"""
     import os as _os
-    root = Path(args.get('path') or '.').resolve()
+    _raw_path = args.get('path')
+    root = Path(_raw_path or '.').resolve()
     # ---- 1② 混版本接缝（显式 WARN 进回执，绝不静默回落 3000 硬杀）---------------
     # 巡检形态（台账来源=inspection）却两个预算面**都缺**（载荷 integ_timeout_sec 与
     # env SANDBAR_INTEG_RUN_BUDGET_SEC 同时缺席）= worker/闸**混版本**（旧活动 + 新闸，
@@ -1112,21 +1250,37 @@ def _integ(args):
         _warnings.append(_warn)
         sys.stderr.write('INTEG_WARN %s\n' % _warn)
         sys.stderr.flush()
-    cfg, err = _cfg_load(root)
+    # t261019-45 named multi-root resolution: the declaration is judged on a
+    # NAMED root; the receipt carries the judged tree, why it was chosen and
+    # every candidate tried. A multi-repo lane whose write set spans member
+    # repos no longer dies on a single-root miss, and nothing weakens: a tree
+    # with no declaration still fails closed by name (contract 2b).
+    _cands, _cerr = _integ_root_candidates(root, args)
+    if _cerr:
+        return {'lane': 'integ', 'green': False, 'err': _cerr,
+                'root': str(root), 'root_source': 'resolution failed',
+                'root_candidates': [], 'warnings': list(_warnings)}
+    cfg, root, _root_src, err = _integ_cfg_resolve(_cands, _raw_path)
+    _root_face = {'root': str(root), 'root_source': _root_src,
+                  # Serialize at the face: the receipt is a JSON contract
+                  # (tools_registry._summarize json.dumps it) — a Path here
+                  # killed the summarizer and turned a judged round into an
+                  # invisible ran=0 (t261019-45 arbitrate gen0). Internal
+                  # resolution keeps the Path form; only the face is str.
+                  'root_candidates': [{'tree': str(c['tree']), 'why': c['why']}
+                                      for c in _cands]}
+    _face.update(_root_face)   # the wrapper stamps this on EVERY exit path
     if err:
-        return {'lane': 'integ', 'green': False, 'err': err,
-                'warnings': list(_warnings)}
-    if cfg is None:
-        return {'lane': 'integ', 'green': False,
-                'err': 'verify.yaml missing: the integ lane fails closed (no declaration-level off state; '
-                       'any call is judged; contract 2b)'}
+        return dict({'lane': 'integ', 'green': False, 'err': err,
+                     'warnings': list(_warnings)}, **_root_face)
     integ_cfg = cfg.get('integration') or {}
     cmd = str(integ_cfg.get('cmd') or '').strip()
     if not cmd:
-        return {'lane': 'integ', 'green': False,
-                'err': 'integration.cmd missing or empty = malformed, fail-closed; to express "this lane '
-                       'has nothing to do", declare an always-succeeding empty command '
-                       '(e.g. true) and the round is green with zero scenarios (contract 2b)'}
+        return dict({'lane': 'integ', 'green': False,
+                     'err': 'integration.cmd missing or empty = malformed, fail-closed; to express "this lane '
+                            'has nothing to do", declare an always-succeeding empty command '
+                            '(e.g. true) and the round is green with zero scenarios (contract 2b)'},
+                    **_root_face)
     # supply 供给声明（t260904-12 乙段，契约 ②a）：逐条幂等装配命令先于 integration.cmd
     # 执行；失败/超时 = 显式红点名 need，不静默继续（契约「装配失败=红点名 need」）。
     #
@@ -1610,6 +1764,9 @@ def _integ(args):
     # 两键恒在（additive；NaN 面用 -1 表「未跑到」而不是 0=「瞬时完成」的假值）。
     _out['supply_used_sec'] = supply_used
     _out['runner_used_sec'] = runner_used
+    # t261019-45: the receipt always names the tree the integ lane judged
+    # (never an anonymous root) and lists every candidate it considered.
+    _out.update(_root_face)
     if _warnings:                       # 1② 混版本接缝显式 WARN（进回执，不静默）
         _out['warnings'] = list(_warnings)
     # t261009-01: pre-existing-main discriminator face (additive observation; the

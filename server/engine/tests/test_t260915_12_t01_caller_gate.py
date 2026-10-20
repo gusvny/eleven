@@ -22,8 +22,8 @@ import shared
 
 PROJ = [
     {"key": "sandbar", "dirs": ["/repo"]},
-    {"key": "dengzhufpv", "dirs": ["/Users/user/Documents/dengzhufpv",
-                                   "/Users/user/Documents/dengzhufpv/sub"]},
+    {"key": "dengzhufpv", "dirs": ["/Users/xingu/Documents/dengzhufpv",
+                                   "/Users/xingu/Documents/dengzhufpv/sub"]},
 ]
 REPO_TREE = ("/repo",)
 PROJ2 = [
@@ -63,7 +63,7 @@ def test_stamp_fields_default_empty(cls):
 
 def test_key_for_dir_basic_and_longest_prefix():
     assert shared.project_key_for_dir("/repo/server/engine", PROJ, REPO_TREE) == ""
-    assert shared.project_key_for_dir("/Users/user/Documents/dengzhufpv/sub/x", PROJ, REPO_TREE) == "dengzhufpv"
+    assert shared.project_key_for_dir("/Users/xingu/Documents/dengzhufpv/sub/x", PROJ, REPO_TREE) == "dengzhufpv"
     assert shared.project_key_for_dir("/elsewhere", PROJ, REPO_TREE) == ""
 
 
@@ -74,7 +74,7 @@ def test_key_for_dir_repo_tree_excluded_whole_subtree():
     assert shared.project_key_for_dir("/repo/", PROJ, REPO_TREE) == ""
     assert shared.project_key_for_dir("/repo/a/b/c", PROJ, REPO_TREE) == ""
     # 排除树之外的注册目录照常推导
-    assert shared.project_key_for_dir("/Users/user/Documents/dengzhufpv", PROJ, REPO_TREE) == "dengzhufpv"
+    assert shared.project_key_for_dir("/Users/xingu/Documents/dengzhufpv", PROJ, REPO_TREE) == "dengzhufpv"
 
 
 def test_key_for_dir_symlink_dual_form():
@@ -94,7 +94,7 @@ def test_key_for_dir_empty_and_prefix_confusion():
 
 def test_resolve_arg_beats_env():
     ident = caller_gate.resolve_identity("dengzhufpv", "sandbar",
-                                         cwd="/Users/user/Documents/dengzhufpv",
+                                         cwd="/Users/xingu/Documents/dengzhufpv",
                                          exclude_trees=REPO_TREE, projects=PROJ)
     assert ident == {"value": "dengzhufpv", "src": "arg", "identity_class": "declared"}
 
@@ -105,7 +105,7 @@ def test_resolve_env():
 
 
 def test_resolve_cwd_narrow_and_none():
-    ident = caller_gate.resolve_identity("", "", cwd="/Users/user/Documents/dengzhufpv/x",
+    ident = caller_gate.resolve_identity("", "", cwd="/Users/xingu/Documents/dengzhufpv/x",
                                          exclude_trees=REPO_TREE, projects=PROJ)
     assert ident["src"] == "cwd" and ident["value"] == "dengzhufpv"
     ident2 = caller_gate.resolve_identity("", "", cwd="/tmp/nowhere",

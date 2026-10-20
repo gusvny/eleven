@@ -37,7 +37,7 @@ const ZSTD_TIMEOUT_MS = 10_000
  * 分隔符 / \ : 的连续串坍缩成一个 '-'；安全字符 [A-Za-z0-9._-] 原样；其余按 UTF-16
  * code unit 转义 ~XXXX（大写 4 位）；去掉前导 '-'；截断 251 字符；包成 `--<可读串>--`；
  * 全空则为 `root`。与 dsh-session-persistence-jsonl projectKey() 对齐（260825 已用
- * 本泳道真实目录名 --Users-user-Documents-suyou-.worktrees-t260825-03-- 对拍）。
+ * 本泳道真实目录名 --Users-xingu-Documents-suyou-.worktrees-t260825-03-- 对拍）。
  */
 export function projectDirKey(cwd: string): string {
   if (cwd.length === 0) throw new Error('cannot encode an empty project path')

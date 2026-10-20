@@ -36,6 +36,7 @@ import json
 import os
 import re
 import pathlib
+import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -89,6 +90,7 @@ with workflow.unsafe.imports_passed_through():
     import develop_line
     from agent_activities import (
         INTEG_GUARD_SEC,  # t260924-05 KI-116：外层预算派生源（内层守卫 + 300）
+        bundle_out_ws_prefixes,
         arbitrate,
         acceptance_walkthrough,
         archive_ticket,
@@ -157,6 +159,7 @@ with workflow.unsafe.imports_passed_through():
         AUTH_PROTECTED_PATH,
         AUTHZ_SIGNAL_GATE_MARKER,
         AgentStageArgs,
+        BundleOutWsArgs,
         ChangedFilesArgs,
         SurfacePlanArgs,
         ConflictPrepArgs,
@@ -174,10 +177,18 @@ with workflow.unsafe.imports_passed_through():
         MergeCheckResult,
         MergeResult,
         ReworkRequest,
+        # t261019-26: stop tiers (design executor-operational-envelope-v1.md §2)
+        STOP_TIER_EVIDENCE,
+        STOP_TIER_JUDGEMENT,
+        STOP_TIER_MECHANICAL,
+        StopLiftRequest,
+        classify_stop_tier,
+        stop_lift_row_id_error,
         ReviewGateArgs,
         ReviewGateResult,
         SettleLaneArgs,
         SettleLaneResult,
+        GateSpec,
         Signature,
         Stage,
         StageResult,
@@ -188,6 +199,7 @@ with workflow.unsafe.imports_passed_through():
         UiEvidenceDeclArgs,
         UiEvidenceDeclResult,
         UiEvidenceResult,
+        WorkDoneSignal,
         WORKER_SHUTDOWN_RETRY_PATCH_ID,
         WorkspacePrepResult,
         UI_EVIDENCE_DIR,
@@ -383,6 +395,108 @@ def fast_proof_plan(own_names, fast_result) -> FastProofPlan:
             fast_members=fast, budget_min=f_budget, fast_error=f_err)
     return FastProofPlan(run_only=union, warning=warning, fast_members=fast,
                          budget_min=f_budget, fast_error=f_err)
+
+
+#: t261018-01 (host order 261016): the develop-buffer caliber tightens again.
+#: FEEDBACK face during a stage = change-scoped ONLY (own scenarios ∪
+#: last-round red names); the declared FAST SET leaves the per-round union and
+#: runs ONCE, at the ticket's closing run, whose receipt the release verdict
+#: reads. No gate run on this lane may ever take the full-suite caliber — not
+#: via surface_plan mode=full, not via a changed-file-list failure, not via an
+#: empty cache (each is a named refusal or the scoped face, never "run
+#: everything"). A zero-scenario feedback round is the KI-registered
+#: supply-side failure KI-01M551AR1XT01W9DNR2AN88B52, refused by name BEFORE
+#: any run activity. Same-shaped boolean gate (KI-061 replay discipline):
+#: in-flight instances replaying old history evaluate patched()=False here and
+#: take the t261011-10 path verbatim; new tickets record this marker.
+DEV_BUFFER_SCOPED_FEEDBACK_PATCH_ID = "t261018-01-buffer-scoped-feedback-v1"
+
+
+@dataclass
+class ScopedFeedbackPlan:
+    """Pure decision face for a develop-buffer round's FEEDBACK scope
+    (UT-tested; host order 261016).
+
+    run_only: the SANDBAR_SCENARIO_ONLY face = the change's own scenarios
+    (surface/targeted/own-set derivation) ∪ last-round red names. Empty means
+    the caller must REFUSE the round — never read as "run everything".
+    blocked_reason: non-empty = zero scenarios assembled. That is the
+    registered supply-side failure (KI-01M551AR1XT01W9DNR2AN88B52), named and
+    refused before any run; the full suite is never the fallback. A docs-only
+    ticket on round 1 lands here BY DESIGN: it surfaces as the named refusal,
+    never as a green with no run."""
+
+    run_only: List[str] = field(default_factory=list)
+    blocked_reason: str = ""
+
+
+def scoped_feedback_plan(own_names, prev_red_names=()) -> ScopedFeedbackPlan:
+    """Change-scoped feedback = own scenarios ∪ last-round red names. The
+    fast set is NOT part of this face (host order 261016: it runs once, at
+    closing). Malformed inputs (None, non-string entries, whitespace) are
+    dropped by the same strip filter as ``fast_proof_plan`` — never raise,
+    never widen."""
+    def _s(x):
+        return str(x).strip()
+    run_only = sorted({_s(n) for n in (list(own_names or []) +
+                                       list(prev_red_names or [])) if _s(n)})
+    if not run_only:
+        return ScopedFeedbackPlan(run_only=[], blocked_reason=(
+            "scoped-feedback plan empty: no change-scoped scenarios (own-set/"
+            "surface/prev-red faces all empty) — supply-side failure "
+            "KI-01M551AR1XT01W9DNR2AN88B52; the round is refused before any "
+            "run and the full suite is never a lane fallback"))
+    return ScopedFeedbackPlan(run_only=run_only, blocked_reason="")
+
+
+@dataclass
+class ClosingFacePlan:
+    """Pure decision face for the develop-buffer CLOSING run (UT-tested; host
+    order 261016: the full declared fast set, exactly once, and the release
+    verdict reads that run).
+
+    run_only: the fast-set members — the whole declared set, nothing else.
+    error: non-empty = the closing face is unavailable (empty set, REFUSED
+    declaration, query error, malformed output, absent result) — the caller
+    returns a NAMED zero-run receipt; the full suite is never the fallback.
+    Structurally there is no branch in this planner that can produce a
+    full-suite caliber."""
+
+    run_only: List[str] = field(default_factory=list)
+    error: str = ""
+
+
+def closing_face_plan(fast_members, fast_error="") -> ClosingFacePlan:
+    """Closing run = the declared fast set ONLY. ``fast_members`` comes from
+    the ``fast_set_declaration`` activity (object or dict both accepted;
+    malformed shapes degrade to the named error, never to "run everything").
+    A declared-empty set with no error is still a refusal HERE even though it
+    was legitimate mid-ticket: the closing run's whole meaning is the fast
+    set, so an empty one has nothing to release on — named, never silent."""
+    def _s(x):
+        return str(x).strip()
+    if fast_error:
+        return ClosingFacePlan(
+            run_only=[],
+            error="closing face unavailable: fast-set declaration errored "
+                  "(%s) — the full suite is never a lane fallback; fix the "
+                  "declaration and retry_qc" % str(fast_error)[:200])
+    if isinstance(fast_members, dict):
+        # dict-shaped declaration result (defensive parity with
+        # fast_proof_plan's dual-shape input contract)
+        fast_members = fast_members.get("members")
+    elif not isinstance(fast_members, (list, tuple, set)):
+        # object-shaped result (attribute access path, same as fast_proof_plan)
+        fast_members = getattr(fast_members, "members", None)
+    members = sorted({_s(n) for n in (list(fast_members or []))
+                      if n is not None and _s(n)})
+    if not members:
+        return ClosingFacePlan(
+            run_only=[],
+            error="closing face empty: the declared fast set has no members "
+                  "— the full suite is never a lane fallback; fix the "
+                  "declaration and retry_qc")
+    return ClosingFacePlan(run_only=members, error="")
 
 
 def fast_budget_verdict(wall_s, budget_min) -> Tuple[bool, str]:
@@ -826,6 +940,86 @@ def _concurrency_gate_active(wf, patch_id: str) -> bool:
 #: sequence must answer, before it is pushed to in-flight tickets, what
 #: happens to the runs that started before it.
 COUNTER_RESET_PATCH_ID = "t261006-07-counter-reset-v1"
+
+#: t261019-02 (host ruling 261019): a ticket whose landing row already exists
+#: on a declared develop line must reach main only through a green line
+#: certification followed by a promotion — the legacy per-ticket human merge
+#: gate (a direct squash close-out) is refused named before the signature is
+#: requested. Histories recorded before this marker replay byte-identically
+#: (the fix governs future close-outs only); the promotion act, the
+#: certification caliber and the freeze semantics are untouched.
+LINE_LANDING_CLOSEOUT_GUARD_PATCH_ID = "t261019-02-line-landing-closeout-guard-v1"
+
+
+def line_landing_closeout_verdict(project_key: str, ticket_id: str) -> str:
+    """The t261019-02 close-out guard decision core (pure predicate, one read
+    per call, called once per legacy merge-phase entry).
+
+    Returns "" when the legacy close-out may proceed — including the two
+    VACUOUS cases (no ``lines.json`` = zero declared lines, and an absent
+    delivery ledger = zero landing rows), so line-less projects keep the
+    legacy gate byte-identical. Returns a non-empty named refusal otherwise:
+    a malformed line declaration, a corrupt delivery ledger (the ``bad`` face
+    of ``develop_certify.read_rows`` — fail closed over corrupt records, never
+    judged), or a landing row for this ticket on any declared line (host
+    ruling 261019: main moves only via a green line certification + signed
+    promotion; the refusal names both ways out). Reads are pure predicates
+    over append-only facts (the delivery ledger, ledger-record-models-v1), so
+    the only replay divergence window is a landing appended between the
+    original run and its replay — the same narrow window the in-workflow
+    ``lines.json`` read (the line-base helper) already accepts."""
+    project_key = str(project_key or "").strip()
+    ticket_id = str(ticket_id or "").strip()
+    if not project_key or not ticket_id:
+        return ("close-out refused: the landing guard needs a non-empty "
+                "project key and ticket id (got %r / %r)"
+                % (project_key or "", ticket_id or ""))
+    import develop_certify  # lazy: the module edge the wait face already uses
+    import develop_line  # local: declared by t261009-46
+    try:
+        lines_path = shared.develop_dir(project_key) / "lines.json"
+    except Exception as e:  # noqa: BLE001 — develop_dir raises named on a bad key
+        return "close-out refused: project key malformed for the landing guard: %s" % e
+    # Missing vs malformed (review R1/N1): a real is_file() probe, never an
+    # error-type switch — LineDeclarationError covers BOTH cases, and a catch
+    # would silently re-merge them.
+    if not lines_path.is_file():
+        return ""  # zero declared lines: the guard is vacuous, legacy gate proceeds
+    try:
+        lines = develop_line.load_lines(project_key)
+    except Exception as e:  # noqa: BLE001 — present but unreadable/malformed
+        return ("close-out refused: line declaration malformed (%s) — the "
+                "landing guard refuses to judge over records it cannot read" % e)
+    try:
+        _, bad = develop_certify.read_rows(develop_certify.ledger_path(project_key))
+    except Exception as e:  # noqa: BLE001 — the ledger read itself faulted
+        return ("close-out refused: delivery ledger unreadable (%s: %s) — "
+                "the landing guard refuses to close out over corrupt records"
+                % (type(e).__name__, str(e)[:300]))
+    if bad:
+        return ("close-out refused: delivery ledger has %d malformed line(s) "
+                "(first: %s) — the landing guard refuses to close out over "
+                "corrupt records; repair the ledger with a human first"
+                % (len(bad), str(bad[0])[:120]))
+    for line_id, line in sorted(lines.items()):
+        try:
+            hit = develop_line.has_landing(project_key, ticket_id,
+                                           str(getattr(line, "line_id", "") or line_id))
+        except Exception as e:  # noqa: BLE001
+            return ("close-out refused: landing face unreadable on line %s "
+                    "(%s: %s)" % (line_id, type(e).__name__, str(e)[:300]))
+        if hit:
+            return ("close-out refused by host ruling 261019 (\"the tickets "
+                    "that landed on the line certainly have to go through the "
+                    "line round to be promoted\"): this ticket already has a "
+                    "landing row on line %s — main moves only through a green "
+                    "line certification followed by a signed promotion, never "
+                    "a direct squash. Ways out: (a) let the line round "
+                    "certify the landing and sign the promotion; (b) a human "
+                    "rework/handoff decision recorded on this ticket. "
+                    "retry_qc does NOT clear this guard — the landing row "
+                    "stays." % line_id)
+    return ""
 E9DAA05_LANDED_AT = datetime(2026, 10, 6, 7, 25, 58, tzinfo=timezone.utc)
 
 
@@ -869,11 +1063,72 @@ UI_EVIDENCE_TO = timedelta(seconds=420)
 MAX_CONFLICT_ROUNDS = 3  # conflict auto-resolution round cap (t260826-01); over limit or
                          # the same file set conflicting twice → blocked, handed to a human
 
-# t260901-04: the legal vocabulary for rework target/fallback (consumed by the
-# _auto_rework validation, spelled out explicitly). Note: this vocabulary intentionally
-# differs from the STAGES id vocabulary (acceptance etc. are phase values but not
-# STAGES ids) — it serves rework validation only; do not derive it from STAGES or reuse
-# it elsewhere.
+#: 261019: mechanical self-heal for merge_check reds is DECLARATION-DRIVEN.
+#: The engine keeps the closed registry of reds whose remedy is a mechanical,
+#: idempotent act (path_gates.REMEDIABLE_RED_CODES); the project opts in per red
+#: code in server/merge-checks.yaml `merge_check_auto_rework:` (stage + bound).
+#: Measured on t261019-09: the gate rebuilt through the declared entry, found the
+#: committed bundle stale, and parked the ticket on a human although the write set
+#: already admitted the paired out prefix - the remedy was the lane's to perform.
+#: A project that declares nothing keeps today's behaviour byte for byte.
+AUTO_REWORK_PATCH_ID = "dev-lane-merge-check-auto-rework-v1"
+
+#: 261019: the implement-stage half of the bundle-out widening. The merge gate
+#: has always widened its whitelist with the declared `out` prefixes whose `src`
+#: the ticket write set covers (t261009-38), but the stage that has to PRODUCE
+#: those bytes did not - so the gate asked for a rebuild the write-set gate then
+#: refused, on every ticket touching a declared `src` (measured: t261019-09).
+#: Patch-guarded: a history recorded before this point keeps its exact write set
+#: on replay (KI-061 replay discipline).
+BUNDLE_OUT_WS_PATCH_ID = "dev-lane-bundle-out-write-set-v1"
+
+#: 261019: a develop-buffer landing that CONFLICTS has a named, mechanical
+#: remedy that the engine can perform itself - the refusal text says it: "the
+#: lane re-merges the line and lands again". Until now the stage treated it as a
+#: human stop, so a ticket that simply lost a race with a sibling landing sat
+#: blocked until somebody fired retry_qc (t261019-42 and -45 did exactly that
+#: within one night). Route it back through the gate that re-syncs the line,
+#: bounded, so a real conflict still reaches a human.
+def _stamp_clause(receipt: Any) -> str:
+    """The measurement environment, written INTO a stop's reason (261020).
+
+    An "identical face" stop asserts "a rerun cannot produce new information".
+    That premise is about the WORLD, and the world includes the engine code: a
+    fix landed between rounds changes what the next round measures. Recording the
+    stamp next to the stop lets a later reader (the executor's lift policy, the
+    patrol, a person) check the premise instead of trusting it: if the current
+    code stamp differs from the one in this text, the stop is stale and a rerun
+    IS informative.
+
+    Pure: derives from the receipt's own code stamp, no IO, deterministic on the
+    same input (replay-safe). Empty when the receipt carries no stamp (old
+    receipts), which reads as "unknown", never as "same".
+    """
+    stamp = getattr(receipt, "code_stamp", None)
+    if not isinstance(stamp, dict):
+        return ""
+    line = str(stamp.get("stamp_line") or "").strip()
+    return (" (measured under code stamp %s — if the engine code has moved since, "
+            "this stop's premise is stale and a rerun is informative)" % line) if line else ""
+
+
+MAX_LANDING_CONFLICT_ROUNDS = 3
+LANDING_CONFLICT_PATCH_ID = "dev-lane-landing-conflict-rewind-v1"
+
+#: 261019: the walkthrough send-back cap counts REPEATS of the same finding, not
+#: rounds in general (a round that names a new defect is progress). Patch-guarded
+#: so an in-flight history keeps its recorded counter semantics on replay.
+ACC_FINDING_PATCH_ID = "dev-lane-acceptance-finding-counter-v1"
+
+#: 261020: the human gate requires a NAMED signature. Measured on t261019-32's
+#: walkthrough: a payload that lost its fields produced who="" and the merge
+#: booked with an empty signer. Patch-guarded for replay parity.
+SIGN_IDENTITY_PATCH_ID = "dev-lane-sign-identity-v1"
+
+#: Engine-side hard ceiling on the rounds a declaration may ask for (a remedy
+#: that never stabilises must reach a human, not loop).
+AUTO_REWORK_MAX_ROUNDS_CEILING = 3
+
 PHASE_MAIN_CHAIN = frozenset({
     "create_plan", "review_plan", "parallel_impl_design", "implement",
     "integ_join", "integration_review", "run_integration_tests", "arbitrate",
@@ -1671,7 +1926,16 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         byte for byte."""
         if not workflow.patched(EFFECTIVE_WS_PATCH_ID):
             return list(self.meta.get("write_set") or [])
-        return write_set_effective(self.meta)
+        ws = write_set_effective(self.meta)
+        # 261019: a DECLARED build-chain output prefix belongs to this lane as
+        # soon as its paired src is in the write set (the same rule the merge
+        # gate applies). Without this, the gate can ask for a rebuild the write
+        # set then refuses - the declaration deadlock measured on t261019-09
+        # (it blocked every ticket touching a declared `src`, not just that one).
+        # The prefixes come from an activity (the workflow cannot read files) and
+        # are cached in meta, so this stays a pure append on replay.
+        extra = [str(p) for p in (self.meta.get("bundle_out_prefixes") or []) if str(p).strip()]
+        return (ws + [p for p in extra if p not in ws]) if extra else ws
 
     def _write_set_record_path(self) -> str:
         """The ABSOLUTE record path (boundary rule: cross-process readers take
@@ -1851,9 +2115,30 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
     # was killed mid-stage is cleared by ticket.py op=concurrency reconcile.
 
     CONC_GATE_POLL = timedelta(seconds=5)   # waiter re-poll backstop
+    # 261019 measured: a flat 5-second re-poll costs ~11 history events per
+    # round (acquire + timer + workflow tasks), so a ticket queued for ~5 hours
+    # reaches Temporal's 51,200-event limit and the SERVER terminates it
+    # ("Workflow history count exceeds limit") — four tickets died that way
+    # (t261019-16/-18/-19/-27) and each promotion then parked a slot on the
+    # corpse. The waiter therefore backs off geometrically to CONC_GATE_POLL_MAX:
+    # ~30 polls for the first five minutes, then one poll every two minutes,
+    # which keeps a multi-day queue inside the limit. The backoff is behind a
+    # patch marker so histories recorded at the flat 5 s replay unchanged
+    # (KI-061 replay discipline: the sleep duration IS history).
+    CONC_GATE_POLL_MAX = timedelta(seconds=120)
+    CONC_GATE_BACKOFF_PATCH_ID = "dev-lane-conc-gate-backoff-v1"
 
     def _conc_project(self) -> str:
         return str(self.meta.get("project") or "")
+
+    def _conc_gate_delay(self, polls: int) -> timedelta:
+        """The waiter's next sleep: flat historical 5 s, or the capped
+        geometric backoff for histories started after the backoff patch.
+        Deterministic in `polls`, which is replay-reconstructable."""
+        if not workflow.patched(self.CONC_GATE_BACKOFF_PATCH_ID):
+            return self.CONC_GATE_POLL
+        step = min(polls, 6)                      # 5s,10,20,40,80,120...
+        return min(self.CONC_GATE_POLL * (2 ** step), self.CONC_GATE_POLL_MAX)
 
     async def _concurrency_gate(self) -> None:
         """Judge the slot BEFORE a stage starts (rule 1). Not granted → the
@@ -1868,6 +2153,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 "limit is judged per project, an empty key is never admitted "
                 "(fail-closed, t261004-32 rule 9)" % self.ticket_id)
         last_pos = None
+        polls = 0
         while True:
             r = await workflow.execute_activity(
                 concurrency_acquire,
@@ -1890,11 +2176,16 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                           "stage never jumps the queue"
                           % (pos, r.get("limit"), r.get("holders")))
                 last_pos = pos
+            if r.get("dropped_stale"):
+                self._log("Queue corpses dropped: %s (their workflows are gone; "
+                          "a dead head no longer blocks the queue)"
+                          % ", ".join(str(x) for x in r["dropped_stale"]))
             self.meta["stage_state"] = "queued"
             self.meta["queue_face"] = {"position": pos, "limit": r.get("limit"),
                                        "waiting": r.get("waiting")}
             self._touch()
-            await workflow.sleep(self.CONC_GATE_POLL)
+            await workflow.sleep(self._conc_gate_delay(polls))
+            polls += 1
 
     async def _concurrency_renew(self, reason: str) -> None:
         """Atomic holder-record refresh (stage end / human-gate transition).
@@ -1967,6 +2258,14 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         # surface it top-level (blocked_reason / blocked_detail) — the ticket face
         # and the human gate must see WHY without diving into worker logs.
         self.meta["blocked_reason"] = why
+        # t261019-26 (executor-operational-envelope-v1.md §2): pin the stop's tier
+        # next to the reason, derived from the recorded reason TEXT ALONE — never
+        # from anything a lifter declares. The tier decides who may clear the stop:
+        # evidence/mechanical may be lifted by the executor (lift_stop), judgement
+        # stays human-only. Deterministic on the same why string, so replay-safe.
+        _tier, _kind = classify_stop_tier(why)
+        self.meta["blocked_tier"] = _tier
+        self.meta["blocked_evidence"] = {"kind": _kind, "cited_row_id": ""}
         self._touch()
         self._log("%s → blocked，等 retry_qc 重跑或 rework 打回" % why)
         self._mark(step_id, "blocked", why)
@@ -2036,6 +2335,61 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         同形入参（同代数、同策略值，走 _integ_run_args 单写者），仅 only_names
         为空（全量面，不注入 SANDBAR_SCENARIO_ONLY）。回执形状同
         IntegrationRunResult。"""
+        if workflow.patched(DEV_BUFFER_SCOPED_FEEDBACK_PATCH_ID) and \
+                is_develop_buffer_ticket(self.meta):
+            # t261018-01 (host order 261016): the closing run IS the declared
+            # FAST SET, exactly once per attempt — the release verdict reads
+            # this run. Members are re-read fresh from the declaration query
+            # at closing time (the per-round receipt stays a receipt; the
+            # declaration is the truth source). Any unavailable shape = a
+            # NAMED zero-run receipt; the full suite is never a fallback.
+            # "Exactly once": per attempt (generation). A pass whose closing
+            # run finds new reds voids the verdict; the RE-JUDGED pass reads
+            # the SAME closing run (no second run inside one attempt). A
+            # rework bumps the generation, so the next pass of the new
+            # attempt triggers the new attempt's one closing run. The
+            # receipt face meta["closing_run_face"] names the run (gen,
+            # members, wall, error) so the release verdict always points at
+            # one unambiguous run.
+            _fs = await workflow.execute_activity(
+                fast_set_declaration,
+                FastSetDeclarationArgs(
+                    ticket_id=self.ticket_id,
+                    worktree=str(self.meta.get("worktree") or "")),
+                start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
+            _cerr = str(getattr(_fs, "error", "") or "")
+            _cplan = closing_face_plan(
+                list(getattr(_fs, "members", None) or []), _cerr)
+            if _cplan.error:
+                self.meta["closing_run_face"] = {
+                    "gen": self._gen("run_integration_tests"),
+                    "members": [], "wall_s": 0.0, "error": _cplan.error}
+                self._log(_cplan.error)
+                return IntegrationRunResult(
+                    ran=0, passed=0, failed=0, env_fail=0, details=[],
+                    error=_cplan.error)
+            self._log("closing run = the declared fast set, %d member(s), "
+                      "exactly once this attempt (gen %d)"
+                      % (len(_cplan.run_only),
+                         self._gen("run_integration_tests")))
+            _ct0 = self._now_epoch()
+            rraw = await workflow.execute_activity(
+                run_integration_tests, self._integ_run_args(_cplan.run_only),
+                start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
+            _cres = rraw if isinstance(rraw, IntegrationRunResult) else \
+                IntegrationRunResult(
+                    ran=int(rraw.get("ran") or 0),
+                    passed=int(rraw.get("passed") or 0),
+                    failed=int(rraw.get("failed") or 0),
+                    env_fail=int(rraw.get("env_fail") or 0),
+                    details=[dict(d) for d in (rraw.get("details") or [])],
+                    error=str(rraw.get("error") or ""))
+            self.meta["closing_run_face"] = {
+                "gen": self._gen("run_integration_tests"),
+                "members": list(_cplan.run_only),
+                "wall_s": round(max(0, self._now_epoch() - _ct0), 1),
+                "error": str(getattr(_cres, "error", "") or "")}
+            return _cres
         if workflow.patched(DEV_BUFFER_FAST_PROOF_PATCH_ID) and \
                 is_develop_buffer_ticket(self.meta):
             # t261011-10: on this version the closing run is the SAME scoped
@@ -2217,6 +2571,30 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         return " | env-red (not blocking, named): %s%s (total %d)" % (
             shown, "..." if len(got) > limit else "", len(got))
 
+    def _acc_finding_sig(self, res: Any) -> str:
+        """The walkthrough finding's identity (261019).
+
+        The cap exists to stop a ticket bouncing on the SAME finding forever.
+        Measured on t261019-32: eight send-backs, each one a DIFFERENT, real
+        defect (a nested payload, a missing fixture declaration, a class-attribute
+        reference, a sign payload that blanked the signer) - every round moved the
+        ticket forward, yet the counter treated them as one loop and stopped at
+        the cap. Counting only repeats keeps the cap's intent (no infinite
+        bouncing) while letting progress accumulate.
+
+        Digest of the report's own words, normalised: whitespace collapsed, and
+        the round number / gen markers stripped so "round 3" and "round 4" say
+        the same thing when the finding is the same."""
+        import hashlib as _h
+        import re as _re
+        text = str(getattr(res, "report", "") or getattr(res, "summary", "") or "")
+        if not text.strip():
+            return ""
+        norm = _re.sub(r"\s+", " ", text).strip().lower()
+        norm = _re.sub(r"round \d+", "round N", norm)
+        norm = _re.sub(r"gen\d+", "genN", norm)
+        return _h.sha256(norm.encode("utf-8")).hexdigest()
+
     def _integ_round_stall(self, cur_integ) -> Dict[str, Any]:
         """本轮闸**测量面**与上一轮判过的逐字相同 ⇒ 判停（260929 宿主令直修）。
 
@@ -2247,7 +2625,8 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                              "baseline ref): this ticket's write set and red face are unchanged, "
                              "so a full rerun cannot produce new information. Route to human review "
                              "(decide after reading the arbitration verdict and the "
-                             "DESIGN-CONFLICT handover); after the human ruling, retry_qc can revive it." % rounds)}
+                             "DESIGN-CONFLICT handover); after the human ruling, retry_qc can revive it."
+                             "%s" % (rounds, _stamp_clause(cur_integ)))}
         self.meta["integ_signature"] = sig
         self.meta["integ_signature_rounds"] = 1
         return {"stall": False, "rounds": 1, "sig": sig, "note": ""}
@@ -3293,7 +3672,8 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 # t260922-18 新证据键：dict 回退重建点漏写=证据静默丢，同批补齐
                 target_sha=str(praw.get("target_sha") or ""),
                 lane_head=str(praw.get("lane_head") or ""),
-                up_to_date=bool(praw.get("up_to_date")))
+                up_to_date=bool(praw.get("up_to_date")),
+                branch_tip=str(praw.get("branch_tip") or ""))
             _tag = _st["name"]
             _mode = ("up_to_date" if prep.up_to_date
                      else "merged" if prep.already_clean else "conflict")
@@ -3657,6 +4037,37 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                       % tr.error)
         return True
 
+    async def _line_landing_closeout_guard(self) -> bool:
+        """t261019-02 (host ruling 261019) — the legacy merge-gate close-out
+        guard, ONE declared seam (the integration scenario drives exactly
+        this). True = this close-out is refused: the named block has already
+        been raised (step "merge") and the caller must continue; False = no
+        landing row anywhere (or the guard is vacuous), the legacy gate
+        proceeds untouched. The decision itself is the pure module-level
+        ``line_landing_closeout_verdict`` — this wrapper only carries the
+        workflow-side effects (log + block)."""
+        # 261019: the verdict is computed in an activity - the core reads the delivery
+        # ledger, and a workflow may not touch the environment or the file system
+        # (measured: RestrictedWorkflowAccessError refused every close-out).
+        # PATCHED: histories recorded before this change replay the inline call, so an
+        # in-flight ticket never hits a nondeterminism error (it keeps the old, blocked
+        # shape); new workflows take the activity.
+        if workflow.patched("closeout-guard-activity-261019"):
+            from activities import line_landing_closeout_verdict_activity
+            verdict = await workflow.execute_activity(
+                line_landing_closeout_verdict_activity,
+                {"project": str(self.meta.get("project") or ""), "ticket": self.ticket_id},
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+        else:
+            verdict = line_landing_closeout_verdict(
+                str(self.meta.get("project") or ""), self.ticket_id)
+        if not verdict:
+            return False
+        self._log("landing close-out guard refused the close-out: %s"
+                  % verdict[:200])
+        await self._blocked("merge", verdict)
+        return True
+
     async def _dev_buffer_land_step(self) -> bool:
         """The develop-buffer landing path (t261009-46) — the version-gated
         replacement for the per-ticket human merge gate. Consumes the PROVEN
@@ -3717,6 +4128,41 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 or "already landed" in (lr.error or "") \
                 or "already has a landing" in (lr.error or "")
             if not already:
+                # 261019: a CONFLICT refusal is the one shape with a mechanical
+                # remedy the engine owns — the refusal itself says "the lane
+                # re-merges the line and lands again", and the gate phase does
+                # exactly that. Route back to it (bounded, patch-guarded so an
+                # older history keeps its block-on-a-human path) instead of
+                # parking a ticket that merely lost a race with a sibling
+                # landing. Every other refusal (drifted checkout, undeclared
+                # line, duplicate landing) stays a human stop, unchanged.
+                _err = str(lr.error or "")
+                if workflow.patched(LANDING_CONFLICT_PATCH_ID) \
+                        and "conflicts in repository" in _err:
+                    self._landing_conflict_rounds += 1
+                    if self._landing_conflict_rounds <= MAX_LANDING_CONFLICT_ROUNDS:
+                        self._log("landing conflicted with the line; re-merging and "
+                                  "landing again (round %d of %d): %s"
+                                  % (self._landing_conflict_rounds,
+                                     MAX_LANDING_CONFLICT_ROUNDS, _err[:200]))
+                        self._handoff(
+                            "merge",
+                            "line landing conflicted, back to the gate to re-sync "
+                            "(round %d)" % self._landing_conflict_rounds,
+                            report=_err[:800])
+                        self._auto_rework(
+                            "merge_check",
+                            "line landing conflicted (mechanical, round %d): %s - "
+                            "re-merge the line into the lane and land again."
+                            % (self._landing_conflict_rounds, _err[:400]),
+                            who="workflow", fallback="merge_check")
+                        return False
+                    await self._blocked(
+                        "merge",
+                        "develop-buffer landing still conflicted after %d automatic "
+                        "re-merges — a human resolves it: %s"
+                        % (MAX_LANDING_CONFLICT_ROUNDS, _err or "unknown"))
+                    return False
                 # A drifted checkout / undeclared line / duplicate landing:
                 # the refusal is named, nothing landed, the tip is untouched.
                 await self._blocked("merge", "develop-buffer landing refused: %s"
@@ -3764,8 +4210,9 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             await self._blocked(
                 "merge",
                 "no certification covered this landing within %d polls x %ds "
-                "(the certification round schedule is t261009-30, not built "
-                "yet) — stopped named for a human, not silently delivered"
+                "(certification wait timed out; the line-round schedule certifies "
+                "the derived range on its next tick) — stopped named, liftable by "
+                "retry_qc once a round certifies the landing"
                 % (CERT_WAIT_ROUNDS, CERT_WAIT_INTERVAL_S))
             return False
         if not await self._archive_and_teardown():
@@ -3860,6 +4307,24 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         arb_ctx = ""                              # test results produced by run_integration_tests, injected
         ui_ctx = ""  # t260828-09: UI screenshot evidence (produced at the join, consumed by acceptance)
         self._conflict_rounds = 0                       # t260826-01: conflict auto-resolution rounds (cap MAX_CONFLICT_ROUNDS)
+        self._auto_rework_rounds = 0                    # 261019: mechanical-red auto-rework rounds (declared bound, engine ceiling)
+        self._landing_conflict_rounds = 0               # 261019: line-landing conflict re-merges (cap MAX_LANDING_CONFLICT_ROUNDS)
+        if workflow.patched(BUNDLE_OUT_WS_PATCH_ID) and not self.meta.get("bundle_out_prefixes"):
+            # 261019: resolve the lane's declared build-chain outputs ONCE (the
+            # workflow cannot read files), cache them in meta, and let
+            # _effective_write_set append them. Fail-closed and quiet: an
+            # unreadable/absent declaration widens nothing and says why.
+            _bws = await workflow.execute_activity(
+                bundle_out_ws_prefixes,
+                BundleOutWsArgs(ticket_id=self.ticket_id,
+                                worktree=str(self.meta.get("worktree") or ""),
+                                write_set=list(self.meta.get("write_set") or [])),
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+            _prefixes = list(getattr(_bws, "prefixes", []) or [])
+            if _prefixes:
+                self.meta["bundle_out_prefixes"] = _prefixes
+            if str(getattr(_bws, "note", "") or ""):
+                self._log("[bundle-out] %s" % getattr(_bws, "note"))
         self._prev_conflict_files: List[str] = []       # last round's conflict files (sorted set comparison)
         prev_ctx = ""
         ui_ctx = ""   # t260828-09: UI screenshot evidence list (produced at the join, consumed by the walkthrough)
@@ -4566,18 +5031,35 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                             | set(str(n).strip()
                                   for n in (getattr(_fs, "own_members", None)
                                             or []) if str(n).strip()))
-                        _fplan = fast_proof_plan(_own_names, _fs)
+                        _deferred = False
+                        if workflow.patched(DEV_BUFFER_SCOPED_FEEDBACK_PATCH_ID):
+                            # t261018-01 (host order 261016): on this version
+                            # the FEEDBACK face is change-scoped ONLY — own
+                            # scenarios ∪ last-round red names. The fast set
+                            # is NOT run here; it is deferred to the closing
+                            # run (which re-reads the declaration fresh). The
+                            # declaration receipt keeps members/budget/error
+                            # fields unchanged and is marked
+                            # deferred_to_closing so a closing-run refusal is
+                            # diagnosable from the round receipt alone.
+                            _deferred = True
+                            _fplan = scoped_feedback_plan(_own_names)
+                        else:
+                            _fplan = fast_proof_plan(_own_names, _fs)
                         self.meta["fast_set_proof"] = {
-                            "members": list(_fplan.fast_members),
-                            "count": len(_fplan.fast_members),
+                            "members": list(getattr(_fs, "members", None)
+                                            or []),
+                            "count": len(getattr(_fs, "members", None) or []),
                             "own_members": list(getattr(_fs, "own_members",
                                                         None) or []),
-                            "budget_min": int(_fplan.budget_min),
+                            "budget_min": int(getattr(_fs, "budget_min", 0)
+                                              or 0),
                             "proof_budget_min": DEV_BUFFER_PROOF_BUDGET_MIN,
                             "wall_s": 0.0, "breach": False,
-                            "error": _fplan.fast_error,
+                            "error": str(getattr(_fs, "error", "") or ""),
                             "own_error": str(getattr(_fs, "own_error", "")
-                                             or "")}
+                                             or ""),
+                            "deferred_to_closing": _deferred}
                         if getattr(_fs, "own_error", ""):
                             self._log("own-set face unavailable this round "
                                       "(%s) — named, the proof still carries "
@@ -4586,17 +5068,32 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                         if _fplan.blocked_reason:
                             # [R1]: both sources absent = a NAMED failed round,
                             # refused BEFORE any run — never the full suite.
+                            # t261018-01: under the scoped-feedback version
+                            # this refusal shape is the registered supply-side
+                            # failure (KI-01M551AR1XT01W9DNR2AN88B52) — incl.
+                            # a docs-only first round (no own set, no prev
+                            # reds): it surfaces as THIS named refusal, never
+                            # as a green with no run.
                             self._log(_fplan.blocked_reason)
                             self.meta["blocked_detail"] = {
-                                "reason_code": "fast_proof_plan_empty",
-                                "item": "__fast_proof_plan__",
+                                "reason_code": ("scoped_feedback_plan_empty"
+                                                if _deferred else
+                                                "fast_proof_plan_empty"),
+                                "item": ("__scoped_feedback_plan__"
+                                         if _deferred else
+                                         "__fast_proof_plan__"),
                                 "detail": _fplan.blocked_reason}
                             _fs_refusal = _fplan.blocked_reason
                         else:
                             run_only = list(_fplan.run_only)
                             self.meta["fast_proof_only"] = list(run_only)
-                            if _fplan.warning:
+                            if getattr(_fplan, "warning", ""):
                                 self._log(_fplan.warning)
+                            if _deferred:
+                                self._log("scoped feedback face: %d change-"
+                                          "scoped scenario(s); the declared "
+                                          "fast set runs once at closing"
+                                          % len(run_only))
                     if _fs_refusal:
                         # The proof-plan step failed by name: the round is
                         # judged on this zero-run receipt — no run activity,
@@ -4646,14 +5143,19 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                             _own_n = len(_fsp.get("own_members") or [])
                             self._log("fast-set proof: %d member(s) [%s] "
                                       "own=%d wall=%.1fs proof-ceiling=%ss "
-                                      "declared-fast-budget=%ss%s"
+                                      "declared-fast-budget=%ss%s%s"
                                       % (int(_fsp.get("count") or 0),
                                          (_shown[:300] + "…") if len(_shown) > 300 else _shown,
                                          _own_n,
                                          float(_fsp["wall_s"]),
                                          DEV_BUFFER_PROOF_BUDGET_MIN * 60,
                                          int(_fsp.get("budget_min") or 0) * 60,
-                                         ("｜" + _fnote) if _fnote else ""))
+                                         ("｜" + _fnote) if _fnote else "",
+                                         ("｜deferred: wall covers the "
+                                          "change-scoped face only, the fast "
+                                          "set runs once at closing"
+                                          ) if _fsp.get("deferred_to_closing")
+                                         else ""))
                 except Exception as e:
                     # t260929-18：error 进仲裁/票面 → 链下钻带上真实根因。
                     ir = IntegrationRunResult(error="集成测试 activity 故障：%s: %s%s"
@@ -5628,6 +6130,16 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     # 重入。
                     await self._block_agent_failed("acceptance_walkthrough", res)
                     continue
+                # 261019: a send-back that names a NEW finding resets the bounce
+                # counter — the cap is for a repeated finding, not for progress
+                # (measured on t261019-32: eight different real defects, capped
+                # as if it were one loop).
+                _sig = self._acc_finding_sig(res)
+                _prev_sig = str(self.meta.get("acc_finding_sig") or "")
+                if workflow.patched(ACC_FINDING_PATCH_ID):
+                    if _sig and _sig != _prev_sig:
+                        acc_rounds = 0
+                        self.meta["acc_finding_sig"] = _sig
                 acc_rounds += 1
                 prev_ctx = ("【验收走查打回（第 %d 轮）】走查发现代码问题：\n%s"
                             % (acc_rounds, res.report or res.summary or "")).strip()
@@ -5771,6 +6283,63 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 # red (mc.conflict) skips blocked and automatically sends work back to
                 # implement for resolution (reusing the rework loop, no signal needed);
                 # every other red stays blocked waiting for a human.
+                # 261019: mechanical self-heal for a stale DECLARED build output.
+                # The gate already rebuilt through the declared entry and only
+                # found the committed bundle out of date; the paired out prefix is
+                # already inside the effective write set (t261009-38), so the
+                # remedy is "run the declared entry, commit the output" — a thing
+                # the lane can do and no human has to. Routed back to implement,
+                # bounded, and ONLY when this is the round's sole red so nothing
+                # else is masked. Behind a patch marker: a history recorded while
+                # this red still parked on a human must replay the block path
+                # (KI-061 replay discipline), so old runs keep asking for a human.
+                # 261019: mechanical self-heal, DECLARATION-DRIVEN (generic).
+                # The engine owns the closed registry of reds whose remedy is a
+                # mechanical, idempotent act; the PROJECT opts in and names the
+                # stage + bound in server/merge-checks.yaml
+                # `merge_check_auto_rework:`. The activity resolved that policy
+                # and handed this workflow a plain decision (`mc.auto_rework`), so
+                # no new red class needs an engine edit - only a declaration.
+                # Behind a patch marker: a history recorded while such a red
+                # still parked on a human must replay the block path (KI-061).
+                if not mc.conflict and workflow.patched(AUTO_REWORK_PATCH_ID):
+                    _plan = getattr(mc, "auto_rework", None)
+                    if isinstance(_plan, dict) and _plan.get("stage"):
+                        self._auto_rework_rounds += 1
+                        _cap = int(self.meta.get("auto_rework_max_rounds")
+                                   or AUTO_REWORK_MAX_ROUNDS_CEILING)
+                        if self._auto_rework_rounds <= _cap:
+                            # No _pin_merge_red_detail here ON PURPOSE: that face
+                            # is the "current block" card and this path does not
+                            # block (t260915-01 A4 pins every pin site adjacent to
+                            # a _blocked). The round is logged + handed off by name.
+                            _note = str(_plan.get("note") or "")
+                            self._log(_note)
+                            self._handoff(
+                                "merge_check",
+                                "mechanical red %s, back to %s (round %d)"
+                                % (_plan.get("code"), _plan.get("stage"),
+                                   self._auto_rework_rounds),
+                                report="; ".join(
+                                    str(c.get("detail") or "")
+                                    for c in mc.checks if not c.get("green")))
+                            impl_done = False
+                            phase = self._auto_rework(
+                                str(_plan["stage"]), _note, who="workflow",
+                                fallback="merge_check")
+                            continue
+                        # Over the declared bound: the mechanical remedy does not
+                        # stick (a build that never stabilises), so a human looks.
+                        self._pin_merge_red_detail(
+                            mc.checks,
+                            disposition="mechanical red survived %d automatic "
+                                        "rework rounds → blocked for a human" % _cap)
+                        await self._blocked(
+                            "merge_check",
+                            "merge_check red: %s did not clear after %d automatic "
+                            "rework rounds (the declared remedy is not stabilising): %s"
+                            % (_plan.get("code"), _cap, red or mc.error))
+                        continue
                 if not mc.conflict:
                     # t260915-01 ②（A4）：非冲突红转 blocked——首红项既有结论结构化
                     # 紧邻 _blocked 写入（当前受阻明细；非 blocked 期由清点①②清空）。
@@ -5843,7 +6412,11 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     conflict_files=[str(x) for x in (praw.get("conflict_files") or [])],
                     merge_output=str(praw.get("merge_output") or ""),
                     already_clean=bool(praw.get("already_clean")),
-                    error=str(praw.get("error") or ""))
+                    error=str(praw.get("error") or ""),
+                    # t261016-13: the additive evidence key is carried at EVERY
+                    # rebuild point (review comment 2: not two sites, all of them -
+                    # a missing key silently drops evidence)
+                    branch_tip=str(praw.get("branch_tip") or ""))
                 if not prep.ok:
                     await self._blocked("merge_check", "conflict-resolution prep failed (round %d): %s"
                                         % (self._conflict_rounds, prep.error or "unknown"))
@@ -5975,6 +6548,21 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     if await self._dev_buffer_land_step():
                         phase = "done"
                     continue
+                # t261019-02 (host ruling 261019): the line-landed close-out fence now
+                # lives in the merge ACTIVITY (agent_activities.merge), where reading the
+                # delivery ledger is legal. 261019: the in-workflow version was refused by
+                # the Temporal sandbox (RestrictedWorkflowAccessError) and blocked every
+                # close-out; an activity-side check needs no new workflow input, so old
+                # histories are fenced too. Nothing to do here.
+                #
+                # The marker call STAYS (with an empty branch): histories recorded while
+                # the guard lived here carry this patch marker, and dropping the call
+                # changes their command sequence - measured 261019 as TMPRL1100
+                # nondeterminism on t261019-14/-15 ("Activity type of scheduled event ...
+                # does not match"). A patch call whose branch does nothing keeps every
+                # history replayable.
+                if workflow.patched(LINE_LANDING_CLOSEOUT_GUARD_PATCH_ID):
+                    pass
                 st = self._step("merge")
                 self._enter("merge")
                 prep_ctx = await workflow.execute_activity(
@@ -6001,16 +6589,39 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 if self._rework is not None:
                     continue  # unified stage-skip at the top of the main loop
                 sig = self._sigs.pop("merge")
+                # 261020: the human gate needs an IDENTITY, not just a signal.
+                # Measured on t261019-32's walkthrough: a signature whose payload
+                # lost its fields arrived with who="" and the merge booked with an
+                # empty signer ("human : ;") — the design's one human signature
+                # became unaccountable, and any self-sign check that compares
+                # against the working session is vacuous when who is blank. A
+                # blank identity is refused by name at the gate and the ticket
+                # stays awaiting-human (the signal is consumed, so a real
+                # signature can follow). Behind a patch marker: a history that
+                # already booked with a blank signer replays unchanged.
+                if workflow.patched(SIGN_IDENTITY_PATCH_ID) \
+                        and not str(getattr(sig, "who", "") or "").strip():
+                    self.refused.append(
+                        {"who": "", "want": "sign(merge)",
+                         "why": "signature carries no identity (who is blank): the "
+                                "human gate is a named act, refusing to book an "
+                                "anonymous merge"})
+                    self._log("merge sign-off refused: blank identity (who='') — "
+                              "still awaiting a named signature")
+                    self._mark("merge", "awaiting-human",
+                               "signature refused: blank identity; waiting for a named sign")
+                    continue
                 self.signatures["merge"] = {"who": sig.who, "decision": sig.decision,
                                             "note": sig.note, "at": self._now_iso()}
                 if sig.decision != "approve":
                     # KI-212: internal send-back goes through the coalescing queue —
-                    # it must never clobber a held external rework.
-                    self._queue_rework(
-                        ReworkRequest(
-                            who=sig.who, target_stage="implement",
-                            note="human send-back at merge: %s (signed by %s)" % (sig.note, sig.who)),
-                        "human-gate reject at merge")
+                    # it must never clobber a held external rework. Single writer =
+                    # _queue_human_gate_reject (t261012-05 pins the construction
+                    # count; every human-gate reject routes through it).
+                    self._queue_human_gate_reject(
+                        sig.who,
+                        "human send-back at merge: %s (signed by %s)" % (sig.note, sig.who),
+                        "implement")
                     continue
                 # Approved signature → real merge
                 self.meta["stage_state"] = "running"
@@ -6359,6 +6970,90 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
              "reason": "%s requests rerun (attempt %d)" % (who, self._retry_token)})
 
     @workflow.signal
+    def lift_stop(self, req: StopLiftRequest) -> None:
+        """Clear a blocked stop whose tier says the executor may clear it
+        (t261019-26; design executor-operational-envelope-v1.md §2).
+
+        Tier rules, fail-closed:
+        - no recorded tier (a stop blocked before this code deployed, incl. a
+          parked instance resumed later) → refused, treated as judgement;
+        - requested tier must equal the tier recorded at block time — the request
+          can never upgrade a stop's tier (the classifier reads the recorded
+          reason alone);
+        - judgement stops are refused outright: only a person (host_ruling +
+          retry_qc) lifts those;
+        - evidence stops require a well-formed cited_row_id (structural check
+          only; the semantic check of the ledger row is the lifter's written
+          duty — the workflow takes no IO);
+        - mechanical stops lift with the written note; the actual clearing move
+          stays the existing rework / retry_qc signals.
+
+        Deliberately NOT carried over from the human signals: the t261006-07 (R3)
+        counter reset (_conflict_rounds / _prev_conflict_files). An executor lift
+        is not a human signal and must not hand out one more resolve round inside
+        the arbitration caps. A granted lift bumps _retry_token only, so the
+        _blocked wait wakes exactly as after a retry_qc."""
+        who = str(req.who or "").strip()
+        want = "lift_stop(%s)" % (str(req.tier or "").strip() or "?")
+        # t260915-12 cross-project gate (second check, before any intake; a
+        # refused lift mutates nothing, same rule as rework).
+        if not self._cross_project_gate(str(getattr(req, "caller_project", "") or ""),
+                                        str(getattr(req, "cross_project_note", "") or ""),
+                                        "lift_stop", who, "lift_stop"):
+            return
+        note = str(req.note or "").strip()
+        recorded = str(self.meta.get("blocked_tier") or "")
+        if not recorded:
+            self.refused.append(
+                {"who": who, "want": want,
+                 "why": "no recorded stop tier (a stop from before this code "
+                        "deployed); treated as judgement — a person must rule "
+                        "(host_ruling + retry_qc)"})
+            return
+        if recorded == STOP_TIER_JUDGEMENT:
+            self.refused.append(
+                {"who": who, "want": "lift_stop(%s)" % recorded,
+                 "why": "judgement stop: the records cannot settle it — a person "
+                        "must rule (host_ruling + retry_qc), never lift_stop"})
+            return
+        if str(req.tier or "").strip() != recorded:
+            self.refused.append(
+                {"who": who, "want": want,
+                 "why": "tier mismatch: the recorded stop tier is %r, the request "
+                        "says %r — a lift request cannot change the stop's tier"
+                        % (recorded, str(req.tier or "").strip())})
+            return
+        rid = ""
+        if recorded == STOP_TIER_EVIDENCE:
+            kind = (self.meta.get("blocked_evidence") or {}).get("kind")
+            # validate the RAW payload (a non-string row id must be refused as
+            # itself, not silently coerced), then keep the stripped form.
+            err = stop_lift_row_id_error(req.cited_row_id, kind)
+            if err:
+                self.refused.append({"who": who, "want": want, "why": err})
+                return
+            rid = str(req.cited_row_id).strip()
+        if not note:
+            self.refused.append(
+                {"who": who, "want": want,
+                 "why": "a lift must carry a written reason (note is required "
+                        "and non-empty)"})
+            return
+        if recorded == STOP_TIER_EVIDENCE:
+            self.meta["blocked_evidence"]["cited_row_id"] = rid
+        self._retry_token += 1
+        self.timeline.append(
+            {"at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
+             "state": "stop-lifted",
+             "reason": "%s lifts %s stop%s (attempt %d): %s"
+                       % (who, recorded,
+                          ", row %s" % rid if rid else "",
+                          self._retry_token, note)})
+        self._log("stop lifted (%s) by %s%s — blocked step re-driven; "
+                  "counters untouched"
+                  % (recorded, who, ", row %s" % rid if rid else ""))
+
+    @workflow.signal
     def host_ruling(self, req: HostRulingRequest) -> None:
         """Host ruling injection (KI-053): the official channel for human opinions,
         sendable in any state (blocked included). A valid ruling is appended to
@@ -6545,3 +7240,1022 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
 
     def _snapshot(self) -> Dict[str, Any]:
         return self.snapshot()
+
+    def _queue_human_gate_reject(self, who: str, note: str, target_stage: str) -> None:
+        """Single writer for the merge-gate reject send-back (KI-212: the internal
+        rework goes through the coalescing queue and must never clobber a held
+        external rework). One construction site in this file — t261012-05 pins the
+        count; dev-lane and the quickmanual lane both route through here with their
+        own target stage and note text verbatim."""
+        self._queue_rework(
+            ReworkRequest(who=who, target_stage=target_stage, note=note),
+            "human-gate reject at merge")
+
+
+# ---------------------------------------------------------------------------
+# quickmanual lane (t261019-32; design docs/design/quickmanual-lane-v1.md,
+# committed abda6dc1) — a recorded lane where ONE session does the work.
+#
+# Stage chain: open -> work -> run_integration_tests -> merge_check -> merge.
+# No create_plan / review_plan / design_integration_tests / acceptance_walkthrough:
+# those stages exist to make a second and third role check the first, and a quick
+# lane has no second role. The work stage does NOT spawn an agent: a session (the
+# host's own, or a project session pointed at the ticket) works in the lane worktree
+# and signals done; the ordinary settle/disposal path, the write-set gate and the
+# settle commit still apply, so "direct" never means "outside the engine". The gates
+# and the landing act are the parent's own machinery, reused - not forked.
+#
+# Reuse face (what is NOT re-implemented here):
+#   - workspace preparation: DevLaneWorkflow._prepare_workspace_step (the same
+#     helper dev-lane and light-lane call);
+#   - pre-gate main sync: DevLaneWorkflow._main_sync_before_gate (the single
+#     implementation; the human-readable texts come from light_lane's English block
+#     through a runtime lazy import - a module-level import would be circular,
+#     because light_lane imports dev_lane);
+#   - the machine gate: the same run_integration_tests activity through the same
+#     _integ_run_args single-writer, FULL-registry rounds (the landing verdict only
+#     accepts a full run, and a quick lane runs nothing else);
+#   - merge_check / merge / archive / teardown: the same activities with the same
+#     argument family as light-lane;
+#   - rework hold, pause, event ledger, concurrency slot gate, human-gate signals:
+#     the parent's/mixin's own code.
+# New in this class (and only this): the template, the manual work stage (the
+# work_done signal + the session identity face), the mandatory evidence gate at
+# open, and the no-self-sign check at the merge gate.
+#
+# Registration status (t261019-32 write-set boundary): shared.TEMPLATE_CLASS_NAMES
+# carries the id on the names face; the CLASS face (workflows_v2.TEMPLATE_CLASSES /
+# ALL_WORKFLOWS_V2) and the generated server/workflows/quickmanual-lane.yaml are
+# outside the ticket's declared write set and register in the named follow-up step
+# after the host amends the declared paths (plan gen1 step 0, review-passed). Until
+# then, creation through this id fails closed with a named refusal on both creation
+# entries - never a half-started workflow with no registered worker.
+# ---------------------------------------------------------------------------
+
+QUICKMANUAL_PATCH_ID = "quickmanual-lane-v1"
+
+QUICKMANUAL_TEMPLATE_ID = "quickmanual-lane"
+
+# Concurrency slot gate: a NEW lane-scoped patch id, same reasoning as light-lane's
+# LIGHT_CONCURRENCY_GATE_PATCH_ID (see that comment block in light_lane.py). New
+# instances always evaluate live -> True; the emitting helpers physically live in
+# dev_lane and keep their own dev-lane patch guards.
+QUICKMANUAL_CONCURRENCY_GATE_PATCH_ID = "quickmanual-lane-concurrency-gate-v1"
+
+# Pre-gate main sync: gated for the same replay-discipline reason as the light-lane
+# gates (a fresh class has no old in-flight history, but the gate keeps the family
+# discipline uniform and costs nothing).
+QUICKMANUAL_MAIN_SYNC_PATCH_ID = "quickmanual-lane-main-sync-v1"
+
+#: The machine gate declaration face (same command / same executor as dev-lane and
+#: light-lane; mirrored into shared.default_gate_for).
+QUICKMANUAL_GATES: Dict[Any, GateSpec] = {
+    (QUICKMANUAL_TEMPLATE_ID, "run_integration_tests"): GateSpec(
+        stage="run_integration_tests", tool="verify_lane", args={"lane": "integ"},
+        label="verify_lane integ (the project-declared integration command)"),
+}
+
+#: Rework vocabulary: exactly the stages this lane has. A rework to a dev-lane-only
+#: stage (create_plan, review_plan, implement, arbitrate, acceptance_walkthrough...)
+#: is refused BY NAME - never a silent fall-through to an unknown phase.
+QUICKMANUAL_REWORK_TARGETS = frozenset({
+    "open", "work", "run_integration_tests", "merge_check", "merge"})
+
+#: The ways-out text shared by this lane's blocked convergence points. The shared
+#: next_action hints that point at create_plan are rewritten HERE (the shared
+#: strings in path_gates are NOT touched, so dev-lane faces stay byte-identical);
+#: same approach as light-lane's LIGHT_NEUTRAL_NEXT_ACTION.
+QUICKMANUAL_NEXT_ACTION_REWRITE = (
+    "This lane has no planning stage: put the files to change into the ticket's "
+    "declared write set and send rework(to_stage=work) to fix the change in the "
+    "lane, or retry_qc to re-run the check as is.")
+
+
+class QuickmanualLaneWorkflow(DevLaneWorkflow):
+    """Quickmanual lane: open -> work -> run_integration_tests -> merge_check -> merge.
+
+    STAGES is display/derivation metadata (yaml snapshot, lane graph, creation
+    derivation); the real orchestration is run() below. Everything mechanical is
+    inherited from DevLaneWorkflow (see the reuse face in the module block above).
+    """
+
+    PATCH_ID = QUICKMANUAL_PATCH_ID
+    TEMPLATE_ID = QUICKMANUAL_TEMPLATE_ID
+    TEMPLATE_NAME = "Quickmanual Lane"
+    # KI-124: the stage path gate switch travels with the template class
+    # (client.py ticket-start reads the class attribute).
+    PATH_GATE = True
+    TEMPLATE_LANE = "worktree"
+    TEMPLATE_WORKSPACE_DIR = False
+    TEMPLATE_DESC = ("Quickmanual lane: open (evidence gate) -> work (a session works "
+                     "the lane, no agent; the worker settles the commit) -> "
+                     "run_integration_tests (machine gate, full registry) -> "
+                     "merge_check -> merge (human review; the working session cannot "
+                     "sign its own merge) - red blocks for a human, no automatic "
+                     "re-run or arbitration")
+    #: No agent stages -> no stage flow briefs to inject into prompts.
+    FLOW_BRIEF_SET: Dict[str, str] = {}
+
+    #: Blocked-face discipline (same family as light-lane): the ticket face is a
+    #: human-readable digest; the full machine lists stay in blocked_detail / the
+    #: receipt / the report files. The caps are mechanical criteria (UT-pinned).
+    FACE_NAME_LIMIT = 5
+    FACE_MAX_LINES = 10
+    FACE_MAX_CHARS = 1350
+
+    #: Class-level default so a signal arriving before run() never sees a missing
+    #: attribute (the handler only ever writes the instance attribute).
+    _quick_work_done: Optional[Dict[str, Any]] = None
+
+    #: Stage declaration (same order as run(); all ticket-face text in English per
+    #: CLAUDE.md rule 6).
+    STAGES = (
+        Stage(id="open", name="Open (evidence gate)", role="developer", next="work",
+              desc="Programmatic (no agent): validate the ticket's mandatory evidence "
+                   "declaration - an L1 battery, a scenario, or (document-only) the "
+                   "check that ran. A quick fix without evidence is a defect of the "
+                   "delivery, not a shortcut: the record is what distinguishes this "
+                   "lane from a direct commit. The declaration is creation-time "
+                   "input; a missing or malformed one blocks here with a named "
+                   "remedy.",
+              parts=("script",),
+              acceptance=("The ticket carries a valid evidence declaration "
+                          "(kind: l1_battery | scenario | check, name filled in)",
+                          "The declaration is recorded on the ticket face as a claim - "
+                          "the merge human reviewer judges whether the delivered work "
+                          "matches it")),
+        Stage(id="work", name="Work (session in the lane)", role="developer",
+              next="run_integration_tests",
+              desc="The lane is created and held; NO agent is spawned. A session (the "
+                   "host's own, or a project session pointed at the ticket) works in "
+                   "the lane worktree inside the declared write set, does NOT git "
+                   "commit (the worker settles the commit on its behalf), and signals "
+                   "work_done with its session id (mandatory) and role. The ordinary "
+                   "settle/disposal path, write-set gate and settle commit apply.",
+              parts=("human", "script"),
+              acceptance=("Changes stay inside the declared write set (the same path "
+                          "gate as every lane)",
+                          "The working session id and its role are recorded on the "
+                          "ticket face (never a borrowed role name)",
+                          "The work is committed through the ordinary settle path "
+                          "(worker-settled, never a hand-made repo)")),
+        Stage(id="run_integration_tests", name="Run integration tests",
+              role="integration", next="merge_check", agent=False,
+              gate=QUICKMANUAL_GATES[(QUICKMANUAL_TEMPLATE_ID,
+                                      "run_integration_tests")],
+              desc="Programmatic (no agent): lane 0-commit precheck -> pre-gate main "
+                   "sync (merge main into the lane once; the verified tree = the "
+                   "merged tree) -> run the project-declared integration command "
+                   "through the same single-writer args as dev-lane, FULL registry "
+                   "every round. Not green = blocked for a human (a digest face: "
+                   "counts + at most 5 named violations + the ways out); no automatic "
+                   "re-run, no arbitration.",
+              parts=("script",),
+              acceptance=("The project-declared integration command ran over the full "
+                          "registry and produced a receipt",
+                          "Any red is carried in full (counts + the named violations; "
+                          "the full set in the receipt)")),
+        Stage(id="merge_check", name="Merge check", role="integration", next="merge",
+              agent=False,
+              desc="Programmatic checks (no agent): the lane has commits, the "
+                   "worktree is clean, in-lane verify_lane is green, merge-tree has "
+                   "no conflict; phase entry re-merges main before the check (the "
+                   "same shared helper as dev-lane/light-lane). Any red -> blocked "
+                   "for a human (no automatic conflict-resolution rounds).",
+              parts=("script",),
+              acceptance=("Lane branch has commits", "Worktree is clean",
+                          "The in-lane verify_lane check is green",
+                          "merge dry-run has no conflict")),
+        Stage(id="merge", name="Merge (human review)", role="integration", next="",
+              exit="human",
+              desc="After human sign-off, execute the merge: merge main + lane "
+                   "cleanup (tear down the worktree, delete the branch); landing "
+                   "goes through the engine's ordinary landing act - never a direct "
+                   "squash into main. NO SELF-SIGN: the session that did the work "
+                   "does not sign the merge (the executor signs per the own-project "
+                   "rule, or the host signs); a signature from the recorded working "
+                   "session is refused by name.",
+              parts=("human", "script"),
+              acceptance=("Human sign-off recorded (the working session cannot sign "
+                          "its own merge)",
+                          "Merge booked + lane cleaned up")),
+    )
+
+    # ------------------------------------------------------------ signals
+    @workflow.signal
+    def work_done(self, sig: "WorkDoneSignal") -> None:
+        """The working session signals done (this lane's own signal).
+
+        Intake rules (identity guardrail): the session id is MANDATORY and non-blank
+        after stripping - a missing / empty / whitespace-only id is refused BY NAME
+        into `refused` and never wakes the parked work stage (the same discipline as
+        the sign handler's refusals; malformed input never becomes control flow).
+        The cross-project gate runs first, same as sign/rework."""
+        if not self._cross_project_gate(str(getattr(sig, "caller_project", "") or ""),
+                                        str(getattr(sig, "cross_project_note", "") or ""),
+                                        "work_done",
+                                        str(getattr(sig, "session", "") or ""),
+                                        "work_done"):
+            return
+        session = str(getattr(sig, "session", "") or "").strip()
+        if not session:
+            self.refused.append({
+                "who": str(getattr(sig, "session", "") or ""),
+                "want": "work_done",
+                "why": "session id missing, empty or whitespace-only - the lane "
+                       "records who worked (identity guardrail); send work_done "
+                       "again with the real session id"})
+            self._log("work_done refused: blank session id (identity guardrail)")
+            return
+        note = str(getattr(sig, "note", "") or "")
+        self._quick_work_done = {
+            "session": session,
+            "role": str(getattr(sig, "role", "") or "").strip() or "session",
+            "note": note[:shared.QUICK_WORK_NOTE_INPUT_LIMIT],
+            "evidence_ref": str(getattr(sig, "evidence_ref", "") or "")
+            [:shared.QUICK_WORK_EVIDENCE_REF_LIMIT],
+        }
+        self._log("work_done accepted from session %s (role %s)"
+                  % (session, self._quick_work_done["role"]))
+
+    @workflow.signal
+    def sign(self, sig: Signature) -> None:
+        """Human-gate signature with the quickmanual NO-SELF-SIGN gate in front
+        (guardrail 4): the session that did the work does not sign the merge. A
+        signature whose `who` matches the recorded working session id exactly is
+        refused by name and never reaches the parent's sign semantics; the executor
+        (per the own-project rule) and the host sign exactly as in every other lane
+        - no new authority surface. Everything else delegates to the parent handler
+        (authorize intake, cross-project gate, awaiting-human checks) verbatim."""
+        wb = dict(self.meta.get("worked_by") or {})
+        who = str(getattr(sig, "who", "") or "")
+        if str(wb.get("session") or "") and who == str(wb.get("session")):
+            self.refused.append({
+                "who": who, "want": "sign(%s)" % str(getattr(sig, "gate", "") or ""),
+                "why": "no self-sign: this identity is the session that worked the "
+                       "lane (recorded on the ticket face); the executor signs per "
+                       "the own-project rule, or the host signs"})
+            self._log("sign refused (no self-sign): %s is the recorded working "
+                      "session" % who)
+            return
+        DevLaneWorkflow.sign(self, sig)
+
+    # ------------------------------------------------------------ helpers
+    def _quick_settle_refused(self, err: str) -> bool:
+        """Single writer for the settle gate-refusal signature (the same
+        machine-readable marker the parent's fork sites match)."""
+        return "path_gate_reason=" in (err or "")
+
+    #: Named fallback when the light-lane class attribute is unreachable (the
+    #: acceptance gen5 AttributeError showed a bare reach-through crashes the
+    #: gate phase): same four keys with the same sentences the other lanes'
+    #: humans read, degraded ON PURPOSE so a missing block is visible in the log
+    #: and the sync still runs with honest text.
+    QUICK_MAIN_SYNC_TEXTS_FALLBACK: Dict[str, str] = {
+        "unreachable": ("Main sync failed - a human has to take it: this lane never "
+                        "skips the sync (otherwise the verified tree is not the tree "
+                        "that would be merged): %s%s"),
+        "resolve_round": "Main sync conflict, resolution round %d (%s): %s",
+        "conflict_ctx": ("Main sync conflict (round gen%d/cap%d): the pre-gate sync "
+                         "merged main into the lane and conflict markers are present "
+                         "in:\n%s\nResolve file by file keeping both sides' "
+                         "semantics; do NOT git commit (the worker settles the merge "
+                         "commit); this round must not run any integration entry."),
+        "agent_failed_fmt": "Main sync conflict resolution round %d: %s",
+        "settle_unconverged": ("Main sync conflict resolution round %d did not "
+                               "converge: %s. Send rework(to_stage=work) or retry_qc."),
+        "back_to_implement": "Main sync conflict resolved (round %d) - back to work",
+        "synced_log": "main sync (%s): %s",
+        "reset_exception": (" | merge reset attempt raised (%s: %s) - the lane may "
+                            "still be mid-merge; a human has to finish it"),
+        "reset_ok": (" | merge reset done (MERGE_HEAD cleared) - the next main sync "
+                     "retries from a clean tree"),
+        "reset_failed": (" | merge reset failed: %s - the lane is still mid-merge; a "
+                         "human has to finish it"),
+    }
+
+    def _quick_main_sync_texts(self) -> Dict[str, str]:
+        """The English main-sync text block. Runtime lazy import: light_lane imports
+        dev_lane at module level, so dev_lane cannot import it back at import time;
+        by the time a workflow executes, the worker has both modules loaded, and the
+        import is a sys.modules lookup (deterministic on replay). The block is a
+        CLASS attribute of LightLaneWorkflow (never a module attribute - acceptance
+        gen5's AttributeError), and an unreachable block degrades to the named
+        local fallback instead of faulting the gate phase."""
+        try:
+            import light_lane  # noqa: PLC0415 - runtime-only, see the docstring
+            return dict(light_lane.LightLaneWorkflow.LIGHT_MAIN_SYNC_TEXTS)
+        except Exception as e:  # noqa: BLE001 - named degradation, never AttributeError
+            self._log("main-sync text block unreachable (%s: %s) - using this "
+                      "lane's fallback wording (the sync mechanism is the shared "
+                      "helper either way)" % (type(e).__name__, str(e)[:200]))
+            return dict(self.QUICK_MAIN_SYNC_TEXTS_FALLBACK)
+
+    def _quick_safe_phase(self, phase: str) -> str:
+        """Clamp a phase value into this lane's vocabulary (the parent's _safe_phase
+        validates against PHASE_MAIN_CHAIN, which does not contain this lane's
+        stages). Never raises, never returns an empty/unknown value."""
+        if phase in QUICKMANUAL_REWORK_TARGETS:
+            return phase
+        self.refused.append({"who": "", "want": "phase-clamp",
+                             "why": "phase %r is not a quickmanual stage -> clamped "
+                                    "to open" % (phase,)})
+        self._log("phase clamp: %r is not a quickmanual stage -> open" % (phase,))
+        return "open"
+
+    def _consume_quick_rework(self, phase: str) -> Tuple[str, str]:
+        """Consume the rework signal (refusals consume it too - never a residue).
+        Target must be in QUICKMANUAL_REWORK_TARGETS; otherwise refused by name.
+        Valid targets are this class's own STAGES ids, so the role lookup via
+        _step is total (no vocabulary drift)."""
+        req = self._rework
+        self._rework = None
+        target = str(getattr(req, "target_stage", "") or "") or phase
+        if target not in QUICKMANUAL_REWORK_TARGETS:
+            why = ("target %r is not a quickmanual stage (admissible: %s) - this lane "
+                   "has no plan review, no arbitration and no acceptance walkthrough"
+                   % (target, ", ".join(sorted(QUICKMANUAL_REWORK_TARGETS))))
+            self.refused.append({"who": str(getattr(req, "who", "") or ""),
+                                 "want": "rework(%s)" % target, "why": why})
+            self._log("rework refused: %s" % why)
+            return "", ("rework refused: %s" % why)
+        note = str(getattr(req, "note", "") or "")
+        who = str(getattr(req, "who", "") or "")
+        self.meta["stage"] = target
+        self.meta["role"] = self._step(target).role
+        self.meta["status"] = "rework"
+        self.meta["stage_state"] = "awaiting"
+        self.meta["last_rework_note"] = note
+        self._touch()
+        self._log("rework: %s (back to %s) - %s" % (note, target, who))
+        self._mark(target, "rework", "%s (%s)" % (note, who))
+        self._persist_stage_memo(target, "rework")
+        return target, ""
+
+    def _quick_gate_verdict(self, ir: Any) -> str:
+        """Verdict for a FULL-registry round (pure w.r.t. the receipt + the parent's
+        red-name single writers):
+          - a receipt error is red;
+          - any product red (parent _tests_red_names: details exit != 0 union the
+            gate blocker list, minus named environment reds) is red;
+          - env_fail > 0 with NO named env-red channel is red (no named channel =
+            no exemption - the B2 rule, same as light-lane);
+          - otherwise green.
+        UT-pinned against the same truth table as the light-lane verdict."""
+        if str(getattr(ir, "error", "") or ""):
+            return "red"
+        if self._tests_red_names(ir):
+            return "red"
+        env_names, _ok = self._tests_env_red_names(ir)
+        if int(getattr(ir, "env_fail", 0) or 0) > 0 and not env_names:
+            return "red"
+        return "green"
+
+    async def _quick_gate_round(self) -> Any:
+        """One FULL-registry machine-gate round (same activity, same single-writer
+        args as dev-lane/light-lane; a quick lane runs no narrowed fast-feedback
+        face)."""
+        rraw = await workflow.execute_activity(
+            run_integration_tests, self._integ_run_args(),
+            start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
+        if isinstance(rraw, IntegrationRunResult):
+            return rraw
+        return IntegrationRunResult(
+            ran=int(rraw.get("ran") or 0), passed=int(rraw.get("passed") or 0),
+            failed=int(rraw.get("failed") or 0),
+            env_fail=int(rraw.get("env_fail") or 0),
+            details=[dict(d) for d in (rraw.get("details") or [])],
+            error=str(rraw.get("error") or ""),
+            blockers=[str(x) for x in (rraw.get("blockers") or [])],
+            excluded_pools=[str(x) for x in (rraw.get("excluded_pools") or [])],
+            excluded_count=int(rraw.get("excluded_count") or 0),
+            only_names=[str(x) for x in (rraw.get("only_names") or [])],
+            env_red=[str(x) for x in (rraw.get("env_red") or [])])
+
+    def _quick_gate_receipt(self, ir: Any, gen: int) -> Dict[str, Any]:
+        """Machine-gate receipt onto the ticket face (results.run_integration_tests,
+        same shape family as light-lane's; full per-scenario rows stay in evidence +
+        the lane report)."""
+        _wf_line = shared.worker_verified_line(getattr(ir, "worker_identity", ""),
+                                               getattr(ir, "code_stamp", None))
+        names = self._tests_red_names(ir)
+        green = self._quick_gate_verdict(ir) == "green"
+        return {
+            "status": "ok" if green else "failed",
+            "summary": ("integration gate (full registry): %s ran / %s passed / %s "
+                        "failed / %s env-red%s%s"
+                        % (ir.ran, ir.passed, ir.failed, ir.env_fail,
+                           (" | " + str(ir.error)) if ir.error else "",
+                           (" | " + _wf_line) if _wf_line else "")),
+            "report": "", "deliverables": [], "files_changed": [],
+            "evidence": json.dumps(ir.details, ensure_ascii=False)[-4000:],
+            "gen": gen,
+            "worker_identity": str(getattr(ir, "worker_identity", "") or ""),
+            "code_stamp": getattr(ir, "code_stamp", None) or {},
+            "blockers": [str(b) for b in (getattr(ir, "blockers", None) or [])],
+            "violations": names,
+        }
+
+    def _quick_gate_blocked_text(self, ir: Any, reason_code: str, gen: int) -> str:
+        """Blocked digest for a red gate round (ticket face = a human-readable
+        summary: one conclusion line + counts + at most FACE_NAME_LIMIT named
+        violations + the ways out; the full violation set stays in
+        results.run_integration_tests and the receipt)."""
+        names = [str(n) for n in self._tests_red_names(ir)]
+        shown = names[:self.FACE_NAME_LIMIT]
+        more = len(names) - len(shown)
+        lines = [
+            "Integration gate round %d is RED (%s): %s ran / %s passed / %s failed "
+            "/ %s env-red." % (gen, reason_code, ir.ran, ir.passed, ir.failed,
+                               ir.env_fail),
+            ("Violations: %s" % ", ".join(shown)) if shown
+            else "Violations: none named by the product-red channel (see the reason "
+                 "code).",
+        ]
+        if more > 0:
+            lines.append("+%d more - the full set is in "
+                         "results.run_integration_tests.violations and the lane "
+                         "report." % more)
+        lines.append("Ways out: retry_qc to re-run the gate, or rework(to_stage=work) "
+                     "to fix the change in the lane (the session works again, the "
+                     "worker re-settles).")
+        return "\n".join(lines[:self.FACE_MAX_LINES])[:self.FACE_MAX_CHARS]
+
+    async def _quick_merge_check(self) -> MergeCheckResult:
+        """merge_check activity (same activity, same argument family as
+        light-lane/dev-lane - no second implementation of the checks)."""
+        raw = await workflow.execute_activity(
+            merge_check,
+            MergeCheckArgs(ticket_id=self.ticket_id,
+                           worktree=str(self.meta.get("worktree") or ""),
+                           branch=str(self.meta.get("branch") or ""),
+                           base_ref=str(self.meta.get("base_ref") or ""),
+                           write_set=list(self.meta.get("write_set") or []),
+                           path_gate=bool(self.meta.get("path_gate")),
+                           path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
+                           authorizations=self._protected_authz_records(),
+                           no_file_changes=bool(self.meta.get("no_file_changes")),
+                           last_green_run=dict(self.meta.get("last_green_run") or {})),
+            start_to_close_timeout=MERGE_CHECK_TO, retry_policy=RETRY)
+        mc = raw if isinstance(raw, MergeCheckResult) else MergeCheckResult(
+            green=bool(raw.get("green")), checks=list(raw.get("checks") or []),
+            error=str(raw.get("error") or ""),
+            conflict=bool(raw.get("conflict")),
+            conflict_files=[str(x) for x in (raw.get("conflict_files") or [])],
+            merge_tree_excerpt=str(raw.get("merge_tree_excerpt") or ""))
+        self._record_authz_uses(
+            "; ".join(str(c.get("detail") or "") for c in mc.checks), "merge_check")
+        self.gate_runs.append({
+            "stage": "merge_check", "label": "merge_check (programmatic checks)",
+            "green": mc.green,
+            "red_count": len([c for c in mc.checks if not c.get("green")]),
+            "exit_code": 0, "checks": mc.checks,
+            "conflict": mc.conflict, "conflict_files": mc.conflict_files})
+        return mc
+
+    # ------------------------------------------------------------ query face
+    @workflow.query
+    def snapshot(self) -> Dict[str, Any]:
+        """Parent snapshot + this lane's additive face keys (worked_by: who worked;
+        quick_evidence: the declared evidence). Additive keys only - the parent's
+        face is unchanged, so existing consumers never see a shape break."""
+        face = DevLaneWorkflow.snapshot(self)
+        face["worked_by"] = dict(self.meta.get("worked_by") or {})
+        face["quick_evidence"] = dict(self.meta.get("quick_evidence") or {})
+        return face
+
+    # ------------------------------------------------------------ main flow
+    @workflow.run
+    async def run(self, inp: TicketInput) -> Dict[str, Any]:
+        # FAIL-NAMED boundary (acceptance gen2: both journey tickets sat at
+        # open/awaiting with an EMPTY blocked face and zero timeline entries -
+        # the shape of a workflow task dying before the first _enter, invisible
+        # to the user). An exception escaping the body is converted into a named
+        # blocked on the open stage with the fault class + message + traceback
+        # tail, so a stall can never be silent again; the remedy named is
+        # retry_qc (the task re-runs and, if the fault is systemic, the face
+        # names it again). The boundary wraps everything, so no pre-open step
+        # (slot gate / workspace preparation / pause gate / ledger flush) can
+        # produce a motionless ticket without a reason on the face.
+        while True:
+            try:
+                return await self._run_quickmanual(inp)
+            except Exception as e:  # noqa: BLE001 - fail-named, never fail-silent
+                tb = traceback.format_exc(limit=8)
+                await self._blocked(
+                    self._quick_safe_phase(str(self.meta.get("stage") or "open")),
+                    "The quickmanual workflow task faulted before it could progress "
+                    "(%s: %s) - this block replaces an invisible stall. Traceback "
+                    "tail for the engineer: %s | Remedy: retry_qc re-runs the task "
+                    "from the current phase; if the fault repeats, the named class "
+                    "above is the fix point, and a human can always cancel."
+                    % (type(e).__name__, str(e)[:300], tb[-700:]))
+
+    async def _run_quickmanual(self, inp: TicketInput) -> Dict[str, Any]:
+        self._init(inp)
+        # The evidence declaration travels with the creation input (state lives in
+        # the workflow; pinned once here, read only by the open stage).
+        self._quick_evidence_raw = getattr(inp, "evidence", None)
+
+        # Concurrency gate: same face as the other lanes (helpers in the parent);
+        # judged before the first stage, queued when not granted.
+        if _concurrency_gate_active(workflow, QUICKMANUAL_CONCURRENCY_GATE_PATCH_ID):
+            await self._concurrency_gate()
+
+        # Workspace preparation: the parent's own helper (same activity / same
+        # blocked-on-failure / same rework semantics as every lane).
+        await self._prepare_workspace_step()
+
+        phase = str(self.meta.get("stage") or self.STAGES[0].id)
+        # Pre-open step traces: each pre-loop await lands a timeline entry, so a
+        # stall is always locatable to one step on the ticket face (acceptance
+        # gen2's invisible-stall defect - never again without a where).
+        self._log("pre-open: workspace ready (%s), slot granted, pause gate open "
+                  "- entering the phase loop at %s"
+                  % (self.meta.get("worktree") or "(worktree unknown)", phase))
+        self._touch()
+        # Cross-round guard state consumed by the rework/retry_qc handlers (same
+        # names as the parent's conflict-resolution loop).
+        self._conflict_rounds = 0
+        self._prev_conflict_files: List[str] = []
+
+        while phase != "done":
+            await self._concurrency_release_if_paused()
+            await self._pause_gate()
+            if _concurrency_gate_active(workflow, QUICKMANUAL_CONCURRENCY_GATE_PATCH_ID):
+                await self._concurrency_gate()
+            await self._ledger_flush()
+
+            if self._rework is not None:
+                # KI-212 hold: while the current phase is a RUNNING mechanical
+                # round, hold the landing (no stage prompt to carry the note);
+                # consume at any parked state (this lane has no agent-capable
+                # phase).
+                _held = False
+                if workflow.patched(REWORK_HOLD_PATCH_ID):
+                    _tgt = str(getattr(self._rework, "target_stage", "") or "")
+                    _eff = _tgt or phase
+                    if _eff in QUICKMANUAL_REWORK_TARGETS:
+                        _d, _why = rework_landing_decision(
+                            phase, _tgt, str(self.meta.get("stage_state") or ""),
+                            frozenset())
+                        if _d == "hold":
+                            self._note_rework_held(_eff, _why)
+                            _held = True
+                if not _held:
+                    landing, refusal = self._consume_quick_rework(phase)
+                    if refusal:
+                        await self._blocked(self._quick_safe_phase(phase), refusal)
+                        continue
+                    phase = landing
+                    await self._breathe()
+                    continue
+
+            # 1) open - the evidence gate (guardrail 3, mechanical).
+            if phase == "open":
+                self._enter("open")
+                ok, reason, ev = shared.quick_evidence_validate(
+                    self._quick_evidence_raw)
+                if not ok:
+                    await self._blocked(
+                        "open",
+                        "The mandatory evidence declaration is missing or malformed: "
+                        "%s. A quick fix without evidence is a defect of the "
+                        "delivery, not a shortcut (design guardrail 3). The "
+                        "declaration is creation-time input and cannot be mutated in "
+                        "place: re-create the ticket with a valid evidence "
+                        "declaration (kind: %s; 'check' is the document-only form), "
+                        "or send a host ruling if the declaration is in fact present "
+                        "but unread by this engine version."
+                        % (reason, ", ".join(shared.QUICK_EVIDENCE_KINDS)))
+                    continue
+                self.meta["quick_evidence"] = ev
+                self._finish("open", by="open",
+                             evidence="evidence declared: kind=%s name=%s (the "
+                                      "declaration is a claim; the merge human "
+                                      "reviewer judges whether the delivered work "
+                                      "matches it)" % (ev["kind"], ev["name"]))
+                self._handoff("open", "Evidence declared (%s: %s)"
+                                      % (ev["kind"], ev["name"]))
+                phase = "work"
+                continue
+
+            # 2) work - the lane held for a session; NO agent is spawned.
+            if phase == "work":
+                self._enter("work")
+                self._log("work stage parked: a session works in the lane worktree "
+                          "%s - make the change inside the declared write set, do "
+                          "NOT git commit (the worker settles the commit), then "
+                          "send work_done with the session id (mandatory) and role."
+                          % (self.meta.get("worktree") or "(worktree unknown)"))
+                self._mark("work", "awaiting-session",
+                           "Waiting for the working session: work_done(session, "
+                           "role)")
+                self.meta["stage_state"] = "awaiting"
+                self._touch()
+                # A parked lane holds its slot on purpose, same as the human gate
+                # (the ledger says human-hold).
+                await self._concurrency_renew(CAUSE_HUMAN_GATE)
+                await self._ledger_flush()
+                await workflow.wait_condition(
+                    lambda: (self._quick_work_done is not None)
+                            or (self._rework is not None))
+                if self._rework is not None:
+                    continue  # consumed at the loop top
+                done = dict(self._quick_work_done or {})
+                self._quick_work_done = None
+                # Identity face (guardrail: who worked, never a borrowed role name).
+                self.meta["worked_by"] = {"session": done.get("session", ""),
+                                          "role": done.get("role", ""),
+                                          "at": self._now_iso()}
+                self._log("work_done from session %s (role %s) - settling the lane "
+                          "through the ordinary settle path"
+                          % (done.get("session", ""), done.get("role", "")))
+                self.meta["stage_state"] = "running"
+                self._touch()
+                try:
+                    sraw = await workflow.execute_activity(
+                        settle_lane,
+                        SettleLaneArgs(ticket_id=self.ticket_id,
+                                       worktree=str(self.meta.get("worktree") or ""),
+                                       stage_id="work", gen=self._gen("work"),
+                                       write_set=self._effective_write_set(),
+                                       base_ref=str(self.meta.get("base_ref") or ""),
+                                       path_gate=bool(self.meta.get("path_gate")),
+                                       path_gate_rules=dict(
+                                           self.meta.get("path_gate_rules") or {}),
+                                       authorizations=self._protected_authz_records()),
+                        start_to_close_timeout=SHORT, retry_policy=RETRY)
+                except Exception as e:  # noqa: BLE001 - the work stays in the tree
+                    await self._blocked(
+                        "work",
+                        "The worker settle failed (%s: %s). The change is still in "
+                        "the worktree, nothing is lost; send retry_qc to settle "
+                        "again." % (type(e).__name__, str(e)[:400]))
+                    continue
+                s = sraw if isinstance(sraw, SettleLaneResult) else SettleLaneResult(
+                    note=str(sraw.get("note") or ""),
+                    lane_commits=int(sraw.get("lane_commits") or -1),
+                    error=str(sraw.get("error") or ""))
+                self._record_authz_uses(s.note, "work")
+                if self._quick_settle_refused(s.error):
+                    # The write-set gate refused: named blocked, never a silent
+                    # partial settle. Replay discipline (t260925-17 family): the
+                    # branch is gated and this lane's pending bookkeeping is reset
+                    # here (the wake path re-enters the work phase clean; this lane
+                    # has no fork edges, so there is no impl/arb flag to clear).
+                    if workflow.patched(QUICKMANUAL_PATCH_ID):
+                        self._quick_work_done = None
+                    self._pin_settle_refusal(s)
+                    await self._blocked(
+                        "work",
+                        "The settle was refused by the write-set gate: %s | "
+                        "Remedies: rework(to_stage=work) to bring the change inside "
+                        "the declared write set." % s.error[:400])
+                    continue
+                if s.error:
+                    # The wording deliberately avoids the main-sync
+                    # conflict-resolution family's signature phrase (pinned by
+                    # t261007-06 S4 with its rework/--abort exits): this site is a
+                    # different mechanism (worker settle failure, remedy retry_qc)
+                    # and must stay uniquely identifiable.
+                    await self._blocked(
+                        "work",
+                        "The worker settle failed at the work stage: %s | The "
+                        "worktree may be mid-operation; send retry_qc to settle "
+                        "again." % s.error[:400])
+                    continue
+                self._finish("work", by=str(done.get("session") or "session"),
+                             evidence="settle: %s | session note: %s"
+                                      % (s.note[:300],
+                                         str(done.get("note") or "")[:300]))
+                self._handoff("work",
+                              "Session %s (%s) delivered the change; the worker "
+                              "settled the lane commit (%s)"
+                              % (done.get("session", ""), done.get("role", ""),
+                                 s.note[:200]),
+                              report=str(done.get("note") or ""))
+                phase = "run_integration_tests"
+                continue
+
+            # 3) run_integration_tests - the machine gate, full registry, red -> human.
+            if phase == "run_integration_tests":
+                gen0 = self._gen("run_integration_tests")
+                self._enter("run_integration_tests")
+                # 3.1 0-commit precheck (same activity, same criteria; exempt for
+                # no_file_changes tickets) - a work stage that settled nothing is
+                # the named red, with work-stage ways out.
+                if not self.meta.get("no_file_changes"):
+                    try:
+                        graw = await workflow.execute_activity(
+                            verify_review_gate,
+                            ReviewGateArgs(
+                                ticket_id=self.ticket_id,
+                                worktree=str(self.meta.get("worktree") or ""),
+                                write_set=list(self.meta.get("write_set") or []),
+                                no_file_changes=True),
+                            start_to_close_timeout=SHORT, retry_policy=RETRY)
+                        g = graw if isinstance(graw, ReviewGateResult) else \
+                            ReviewGateResult(
+                                git_error=str(graw.get("git_error") or ""),
+                                lane_commits=int(graw.get("lane_commits") or -1),
+                                shots_path_error=str(graw.get("shots_path_error")
+                                                     or ""),
+                                png_count=int(graw.get("png_count") or -1))
+                        if g.lane_commits == 0:
+                            await self._blocked(
+                                "run_integration_tests",
+                                "Nothing landed (the lane branch has 0 commits) - "
+                                "the work stage settled no change, so there is "
+                                "nothing to verify. Remedies: rework(to_stage=work) "
+                                "and signal work_done after the change is in the "
+                                "worktree, or retry_qc once it is in the lane.")
+                            continue
+                    except Exception as e:  # noqa: BLE001 - not a main-chain gate
+                        self._log("0-commit pre-check failed (not blocking the main "
+                                  "chain): %s: %s" % (type(e).__name__, e))
+                # 3.2 Pre-gate main sync (the shared helper; the verified tree =
+                # the merged tree). Conflict -> the helper's existing resolution
+                # loop (rework back to work); unreachable -> loud blocked.
+                if workflow.patched(QUICKMANUAL_MAIN_SYNC_PATCH_ID):
+                    _ms = await self._main_sync_before_gate(
+                        texts=self._quick_main_sync_texts())
+                    if _ms.get("phase"):
+                        phase = str(_ms["phase"])
+                    if _ms.get("stop"):
+                        continue
+                # 3.3 One full-registry round.
+                ir = await self._quick_gate_round()
+                if not ir.error:
+                    self._handover_debt_clear()
+                verdict = self._quick_gate_verdict(ir)
+                self.results["run_integration_tests"] = self._quick_gate_receipt(
+                    ir, gen0)
+                self.gate_runs.append({
+                    "stage": "run_integration_tests",
+                    "label": "machine gate (verify_lane integ, round %d)"
+                             % (gen0 + 1),
+                    "green": verdict == "green",
+                    "red_count": len(self._tests_red_names(ir)),
+                    "counts": {"ran": ir.ran, "passed": ir.passed,
+                               "failed": ir.failed, "env_fail": ir.env_fail},
+                    "exit_code": 0 if not ir.error else 1,
+                    "narrowed": 0,
+                    "error": str(ir.error or "")})
+                self._finish("run_integration_tests", by="run_integration_tests",
+                             evidence=self.results["run_integration_tests"]
+                             ["summary"])
+                self._handoff("run_integration_tests",
+                              "gate round %d: ran=%s passed=%s failed=%s "
+                              "env_fail=%s%s"
+                              % (gen0 + 1, ir.ran, ir.passed, ir.failed, ir.env_fail,
+                                 (" | " + str(ir.error)) if ir.error else ""))
+                if verdict != "green":
+                    if str(getattr(ir, "error", "") or ""):
+                        reason_code = "quick_gate_error"
+                    elif not self._tests_red_names(ir):
+                        reason_code = "quick_gate_env_unnamed"
+                    else:
+                        reason_code = "quick_gate_red"
+                    if getattr(self, "_detail_face_on", False):
+                        self.meta["blocked_detail"] = {
+                            "check_id": "run_integration_tests",
+                            "item": "integration gate (full registry)",
+                            "red": True,
+                            "reason_code": reason_code,
+                            "violations": self._tests_red_names(ir),
+                            "counts": {"ran": ir.ran, "passed": ir.passed,
+                                       "failed": ir.failed, "env_fail": ir.env_fail},
+                            "next_action": QUICKMANUAL_NEXT_ACTION_REWRITE,
+                            "evidence": str(ir.error or "")[:400],
+                        }
+                        self._touch()
+                    await self._blocked("run_integration_tests",
+                                        self._quick_gate_blocked_text(
+                                            ir, reason_code, gen0 + 1))
+                    continue
+                env_names, _ok = self._tests_env_red_names(ir)
+                if env_names:
+                    self._log("named environment reds this round (not blocking): %s"
+                              % ", ".join(env_names))
+                phase = "merge_check"
+                continue
+
+            # 4) merge_check - programmatic checks; any red -> human.
+            if phase == "merge_check":
+                self._enter("merge_check")
+                if workflow.patched(MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID):
+                    _ms = await self._main_sync_before_gate(
+                        texts=self._quick_main_sync_texts(), step_id="merge_check")
+                    if _ms.get("phase"):
+                        phase = str(_ms["phase"])
+                    if _ms.get("stop"):
+                        continue
+                mc = await self._quick_merge_check()
+                if mc.green:
+                    self._finish("merge_check", by="merge_check",
+                                 evidence="; ".join(str(c.get("item", ""))
+                                                    for c in mc.checks))
+                    self._handoff("merge_check", "Merge check: all items green")
+                    phase = "merge"
+                    continue
+                reds = [c for c in mc.checks if not c.get("green")]
+
+                def _handling(c):
+                    na = str(c.get("next_action") or "")
+                    if "create_plan" in na:
+                        return QUICKMANUAL_NEXT_ACTION_REWRITE
+                    return na
+
+                red = "; ".join(
+                    "%s: %s%s" % (c.get("item"), c.get("detail"),
+                                  (" | handling: %s" % _handling(c)) if _handling(c)
+                                  else "")
+                    for c in reds)
+                self._pin_merge_red_detail(
+                    mc.checks, mc.conflict_files,
+                    disposition="quickmanual lane: every merge_check red blocks for "
+                                "a human (no automatic conflict-resolution round); "
+                                "rework(to_stage=work) or retry_qc re-runs the check")
+                await self._blocked(
+                    "merge_check",
+                    "Merge check is RED: %s | Remedies: fix the named condition "
+                    "(rework(to_stage=work) for lane-side fixes) or retry_qc to "
+                    "re-run the check." % red[:1200])
+                continue
+
+            # 5) merge - the human gate; landing through the ordinary act.
+            if phase == "merge":
+                self._enter("merge")
+                prep_ctx = await workflow.execute_activity(
+                    prepare_human_gate,
+                    HumanGatePrep(ticket_id=self.ticket_id, stage_id="merge",
+                                  workspace=self.meta.get("workspace"),
+                                  worktree=str(self.meta.get("worktree") or ""),
+                                  base_ref=str(self.meta.get("base_ref") or ""),
+                                  title=str(self.meta.get("title") or "")),
+                    start_to_close_timeout=SHORT, retry_policy=RETRY)
+                ctx_text = getattr(prep_ctx, "context_text", "") or str(prep_ctx)
+                self.human_context["merge"] = {"context_text": ctx_text}
+                self.meta["stage_state"] = "awaiting-human"
+                self._touch()
+                await self._concurrency_renew(CAUSE_HUMAN_GATE)
+                wb = dict(self.meta.get("worked_by") or {})
+                self._log("merge gate parked: waiting for the human sign signal "
+                          "(merge_check is green); the working session (%s) cannot "
+                          "sign this gate" % (wb.get("session") or "none recorded"))
+                self._mark("merge", "awaiting-human",
+                           "Waiting for the human sign-off: sign(gate=merge); the "
+                           "working session cannot sign its own merge")
+                await self._ledger_flush()
+                await workflow.wait_condition(
+                    lambda: ("merge" in self._sigs) or (self._rework is not None))
+                if self._rework is not None:
+                    continue  # consumed at the loop top
+                sig: Signature = self._sigs.pop("merge")
+                self.signatures["merge"] = {"who": sig.who, "decision": sig.decision,
+                                            "note": sig.note, "at": self._now_iso()}
+                if sig.decision != "approve":
+                    self._queue_human_gate_reject(
+                        sig.who,
+                        "human rejected at the merge gate: %s (signer %s)"
+                        % (sig.note, sig.who),
+                        "work")
+                    continue
+                self.meta["stage_state"] = "running"
+                self._mark("merge", "running", "human signed off (%s) - merging"
+                           % sig.who)
+                raw = await workflow.execute_activity(
+                    merge,
+                    MergeArgs(ticket_id=self.ticket_id,
+                              worktree=str(self.meta.get("worktree") or ""),
+                              branch=str(self.meta.get("branch") or ""),
+                              base_ref=str(self.meta.get("base_ref") or ""),
+                              defer_teardown=True,
+                              write_set=list(self.meta.get("write_set") or [])),
+                    start_to_close_timeout=MERGE_TO, retry_policy=RETRY)
+                mr = raw if isinstance(raw, MergeResult) else MergeResult(
+                    ok=bool(raw.get("ok")), action=str(raw.get("action") or ""),
+                    merge_commit=str(raw.get("merge_commit") or ""),
+                    error=str(raw.get("error") or ""),
+                    reason=str(raw.get("reason") or ""),
+                    files=[str(x) for x in (raw.get("files") or [])])
+                if not mr.ok:
+                    self.meta["blocked_detail"] = {
+                        "check_id": "merge",
+                        "item": "merge execution",
+                        "red": True,
+                        "reason_code": mr.reason or ("merge_%s"
+                                                     % (mr.action or "fault")),
+                        "files": list(mr.files)[:20],
+                        "next_action": ("resolve the condition named above "
+                                        "(commit/stash the listed files on main, or "
+                                        "repair the lane), then send retry_qc to "
+                                        "re-run the merge"),
+                        "evidence": str(mr.error or "")[:400],
+                    }
+                    self._touch()
+                    await self._blocked(
+                        "merge",
+                        "Merge did not close out (%s/%s): %s | files: %s | "
+                        "Remedies: fix the named condition on main or in the lane, "
+                        "then send retry_qc (the recorded sign-off is not silently "
+                        "consumed - the merge re-runs under it)."
+                        % (mr.action, mr.reason or "merge_fault",
+                           (mr.error or "unknown")[:400],
+                           ", ".join(list(mr.files)[:10]) or "(none named)"))
+                    continue
+                try:
+                    ares = await workflow.execute_activity(
+                        archive_ticket,
+                        ArchiveArgs(ticket_id=self.ticket_id,
+                                    project_key=str(self.meta.get("project") or ""),
+                                    worktree=str(self.meta.get("worktree") or ""),
+                                    meta=dict(self.meta)),
+                        start_to_close_timeout=SHORT, retry_policy=RETRY)
+                except Exception as e:  # noqa: BLE001 - fail-closed: keep the lane
+                    await self._blocked(
+                        "merge",
+                        "Ticket data archive failed (fail-closed: the lane is kept, "
+                        "not torn down): %s: %s%s"
+                        % (type(e).__name__, str(e)[:400],
+                           shared.exception_chain_note(e)))
+                    continue
+                if not isinstance(ares, ArchiveResult) or not ares.ok:
+                    await self._blocked(
+                        "merge",
+                        "Ticket data archive receipt is not ok (fail-closed: the "
+                        "lane is kept, not torn down): %s"
+                        % ((getattr(ares, "error", "") or repr(ares))[:400]))
+                    continue
+                self._log("ticket data archived: %s"
+                          % (getattr(ares, "archive_path", "") or "(path unknown)"))
+                try:
+                    tr = await workflow.execute_activity(
+                        teardown_lane,
+                        MergeArgs(ticket_id=self.ticket_id,
+                                  worktree=str(self.meta.get("worktree") or ""),
+                                  branch=str(self.meta.get("branch") or ""),
+                                  repo_worktrees=list(self.meta.get("repo_worktrees")
+                                                      or [])),
+                        start_to_close_timeout=SHORT, retry_policy=RETRY)
+                except Exception as e:  # noqa: BLE001
+                    await self._blocked(
+                        "merge",
+                        "Lane teardown failed (data already archived; lane "
+                        "leftovers need a human): %s: %s%s"
+                        % (type(e).__name__, str(e)[:400],
+                           shared.exception_chain_note(e)))
+                    continue
+                if not isinstance(tr, MergeResult) or not tr.ok:
+                    await self._blocked(
+                        "merge",
+                        "Lane teardown receipt is not ok (data already archived; "
+                        "lane leftovers need a human): %s"
+                        % ((getattr(tr, "error", "") or repr(tr))[:400]))
+                    continue
+                if tr.error:
+                    self._log("lane teardown warning (reclaimable leftovers, data "
+                              "already archived): %s" % tr.error)
+                self._finish("merge", by=sig.who,
+                             evidence="merge booked %s (human %s: %s; worked by "
+                                      "session %s)"
+                                      % (mr.merge_commit, sig.who, sig.note,
+                                         (self.meta.get("worked_by") or {})
+                                         .get("session", "")))
+                self._handoff("merge", "Merged %s" % mr.merge_commit)
+                phase = "done"
+                continue
+
+            # Unknown phase: never raise (a bare raise would kill the workflow task
+            # and make the ticket unqueryable) - park for a human, name the legal
+            # stages.
+            await self._blocked(
+                self._quick_safe_phase(phase),
+                "internal phase resolved to an unknown value %r (quickmanual stages: "
+                "%s) - parked for a human instead of failing the workflow task; use "
+                "rework(to_stage=<stage>) to reset, or retry_qc to re-drive."
+                % (phase, ", ".join(s.id for s in self.STAGES)))
+            phase = self._quick_safe_phase(phase)
+            continue
+
+        # Close-out (same shape as the parent: closed + terminal timeline + flush).
+        if workflow.patched(REWORK_HOLD_PATCH_ID):
+            self._refuse_held_rework_at_close()
+        self.meta["status"] = "closed"
+        self.meta["stage_state"] = "awaiting"
+        self._touch()
+        await self._concurrency_release(CAUSE_TERMINATED)
+        self._log("merge booked, ticket closed")
+        self._mark("merge", "closed", "workflow finished")
+        await self._ledger_flush()
+        return self._snapshot()
+
+
+# Workflow registration (Temporal SDK gate). The SDK refuses a subclass of a class
+# that already carries a workflow definition (the same measured behavior that made
+# light-lane clear the marker and re-decorate; see light_lane.py's block). Same
+# discipline: the parent's definition is untouched, this class gets its own run /
+# class attributes / workflow type name (= the class name).
+QuickmanualLaneWorkflow.__temporal_workflow_definition = None
+QuickmanualLaneWorkflow = workflow.defn(QuickmanualLaneWorkflow)

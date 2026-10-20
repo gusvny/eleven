@@ -7,7 +7,7 @@
 | 立项日期 | 2026-10-04 |
 | 起草人 | integration（sandbar 项目会话） |
 | 来源 | 宿主 261004 会话连续追问与拍板：入口归并（左栏项目/工单/会话）、删状态看板、Epics 与 Docs 进面板 tab、Metrics 迁入面板、票详情做成中栏浮层、泳道图 v5、项目徽标（形状+颜色）、chat 身份带与会话账册、顶栏取消（品牌并入左栏第一行） |
-| 设计基准 | `notes/discussions/261004-并发上限-设计稿.md` 第 7 节（入口归并、票详情浮层、epic 详情、泳道图、Overview 三块）、`261004-顶栏横幅-设计稿.md`、`261004-chat项目身份与会话句柄.md`、`261004-巡检两面重塑-测试面与简化面.md`（Inspection tab）、`261003-executor-panel-redesign.md`（面板改版与请求卡契约）。**本文不重复其内容。** |
+| 设计基准 | `notes/discussions/261004-concurrency-limit-design.md` 第 7 节（入口归并、票详情浮层、epic 详情、泳道图、Overview 三块）、`261004-top-banner-design.md`、`261004-chat-project-identity-and-session-handle.md`、`261004-inspection-two-faces-tests-simplify.md`（Inspection tab）、`261003-executor-panel-redesign.md`（面板改版与请求卡契约）。**本文不重复其内容。** |
 | 界面 mock | `261004-concurrency-limit-mock.html`（v11，三栏 + 所有浮层）、`261004-inspection-tab-mock.html`（v8）、`261003-executor-panel-redesign-mock.html` |
 
 ## ⓪ 说人话版（一分钟）

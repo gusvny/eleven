@@ -186,7 +186,11 @@ def test_worker_registers_one_worker_per_queue():
     assert "for _q in configured_task_queues():" in src
     assert "task_queue=_q" in src                                   # 每队列一个 Worker 实例
     assert "worker polling queues" in src                           # 注册日志证据行
-    assert "await asyncio.gather(*(w.shutdown() for w in workers))" in src  # 全终态停机
+    # t261019-42: the shutdown gather moved into a named `shutdown_phase` awaitable
+    # (idle fast-exit races it against a deadline); the all-terminal-state shutdown
+    # anchor now pins the gather construction + its awaits.
+    assert "shutdown_phase = asyncio.gather(*(w.shutdown() for w in workers))" in src
+    assert "await shutdown_phase" in src
 
 
 def test_worker_queues_source_uses_shared_config():

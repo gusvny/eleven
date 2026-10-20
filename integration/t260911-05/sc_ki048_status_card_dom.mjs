@@ -30,7 +30,8 @@
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`; FAIL>0 或全部子用例 na -> exit 1;
 // env_fail>0 -> exit 2. Precedent: t260904-06/sc_spec_card_dom.mjs.
 
-import { ensureStageConsole } from '../lib_stage_console.mjs';
+import { ensureStageConsole } from '../lib_stage_console.mjs'
+import { loadPlaywright as pwLoad, pwMissingDetail } from '../lib_pw_deps.mjs' // t261012-05: single-source probe;
 import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
@@ -222,28 +223,14 @@ async function scenarioMalformedDetail(page) {
 
 // ---------------------------------------------------------------- browser run
 
-function mainRepoRoot() {
-  try {
-    const common = execFileSync('git', ['rev-parse', '--git-common-dir'],
-      { cwd: REPO, encoding: 'utf8', timeout: 5000 }).trim()
-    if (common) return resolve(REPO, common, '..')
-  } catch { /* not a worktree — cwd is the main checkout */ }
-  return REPO
-}
 
-async function loadPlaywright() {
-  const candidates = ['playwright-core']
-  const main = mainRepoRoot()
-  for (const sub of ['server/ui-check/node_modules/playwright-core/index.mjs',
-    'server/plugins/workbench/node_modules/playwright-core/index.mjs']) {
-    const p = join(main, sub)
-    if (existsSync(p)) candidates.push(pathToFileURL(p).href)
-  }
-  for (const c of candidates) {
-    try { return await import(c) } catch { /* next candidate */ }
-  }
-  return null
-}
+// t261012-05: playwright-core resolution converges on integration/lib_pw_deps.mjs
+// (single source: SANDBAR_PLAYWRIGHT_PATH -> legacy SANDBAR_PLAYWRIGHT_MODULE ->
+// bare import -> this-tree ui-check -> main tree via git common-dir). The old
+// inline copy dropped both env overrides, so the documented asset-injection
+// path (KI-036 remedy) was dead here; the fact-naming miss detail now comes
+// from pwMissingDetail() (names every probed candidate, no blame wording).
+async function loadPlaywright() { return pwLoad() }
 
 async function launchBrowser(pw) {
   for (const opts of [{ channel: 'chrome', headless: true }, { headless: true }]) {
@@ -258,7 +245,7 @@ async function run() {
     ctx.pw = await loadPlaywright()
   } catch { /* treated as missing below */ }
   if (!ctx.pw) {
-    record('S0 playwright', 'env_fail', 'playwright-core 不可解析（KI-036：ui-check 依赖未随迁移恢复，恢复后自动生效）')
+    record('S0 playwright', 'env_fail', pwMissingDetail())
     summarize()
   }
   ctx.browser = await launchBrowser(ctx.pw)

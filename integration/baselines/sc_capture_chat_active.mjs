@@ -58,9 +58,12 @@ const CAPTURE_LANE = path.join(REPO_ROOT, "server", "ui-check", "capture-lane.mj
 // (appearance / docs / model routes, etc.) beyond what the docker workbench
 // makes; the assertion only checks these 7 exist — extras never regress, a
 // missing one is the red.
+// t261012-05: same live-view realignment as sc_capture_chat_e2e (capture.mjs
+// default VIEWS; epics/new-ticket/default retired with their icons;
+// ticket-detail is data-optional and stays out of the required set).
 const SEVEN_VIEWS = [
-  "console-default.png", "console-board.png", "console-epics.png",
-  "console-new-ticket.png", "console-sessions.png", "console-chat.png",
+  "console-board.png", "console-board-dark.png", "console-board-light.png",
+  "console-sessions.png", "console-settings-routes.png", "console-chat.png",
   "console-refresh.png",
 ];
 
@@ -194,8 +197,10 @@ async function fullChain() {
     if (missing.length) return record("C1 capture-lane 全链", "fail", `必备视图缺失 ${missing.length} 张: ${missing.join(",")}（实得 ${files.length}）`);
     const sha = async (f) => createHash("sha256").update(await readFile(path.join(out, f))).digest("hex");
     const chatSha = await sha("console-chat.png");
-    const defaultSha = await sha("console-default.png");
-    if (chatSha === defaultSha) return record("C1 capture-lane 全链", "fail", "console-chat ≡ console-default（字节相同=chat 视图未切换，同帧假验收）");
+    // t261012-05: chat-vs-board (console-default.png retired; board is the
+    // live non-chat landing face).
+    const defaultSha = await sha("console-board.png");
+    if (chatSha === defaultSha) return record("C1 capture-lane 全链", "fail", "console-chat ≡ console-board（字节相同=chat 视图未切换，同帧假验收）");
     // chat view success anchor: the log line unique to navigateToChat's
     // success path (the only way the 25s active assertion passes; when the
     // assertion fails the view is recorded failed and this line is absent —

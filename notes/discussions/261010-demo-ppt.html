@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sandbar — An exploration towards Software Factory</title>
+<style>
+  /* Two themes: light (default, for projectors and print) and dark (press T). */
+  :root{
+    --bg:#f4f6f9; --bg2:#e9eef5; --panel:#ffffff; --panel2:#eef2f7; --line:#d3dbe6;
+    --ink:#0e1621; --dim:#5b6c82; --accent:#0d7a63; --accent2:#a86400; --warn:#c0392b;
+    --shadow:0 1px 2px rgba(14,22,33,.05), 0 10px 28px rgba(14,22,33,.07);
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0a0f1a; --bg2:#0e1524; --panel:#151e30; --panel2:#1c2639; --line:#2c3a52;
+    --ink:#f0f4fa; --dim:#9db0c9; --accent:#5ee1c8; --accent2:#ffc266; --warn:#ff8b7a;
+    --shadow:0 1px 2px rgba(0,0,0,.35), 0 12px 32px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:linear-gradient(160deg,var(--bg),var(--bg2));color:var(--ink);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",sans-serif;
+       -webkit-font-smoothing:antialiased;overflow:hidden}
+  #progress{position:fixed;top:0;left:0;height:5px;background:var(--accent);width:0;z-index:50;transition:width .18s}
+  .slide{display:none;position:absolute;inset:0;padding:8vh 7vw 9vh;flex-direction:column;justify-content:center}
+  .slide.active{display:flex}
+  .slide::after{content:attr(data-sec);position:absolute;left:7vw;bottom:4vh;color:var(--dim);
+                font-size:1rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase}
+  .slide::before{content:attr(data-n);position:absolute;right:7vw;bottom:3.6vh;color:var(--dim);
+                 font-size:1.05rem;font-weight:600;font-variant-numeric:tabular-nums}
+
+  h1{font-size:clamp(3rem,6.4vw,5.6rem);line-height:1.05;margin:0 0 .4em;font-weight:750;letter-spacing:-.02em}
+  h2{font-size:clamp(2.1rem,4vw,3.5rem);line-height:1.12;margin:0 0 .55em;font-weight:720;letter-spacing:-.02em}
+  p{margin:.4em 0;font-size:clamp(1.25rem,2vw,1.85rem);line-height:1.5;color:var(--ink)}
+  .sub{color:var(--dim);font-size:clamp(1.3rem,2.1vw,1.95rem);line-height:1.45;max-width:34ch;font-weight:500}
+  .kicker{color:var(--accent);font-size:clamp(1.35rem,2.3vw,2.1rem);font-weight:700;margin-top:.75em;line-height:1.35}
+  .warnline{color:var(--accent2);font-weight:700}
+  ul{margin:.3em 0;padding-left:1.1em}
+  li{font-size:clamp(1.2rem,1.9vw,1.75rem);line-height:1.5;margin:.4em 0}
+  li::marker{color:var(--accent)}
+  .tight li{font-size:clamp(1.15rem,1.75vw,1.6rem);line-height:1.45;margin:.34em 0}
+  b,strong{font-weight:700}
+
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:3vw;align-items:start}
+  .cards{display:grid;gap:1vw;grid-template-columns:repeat(4,1fr)}
+  .cards.two{grid-template-columns:repeat(2,1fr)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;
+        padding:1.4vw 1.3vw;box-shadow:var(--shadow)}
+  .card .k{color:var(--dim);font-size:1rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.55em}
+  .card .v{font-size:clamp(1.3rem,2vw,1.85rem);font-weight:700;line-height:1.25}
+  .card .n{color:var(--dim);font-size:clamp(1.05rem,1.45vw,1.35rem);margin-top:.5em;line-height:1.45}
+
+  .quote{font-size:clamp(1.4rem,2.4vw,2.15rem);font-weight:650;color:var(--accent);
+         border-left:5px solid var(--accent);padding-left:.85em;margin-top:1em;max-width:40ch;line-height:1.4}
+  .chain{font-family:var(--mono);font-size:clamp(1rem,1.5vw,1.5rem);line-height:1.95;background:var(--panel);
+         border:1px solid var(--line);border-radius:16px;padding:1.2vw 1.4vw;white-space:pre;overflow-x:auto;
+         box-shadow:var(--shadow)}
+  .chain .g{color:var(--accent);font-weight:700} .chain .h{color:var(--accent2);font-weight:700} .chain .p{color:#3a7bd5}
+  table{border-collapse:collapse;font-size:clamp(1.1rem,1.6vw,1.5rem);margin:.4em 0}
+  th,td{text-align:left;padding:.5em 1.1em .5em 0;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-weight:600;letter-spacing:.04em}
+  code,.mono{font-family:var(--mono);font-size:.94em}
+  .small{font-size:clamp(1rem,1.3vw,1.2rem);color:var(--dim);line-height:1.5}
+  .tag{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:.2em .8em;color:var(--dim);font-size:1rem;margin-right:.5em}
+
+  /* cover */
+  .title-slide h1{font-size:clamp(4rem,9vw,8rem)}
+  .title-slide .rule{width:6vw;height:6px;background:var(--accent);margin:1.1em 0;border-radius:3px}
+
+  /* data page (slide 2 / 3) */
+  .msplit{display:grid;grid-template-columns:1.05fr 1fr;gap:3vw;align-items:start;margin-top:.3em}
+  .mnum{display:grid;grid-template-columns:1fr 1fr;gap:.9vw}
+  .mitem{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:1vw 1.1vw;box-shadow:var(--shadow)}
+  .mitem .mv{font-size:clamp(1.9rem,3.4vw,3rem);font-weight:750;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .mitem .ml{color:var(--dim);font-size:1.05rem;margin-top:.25em;font-weight:600}
+  .mcomp{margin-top:1.5vh;display:flex;flex-direction:column;gap:.8vh}
+  .mrow{display:grid;grid-template-columns:5.4em 1fr 5.6em;gap:.7em;align-items:center}
+  .mrow .mlab{color:var(--dim);font-size:1.1rem;text-align:right;font-weight:600}
+  .mrow .mtrack{background:var(--panel2);border:1px solid var(--line);border-radius:8px;height:1.9vh;overflow:hidden}
+  .mrow .mtrack i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),#3aa9ff)}
+  .mrow .mval{font-size:1.1rem;font-variant-numeric:tabular-nums;font-weight:600}
+  .mratio{display:flex;align-items:baseline;gap:.7em;margin-top:1.2vh}
+  .mratio b{font-size:clamp(2rem,3.6vw,3.1rem);color:var(--accent);font-variant-numeric:tabular-nums;font-weight:750}
+  .mratio span{color:var(--dim);font-size:1.15rem;font-weight:600}
+  .msmall{font-size:1rem;color:var(--dim);margin-top:.7em;line-height:1.45}
+  .mchart{display:grid;grid-template-columns:3em 1fr;grid-template-rows:1fr auto;height:32vh;gap:.3em 0}
+  .mcy{grid-column:1;grid-row:1;display:flex;flex-direction:column;justify-content:space-between;
+       align-items:flex-end;padding-right:.4em;color:var(--dim);font-size:.95rem;font-variant-numeric:tabular-nums}
+  .mcplot{grid-column:2;grid-row:1;position:relative;border-bottom:1px solid var(--line)}
+  .mcg{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between}
+  .mcg i{border-top:1px dashed var(--line)}
+  .mcbars{position:absolute;inset:0;display:flex;align-items:flex-end;gap:.22vw}
+  .mcol{position:relative;flex:1;height:100%;display:flex;align-items:flex-end}
+  .mbar{width:100%;border-radius:2px 2px 0 0;background:linear-gradient(180deg,var(--accent),#3aa9ff)}
+  .mcol.peak .mbar{background:linear-gradient(180deg,#ffb452,#ff7a5c)}
+  .mcol.today .mbar{background:linear-gradient(180deg,#a9bcd8,#6b82a3)}
+  .mcol .mlbl{position:absolute;left:50%;transform:translateX(-50%);font-size:.95rem;font-weight:700;
+              color:var(--accent2);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .mcol .mlbl.today{color:var(--dim)}
+  .mcavg{position:absolute;left:0;right:0;border-top:2px dashed var(--accent);opacity:.5}
+  .mcx{grid-column:2;grid-row:2;display:flex;justify-content:space-between;color:var(--dim);font-size:.95rem;padding-top:.35em}
+  .mcap{margin-top:.9em;color:var(--dim);font-size:1.05rem;line-height:1.45}
+
+  /* architecture page */
+  .arch{display:flex;flex-direction:column;gap:.6em;margin:.6em 0 .2em}
+  .band{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:.8em 1.1em;box-shadow:var(--shadow)}
+  .band.core{border:2px solid var(--accent);background:linear-gradient(180deg,var(--panel2),var(--panel))}
+  .band .bt{font-size:1rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:.5em}
+  .band.core .bt{color:var(--accent)}
+  .chips{display:flex;flex-wrap:wrap;gap:.5em}
+  .chips span{border:1px solid var(--line);border-radius:999px;padding:.22em .9em;font-size:1.15rem;font-weight:600}
+  .band.core .chips span{border-color:var(--accent)}
+  .trio{display:grid;grid-template-columns:repeat(3,1fr);gap:.8em}
+  .trio .band{padding:.75em .95em}
+  .trio .bt{font-size:.95rem;margin-bottom:.35em}
+  .trio .d{font-size:1.15rem;line-height:1.4}
+  .arrowr{text-align:center;color:var(--dim);font-size:1.05rem;letter-spacing:.22em}
+
+  #notes{position:fixed;left:0;right:0;bottom:0;max-height:34vh;overflow:auto;background:var(--panel);
+         border-top:3px solid var(--accent);padding:1.2rem 4vw 1.6rem;font-size:1.2rem;line-height:1.6;
+         color:var(--ink);display:none;z-index:40;box-shadow:0 -8px 30px rgba(0,0,0,.14)}
+  #notes.on{display:block}
+  #hint{position:fixed;right:1.3rem;top:1rem;color:var(--dim);font-size:.9rem;z-index:45;opacity:.75}
+  @media print{
+    body{overflow:visible;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .slide{display:flex !important;position:relative;page-break-after:always;height:100vh;padding:8vh 7vw 15vh}
+    #progress,#hint{display:none !important}
+  }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<div id="notes"></div>
+<div id="hint">← → navigate · N notes · T light/dark · F fullscreen</div>
+
+<section class="slide title-slide active" data-sec="The record" data-n="1"
+  data-note="Open with a question to the room: <b>do you believe we will still write code by hand in a few years?</b> Let them answer — do not rush it. Then tell my own story: the pain of working with AI today — I am the scheduler of three or four agents, the one who reassembles the context every morning, the one who reviews everything because nothing else is trusted to judge. Sessions evaporate, work has no owner, and faster coding only moved the bottleneck onto me. <b>That pain is why I started this project</b> — and everything in this deck is what came out of it.">
+  <h1>Sandbar</h1>
+  <div class="rule"></div>
+  <h2 style="color:var(--accent)">An exploration towards Software Factory</h2>
+</section>
+
+<section class="slide" data-sec="Why" data-n="2">
+  <h2>Why we build Sandbar</h2>
+  <div class="cols">
+    <div>
+      <div class="k" style="color:var(--accent2);margin-bottom:.5em">What we see</div>
+      <ul class="tight">
+        <li>A person still schedules the agents.</li>
+        <li>Chat history is not engineering state.</li>
+        <li>An agent sees the task, not the project.</li>
+        <li>Coding got faster. Verification did not.</li>
+        <li>The engineering base is rented from someone else's model.</li>
+      </ul>
+    </div>
+    <div>
+      <div class="k" style="color:var(--accent);margin-bottom:.5em">What is missing</div>
+      <ul class="tight">
+        <li>General harnesses answer <i>how to execute</i>.</li>
+        <li>A company must answer <i>what to execute, and how to know it is done</i>.</li>
+        <li>So three things are missing: durable process state, objective completion, organisational bookkeeping.</li>
+      </ul>
+      <p class="small" style="margin-top:.8em">Anthropic's Fermat project: about 13 million lines of Lean proof in under two weeks &mdash; after a domain harness (Prove2Me) was added.</p>
+    </div>
+  </div>
+  <p class="kicker">An amplifier does not produce an organiser. That layer is what we build.</p>
+</section>
+
+
+<section class="slide" data-sec="The record" data-n="3">
+  <h2>Sandbar develops itself</h2>
+  <p class="sub">Bootstrapped with Claude Code (GLM-5.3) for several days. After that, Sandbar builds itself.</p>
+  <div class="cols" style="margin-top:.6em;align-items:start">
+    <div style="display:flex;flex-direction:column;gap:.9em">
+      <div class="card" style="border-color:#4a3a1e">
+        <div class="k" style="color:var(--accent2)">Humans</div>
+        <ul class="tight">
+          <li>Set the direction: what to build, and in what order.</li>
+          <li>Review the design before work starts.</li>
+          <li>Sign the merge. The job waits at the gate until then.</li>
+        </ul>
+      </div>
+      <div class="card" style="border-color:#1e4a44">
+        <div class="k" style="color:var(--accent)">Agents</div>
+        <ul class="tight">
+          <li>Write the plan, then the code.</li>
+          <li>Review the plan; design and run the integration tests.</li>
+          <li>Arbitrate, then walk through acceptance.</li>
+          <li>Prepare the merge and keep the record.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="card" style="border-color:#22304d">
+      <div class="k">Models it runs on</div>
+      <table style="width:100%">
+        <tr><th>role</th><th>route</th></tr>
+        <tr><td>developer</td><td class="mono">zai-coding-cn / glm-5.3-flash</td></tr>
+        <tr><td>integration</td><td class="mono">zai-coding-cn / glm-5.3</td></tr>
+        <tr><td>executor</td><td class="mono">mimo / mimo-v2.6-flash</td></tr>
+      </table>
+      <p class="kicker" style="font-size:clamp(.95rem,1.5vw,1.3rem);margin-top:.8em">No frontier model. This is not a model demo — it is a process demo.</p>
+    </div>
+  </div>
+  <p class="small" style="margin-top:1em">298 of 1,086 commits changed the engine and its tools. 479 tickets closed across three projects in the month.</p>
+</section>
+<section class="slide" data-sec="The record" data-n="4">
+  <h2>One month. 1,086 commits.</h2>
+  <div class="msplit">
+    <div class="mleft">
+      <div class="mnum">
+        <div class="mitem"><div class="mv">31</div><div class="ml">days · Sep 10 – Oct 10</div></div>
+        <div class="mitem"><div class="mv">1,086</div><div class="ml">commits</div></div>
+        <div class="mitem"><div class="mv">519,736</div><div class="ml">lines</div></div>
+        <div class="mitem"><div class="mv">2,139</div><div class="ml">files</div></div>
+      </div>
+      <div class="mcomp">
+        <div class="mrow"><span class="mlab">Tests</span><span class="mtrack"><i style="width:100%"></i></span><span class="mval">340,697</span></div>
+        <div class="mrow"><span class="mlab">Product</span><span class="mtrack"><i style="width:44.6%"></i></span><span class="mval">151,995</span></div>
+        <div class="mrow"><span class="mlab">Docs</span><span class="mtrack"><i style="width:7.9%"></i></span><span class="mval">27,044</span></div>
+      </div>
+      <div class="mratio"><b>2.2 : 1</b><span>test code to product code</span></div>
+      <p class="msmall">Text files only. Generated artifacts (40,085 lines) and binary files are excluded. Lines and files are the repository at the end of the window; source files alone are 461,248 lines.</p>
+    </div>
+    <div class="mright">
+      <div class="mchart">
+        <div class="mcy"><span>157</span><span>104</span><span>52</span><span>0</span></div>
+        <div class="mcplot">
+          <div class="mcg"><i></i><i></i><i></i><i></i></div>
+          <div class="mcbars">
+          <div class="mcol" title="2026-09-10 — 44 commits"><div class="mbar" style="height:28.03%"></div></div>
+          <div class="mcol" title="2026-09-11 — 47 commits"><div class="mbar" style="height:29.94%"></div></div>
+          <div class="mcol" title="2026-09-12 — 0 commits"><div class="mbar" style="height:0.8%"></div></div>
+          <div class="mcol" title="2026-09-13 — 6 commits"><div class="mbar" style="height:3.82%"></div></div>
+          <div class="mcol" title="2026-09-14 — 24 commits"><div class="mbar" style="height:15.29%"></div></div>
+          <div class="mcol" title="2026-09-15 — 19 commits"><div class="mbar" style="height:12.1%"></div></div>
+          <div class="mcol" title="2026-09-16 — 7 commits"><div class="mbar" style="height:4.46%"></div></div>
+          <div class="mcol" title="2026-09-17 — 9 commits"><div class="mbar" style="height:5.73%"></div></div>
+          <div class="mcol" title="2026-09-18 — 8 commits"><div class="mbar" style="height:5.1%"></div></div>
+          <div class="mcol" title="2026-09-19 — 2 commits"><div class="mbar" style="height:1.27%"></div></div>
+          <div class="mcol" title="2026-09-20 — 10 commits"><div class="mbar" style="height:6.37%"></div></div>
+          <div class="mcol" title="2026-09-21 — 15 commits"><div class="mbar" style="height:9.55%"></div></div>
+          <div class="mcol" title="2026-09-22 — 15 commits"><div class="mbar" style="height:9.55%"></div></div>
+          <div class="mcol" title="2026-09-23 — 35 commits"><div class="mbar" style="height:22.29%"></div></div>
+          <div class="mcol" title="2026-09-24 — 16 commits"><div class="mbar" style="height:10.19%"></div></div>
+          <div class="mcol" title="2026-09-25 — 26 commits"><div class="mbar" style="height:16.56%"></div></div>
+          <div class="mcol" title="2026-09-26 — 32 commits"><div class="mbar" style="height:20.38%"></div></div>
+          <div class="mcol" title="2026-09-27 — 25 commits"><div class="mbar" style="height:15.92%"></div></div>
+          <div class="mcol" title="2026-09-28 — 56 commits"><div class="mbar" style="height:35.67%"></div></div>
+          <div class="mcol" title="2026-09-29 — 77 commits"><div class="mbar" style="height:49.04%"></div></div>
+          <div class="mcol" title="2026-09-30 — 36 commits"><div class="mbar" style="height:22.93%"></div></div>
+          <div class="mcol" title="2026-10-01 — 73 commits"><div class="mbar" style="height:46.5%"></div></div>
+          <div class="mcol" title="2026-10-02 — 32 commits"><div class="mbar" style="height:20.38%"></div></div>
+          <div class="mcol" title="2026-10-03 — 14 commits"><div class="mbar" style="height:8.92%"></div></div>
+          <div class="mcol" title="2026-10-04 — 101 commits"><div class="mbar" style="height:64.33%"></div></div>
+          <div class="mcol" title="2026-10-05 — 27 commits"><div class="mbar" style="height:17.2%"></div></div>
+          <div class="mcol" title="2026-10-06 — 27 commits"><div class="mbar" style="height:17.2%"></div></div>
+          <div class="mcol" title="2026-10-07 — 18 commits"><div class="mbar" style="height:11.46%"></div></div>
+          <div class="mcol" title="2026-10-08 — 32 commits"><div class="mbar" style="height:20.38%"></div></div>
+          <div class="mcol peak" title="2026-10-09 — 157 commits"><div class="mbar" style="height:100.0%"></div><span class="mlbl" style="bottom:calc(100.0% + 4px)">157</span></div>
+          <div class="mcol" title="2026-10-10 — 96 commits"><div class="mbar" style="height:61.15%"></div></div>
+          </div>
+          <div class="mcavg" style="bottom:22.3%"></div>
+        </div>
+        <div class="mcx"><span>Sep 10</span><span>Sep 25</span><span>Oct 10</span></div>
+      </div>
+      <p class="mcap">Commits per day, Sep 10 – Oct 10 — 1,086 total, 35 a day.<br>Dashed line: the average. One day (Sep 12) had no commits.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide" data-sec="The whole picture" data-n="5">
+  <h2>Engineering IDE of AI era</h2>
+  <svg viewBox="0 0 1240 624" style="width:100%;height:auto;max-height:58vh" role="img" aria-label="Sandbar architecture">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--dim)"/></marker></defs>
+  <rect x="250" y="4" width="740" height="56" rx="14" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="620" y="40" text-anchor="middle" font-size="21" font-weight="600" fill="var(--ink)">PEOPLE  ·  set the goal  ·  review the design  ·  sign the merge</text>
+  <line x1="620" y1="60" x2="620" y2="88" stroke="var(--dim)" stroke-width="2.5" marker-end="url(#ah)"/>
+  <rect x="30" y="88" width="1180" height="392" rx="18" fill="var(--panel)" stroke="var(--accent)" stroke-width="3"/>
+  <text x="620" y="124" text-anchor="middle" font-size="26" font-weight="700" fill="var(--accent)">SANDBAR  ·  the engineering layer</text>
+  <rect x="270" y="140" width="700" height="50" rx="12" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="620" y="172" text-anchor="middle" font-size="21" font-weight="600" fill="var(--ink)">CONSOLE · web  ·  watch · decide · sign</text>
+  <rect x="60" y="202" width="360" height="44" rx="22.0" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="240.0" y="231.0" text-anchor="middle" font-size="20" font-weight="600" fill="var(--ink)">work graph = tickets</text>
+  <rect x="440" y="202" width="360" height="44" rx="22.0" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="620.0" y="231.0" text-anchor="middle" font-size="20" font-weight="600" fill="var(--ink)">spec</text>
+  <rect x="820" y="202" width="360" height="44" rx="22.0" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1000.0" y="231.0" text-anchor="middle" font-size="20" font-weight="600" fill="var(--ink)">gates</text>
+  <rect x="60" y="252" width="360" height="44" rx="22.0" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="240.0" y="281.0" text-anchor="middle" font-size="20" font-weight="600" fill="var(--ink)">verification assets</text>
+  <rect x="440" y="252" width="360" height="44" rx="22.0" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="620.0" y="281.0" text-anchor="middle" font-size="20" font-weight="600" fill="var(--ink)">knowledge base</text>
+  <rect x="820" y="252" width="360" height="44" rx="22.0" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1000.0" y="281.0" text-anchor="middle" font-size="20" font-weight="600" fill="var(--ink)">audit trail</text>
+  <text x="620" y="324" text-anchor="middle" font-size="18" font-weight="600" fill="var(--dim)">RUNS ON  ·  open-source foundation — we run it, we did not write it</text>
+  <rect x="190" y="338" width="400" height="116" rx="14" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="390.0" y="376" text-anchor="middle" font-size="21" font-weight="700" fill="var(--ink)">PROCESS ENGINE</text>
+  <text x="390.0" y="406" text-anchor="middle" font-size="19" font-weight="400" fill="var(--dim)">Temporal</text>
+  <text x="390.0" y="430" text-anchor="middle" font-size="19" font-weight="400" fill="var(--dim)">one durable workflow per ticket</text>
+  <rect x="650" y="338" width="400" height="116" rx="14" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="850.0" y="376" text-anchor="middle" font-size="21" font-weight="700" fill="var(--ink)">AGENT RUNTIME</text>
+  <text x="850.0" y="406" text-anchor="middle" font-size="19" font-weight="400" fill="var(--dim)">dsh</text>
+  <text x="850.0" y="430" text-anchor="middle" font-size="19" font-weight="400" fill="var(--dim)">sessions · tools · sandbox · routing</text>
+  <line x1="620" y1="480" x2="620" y2="516" stroke="var(--dim)" stroke-width="2.5" marker-end="url(#ah)"/>
+  <rect x="430" y="516" width="380" height="56" rx="14" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="620" y="551" text-anchor="middle" font-size="19" font-weight="600" fill="var(--ink)">MODELS  ·  routed per role  ·  replaceable</text>
+  </svg>
+  <p class="kicker">Nothing inside that box lives in a chat window.</p>
+</section>
+
+<section class="slide" data-sec="What Sandbar is" data-n="6">
+  <h2>How the context is managed</h2>
+  <svg viewBox="0 0 1240 596" style="width:100%;height:auto;max-height:58vh" role="img" aria-label="How context is layered">
+  <defs><marker id="cg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker></defs>
+  <rect x="104" y="6" width="1112" height="80" rx="12" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="128" y="42" text-anchor="start" font-size="21" font-weight="700" fill="var(--ink)">TRUTH · docs/</text>
+  <text x="400" y="36" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">Verified facts only: design, terminology, runbooks. Entry:</text>
+  <text x="400" y="60" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">docs/README.md; machine index: docs/index.json.</text>
+  <rect x="1113.6" y="28" width="76.4" height="30" rx="15" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1151.8" y="49" text-anchor="middle" font-size="15" font-weight="600" fill="var(--dim)">frozen</text>
+  <rect x="104" y="98" width="1112" height="80" rx="12" fill="var(--bg2)" stroke="var(--dim)" stroke-width="2" stroke-dasharray="9 7"/>
+  <text x="128" y="134" text-anchor="start" font-size="21" font-weight="700" fill="var(--ink)">DRAFTS · notes/</text>
+  <text x="400" y="128" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">Discussions, epics, the defect ledger. Off the agent’s reading</text>
+  <text x="400" y="152" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">surface; graduates into docs/ at a verification event.</text>
+  <rect x="1096.8" y="120" width="93.2" height="30" rx="15" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1143.4" y="141" text-anchor="middle" font-size="15" font-weight="600" fill="var(--dim)">volatile</text>
+  <rect x="104" y="190" width="1112" height="80" rx="12" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="128" y="226" text-anchor="start" font-size="21" font-weight="700" fill="var(--ink)">INTENT · spec</text>
+  <text x="400" y="220" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">Direction level: the epic. Task level: the ticket face — what, why,</text>
+  <text x="400" y="244" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">done-definition, write scope.</text>
+  <rect x="1046.4" y="212" width="143.60000000000002" height="30" rx="15" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1118.2" y="233" text-anchor="middle" font-size="15" font-weight="600" fill="var(--dim)">human-approved</text>
+  <rect x="104" y="282" width="1112" height="80" rx="12" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="128" y="318" text-anchor="start" font-size="21" font-weight="700" fill="var(--ink)">THE JOB · work graph</text>
+  <text x="400" y="312" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">One ticket, one durable workflow: stations, dependencies,</text>
+  <text x="400" y="336" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">boundaries. The agent reads the ticket, never a chat.</text>
+  <rect x="1080.0" y="304" width="110.0" height="30" rx="15" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1135.0" y="325" text-anchor="middle" font-size="15" font-weight="600" fill="var(--dim)">per ticket</text>
+  <rect x="104" y="374" width="1112" height="80" rx="12" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="128" y="410" text-anchor="start" font-size="21" font-weight="700" fill="var(--ink)">HANDOVERS · artifacts</text>
+  <text x="400" y="404" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">Plan, test design, gate results, result file — written to disk, read</text>
+  <text x="400" y="428" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">by the next station. Nothing crosses by memory.</text>
+  <rect x="1088.4" y="396" width="101.60000000000001" height="30" rx="15" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1139.2" y="417" text-anchor="middle" font-size="15" font-weight="600" fill="var(--dim)">per stage</text>
+  <rect x="104" y="466" width="1112" height="80" rx="12" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="128" y="502" text-anchor="start" font-size="21" font-weight="700" fill="var(--ink)">SESSION · the agent</text>
+  <text x="400" y="496" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">Scoped by the ticket, isolated in its own worktree. The session may</text>
+  <text x="400" y="520" text-anchor="start" font-size="17" font-weight="400" fill="var(--dim)">die at any moment; the work does not.</text>
+  <rect x="1080.0" y="488" width="110.0" height="30" rx="15" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1135.0" y="509" text-anchor="middle" font-size="15" font-weight="600" fill="var(--dim)">disposable</text>
+  <line x1="92" y1="108" x2="92" y2="80" stroke="var(--accent)" stroke-width="2.5" marker-end="url(#cg)"/>
+  <text x="80" y="92" text-anchor="end" font-size="15" font-weight="600" fill="var(--accent)">verification</text>
+  <text x="80" y="112" text-anchor="end" font-size="15" font-weight="600" fill="var(--accent)">event</text>
+  </svg>
+  <p class="kicker">Trust comes from structure — which directory, which index, which gate — not from asking the model to judge.</p>
+</section>
+
+<section class="slide" data-sec="What Sandbar is" data-n="7">
+  <h2>Done is decided by evidence</h2>
+  <svg viewBox="0 0 1240 528" style="width:100%;height:auto;max-height:56vh" role="img" aria-label="Verification: evidence decides">
+  <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--dim)"/></marker></defs>
+  <rect x="24" y="4" width="1192" height="116" rx="14" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="48" y="48" text-anchor="start" font-size="22" font-weight="700" fill="var(--ink)">MACHINE-CHECKABLE</text>
+  <text x="48" y="80" text-anchor="start" font-size="19" font-weight="400" fill="var(--dim)">build · unit · integration · regression guards · performance · merge rehearsal</text>
+  <text x="48" y="106" text-anchor="start" font-size="18" font-weight="600" fill="var(--ink)">Anything a machine can decide is never left to a model.</text>
+  <rect x="1106" y="22" width="84" height="32" rx="16" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1148.0" y="44" text-anchor="middle" font-size="16" font-weight="600" fill="var(--dim)">script</text>
+  <rect x="24" y="136" width="1192" height="116" rx="14" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="48" y="180" text-anchor="start" font-size="22" font-weight="700" fill="var(--ink)">INDEPENDENT JUDGEMENT</text>
+  <text x="48" y="212" text-anchor="start" font-size="19" font-weight="400" fill="var(--dim)">another role reviews the plan, designs the tests, arbitrates, walks through acceptance</text>
+  <text x="48" y="238" text-anchor="start" font-size="18" font-weight="600" fill="var(--ink)">Whoever produces the work never grades it.</text>
+  <rect x="1115" y="154" width="75" height="32" rx="16" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1152.5" y="176" text-anchor="middle" font-size="16" font-weight="600" fill="var(--dim)">agent</text>
+  <rect x="24" y="268" width="1192" height="116" rx="14" fill="var(--panel)" stroke="var(--accent)" stroke-width="3"/>
+  <text x="48" y="312" text-anchor="start" font-size="22" font-weight="700" fill="var(--accent)">HUMAN SIGNATURE</text>
+  <text x="48" y="344" text-anchor="start" font-size="19" font-weight="400" fill="var(--dim)">reads the evidence page and the key diff — not two thousand lines; the reason is recorded</text>
+  <text x="48" y="370" text-anchor="start" font-size="18" font-weight="600" fill="var(--ink)">The gate physically stops the job until a person signs.</text>
+  <rect x="1115" y="286" width="75" height="32" rx="16" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1152.5" y="308" text-anchor="middle" font-size="16" font-weight="600" fill="var(--dim)">human</text>
+  <line x1="24" y1="404" x2="1216" y2="404" stroke="var(--line)" stroke-width="2"/>
+  <text x="620" y="444" text-anchor="middle" font-size="19" font-weight="600" fill="var(--ink)">A failed gate sends the work back. Red is named: product, environment, or foreign. Re-running until green is forbidden.</text>
+  <text x="620" y="476" text-anchor="middle" font-size="19" font-weight="600" fill="var(--ink)">Every fixed defect becomes a permanent guard — the standard of “correct” grows.</text>
+  </svg>
+  <p class="kicker">The conclusion comes from a judge, not from the player.</p>
+</section>
+
+
+
+<section class="slide" data-sec="What Sandbar is" data-n="8">
+  <h2>Extensibility</h2>
+  <svg viewBox="0 0 1240 612" style="width:100%;height:auto;max-height:56vh" role="img" aria-label="Extension points">
+  <defs><marker id="x1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/></marker></defs>
+  <rect x="24" y="4" width="1192" height="100" rx="14" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="48" y="44" text-anchor="start" font-size="22" font-weight="700" fill="var(--accent)">THE CHAIN</text>
+  <text x="48" y="76" text-anchor="start" font-size="19" font-weight="400" fill="var(--ink)">A project brings its own station chain and loads it at run time.</text>
+  <rect x="880.2" y="20" width="309.8" height="30" rx="15" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1035.1" y="41" text-anchor="middle" font-size="15" font-weight="600" fill="var(--dim)">what you write: a template module</text>
+  <text x="1176" y="76" text-anchor="end" font-size="18" font-weight="400" fill="var(--dim)">nusuyou: eight stations, two human gates</text>
+  <rect x="24" y="114" width="1192" height="100" rx="14" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="48" y="154" text-anchor="start" font-size="22" font-weight="700" fill="var(--accent)">THE ROLES</text>
+  <text x="48" y="186" text-anchor="start" font-size="19" font-weight="400" fill="var(--ink)">A role is a declaration — its rules, its red lines, its handover duties.</text>
+  <rect x="931.8" y="130" width="258.2" height="30" rx="15" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1060.9" y="151" text-anchor="middle" font-size="15" font-weight="600" fill="var(--dim)">what you write: a role file</text>
+  <text x="1176" y="186" text-anchor="end" font-size="18" font-weight="400" fill="var(--dim)">developer · integration · product-operation</text>
+  <rect x="24" y="224" width="1192" height="100" rx="14" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="48" y="264" text-anchor="start" font-size="22" font-weight="700" fill="var(--accent)">THE MODELS</text>
+  <text x="48" y="296" text-anchor="start" font-size="19" font-weight="400" fill="var(--ink)">Per role, per kind of work, per account. No code change.</text>
+  <rect x="897.4000000000001" y="240" width="292.59999999999997" height="30" rx="15" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1043.7" y="261" text-anchor="middle" font-size="15" font-weight="600" fill="var(--dim)">what you write: a routing table</text>
+  <text x="1176" y="296" text-anchor="end" font-size="18" font-weight="400" fill="var(--dim)">GLM-5.3-flash for build roles, mimo for the executor</text>
+  <rect x="24" y="334" width="1192" height="100" rx="14" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="48" y="374" text-anchor="start" font-size="22" font-weight="700" fill="var(--accent)">THE PROJECTS</text>
+  <text x="48" y="406" text-anchor="start" font-size="19" font-weight="400" fill="var(--ink)">Registering a project is writing one file — nothing else moves.</text>
+  <rect x="854.4000000000001" y="350" width="335.59999999999997" height="30" rx="15" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1022.2" y="371" text-anchor="middle" font-size="15" font-weight="600" fill="var(--dim)">what you write: one declaration file</text>
+  <text x="1176" y="406" text-anchor="end" font-size="18" font-weight="400" fill="var(--dim)">three projects on one engine today</text>
+  <rect x="24" y="444" width="1192" height="100" rx="14" fill="var(--panel)" stroke="var(--line)" stroke-width="2"/>
+  <text x="48" y="484" text-anchor="start" font-size="22" font-weight="700" fill="var(--accent)">THE SURFACE</text>
+  <text x="48" y="516" text-anchor="start" font-size="19" font-weight="400" fill="var(--ink)">The console is plugins on a micro-kernel, not a monolith.</text>
+  <rect x="957.6" y="460" width="232.39999999999998" height="30" rx="15" fill="var(--panel2)" stroke="var(--line)" stroke-width="2"/>
+  <text x="1073.8" y="481" text-anchor="middle" font-size="15" font-weight="600" fill="var(--dim)">what you write: a plugin</text>
+  <text x="1176" y="516" text-anchor="end" font-size="18" font-weight="400" fill="var(--dim)">board · signatures · metrics · watchdog · providers · knowledge</text>
+  <line x1="24" y1="556" x2="1216" y2="556" stroke="var(--line)" stroke-width="2"/>
+  <text x="620" y="592" text-anchor="middle" font-size="20" font-weight="600" fill="var(--ink)">Nothing about the process is hard-coded: the chain is a template, a role is a file, a model is a table, a project is a declaration.</text>
+  </svg>
+  <p class="kicker">Extending Sandbar means writing declarations — not forking the engine.</p>
+</section>
+
+<section class="slide" data-sec="Value" data-n="9">
+  <h2>Value: five levers, each with evidence</h2>
+  <ul class="tight">
+    <li><b>Human leverage</b> — people appear twice: set the goal, sign the merge. Runs continue unattended overnight.</li>
+    <li><b>Durable</b> — sessions die, work does not: a crashed agent retries and continues.</li>
+    <li><b>Parallel</b> — isolation, not coordination: three projects, 479 tickets closed in one month.</li>
+    <li><b>Evidence over review</b> — read a page of evidence, not 2,000 lines of diff. 268 known defects, each pinned by a regression case.</li>
+    <li><b>Measurable</b> — tokens, model cost and stage time per ticket are recorded.</li>
+  </ul>
+</section>
+
+<section class="slide" data-sec="The boundary" data-n="10">
+  <h2>What we have verified, and what we have not</h2>
+  <div class="cols">
+    <div class="card" style="border-color:#1e4a44"><div class="k" style="color:var(--accent)">Verified in daily use</div>
+      <ul class="tight">
+        <li>Three projects, 479 tickets closed in the month.</li>
+        <li>Unattended overnight runs; crashed agents recover.</li>
+        <li>The engine itself is built this way.</li>
+        <li>Every fixed defect has a regression case.</li>
+      </ul>
+    </div>
+    <div class="card" style="border-color:#4a3a1e"><div class="k" style="color:var(--accent2)">Still to measure</div>
+      <ul class="tight">
+        <li>How much orchestration time disappears.</li>
+        <li>The real scaling curve past a few parallel jobs.</li>
+        <li>A strict A/B: mid-tier model + harness vs frontier model alone.</li>
+        <li>Review load, defect escape rate, cross-domain reach.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="small" style="margin-top:1em"><b>Biggest risk:</b> a wrong work graph. A bad plan executes very efficiently. Two human gates catch it — a person opens the ticket, and a person signs the merge.</p>
+</section>
+
+<section class="slide" data-sec="Next" data-n="11">
+  <h2>Next: what we want to do</h2>
+  <div class="cards" style="margin-top:.4em">
+    <div class="card"><div class="k">1</div><div class="v" style="font-size:1.2rem">Validate on more projects</div><div class="n">Today it runs on our own three projects. Take it to eBay projects and prove the pattern is not specific to us.</div></div>
+    <div class="card"><div class="k">2</div><div class="v" style="font-size:1.2rem">Off this machine, onto the cloud</div><div class="n">Engine, process engine and console all run on one box today. Containerise it and make it multi-tenant.</div></div>
+    <div class="card"><div class="k">3</div><div class="v" style="font-size:1.2rem">Multi-person collaboration</div><div class="n">Today one person signs. Several people should work one board, with their own gates and their own audits.</div></div>
+    <div class="card"><div class="k">4</div><div class="v" style="font-size:1.2rem">Decision models at the gates</div><div class="n">Non-generative models that return a choice and a confidence. Testing one on red triage first — it touches no gate before it wins on our own data.</div></div>
+  </div>
+  <div class="band" style="margin-top:.7em">
+    <div class="bt">Also on the list · sharpening the verification layer</div>
+    <div class="chips">
+      <span>Google Mantis — open-source harness to find and fix bugs; a fix must be proven in a sandbox</span>
+      <span>open-code-review — AI review tooling</span>
+      <span>mutation testing (Cosmic Ray, MutPy) — would our tests actually catch a planted defect?</span>
+      <span>we adopt a practice only when it wins on our own measurements</span>
+    </div>
+  </div>
+  <p class="kicker">The ask: continued investment · one real business domain · one team.</p>
+</section>
+
+<script>
+(function(){
+  var slides=[].slice.call(document.querySelectorAll('.slide'));
+  var i=slides.findIndex(function(s){return s.classList.contains('active')});
+  if(i<0)i=0;
+  var bar=document.getElementById('progress'), notes=document.getElementById('notes');
+  // Light is the default (projectors and print); T switches to the dark theme.
+  var root=document.documentElement;
+  try{ var saved=localStorage.getItem('sandbar-deck-theme'); if(saved) root.dataset.theme=saved; }catch(e){}
+  function toggleTheme(){
+    root.dataset.theme = (root.dataset.theme==='dark') ? 'light' : 'dark';
+    try{ localStorage.setItem('sandbar-deck-theme', root.dataset.theme); }catch(e){}
+  }
+  function show(n){
+    i=Math.max(0,Math.min(slides.length-1,n));
+    slides.forEach(function(s,k){s.classList.toggle('active',k===i)});
+    var note=slides[i].getAttribute('data-note')||'';
+    notes.innerHTML=note;
+    if(!note) notes.classList.remove('on');
+    bar.style.width=((i+1)/slides.length*100)+'%';
+    if(location.hash!=='#'+(i+1)) history.replaceState(null,'','#'+(i+1));
+  }
+  document.addEventListener('keydown',function(e){
+    var k=e.key;
+    if(k==='ArrowRight'||k==='PageDown'||k===' '||k==='Enter'){show(i+1);e.preventDefault();}
+    else if(k==='ArrowLeft'||k==='PageUp'){show(i-1);e.preventDefault();}
+    else if(k==='Home'){show(0);} else if(k==='End'){show(slides.length-1);}
+    else if(k==='n'||k==='N'){ if(notes.innerHTML.trim()) notes.classList.toggle('on'); }
+    else if(k==='t'||k==='T'){toggleTheme();}
+    else if(k==='f'||k==='F'){ if(document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }
+  });
+  document.addEventListener('click',function(e){
+    if(e.clientX>window.innerWidth*0.5) show(i+1); else show(i-1);
+  });
+  var h=parseInt((location.hash||'').replace('#',''),10);
+  show(isNaN(h)?i:h-1);
+  window.addEventListener('hashchange',function(){
+    var n=parseInt((location.hash||'').replace('#',''),10);
+    if(!isNaN(n)&&n-1!==i) show(n-1);
+  });
+})();
+</script>
+</body>
+</html>

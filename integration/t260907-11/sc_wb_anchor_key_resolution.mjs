@@ -17,7 +17,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { makeFixture, makeJudge, EPIC_CODE, EPICS_PREFIX } from './lib_wb_anchor.mjs'
+import { makeFixture, makeJudge, EPIC_CODE, EPICS_PREFIX, EPIC_MD_ENV } from './lib_wb_anchor.mjs'
 
 const j = makeJudge('sc_wb_anchor_key_resolution')
 const fx = await makeFixture()
@@ -30,7 +30,7 @@ try {
     const r = await call(EPICS_PREFIX, EPICS_PREFIX)
     j.ok(r.status === 200 && r.body?.ok === true, `无参 epics 列表 → 200（实得 ${r.status}）`)
     const t = r.body?.result?.epics?.find((e) => e.code === EPIC_CODE)
-    j.ok(t?.title === 'sandbar 侧演示立项', '无参回落读默认仓（repoA）立项单')
+    j.ok(t?.summary === 'sandbar side demo epic.', '无参回落读默认仓（repoA）立项单')
     noParamRoot = r.body?.resolved?.root
     j.ok(r.body?.resolved?.source === 'default', `响应带 resolved.source='default' 来源标记（方案承诺；实得 ${JSON.stringify(r.body?.resolved?.source)}）`)
     j.ok(noParamRoot === fx.repoA, `resolved.root=默认仓根（实得 ${JSON.stringify(noParamRoot)}）`)
@@ -63,14 +63,14 @@ try {
   await fx.withEnv({ SANDBAR_EPICS_DIR: null }, async () => {
     const envEpics = join(fx.root, 'env-epics')
     await mkdir(envEpics, { recursive: true })
-    await writeFile(join(envEpics, `${EPIC_CODE}.md`), '# 立项单：env 覆盖侧演示立项\n', 'utf8')
+    await writeFile(join(envEpics, `${EPIC_CODE}.md`), EPIC_MD_ENV, 'utf8')
     await fx.withEnv({ SANDBAR_EPICS_DIR: envEpics }, async () => {
       const rNo = await call(EPICS_PREFIX, EPICS_PREFIX)
       const tNo = rNo.body?.result?.epics?.find((e) => e.code === EPIC_CODE)
-      j.ok(tNo?.title === 'env 覆盖侧演示立项', '无参回落：SANDBAR_EPICS_DIR 覆盖生效（旧 env 链保留）')
+      j.ok(tNo?.summary === 'env override side demo epic.', '无参回落：SANDBAR_EPICS_DIR 覆盖生效（旧 env 链保留）')
       const rFpv = await call(EPICS_PREFIX, `${EPICS_PREFIX}?project=fpv`)
       const tFpv = rFpv.body?.result?.epics?.find((e) => e.code === EPIC_CODE)
-      j.ok(tFpv?.title === 'fpv 侧演示立项', `per-project 不被 env 串味（实得 ${JSON.stringify(tFpv?.title)}）`)
+      j.ok(tFpv?.summary === 'fpv side demo epic.', `per-project 不被 env 串味（实得 ${JSON.stringify(tFpv?.summary)}）`)
     })
   })
 } finally {

@@ -40,9 +40,16 @@ import { ensureLaneBuild } from "./capture-ensure-build.mjs";
 
 const LANE_ROOT = process.cwd();
 const CAPTURE_LANE = path.join(LANE_ROOT, "server", "ui-check", "capture-lane.mjs");
+// t261012-05: required-view list follows capture.mjs's live default VIEWS
+// (exported BOARD_VIEWS + the non-fixture entries). console-epics /
+// console-new-ticket / console-default were removed with their retired icons
+// (t261005-10 UI-2 / t261008-36; capture.mjs header keeps the leave-a-trace
+// note) — the stale list made A2 red on delivered tree. console-ticket-detail
+// is data-optional (zero-row isolated bench = named skip, not produced), so it
+// stays out of the required set. Still exactly seven deterministic views.
 const SEVEN_VIEWS = [
-  "console-default.png", "console-board.png", "console-epics.png",
-  "console-new-ticket.png", "console-sessions.png", "console-chat.png",
+  "console-board.png", "console-board-dark.png", "console-board-light.png",
+  "console-sessions.png", "console-settings-routes.png", "console-chat.png",
   "console-refresh.png",
 ];
 const RUN_TIMEOUT_MS = Number(process.env.SANDBAR_CAPTURE_E2E_TIMEOUT_MS || 600000); // engine budget 900s/entry
@@ -243,7 +250,10 @@ if (envReason) {
   recordLeg("A2 seven-views-produced", missing.length === 0 && tiny.length === 0 ? "pass" : "fail",
     missing.length ? `缺 ${missing.join(",")}` : tiny.length ? `${tiny.join(",")} 小于 2048 字节（疑似空白）` : "7/7 视图齐且非空白");
 
-  const chat = path.join(outDir, "console-chat.png"), def = path.join(outDir, "console-default.png");
+  // t261012-05: compare chat against console-board.png — the default-landing
+  // view (console-default.png) retired with its icon; board is the live
+  // non-chat landing face, so byte-distinctness still proves the view switched.
+  const chat = path.join(outDir, "console-chat.png"), def = path.join(outDir, "console-board.png");
   if (existsSync(chat) && existsSync(def)) {
     const hC = createHash("sha256").update(await readFile(chat)).digest("hex");
     const hD = createHash("sha256").update(await readFile(def)).digest("hex");

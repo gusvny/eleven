@@ -72,7 +72,10 @@ def _epics(tmp: Path, *codes) -> str:
     d = tmp / "epics"
     d.mkdir(parents=True, exist_ok=True)
     for c in codes:
-        (d / (c + ".md")).write_text("# " + c + "\n", encoding="utf-8")
+        # t261019-12: registry entries carry front-matter; retired:false accepts.
+        (d / (c + ".md")).write_text(
+            "---\ncode: %s\nretired: false\nsummary: fixture entry.\n---\n\n# %s\n" % (c, c),
+            encoding="utf-8")
     return str(d)
 
 

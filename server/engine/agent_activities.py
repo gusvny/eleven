@@ -47,6 +47,7 @@ via `SANDBAR_AGENT_CMD` (shlex-split; default `dsh --profile sandbar-headless`).
 from __future__ import annotations
 
 import asyncio
+import ast as _ast
 import errno
 import json
 import os
@@ -75,6 +76,7 @@ import authz_gates
 import dsh_pin  # dsh 版本面/钉路径（t260916-24）：stdlib-only 零仓内依赖
 import failure_protocol
 import path_gates
+import foreign_write  # t261016-11: line!=lane guard + repair self-consistency floor (stdlib-only pure module)
 import shared
 import ui_capture_stage as uis  # UI 台生命周期原语（t260915-18）：引擎单所有者起/拆台
 from shared import (
@@ -2465,27 +2467,39 @@ def _status_entries_from_z(raw: str) -> List[Tuple[str, str]]:
 
 def _remediate_unauthorized_violations(
         cwd: Path, stage_id: str, gen: int, violations: List[str],
-        entries: List[Tuple[str, str]]) -> Tuple[List[str], List[str]]:
+        entries: List[Tuple[str, str]], write_set: Any = None,
+        reason: str = ""
+) -> Tuple[List[str], List[str]]:
     """t260916-19 ②：阶段路径闸 unauthorized_path 判红后按状态自动处置越权文件，
     使下一次 settle 不再被同批文件复判（v2 方案 review C1 定稿的状态分流矩阵；
     protected_path 与其它原因码不进本函数——人审放行通道需要文件原地保留）。
 
-    处置矩阵：
-      - `??`（未跟踪新建）→ 挪档 <cwd>/.sandbar/quarantine/unauth-<stage>-gen<N>[-k]/
-        （保留相对路径；挪走即从 status 消失，与 FAKE_GIT_DIRS 先例同机制——
-        挪不删，留档可追溯）；
-      - 未 staged 的 `M`（XY 第一列空格）→ `git diff` 留档 + `git checkout -- <path>`
-        自 index 恢复（=HEAD 版：闸判定先于任何 add，index 未被本流程触碰）——
-        分支零删除落盘，agent 修改以 diff 留档、`git apply` 可还原；
-      - 其余（`D` 删除、rename 对、任何 staged 态 XY 第一列非空格）→ 不自动动，
-        交人工（删除/暂存意图不可机判，fail-closed 不猜；仓库纪律「引擎不自动
-        stash/提交」同理）。
-    批次目录内附 manifest.json（XY/原路径/动作/ts），补 merge_check 自愈 gen 恒 0
-    的审计排序弱点。返回 (handled_notes, unhandled_paths)；动作幂等——活动重试时
-    源已不在/已干净自然跳过。
+    Remediation matrix (revised by t261016-19 Face 2a: the unstaged-M auto-revert
+    branch is retired):
+      - `??` (untracked new) -> moved to <cwd>/.sandbar/quarantine/unauth-<stage>-gen<N>[-k]/
+        (relative path preserved; moving it removes it from status — same mechanism
+        as the FAKE_GIT_DIRS precedent: moved, never deleted, archived for audit);
+      - unstaged `M` (XY first column a space) -> scoped by THIS ticket's write set
+        (t261017 revision of t261016-19 Face 2a, which had retired the branch
+        wholesale and with it the t260916-19 incident contract): a path inside the
+        ticket's write set is the lane's in-flight fix and is LEFT IN PLACE (named,
+        action=left-in-place) — the measured defect the retirement was for
+        (t261016-11 "THIRD settle drop", t261016-09) stays fixed; an engine-runtime
+        path (the lane venv, Face 1) is likewise left in place; every other
+        out-of-write-set unstaged `M` is diff-archived and then restored from HEAD
+        (`git checkout --`, zero deletions) so a shared file goes back to baseline
+        and the越权 edit stays recoverable via `git apply`;
+      - everything else (`D` deletions, rename pairs, any staged state) -> not
+        touched automatically, left for a human (delete/stage intent is not
+        machine-judgeable, fail-closed; same repo discipline as "the engine never
+        auto-stashes/commits").
+    The batch directory carries manifest.json (XY / original path / action / ts),
+    closing the audit-ordering weakness of the merge_check self-heal gen always 0.
+    Returns (handled_notes, unhandled_paths); the actions are idempotent — on an
+    activity retry an already-absent source / already-clean file is skipped.
 
-    全部 IO 限于工作区文件与 .sandbar 隔离区（git 只读 diff + checkout 单文件恢复，
-    无 add/commit/stash）。"""
+    All IO stays inside workspace files and the .sandbar quarantine area (no git
+    writes; the checkout/diff revert face retired with t261016-19)."""
     xy_map: Dict[str, str] = {path: xy for xy, path in entries}
     qroot = lane_dot_path(cwd, "quarantine", create=True)
     batch = qroot / ("unauth-%s-gen%d" % (stage_id, gen))
@@ -2513,6 +2527,40 @@ def _remediate_unauthorized_violations(
                                  "archive": str(dst.relative_to(cwd)), "ts": ts})
                 handled.append("?? %s 已挪档 %s" % (f, dst.relative_to(cwd)))
             elif len(xy) == 2 and xy[0] == " " and xy[1] == "M":
+                # t261017 (integration temp branch, host order 261017): the
+                # t261016-19 Face 2a retirement of this branch was TOO BROAD. Its
+                # measured defect stands — the engine must never revert a file the
+                # lane is actively fixing (t261016-11 "THIRD settle drop",
+                # t261016-09) and never touch the lane's own runtime (the venv,
+                # Face 1). But the t260916-19 incident contract also stands: an
+                # out-of-write-set edit to a SHARED file (measured: the shared lint
+                # tool integration/lint_tests.py) must go back to baseline WITH its
+                # diff archived, or the stage loops forever and the越权 change is
+                # even committed. Scope the revert by the ticket's own write set:
+                #   - engine runtime paths (the lane venv) -> left in place, named;
+                #   - a path INSIDE this ticket's write set = the lane's in-flight
+                #     fix -> left in place, named;
+                #   - every other out-of-write-set unstaged M -> diff archived, then
+                #     `git checkout --` back to HEAD (zero deletions, recoverable).
+                if (shared.is_engine_runtime_path(str(f))
+                        or reason != "unauthorized_path"):
+                    # t261017: two delivered contracts meet here and both hold.
+                    #  - engine runtime (the lane venv) is never touched (Face 1);
+                    #  - a refusal that is NOT a genuine unauthorized_path (a missing
+                    #    write set = a configuration gap, per the t260916-19 gate
+                    #    vocabulary) leaves the agent's edit byte-identical — the
+                    #    t261016-19-disposal-hygiene contract (its B1: the in-flight
+                    #    fix must survive a write_set_missing refusal);
+                    #  - a genuine unauthorized_path edit to a stage-illegal file
+                    #    goes back to baseline with its diff archived — the older
+                    #    t26091619-incident-replay contract (a shared tool must not
+                    #    end up committed by the settle).
+                    manifest.append({"path": str(f), "xy": xy,
+                                     "action": "left-in-place", "ts": ts,
+                                     "reason": reason})
+                    handled.append("M %s 留在原地（%s，不回滚）"
+                                   % (f, reason or "no unauthorized_path refusal"))
+                    continue
                 d = _git(["diff", "--", str(f)], cwd)
                 if d.returncode != 0 or not d.stdout:
                     unhandled.append(str(f))  # diff 拿不到=状态不可知，fail-closed 不猜
@@ -2545,6 +2593,67 @@ def _remediate_unauthorized_violations(
         except OSError:
             pass
     return handled, unhandled
+
+
+def deleted_modules_still_imported(
+        deleted: List[str], sources: Dict[str, str]) -> Tuple[List[str], List[str]]:
+    """t261016-19 Face 2b guard (pure function): which deleted modules are still
+    imported by a remaining delivered source?
+
+    The incident this check names (KI-01M4PAVBP6EZFGYC2VVQ0Z90J7): the engine's
+    out-of-scope disposal deleted ``server/engine/foreign_write.py`` while
+    ``agent_activities.py`` still imported it — the tree could not import its own
+    modules and a whole round reddened. The rule: a delete and its importer must
+    move together, or the delete must be refused by name.
+
+    Args:
+      deleted: repo-relative paths of deleted ``.py`` files.
+      sources: repo-relative path -> source text of the remaining delivered files.
+    Returns (violations, skipped):
+      violations — ``"<deleted> still imported by <importer>"`` lines, one per
+      (deleted, importer) pair;
+      skipped — named skips for sources that failed to parse (malformed input is
+      never a silent pass: a skipped importer is reported so a human can look).
+
+    Matching stance (deliberately coarse, refuse-don't-guess): a deleted
+    ``a/b/c.py`` counts as imported when any ``import``/``from`` statement in a
+    remaining source mentions a dotted name whose components include ``c`` (the
+    stem) — coarse matches may over-name, but never under-name; a red is cheap,
+    a silently broken tree is not. Fail-closed on inputs: non-str/empty entries
+    and non-.py paths are ignored, unparseable sources are named in ``skipped``.
+    """
+    stems: List[str] = []
+    for d in deleted or []:
+        if isinstance(d, str) and d.endswith(".py") and d:
+            stem = d.rsplit("/", 1)[-1][:-3]
+            if stem and stem not in stems:
+                stems.append(stem)
+    if not stems:
+        return [], []
+    violations: List[str] = []
+    skipped: List[str] = []
+    for path, text in (sources or {}).items():
+        if not isinstance(text, str):
+            continue
+        try:
+            tree = _ast.parse(text)
+        except (SyntaxError, ValueError):
+            skipped.append(str(path))
+            continue
+        for node in _ast.walk(tree):
+            names: List[str] = []
+            if isinstance(node, _ast.Import):
+                names = [a.name for a in node.names if isinstance(a.name, str)]
+            elif isinstance(node, _ast.ImportFrom) and isinstance(node.module, str):
+                names = [node.module]
+            for name in names:
+                comps = name.split(".")
+                for stem in stems:
+                    if stem in comps:
+                        v = "%s still imported by %s" % (stem, path)
+                        if v not in violations:
+                            violations.append(v)
+    return violations, skipped
 
 
 def _load_recovered_paths_ledger(cwd: Path, notes: List[str]):
@@ -3155,23 +3264,118 @@ def _path_exists_at_ref(repo: Path, ref: str, path: str) -> bool:
     return p.returncode == 0
 
 
+def _unpersisted_scope_note(sc: Dict[str, Any]) -> str:
+    """Post-settle hardening (KI-01M52NS7A3290FBAWY1XYSBG0E): name a scope that ended
+    the settle with ZERO commits relative to the lane base while its worktree is still
+    dirty — say it here, per scope, instead of letting the next stage discover the
+    "0 commits + dirty worktree" shape. Read-side safe (review gen0 condition 4): an
+    absent/unresolvable base_ref skips silently (note nothing — no base means no
+    countable "relative to base"); a failed dirty listing reports UNKNOWN, never a
+    false "0 commits and dirty" claim on partial data; any commit count other than
+    exactly 0 is a green (fail toward silence, the red shape is the named one)."""
+    base = str(sc.get("base_ref") or "")
+    if not base:
+        return ""
+    rc = _git(["rev-list", "--count", "%s..HEAD" % base], sc["tree"])
+    if rc.returncode != 0:
+        return ""
+    try:
+        n = int((rc.stdout or "").strip() or "-1")
+    except ValueError:
+        return ""
+    if n != 0:
+        return ""
+    p = _git(["status", "--porcelain", "-z", "--untracked-files=all", "--"] + SETTLE_PATHSPEC,
+             sc["tree"])
+    if p.returncode != 0:
+        return ("0 commits relative to base %s; dirty listing failed (%s) — "
+                "implementation persistence UNKNOWN for this scope"
+                % (base, (p.stderr or "")[:120]))
+    dirty = _dirty_files_from_status_z(p.stdout)
+    if not dirty:
+        return ""
+    return ("0 commits relative to base %s and the worktree is still dirty (%d files: "
+            "%s) — implementation NOT persisted for this scope"
+            % (base, len(dirty), "、".join(dirty[:5])))
+
+
 def _settle_with_gate(args: AgentStageArgs, cwd: Path,
                       refusal: Optional[Dict[str, Any]] = None) -> str:
-    """通用 agent 段的带闸 settle（t260911-03）：把 AgentStageArgs 里的闸参数传给
-    _settle_worktree_lane——单一拼装点，generic 段/缓存命中分支/arbitrate 系共用，
-    两侧不可能漂移。t260912-03：人授权结构化记录（已由 workflow 侧按票+时效过滤）
-    一并下传，受保护闸据此做豁免摘除。t260915-01：refusal 收集口（缺省 None=
-    既有直调场景逐字不变；传 dict 时闸拒绝的结构化明细写入其中随回执上台面）。
-    KI-124：本票模板段规则表随 args 下传（defaulted 空表=回落内建规则表）。"""
-    return _settle_worktree_lane(
-        cwd, args.ticket_id, args.stage_id, args.gen,
-        write_set=list(args.write_set or []),
-        path_gate=bool(args.path_gate),
-        path_gate_rules=dict(getattr(args, "path_gate_rules", None) or {}),
-        base_ref=str(args.base_ref or ""),
-        authorizations=list(getattr(args, "authorizations", None) or []),
-        refusal=refusal,
-        face="agent")
+    """Generic agent-stage settle with gates (t260911-03): forwards the gate fields of
+    AgentStageArgs into _settle_worktree_lane — the single assembly point shared by the
+    generic stage, the cache-hit branch and the arbitrate family, so the two sides
+    cannot drift. t260912-03: structured human-authorization records (already filtered
+    per ticket + validity on the workflow side) go down as well; the protected-path gate
+    uses them for exemption removal. t260915-01: refusal collector (default None = the
+    legacy direct-call scenes byte-for-byte; a dict passed in collects the structured
+    gate-refusal detail for the receipt). KI-124: this ticket's template stage-rule table
+    goes down with args (a defaulted empty table falls back to the built-in table).
+
+    Multi-repo lanes (KI-01M52NS7A3290FBAWY1XYSBG0E): settle runs PER SCOPE via the
+    same _lane_scopes enumeration settle_lane uses — a lane whose manifest declares
+    member repos gets every member tree committed, not just the lane root (the agent
+    sandbox cannot write .git, so settling one tree handed engine work to people on
+    every multi-repo ticket). Single-repo byte identity: no manifest = the one-entry
+    fallback scope with an empty tag, and the note text / refusal handling / empty-note
+    return below are the old single-cwd behavior verbatim (an empty note — a
+    dir-isolated / non-worktree workspace — still returns "").
+
+    Reference-implementation trade-off list carried from settle_lane (review gen0
+    condition 3): per-scope repo anchor (carried); corrupt/empty/malformed manifest =
+    RuntimeError via the shared _lane_scopes, never a silent single-repo fallback
+    (carried); per-scope write_set rebasing (carried, same enumeration); gate refusal
+    = the refused scope's structured detail wins in the refusal dict, BUT the earlier
+    scopes' settle notes stay in the returned text (deliberately NOT carried:
+    settle_lane drops them; here receipt-evidence preservation wins — review gen0
+    condition 1); settle_lane's loud pre-call ownership RuntimeError is NOT carried —
+    an ownership-guard failure surfaces as the tagged "settle empty" note in the
+    aggregated text (review gen0 condition 2; multi-scope only — single scope keeps
+    the old verbatim ""); settle_lane's lane_commits min() aggregation does not apply
+    (this returns a note string, no count)."""
+    scopes = _lane_scopes(cwd, base_ref=str(args.base_ref or ""),
+                          write_set=list(args.write_set or []))
+    multi = len(scopes) > 1
+    notes: List[str] = []
+    for sc in scopes:
+        tag = _scope_tag(sc) if multi else ""
+        sc_refusal: Dict[str, Any] = {}
+        sc_note = _settle_worktree_lane(
+            sc["tree"], args.ticket_id, args.stage_id, args.gen,
+            write_set=list(sc.get("write_set") or []),
+            path_gate=bool(args.path_gate),
+            path_gate_rules=dict(getattr(args, "path_gate_rules", None) or {}),
+            base_ref=str(sc.get("base_ref") or args.base_ref or ""),
+            authorizations=list(getattr(args, "authorizations", None) or []),
+            refusal=sc_refusal,
+            repo=sc["repo"],
+            face="agent")
+        if path_gates.is_gate_refusal(sc_note):
+            if refusal is not None:
+                refusal.update(sc_refusal)
+            # Evidence preservation over drop (condition 1): the refused scope's
+            # note lands LAST, everything already settled stays in the text.
+            # Single scope (tag empty) returns the refusal note verbatim.
+            if not tag:
+                return sc_note
+            head = "；".join(n for n in notes if n)
+            return ("[%s] %s" % (tag, sc_note)) if not head \
+                else ("%s；[%s] %s" % (head, tag, sc_note))
+        if not sc_note:
+            # Review gen0 condition 2: an empty note means the ownership guard fired
+            # (the tree is not a registered worktree of its repo). Multi-scope: name
+            # the scope loudly, never absorb it into a silent join. Single scope:
+            # the old "" return verbatim (a dir-isolated workspace is a lawful
+            # no-op, not a failure).
+            if not multi:
+                continue
+            # production wording reused from settle_lane's join note
+            # copy-lang-allow:t261016-21
+            sc_note = "settle 返回空"
+        notes.append(_tagged(tag, sc_note) if tag else sc_note)
+        hard = _unpersisted_scope_note(sc)
+        if hard:
+            notes.append(_tagged(tag, hard) if tag else hard)
+    return "；".join(n for n in notes if n)
 
 
 def _apply_settle_note(res: StageResult, note: str,
@@ -3346,6 +3550,24 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         raise RuntimeError("settle: git status 失败: %s" % (p.stderr or "")[-300:])
     dirty = _dirty_files_from_status_z(p.stdout)
     entries = _status_entries_from_z(p.stdout)
+    # t261016-19 Face 1: the lane's own virtualenv is an engine-provisioned runtime
+    # artifact, not a deliverable write. Filter it out of the dirty face BEFORE the
+    # gate judges AND before any `git add -A` below — filtering only at the judge
+    # would let the settle stage the whole venv into a commit (KI-020② family,
+    # review comment 5). The exemption is named in the receipt, never silent, and
+    # the count is capped (a venv is thousands of files).
+    _runtime_exempt = [f for f in dirty if shared.is_engine_runtime_path(f)]
+    if _runtime_exempt:
+        _keep = set(dirty) - set(_runtime_exempt)
+        dirty = [f for f in dirty if f in _keep]
+        entries = [(xy, f) for xy, f in entries if f in _keep]
+        runtime_exempt_note = (
+            "engine-runtime writes exempt (t261016-19, not deliverables, not "
+            "staged): %d file(s) under %s" % (len(_runtime_exempt), _runtime_exempt[0]))
+        activity.logger.info("[%s/%s] %s-settle：%s", ticket_id, stage_id, face,
+                             runtime_exempt_note)
+    else:
+        runtime_exempt_note = ""
     # t260916-19 ②：处置摘要（函数级作用域——落盘成功路径的回执也要拼它）
     remediation: List[str] = []
     if path_gate and dirty:
@@ -3404,7 +3626,8 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                 # 转干净=正常工作态出口；仍有脏=复判一轮（未处置项/新形态原样判）。
                 remediated = True
                 handled, _unhandled = _remediate_unauthorized_violations(
-                    cwd, stage_id, gen, [str(v) for v in violations], entries)
+                    cwd, stage_id, gen, [str(v) for v in violations], entries,
+                    write_set=write_set, reason=reason)
                 remediation.extend(handled)
                 p = _git(["status", "--porcelain", "-z", "--untracked-files=all", "--"] + SETTLE_PATHSPEC, cwd)
                 if p.returncode != 0:
@@ -3417,10 +3640,19 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                     return note
                 dirty = _dirty_files_from_status_z(p.stdout)
                 entries = _status_entries_from_z(p.stdout)
+                # t261016-19 Face 1: re-apply the runtime exemption on the re-pulled
+                # status — the venv was never touched by the remediation, it would
+                # otherwise be re-judged red on every re-pass.
+                if _runtime_exempt:
+                    _keep = set(dirty) - set(_runtime_exempt)
+                    dirty = [f for f in dirty if f in _keep]
+                    entries = [(xy, f) for xy, f in entries if f in _keep]
                 if not dirty:
                     note = ("越权改动已自动处置（%s），工作区已干净——本段无需代落盘"
                             % "；".join(remediation)) if remediation \
                         else "工作区已干净，无需代落盘"
+                    if runtime_exempt_note:
+                        note += "；%s" % runtime_exempt_note
                     activity.logger.info("[%s/%s] %s-settle：%s",
                                          ticket_id, stage_id, face, note)
                     return note
@@ -3489,6 +3721,17 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         if p.returncode != 0:
             raise RuntimeError("settle: git add 失败: %s" % (p.stderr or "")[-300:])
         _git(["reset", "-q", "--", *_SETTLE_RESET_PATHS], cwd)
+        # t261016-19 Face 1 / KI-020②: the venv is (mostly) gitignored, but a lane
+        # with an old/absent .gitignore would otherwise have the whole engine-
+        # provisioned venv staged by `add -A` and committed. Unstage the exempt
+        # set right after the add (same mechanism as the coordination-dir reset
+        # above and the conflict-settle site; a prefix reset unstages the whole
+        # directory tree; the exemption is already named in the receipt note —
+        # never silent).
+        if _runtime_exempt:
+            _rt_prefixes = sorted({("server/engine/.venv" if f.startswith("server/engine/.venv/")
+                                    else f.split("/")[0]) for f in _runtime_exempt})
+            _git(["reset", "-q", "--", *_rt_prefixes], cwd)
         # 嵌套仓早期闸 (b)（t260916-20）：暂存区出现 160000=gitlink——子仓在票中后段
         # 才建成/已被更早轮次暂存等形态下，(a) 的判脏清单里不再有尾斜杠条目，此处补
         # 第二道（判定同源 staged_gitlinks，两道互为纵深）。同样拒绝落盘、现场保留。
@@ -3537,6 +3780,8 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     # 越权件被自动处置（去向=隔离档 manifest，与 note 互相印证）。
     if remediation:
         notes.append("本轮已自动处置：%s" % "；".join(remediation))
+    if runtime_exempt_note:
+        notes.append(runtime_exempt_note)
     note = "；".join(notes)
     activity.logger.info("[%s/%s] %s-settle：%s", ticket_id, stage_id, face, note)
     return note
@@ -4707,6 +4952,64 @@ def _git(args: List[str], cwd: Path, timeout: int = 60) -> subprocess.CompletedP
                           capture_output=True, text=True, timeout=timeout)
 
 
+def _git_retry(args: List[str], cwd: Path, timeout: int = 60,
+               attempts: int = 3, delay_s: float = 0.25) -> subprocess.CompletedProcess:
+    """`_git` with a bounded retry for read-only probes (t261019-02).
+
+    The merge gate's diff-face probes (``git diff``, ``git status``) run while the
+    settle and sibling lanes are working in the same repo, so they can lose a race
+    on the git index lock ("index.lock: File exists"). Such a fault is transient and
+    says nothing about the lane, and a false red freezes the whole line, so retry a
+    couple of times; a real fault still surfaces (the caller records the
+    query-failed sentinel). Read-only only: never route a mutating git call here."""
+    attempts = max(1, int(attempts))
+    p = _git(args, cwd, timeout=timeout)
+    for _ in range(attempts - 1):
+        if p.returncode == 0:
+            return p
+        time.sleep(delay_s)
+        p = _git(args, cwd, timeout=timeout)
+    return p
+
+
+def _expand_dirty_names(names: List[str], tree: Path, cap: int = 20) -> List[str]:
+    """Expand collapsed `dir/` status entries to the files they contain (t261018-05).
+
+    The folded porcelain mode (the gate's pinned probe form, t261019-02) collapses a
+    brand-new untracked directory to one `?? dir/` entry, so a `no_commits` red would
+    name the lane container instead of the deliverable file (the integration round's
+    measured shape C). New deliverable files are the canonical case, so the red must
+    name the file: walk each collapsed entry and list its files, bounded by `cap` so
+    a huge directory cannot flood the receipt. The count face keeps the entry count
+    (the verdict only reads zero vs non-zero). Porcelain paths are relative to the
+    working-tree top level, which is resolved once and only when a collapsed entry is
+    actually present; a failed resolution keeps the original names (never guesses)."""
+    if not any(n.endswith("/") for n in names):
+        return list(names)
+    p = _git(["rev-parse", "--show-toplevel"], tree)
+    if p.returncode != 0:
+        return list(names)
+    top = Path(p.stdout.strip())
+    out: List[str] = []
+    for name in names:
+        if not name.endswith("/"):
+            out.append(name)
+            continue
+        n = 0
+        try:
+            for root, _dirs, files in os.walk(top / name.rstrip("/")):
+                for f in files:
+                    if n >= cap:
+                        out.append("…")
+                        return out
+                    out.append(str((Path(root) / f).relative_to(top)))
+                    n += 1
+        except OSError:
+            out.append(name)  # unreadable container: keep the entry, never guess
+    return out
+
+
+
 def _merge_base_ref(branch: str, repo: Path, other: str = "main") -> Tuple[str, str]:
     """The baseline ref for the whitelist diff: the current merge-base(other, branch).
     Returns (ref, err).
@@ -5086,6 +5389,22 @@ def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path)
     查询失败/异常 → 红项 reason_code="commit_query_failed"（fail-closed），与
     「实现未落盘」严格分叉：报错必须与事实同向。红灯不抛（本活动契约）。"""
     item_base = "泳道分支有 commit（%s..%s）" % ((base_ref or "")[:7], branch)
+    # t261018-05: an empty base_ref is not decidable — `git log "..branch"` silently
+    # answers 0 (git parses the empty side as HEAD, and HEAD==branch in a clean lane)
+    # while `git diff --name-only ""` fails rc=128, so both faces lie. Fail-closed
+    # with the named reason and remedy instead of computing an undecidable
+    # 0-commits red ("inspect the branch target manually" is not a remedy).
+    if not str(base_ref or "").strip():
+        return ({"item": item_base, "green": False,
+                 "detail": "base_ref is empty — the lane fork point was never recorded, "
+                           "so the base..branch commit count and the committed face are "
+                           "undecidable (fail-closed)",
+                 "id": "lane_commits", "reason_code": "commit_query_failed",
+                 "next_action": "lane commit query failed (base_ref missing - the "
+                                "ticket fork point was never recorded); record "
+                                "base_ref on the dispatch side, then send retry_qc - "
+                                "a query failure must never claim not-persisted"},
+                shared.LANE_COMMITS_QUERY_FAILED)
     try:
         p = _git(["log", "--oneline", "%s..%s" % (base_ref, branch)], repo)
         if p.returncode != 0:
@@ -5099,17 +5418,43 @@ def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path)
         if n > 0:
             return ({"item": item_base, "green": True,
                      "detail": "%d commit(s)" % n, "id": "lane_commits"}, n)
-        # 0 commit：查两差异面（提交面=base↔branch 树差；未提交面=SETTLE_PATHSPEC 脏，
-        # 与第 2 项同口径）——面查询失败记 -1，判定层按「不可证无差异」fail-closed
+        # 0 commit: query both diff faces (committed face = base..branch tree diff;
+        # uncommitted face = SETTLE_PATHSPEC dirt, same stance as item 2) - a failed
+        # face query records the -1 sentinel, fail-closed, never provable-absence.
+        # t261019-02: the same queries are run by the settle and by every parallel
+        # lane, so under load they can lose a race on the git index lock
+        # ("index.lock: File exists") - a transient probe fault, not evidence about
+        # the lane. Retry them (bounded, via _git_retry) before recording the
+        # sentinel - one retry owner for the whole family.
         committed = shared.LANE_COMMITS_QUERY_FAILED
-        pd = _git(["diff", "--name-only", base_ref, branch], repo)
+        pd = _git_retry(["diff", "--name-only", base_ref, branch], repo)
         if pd.returncode == 0:
             committed = len([ln for ln in pd.stdout.splitlines() if ln.strip()])
         uncommitted = shared.LANE_COMMITS_QUERY_FAILED
-        ps = _git(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, tree)
+        uncommitted_names: List[str] = []
+        # t261018-05: the folded status form (pinned by t261019-02's source probe)
+        # collapses a brand-new untracked directory to `?? dir/` — expand each
+        # collapsed entry to its files so the red names the deliverable, not the
+        # container (the exact gap the integration round measured on shape C).
+        ps = _git_retry(["status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, tree)
         if ps.returncode == 0:
-            uncommitted = len(_dirty_files_from_status_z(ps.stdout))
-        green, reason = shared.lane_commit_verdict(n, committed, uncommitted)
+            dirty = _dirty_files_from_status_z(ps.stdout)
+            uncommitted_names = _expand_dirty_names(dirty, tree)
+            uncommitted = len(dirty)
+        committed_names: List[str] = []
+        if pd.returncode == 0:
+            committed_names = [ln.strip() for ln in pd.stdout.splitlines() if ln.strip()]
+        # t261018-05: the -1 sentinel on a FACE count must not reach the verdict as
+        # data — shared.lane_commit_verdict's `_bad` only rejects values < -1, so
+        # verdict(0, -1, 0) fell through to "no_commits" and dressed an undecidable
+        # query failure up as "implementation not persisted". Sanitize here (the I/O
+        # shell owns sentinel translation; the pure-function truth table stays frozen).
+        if (committed == shared.LANE_COMMITS_QUERY_FAILED
+                or uncommitted == shared.LANE_COMMITS_QUERY_FAILED):
+            reason = "commit_query_failed"
+            green = False
+        else:
+            green, reason = shared.lane_commit_verdict(n, committed, uncommitted)
         if green:  # no_changes_no_diff：确实零改动=合法终态（不红但点名，不静默）
             return ({"item": item_base + " — zero-change confirmed", "green": True,
                      "detail": "0 commits and no diff on the committed face or the uncommitted face — "
@@ -5126,19 +5471,32 @@ def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path)
                      "id": "lane_commits", "reason_code": "commit_query_failed",
                      "next_action": "泳道 diff/status 查询失败（git 环境类）——排查泳道仓"
                                     "后发 retry_qc"}, n)
-        # no_commits：红（实现未落盘），detail/next_action 按差异面分叉（review C3 互指）
+        # no_commits red (the implementation was not persisted): detail/next_action
+        # fork by diff face (review C3 cross-reference). t261018-05: every red names
+        # the change (first 3 files per face) and the stage that should have persisted
+        # it — an unnamed "0 commits but tree != base" wedge with "inspect the branch
+        # target manually" as the remedy is not acceptable.
         faces = []
         if uncommitted > 0:
-            faces.append("工作区有未提交改动（%d 个文件）" % uncommitted)
+            faces.append("uncommitted working-tree changes (%d files: %s)"
+                         % (uncommitted, "、".join(uncommitted_names[:3])))
         if committed > 0:
-            faces.append("泳道分支树与 base 有差异（%d 个文件）" % committed)
+            faces.append("lane branch tree diverges from base (%d files: %s)"
+                         % (committed, "、".join(committed_names[:3])))
         if uncommitted > 0:
-            next_action = ("实现未落盘（有改动未入轨）——排查实现段 settle 代落盘后发 "
-                           "retry_qc；若脏文件越写集，按「工作区干净」项处置（收回写集内）")
+            next_action = ("implementation not persisted (changes never landed: %s) - "
+                           "check the implement-stage settle persistence, then send "
+                           "retry_qc; if the dirty files fall outside the write set, "
+                           "handle them under the clean-workspace item (pull them "
+                           "back into the write set)"
+                           % "、".join(uncommitted_names[:3]))
         else:
             next_action = ("lane branch position abnormal (0 commits but tree ≠ "
-                           "base) — inspect the branch target manually, then send "
-                           "retry_qc")
+                           "base): files %s exist on the branch tree with no commit "
+                           "carrying them — the persisting stage is implement settle; "
+                           "rework(to_stage=implement) so settle folds them into a "
+                           "lane commit, then send retry_qc"
+                           % ("、".join(committed_names[:3]) or "(unknown)"))
         return ({"item": item_base, "green": False,
                  "detail": "0 commits; %s — implementation not persisted" % "；".join(faces),
                  "id": "lane_commits", "reason_code": "no_commits",
@@ -5358,6 +5716,288 @@ async def _apply_quiet_verdicts(ticket_id: str, checks: List[Dict[str, Any]],
         c["quiet_verdicts"] = verdicts
 
 
+# ---- foreign-file repair face (t261012-09 landing 496aa0c8, carried in full
+# by t261016-11 so the line!=lane guard and the self-consistency floor are
+# wired in THIS tree; the line-side join resolves to this content) ----
+
+FOREIGN_REPAIR_ID = "foreign_file_repair"
+FOREIGN_REPAIR_RULE_TAG = ("KI-01M4PAVBP6EZFGYC2VVQ0Z90J7: engine returns "
+                           "out-of-write-set foreign files to main's version "
+                           "(t261012-09); the lane cannot — removal outside its "
+                           "write set is itself an out-of-write-set write")
+_FOREIGN_COMMIT_NAME = "sandbar-engine"
+_FOREIGN_COMMIT_EMAIL = "sandbar-engine@localhost"
+
+
+def _blob_hash(tree: Path, ref: str, path: str) -> Optional[str]:
+    """The blob hash of `ref:path`, or None when the path is absent at the ref.
+    Git faults (rc!=0 for any reason) also return None — the ownership verdict
+    contract is 'hash match or silence', and a faulted lookup is silence here;
+    the repair itself carries its own named per-file failures."""
+    p = _git(["rev-parse", "--verify", "--quiet", "%s:%s" % (ref, path)], tree)
+    if p.returncode != 0:
+        return None
+    sha = (p.stdout or "").strip()
+    return sha or None
+
+
+def _live_lane_candidates(tree: Path, in_flight_ids: Any = None,
+                          exclude_ref: str = "") -> List[Dict[str, str]]:
+    """Candidate owner refs for the ownership verdict.
+
+    Registry-first when the caller can hand in-flight ticket ids over
+    (source=registry, owner label = the ticket id); the cheap fallback is the
+    repo's `refs/heads/lane` list (source=refs, owner label = the branch name —
+    the ticket id is NOT derivable from the alias part without guessing, so the
+    label stays the measured branch name). `exclude_ref` drops the current lane
+    itself — without it every foreign file would hash-match its own carrier
+    branch and the verdict would name the victim as the owner. Ownership is
+    hash-equality or silence either way; the source field only says where the
+    candidate came from. Enumeration faults degrade to an empty list (silence),
+    never raise.
+    """
+    cands: List[Dict[str, str]] = []
+    if isinstance(in_flight_ids, (list, tuple)):
+        for tid in in_flight_ids:
+            if isinstance(tid, str) and tid.strip():
+                _, branch = shared.default_lane_paths(tid.strip())
+                cands.append({"ref": branch, "ticket": tid.strip(),
+                              "source": "registry"})
+    if not cands:
+        p = _git(["for-each-ref", "refs/heads/lane", "--format=%(refname:short)"], tree)
+        if p.returncode == 0:
+            for ln in (p.stdout or "").splitlines():
+                name = ln.strip()
+                if name and name != (exclude_ref or "").strip():
+                    label = name[len("lane/"):] if name.startswith("lane/") else name
+                    cands.append({"ref": name, "ticket": label, "source": "refs"})
+    return [c for c in cands if c["ref"] != (exclude_ref or "").strip()]
+
+
+def _line_candidate_refs(tree: Path) -> List[str]:
+    """t261016-11 ②: the line candidate refs for the line!=lane guard.
+
+    The line is not a lane: it legitimately carries landed content main does
+    not have yet. Candidate refs are the known line-carrier branch names
+    (`develop`, anything under `develop/`, and `line`/`line-*`/`lane-line`);
+    only refs that actually resolve are returned. The caller feeds them to
+    foreign_write.foreign_files via the line_owned injection — a path whose
+    blob is byte-identical at a line ref is never classified foreign.
+    Unknown/unresolvable refs are skipped, never guessed."""
+    p = _git(["for-each-ref", "refs/heads", "--format=%(refname:short)"], tree)
+    if p.returncode != 0:
+        return []
+    names = {ln.strip() for ln in (p.stdout or "").splitlines()}
+    out: List[str] = []
+    for name in sorted(names):
+        if not name:
+            continue
+        short = name.split("/")[-1]
+        if (name == "develop" or name.startswith("develop/")
+                or short == "line" or short.startswith("line-")
+                or short == "lane-line"):
+            if _git(["rev-parse", "--verify", "--quiet", name], tree).returncode == 0:
+                out.append(name)
+    return out
+
+
+def _current_branch(tree: Path) -> str:
+    """The lane's current branch name (empty on a detached HEAD) — the
+    ownership candidates must exclude the carrier lane itself."""
+    p = _git(["rev-parse", "--abbrev-ref", "HEAD"], tree)
+    return (p.stdout or "").strip() if p.returncode == 0 else ""
+
+
+def _lane_effective_write_set(wt: Path) -> List[str]:
+    """The lane's durable effective write set (the write-set record), for the
+    conflict-resolution face where no write_set argument flows in. Malformed /
+    missing record → [] → the repair's fail-closed named skip (never repair on
+    an unknown set)."""
+    f = wt / shared.WRITE_SET_RECORD_NAME
+    if not f.is_file():
+        return []
+    try:
+        rec = json.loads(f.read_text("utf-8"))
+    except (OSError, ValueError):
+        return []
+    try:
+        return shared.read_effective_write_set(rec, None)
+    except Exception:
+        return []
+
+
+def _repair_foreign_files(tree: Path, foreign: List[str],
+                          candidate_refs: List[Dict[str, str]],
+                          write_set: Any,
+                          allow_commit: bool) -> Dict[str, Any]:
+    """One bounded engine pass: restore each classified foreign file to the
+    main-side version (MERGE_HEAD when a merge is in progress, else main);
+    absent there → remove it (main never had it — e.g. the sibling's new test
+    file). Engine-only write face: the scope is exactly the `foreign` list, the
+    stage path gate and _dirty_within_write_set are deliberately NOT consulted,
+    and one engine commit lands the repair only when `allow_commit` (the
+    merge_check face); the conflict face stages only (the resolution commit
+    carries the restored versions). Per-file failures are named, never
+    fail-open; the caller re-runs the diff to judge success."""
+    out: Dict[str, Any] = {"restored": [], "removed": [], "failed": [],
+                           "ownership": {}, "skipped": "", "committed": ""}
+    ok, why = foreign_write.repair_admissible(write_set)
+    if not ok:
+        out["skipped"] = why
+        return out
+    mh = _git(["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], tree)
+    src = "MERGE_HEAD" if mh.returncode == 0 else "main"
+    if mh.returncode == 0:
+        # t260826-01: a commit with MERGE_HEAD present would CREATE the merge
+        # commit — never the engine's to close. Stage only; the resolution
+        # commit carries the restored versions.
+        allow_commit = False
+    if _git(["rev-parse", "--verify", "--quiet", src], tree).returncode != 0:
+        out["skipped"] = "repair source ref %s unresolved — nothing repaired" % src
+        return out
+    own = _git(["rev-parse", "--verify", "--quiet", "HEAD"], tree)
+    head_ref = (own.stdout or "").strip() if own.returncode == 0 else ""
+    # t261016-11 ③ self-consistency floor: a removal whose module is still
+    # imported refuses the WHOLE repair (no rm, no restore, no commit) — a
+    # tree that cannot import its own engine is the measured bb73e620 defect.
+    planned_rm = [f for f in foreign
+                  if isinstance(f, str) and f.strip()
+                  and _blob_hash(tree, src, f) is None]
+    if planned_rm:
+        importers = foreign_write.importers_remain(tree, planned_rm)
+        if importers:
+            out["refused_importers"] = ["%s <- %s" % (m, i) for i, m in importers]
+            out["skipped"] = (
+                "self-consistency floor: removing %s would leave importers "
+                "(%s) — the whole repair is refused; the tree must stay "
+                "importable" % (", ".join(m for _i, m in importers[:6]),
+                                "; ".join(sorted({i for i, _m in importers}))[:200]))
+            return out
+    for f in foreign:
+        if not isinstance(f, str) or not f.strip():
+            continue
+        blob = _blob_hash(tree, head_ref, f) if head_ref else None
+        out["ownership"][f] = foreign_write.ownership(
+            f, blob or "", lambda p, r, _t=tree: _blob_hash(_t, r, p),
+            candidate_refs)
+        if _blob_hash(tree, src, f) is not None:
+            p = _git(["restore", "--source=" + src, "--staged", "--worktree",
+                      "--", f], tree)
+            if p.returncode != 0:
+                out["failed"].append({"path": f, "op": "restore",
+                                      "err": ((p.stderr or p.stdout or "").strip())[-160:]})
+            else:
+                out["restored"].append(f)
+        else:
+            p = _git(["rm", "-f", "--quiet", "--", f], tree)
+            if p.returncode != 0:
+                out["failed"].append({"path": f, "op": "remove",
+                                      "err": ((p.stderr or p.stdout or "").strip())[-160:]})
+            else:
+                out["removed"].append(f)
+    done = out["restored"] + out["removed"]
+    if allow_commit and done and not out["failed"]:
+        lines = ["engine repair: return out-of-write-set foreign files to the "
+                 "main-side version (%s)" % src, "", FOREIGN_REPAIR_RULE_TAG, ""]
+        lines += ["%s: %s" % (f, out["ownership"].get(f, "belongs to no live lane"))
+                  for f in done]
+        p = _git(["-c", "user.name=" + _FOREIGN_COMMIT_NAME,
+                  "-c", "user.email=" + _FOREIGN_COMMIT_EMAIL,
+                  "commit", "-m", "\n".join(lines), "--"] + done, tree)
+        if p.returncode != 0:
+            out["failed"].append({"path": "(commit)", "op": "commit",
+                                  "err": ((p.stderr or p.stdout or "").strip())[-160:]})
+        else:
+            h = _git(["rev-parse", "--short", "HEAD"], tree)
+            out["committed"] = h.stdout.strip() if h.returncode == 0 else "committed"
+    return out
+
+
+def _foreign_repair_check_item(tree: Path, branch: str, write_set: Any,
+                               ticket_id: str,
+                               in_flight_ids: Any = None) -> Optional[Dict[str, Any]]:
+    """merge_check face: classify, NAME the owners first (the receipt item is
+    written before any repair is attempted), repair with one commit, re-run the
+    diff. Green only when nothing foreign remains; remaining foreign = red with
+    the ownership lines attached (spec 2 holds on the failure path). Returns
+    None when the diff shows nothing foreign (no item, nothing to say)."""
+    base, base_err = _merge_base_ref(str(branch), tree)
+    if base_err:
+        return {"item": "out-of-write-set foreign files (engine returns main's version)", "green": False,
+                "detail": "diff baseline unresolved, foreign files unjudgeable (fail-closed): %s" % base_err,
+                "id": FOREIGN_REPAIR_ID, "reason_code": "foreign_file_unjudgeable"}
+    p = _git(["-c", "core.quotepath=false", "diff", "--name-status", "-z",
+              "%s...HEAD" % base], tree)
+    if p.returncode != 0:
+        return {"item": "out-of-write-set foreign files (engine returns main's version)", "green": False,
+                "detail": "git diff failed: %s" % ((p.stderr or "").strip())[-200:],
+                "id": FOREIGN_REPAIR_ID, "reason_code": "foreign_file_unjudgeable"}
+    changed = [f for _st, f in foreign_write.parse_name_status_z(p.stdout)]
+    line_refs = _line_candidate_refs(tree)
+    head_own = _git(["rev-parse", "--verify", "--quiet", "HEAD"], tree)
+    head_sha = (head_own.stdout or "").strip() if head_own.returncode == 0 else ""
+
+    def _line_face(pp: str) -> bool:
+        return foreign_write.line_owned(
+            pp, _blob_hash(tree, head_sha, pp) or "",
+            lambda q, r: _blob_hash(tree, r, q), line_refs)
+
+    foreign = foreign_write.foreign_files(
+        changed, write_set, str(ticket_id or ""),
+        test_face=lambda f: path_gates.is_ticket_test_face(f, str(ticket_id or "")),
+        protected_paths=path_gates.PROTECTED_PATHS,
+        line_owned=_line_face)
+    if not foreign:
+        return None
+    cands = _live_lane_candidates(tree, in_flight_ids, exclude_ref=str(branch or ""))
+    rep = _repair_foreign_files(tree, foreign, cands, write_set, allow_commit=True)
+    if rep.get("refused_importers"):
+        return {"item": "out-of-write-set foreign files (engine returns main's version)",
+                "green": False,
+                "detail": "%s | refused: %s" % (rep["skipped"],
+                                                "; ".join(rep["refused_importers"][:6])),
+                "id": FOREIGN_REPAIR_ID,
+                "reason_code": "foreign_repair_refused_importers",
+                "files": list(foreign)}
+    if rep["skipped"]:
+        return {"item": "out-of-write-set foreign files (engine returns main's version)", "green": False,
+                "detail": "%s | foreign files: %s | ownership: %s" % (
+                    rep["skipped"], "、".join(foreign[:6]),
+                    "; ".join("%s %s" % (f, rep["ownership"].get(f, "belongs to no live lane"))
+                              for f in foreign[:6])),
+                "id": FOREIGN_REPAIR_ID, "reason_code": "foreign_file_remaining",
+                "files": list(foreign)}
+    re_p = _git(["-c", "core.quotepath=false", "diff", "--name-only", "-z",
+                 "%s...HEAD" % base], tree)
+    still = [ln for ln in (re_p.stdout or "").split("\0") if ln.strip()]
+    remaining = foreign_write.foreign_files(
+        still, write_set, str(ticket_id or ""),
+        test_face=lambda f: path_gates.is_ticket_test_face(f, str(ticket_id or "")),
+        protected_paths=path_gates.PROTECTED_PATHS,
+        line_owned=_line_face)
+    parts = []
+    if rep["restored"]:
+        parts.append("restored to main's version: %s" % ", ".join(rep["restored"]))
+    if rep["removed"]:
+        parts.append("removed (main never had it): %s" % ", ".join(rep["removed"]))
+    if rep["failed"]:
+        parts.append("repair failed: %s" % "; ".join(
+            "%s (%s) %s" % (x["path"], x["op"], x["err"]) for x in rep["failed"]))
+    if rep["committed"]:
+        parts.append("engine repair commit: %s" % rep["committed"])
+    own_lines = "; ".join("%s %s" % (f, rep["ownership"].get(f, "belongs to no live lane"))
+                          for f in foreign[:6])
+    detail = " | ".join(parts + ["ownership: " + own_lines])
+    if remaining:
+        detail = "still foreign after repair: %s | %s" % (", ".join(remaining[:6]), detail)
+        return {"item": "out-of-write-set foreign files (engine returns main's version)", "green": False,
+                "detail": detail, "id": FOREIGN_REPAIR_ID,
+                "reason_code": "foreign_file_remaining", "files": list(remaining)}
+    return {"item": "out-of-write-set foreign files (engine returns main's version)", "green": True,
+            "detail": detail, "id": FOREIGN_REPAIR_ID, "files": list(foreign)}
+
+
+
 async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                  lane_root: Path, multi: bool) -> Dict[str, Any]:
     """Single-scope merge_check core (extracted from merge_check in ticket B
@@ -5413,6 +6053,13 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             elif _dirty_within_write_set(dirty_files, sc["write_set"]):
                 try:
                     heal_refusal: Dict[str, Any] = {}
+                    # repo= anchor is mandatory here (KI-01M52NS7A3290FBAWY1XYSBG0E,
+                    # the report's section-5 UNRESOLVED item, root-caused): without it
+                    # the ownership guard computes _lane_repo_root(member_tree), which
+                    # misses the .lane convention for member trees and returns REPO_ROOT,
+                    # so _is_worktree_of fails and the guard's single return "" fired
+                    # for every member scope — rendered as the "settle empty (see the
+                    # re-check)" wording the incident receipt showed.
                     note = _settle_worktree_lane(
                         sc["tree"], args.ticket_id, "merge_check", 0,
                         write_set=list(sc.get("write_set") or []),
@@ -5421,6 +6068,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                         base_ref=str(sc.get("base_ref") or getattr(args, "base_ref", "") or ""),
                         authorizations=list(getattr(args, "authorizations", None) or []),
                         refusal=heal_refusal,
+                        repo=sc["repo"],
                         face="heal")
                     if heal_refusal:
                         clean_gate_refusal = dict(heal_refusal)
@@ -5436,6 +6084,25 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     if auto_settle_note:
         activity.logger.info("[%s] merge_check 自愈前置：%s", args.ticket_id,
                              auto_settle_note)
+
+    # 0.5 KI-01M4PAVBP6EZFGYC2VVQ0Z90J7 (t261012-09): foreign-file restore
+    # (engine face, MERGE_HEAD absent here — item 0 just proved that for its
+    # own dirty set, and a mid-merge tree never reaches this point without
+    # MERGE_HEAD... defensively the repair re-reads MERGE_HEAD itself and
+    # stages-only in that case). Placed before item 1 so every later item
+    # reads the REPAIRED branch state. Nothing foreign = no item.
+    try:
+        _fr_item = _foreign_repair_check_item(
+            sc["tree"], str(sc.get("branch") or ""), sc.get("write_set"),
+            str(getattr(args, "ticket_id", "") or ""))
+        if _fr_item is not None:
+            checks.append(_fr_item)
+    except Exception as e:  # the pre-check never blocks the chain (same stance as item 0)
+        checks.append({"item": "out-of-write-set foreign files (engine returns main's version)", "green": False,
+                       "detail": "foreign-file repair pre-check fault (red, not raised): %s: %s"
+                                 % (type(e).__name__, str(e))[-200:],
+                       "id": FOREIGN_REPAIR_ID,
+                       "reason_code": "foreign_file_unjudgeable"})
 
     # 1. The lane has commits — t260921-09 三态判定（对齐 shared.review_gate_verdict 整票
     #    级口径）：有 commit→绿；0 commit 且两差异面均无→本仓确实零改动=合法终态（不红
@@ -5491,6 +6158,54 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     #      （KI-047 教训）；也让 gitlink 权威红先于 verify_lane 的「越界写」误诊文案
     #      （其 ==分支未归一，在 server/tools/ 本票不修）出现。
     checks.append(_gitlink_check_item(str(sc.get("base_ref") or ""), sc["branch"], sc["repo"]))
+
+    # 2b. import-integrity (t261016-19 Face 2b): a committed deletion on the lane
+    # branch must never orphan a module another delivered file still imports
+    # (measured incident: foreign_write.py deleted while agent_activities imported
+    # it — the tree could not import its own modules and a whole round reddened).
+    # Red = named (deleted module + importer), same protective checks[:-1] position
+    # as the gitlink item (blocked for a human, never the auto-resolution loop).
+    try:
+        _del = _git(["diff", "--name-only", "--diff-filter=D",
+                     "%s...%s" % (str(sc.get("base_ref") or "main"), sc["branch"])],
+                    cwd=sc["tree"])
+        _deleted = [ln.strip() for ln in _del.stdout.splitlines()
+                    if ln.strip().endswith(".py")] if _del.returncode == 0 else []
+        if _deleted:
+            _lf = _git(["ls-files", "*.py"], cwd=sc["tree"])
+            _sources: Dict[str, str] = {}
+            if _lf.returncode == 0:
+                _stems = [d.rsplit("/", 1)[-1][:-3] for d in _deleted]
+                for _pf in _lf.stdout.splitlines():
+                    _pf = _pf.strip()
+                    if not _pf or _pf in _deleted:
+                        continue
+                    try:
+                        _text = (sc["tree"] / _pf).read_text("utf-8", errors="replace")
+                    except OSError:
+                        continue
+                    if any(s in _text for s in _stems):
+                        _sources[_pf] = _text
+            _ii_v, _ii_s = deleted_modules_still_imported(_deleted, _sources)
+            checks.append({"item": "import-integrity (deleted module still imported)",
+                           "green": not _ii_v,
+                           "detail": ("；".join(_ii_v[:6])
+                                      + ("；unparseable sources skipped (named, not silent): %s"
+                                         % "、".join(_ii_s[:6]) if _ii_s else ""))
+                                      or "no deleted module is imported by a delivered file",
+                           "id": "import_integrity",
+                           "reason_code": "import_integrity" if _ii_v else "",
+                           "next_action": ("restore the deleted module or change its "
+                                           "importer in the same ticket (the engine "
+                                           "never reverts and never silently allows "
+                                           "an unimportable tree), then retry_qc")
+                                          if _ii_v else ""})
+    except Exception as _ii_e:  # fail-closed: the check itself must never crash the gate
+        checks.append({"item": "import-integrity (deleted module still imported)",
+                       "green": False,
+                       "detail": "check failed: %s" % str(_ii_e)[:200],
+                       "id": "import_integrity", "reason_code": "import_integrity_check_failed",
+                       "next_action": "inspect the lane's git environment, then retry_qc"})
 
     # 3. verify_lane code inside the lane (runs the lane's own admin.py copy: lane
     # code + lane tools)
@@ -6023,6 +6738,17 @@ class LandToLineArgs:
     line_id: str = ""
     worktree: str = ""
     proven_sha: str = ""
+    #: t261019-41 (host ruling 261019 a2): the DECLARED per-repo proven
+    #: anchoring a MULTI-repository line lands on — repository name -> the
+    #: proven sha the gate judged for that repository's own tree. Defaulted
+    #: empty so the single-repository call site constructs the args unchanged
+    #: and the single-repo path stays byte-identical. The engine never
+    #: defaults this map into a value: an undeclared anchoring refuses by
+    #: name ("it is never assumed"). The workflow-side population is the
+    #: dev_lane follow-up outside this ticket's write set; until it lands a
+    #: real multi-repo ticket gets the named refusal (fail-closed, per the
+    #: ruling), never a wrong landing.
+    repo_proven: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -6056,10 +6782,13 @@ async def land_to_line(args: LandToLineArgs) -> LandToLineResult:
     (``develop_line.land_ticket``) does the act — the add/commit sequence
     stays ``_settle_merge_core``'s single implementation, only the destination
     changes (the line's branch, not main). Main is NOT touched here: delivery
-    moves only through a signed promotion. Single-repository phase: the line
-    must declare exactly one repository and the lane worktree maps to it — a
-    multi-repository line refuses by name (per-repo proven anchoring is a
-    later declaration, not a silent single-repo assumption)."""
+    moves only through a signed promotion. Two phases (t261019-41, host
+    ruling 261019 a2): the single-repository phase is the path below
+    byte-identical; a MULTI-repository line lands when its per-repo proven
+    anchoring is DECLARED (``repo_proven``) — every declared repository then
+    goes through the same guards (contains-own-main, pin at its proven sha)
+    and ONE all-or-nothing landing act, refused by name before anything
+    moves otherwise."""
     import develop_line  # lazy: develop_line imports this module at module level
 
     if not isinstance(args.ticket_id, str) or not args.ticket_id.strip():
@@ -6077,7 +6806,12 @@ async def land_to_line(args: LandToLineArgs) -> LandToLineResult:
         return _land_to_line_refuse(
             "ticket %s: lane worktree empty/malformed — refusing to land"
             % args.ticket_id)
-    if not (isinstance(args.proven_sha, str) and args.proven_sha.strip()):
+    # t261019-41: a MULTI-repository landing carries its anchoring per repo
+    # (``repo_proven``), so the single root sha may legitimately be empty
+    # there. A declaration without either form refuses exactly as before.
+    _has_repo_proven = isinstance(args.repo_proven, dict) and bool(args.repo_proven)
+    if not (isinstance(args.proven_sha, str) and args.proven_sha.strip()) \
+            and not _has_repo_proven:
         return _land_to_line_refuse(
             "ticket %s: the proven revision is empty/malformed — refusing to "
             "land (the landing consumes the revision the gate judged, never "
@@ -6107,13 +6841,20 @@ async def land_to_line(args: LandToLineArgs) -> LandToLineResult:
     # did not contain current main, so the line read every main-side fix as its
     # OWN new regression (11 of them). Below the proven sha means: re-verify
     # (a fresh gate round anchors the face on a tree that contains main), then
-    # land. Never falls back to the current tip.
-    try:
-        _p = _git(["merge-base", "--is-ancestor", "main",
-                   args.proven_sha.strip()], Path(args.worktree))
-        _contains_main = _p.returncode == 0
-    except Exception:  # noqa: BLE001 — unanswerable is not licence to land
-        _contains_main = False
+    # land. Never falls back to the current tip. With a DECLARED per-repo
+    # anchoring (t261019-41) the per-repository form of this guard runs below,
+    # against each scope tree's OWN main — the lane container is not a
+    # repository in a multi-repo lane, so the root check is skipped, never
+    # weakened (a declared anchoring replaces the root anchor, it does not
+    # bypass the discipline).
+    _contains_main = True
+    if not _has_repo_proven:
+        try:
+            _p = _git(["merge-base", "--is-ancestor", "main",
+                       args.proven_sha.strip()], Path(args.worktree))
+            _contains_main = _p.returncode == 0
+        except Exception:  # noqa: BLE001 — unanswerable is not licence to land
+            _contains_main = False
     if not _contains_main:
         return _land_to_line_refuse(
             "ticket %s: proven revision %s does not contain current main — "
@@ -6129,11 +6870,100 @@ async def land_to_line(args: LandToLineArgs) -> LandToLineResult:
             % (args.ticket_id, args.line_id, args.project_key,
                type(e).__name__, str(e)[:300]))
     if len(line.repositories) != 1:
-        return _land_to_line_refuse(
-            "ticket %s: line %r declares %d repositories — the per-ticket "
-            "landing wires the single-repository phase; a multi-repository "
-            "line needs its per-repo proven anchoring declared first, it is "
-            "never assumed" % (args.ticket_id, args.line_id, len(line.repositories)))
+        # ---- t261019-41: the multi-repository landing (host ruling 261019
+        # a2). Every declared repository goes through the SAME act — declared
+        # per-repo proven anchoring, per-repo contains-main, per-repo pin,
+        # then ONE all-or-nothing ``land_ticket`` over the full repo set. Any
+        # refusal happens BEFORE any repo moves and is named.
+        declared_names = [r.name for r in line.repositories]
+        rp = args.repo_proven
+        if not isinstance(rp, dict) or set(rp or {}) != set(declared_names):
+            return _land_to_line_refuse(
+                "ticket %s: line %r declares %d repositories (%s) — a "
+                "multi-repository landing needs its per-repo proven anchoring "
+                "DECLARED for exactly that set (repo_proven: missing=%s, "
+                "undeclared=%s); it is never assumed"
+                % (args.ticket_id, args.line_id, len(declared_names),
+                   ", ".join(declared_names),
+                   sorted(set(declared_names) - set(rp or {})),
+                   sorted(set(rp or {}) - set(declared_names))))
+        try:
+            scopes = _lane_scopes(Path(args.worktree))
+        except Exception as e:  # noqa: BLE001 — corrupt/empty manifest: named refusal
+            return _land_to_line_refuse(
+                "ticket %s: the multi-repo lane manifest at %r is unreadable: "
+                "%s: %s — never a silent single-repo fallback"
+                % (args.ticket_id, args.worktree, type(e).__name__,
+                   str(e)[:300]))
+        # Map every DECLARED repository to its lane scope (manifest name
+        # first, then the repo path's basename — the two faces a manifest
+        # entry can carry). A declared repo with no lane scope, or a scope
+        # the line does not declare, refuses: the act covers exactly the
+        # declared set, all-or-nothing.
+        by_name: Dict[str, Dict[str, Any]] = {}
+        for sc in scopes:
+            key = str(sc.get("name") or "")
+            if not key or key in by_name:
+                key = Path(str(sc.get("repo_rel") or "root")).name or "root"
+            by_name.setdefault(key, sc)
+        no_scope = [n for n in declared_names if n not in by_name]
+        if no_scope:
+            return _land_to_line_refuse(
+                "ticket %s: line %r declares repository %s but the lane "
+                "manifest has no scope for it — every declared repository "
+                "needs its lane tree, the landing refuses"
+                % (args.ticket_id, args.line_id, no_scope))
+        undeclared = sorted(set(by_name) - set(declared_names))
+        if undeclared:
+            return _land_to_line_refuse(
+                "ticket %s: the lane manifest carries scope(s) %s that line "
+                "%r does not declare — the landing covers exactly the "
+                "declared set, all-or-nothing"
+                % (args.ticket_id, undeclared, args.line_id))
+        # Per-repository contains-OWN-main (review condition 3, t261019-41):
+        # each repo realises its own branch, so each proven sha must contain
+        # THAT repository's current main — judged in the repo's own scope
+        # tree. A single bad repo refuses the WHOLE landing; no pin has run,
+        # no line-side state moved.
+        for r in line.repositories:
+            tree = Path(str(by_name[r.name]["tree"]))
+            try:
+                p = _git(["merge-base", "--is-ancestor", "main",
+                          rp[r.name].strip()], tree)
+                ok_main = p.returncode == 0
+            except Exception:  # noqa: BLE001 — unanswerable is not licence to land
+                ok_main = False
+            if not ok_main:
+                return _land_to_line_refuse(
+                    "ticket %s: repository %r: proven revision %s does not "
+                    "contain its own current main — refusing the WHOLE "
+                    "landing (all declared repositories or none); nothing "
+                    "was pinned, nothing landed"
+                    % (args.ticket_id, r.name, rp[r.name][:12]))
+        # Pin EVERY scope tree at its declared proven revision BEFORE the act
+        # (develop_line.pin_lane_revisions; the pin is lane-side scratch
+        # state — no line branch moves on a pin refusal).
+        try:
+            develop_line.pin_lane_revisions(
+                [(r.name, Path(str(by_name[r.name]["tree"])), rp[r.name])
+                 for r in line.repositories])
+        except Exception as e:  # noqa: BLE001 — LandNotPinnedError family
+            return _land_to_line_refuse(
+                "ticket %s: pinning the declared proven revisions failed — "
+                "landing refused, no line-side state moved: %s"
+                % (args.ticket_id, str(e)[:400]))
+        try:
+            res = develop_line.land_ticket(
+                line, args.project_key,
+                {r.name: Path(str(by_name[r.name]["tree"]))
+                 for r in line.repositories},
+                args.ticket_id, performed_by="engine:land_to_line")
+        except Exception as e:  # noqa: BLE001 — LandingError family + ledger faults
+            return _land_to_line_refuse(
+                "ticket %s: landing onto line %r refused: %s: %s"
+                % (args.ticket_id, args.line_id, type(e).__name__, str(e)[:400]))
+        return LandToLineResult(ok=True, line_id=args.line_id,
+                                revisions=dict(getattr(res, "revisions", None) or {}))
     repo_name = line.repositories[0].name
     # Pin BEFORE the act: the checkout must sit at the proven revision, or
     # nothing lands (all-or-nothing starts at the pin, not at the merge).
@@ -6535,7 +7365,13 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         checks.extend(sc_checks)
         lc = core.get("lane_commits")
         if isinstance(lc, int) and not isinstance(lc, bool):
-            scope_commit_counts[str(sc.get("name") or sc.get("repo_rel") or "?")] = lc
+            # t261019-03: name the repo from the scope's real fields - a bare "?" in
+            # the whole-ticket refusal is an error-precision failure (the reader cannot
+            # tell which repo was counted). sc always carries the repo path; its
+            # basename is the repo name the reader knows.
+            scope_commit_counts[str(sc.get("name") or sc.get("repo_rel")
+                                   or Path(str(sc.get("repo") or "")).name
+                                   or str(sc.get("tree") or "?"))] = lc
         rehearsal_green = rehearsal_green and bool(core["rehearsal_green"])
         conflict_files.extend(core["conflict_files"])
         if core["merge_tree_excerpt"]:
@@ -6640,10 +7476,35 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
             ws_err = "write-set record read failed: %s" % e
     if ws_err:
         ws_history = ["write-set record unreadable: %s (judging fell back to the stored field)" % ws_err]
+    # 261019: resolve the project's self-healing policy HERE (the workflow cannot
+    # read files). The engine owns the closed remedy registry, the project owns
+    # the opt-in; a red neither side names stays a human's call. Fail-closed: an
+    # unreadable/malformed declaration yields no route plus a named diag line,
+    # never an invented one.
+    _auto_rework = None
+    try:
+        _mc_text = ""
+        _mc_path = sc["repo"] / MERGE_CHECKS_CFG if isinstance(sc.get("repo"), Path) else None
+        if _mc_path is not None and _mc_path.is_file():
+            _mc_text = _mc_path.read_text(encoding="utf-8")
+        _policy, _pol_diag = path_gates.parse_auto_rework_policy(_mc_text)
+        if _pol_diag:
+            checks.append({"item": "merge_check auto-rework policy", "green": False,
+                           "detail": _pol_diag, "id": "auto_rework_policy",
+                           "reason_code": "auto_rework_policy_unreadable"})
+        else:
+            _auto_rework = path_gates.auto_rework_plan(checks, _policy)
+    except Exception as e:      # the policy read must never break the gate
+        checks.append({"item": "merge_check auto-rework policy", "green": False,
+                       "detail": "auto-rework policy read failed: %s: %s"
+                                 % (type(e).__name__, e),
+                       "id": "auto_rework_policy",
+                       "reason_code": "auto_rework_policy_unreadable"})
     return MergeCheckResult(green=green, checks=checks,
                             conflict=conflict, conflict_files=conflict_files,
                             merge_tree_excerpt=merge_tree_excerpt,
-                            write_set_history=ws_history)
+                            write_set_history=ws_history,
+                            auto_rework=_auto_rework)
 
 
 # ---------- t261009-58: the ONE effective write set — record persistence, holder scan ----------
@@ -6773,6 +7634,57 @@ def _unmerged_files(wt: Path) -> List[str]:
     return sorted(files)
 
 
+def _branch_tip_or_refuse(wt: Path, branch: str, ticket_id: str = "",
+                          ) -> Optional[ConflictPrepResult]:
+    """t261016-13 gate 2 (belt): the branch tip must equal the worktree HEAD, or the
+    sync refuses by name.
+
+    Read-only git, zero state change. Returns None = the branch follows HEAD (or
+    there is no branch name to judge - the legacy empty-`branch` caller keeps its
+    behaviour, out of this ticket's scope). Returns a ConflictPrepResult = ok=False
+    named refusal (branch behind, or the branch ref unreadable) with the measured
+    numbers in the error (tip, HEAD, commits behind). Covers more than detached
+    (gate 1 already blocks that): a branch reset behind HEAD (the t261014-04
+    24-files shape itself), a mid-rebase HEAD, any "HEAD != branch" state - one
+    named red line for all of them.
+    """
+    br = (branch or "").strip()
+    if not br:
+        return None
+    ph = _git(["rev-parse", "--verify", "HEAD"], wt)
+    if ph.returncode != 0:
+        return None   # an unreadable HEAD belongs to another guard (missing/empty repo)
+    head_full = ph.stdout.strip()
+    pb = _git(["rev-parse", "--verify", "%s^{commit}" % br], wt)
+    if pb.returncode != 0:
+        return ConflictPrepResult(
+            ok=False,
+            error="lane branch %r unreadable - refusing to sync by name "
+                  "(the verified tree is judged through the branch; measured: %s)"
+                  % (br, (pb.stderr or "").strip()[-160:]))
+    tip_full = pb.stdout.strip()
+    if tip_full == head_full:
+        return None
+    phs = _git(["rev-parse", "--short", "HEAD"], wt)
+    pbs = _git(["rev-parse", "--short", br], wt)
+    pc = _git(["rev-list", "--count", "%s..HEAD" % br], wt)
+    activity.logger.warning("[%s] main sync refused: branch %s is behind the "
+                            "worktree HEAD (tip=%s, HEAD=%s, %s commits behind)",
+                            ticket_id, br,
+                            pbs.stdout.strip() if pbs.returncode == 0 else "?",
+                            phs.stdout.strip() if phs.returncode == 0 else "?",
+                            pc.stdout.strip() if pc.returncode == 0 else "?")
+    return ConflictPrepResult(
+        ok=False,
+        error="lane branch %s is behind the worktree HEAD - the branch would "
+              "not advance (branch tip=%s, worktree HEAD=%s, %s commits behind; "
+              "merge_check judges the branch, so the sync refuses by name "
+              "instead of reporting a clean sync over a stale tree)"
+              % (br, pbs.stdout.strip() if pbs.returncode == 0 else "?",
+                 phs.stdout.strip() if phs.returncode == 0 else "?",
+                 pc.stdout.strip() if pc.returncode == 0 else "?"))
+
+
 @activity.defn
 async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepResult:
     """Run `git merge <base_ref>` into the lane on the worker's behalf, leaving the
@@ -6806,12 +7718,47 @@ async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepRes
         wt = REPO_ROOT / wt
     target = args.base_ref or "main"
     _t0 = time.monotonic()   # t260925-12：活动自报墙钟（执行面，供闸段分相计时）
+    # t261016-13 gate 1 (branch-behind guard, host order 261016 verbatim): refuse by
+    # name when the worktree HEAD is detached. Detached is also a lawful state the
+    # engine itself produces (land_to_line -> pin_lane_revision pins checkout
+    # --detach on the PROVEN sha); any merge then lands on the detached HEAD and no
+    # branch ref moves - while merge_check judges the branch, so the verified tree
+    # != the merged tree (measured on t261014-04: branch vs main differed in 24
+    # files, worktree vs main in 1; three false-red bounces). Never auto-advance the
+    # branch: that would silently consume the proven sha. Refusal is fail-closed,
+    # idempotent, and names the recovery (re-attach the branch at the worktree
+    # HEAD). Placed BEFORE the fast path - the zero-action fast path also returns
+    # ok=True, which is exactly the measured silent-success shape.
+    _det = _git(["symbolic-ref", "-q", "HEAD"], wt)
+    if _det.returncode != 0:
+        _dh = _git(["rev-parse", "--short", "HEAD"], wt)
+        _dh_txt = _dh.stdout.strip() if _dh.returncode == 0 else "?"
+        _dm = _git(["rev-parse", "--verify", target], wt)
+        _tm = _dm.stdout.strip() if _dm.returncode == 0 else ""
+        activity.logger.warning("[%s] main sync refused: lane checkout is detached - "
+                                "the branch would not advance (worktree HEAD=%s)",
+                                args.ticket_id, _dh_txt)
+        return ConflictPrepResult(
+            ok=False,
+            error="lane checkout is detached - the branch would not advance "
+                  "(worktree HEAD=%s; recovery: re-attach the lane branch at the "
+                  "worktree HEAD, as the t261014-04 rescue did)"
+                  % _dh_txt,
+            target_sha=_tm,
+            wall_s=time.monotonic() - _t0)
     p = _git(["rev-parse", "--verify", target], wt)
     if p.returncode != 0:
         return ConflictPrepResult(ok=False, error="合并目标 ref %r 不存在: %s"
                                   % (target, (p.stderr or "").strip()[-200:]),
                                   wall_s=time.monotonic() - _t0)
     target_sha = (p.stdout or "").strip().splitlines()[0] if (p.stdout or "").strip() else ""
+    # t261016-13 gate 2 (belt, for non-detached branch-behind shapes): after the sync
+    # the branch tip must equal the worktree HEAD or the difference is named - the
+    # face never reports a clean sync while the branch still lags. Runs before the
+    # fast path and again after the merge (see _branch_tip_or_refuse).
+    _refuse = _branch_tip_or_refuse(wt, args.branch, ticket_id=args.ticket_id)
+    if _refuse is not None:
+        return _refuse
     # t260922-18 快路径：目标 ref 已是 HEAD 祖先 = 已追平，零动作幂等返回
     p = _git(["merge-base", "--is-ancestor", target, "HEAD"], wt)
     if p.returncode == 0:
@@ -6819,18 +7766,26 @@ async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepRes
         lane_head = head.stdout.strip() if head.returncode == 0 else ""
         activity.logger.info("[%s] merge %s 已追平（is-ancestor 快路径，零动作）",
                              args.ticket_id, target)
+        # fill branch_tip only when a branch is named (empty = legacy caller, no evidence minted)
         return ConflictPrepResult(ok=True, already_clean=True, up_to_date=True,
                                   target_sha=target_sha, lane_head=lane_head,
+                                  branch_tip=lane_head if (args.branch or "").strip() else "",
                                   wall_s=time.monotonic() - _t0)
     p = _git(["merge", "--no-edit", target], wt, timeout=120)
     out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
     head = _git(["rev-parse", "--short", "HEAD"], wt)
     lane_head = head.stdout.strip() if head.returncode == 0 else ""
     if p.returncode == 0:
+        # gate 2 recheck: after the merge the branch must have followed the new HEAD
+        # (with the worktree attached it moves with the commit; if not, refuse by name)
+        _refuse = _branch_tip_or_refuse(wt, args.branch, ticket_id=args.ticket_id)
+        if _refuse is not None:
+            return _refuse
         activity.logger.info("[%s] 冲突消解 prep：merge %s 零冲突（竞态兜底）",
                              args.ticket_id, target)
         return ConflictPrepResult(ok=True, already_clean=True,
                                   target_sha=target_sha, lane_head=lane_head,
+                                  branch_tip=lane_head if (args.branch or "").strip() else "",
                                   merge_output=out[:1500],
                                   wall_s=time.monotonic() - _t0)
     files = _unmerged_files(wt)
@@ -6845,6 +7800,7 @@ async def prepare_conflict_resolution(args: ConflictPrepArgs) -> ConflictPrepRes
                          args.ticket_id, target, len(files), "、".join(files[:10]))
     return ConflictPrepResult(ok=True, conflict_files=files,
                               target_sha=target_sha, lane_head=lane_head,
+                              branch_tip=lane_head if (args.branch or "").strip() else "",
                               merge_output=out[:1500],
                               wall_s=time.monotonic() - _t0)
 
@@ -7083,6 +8039,19 @@ def _settle_merge_core(wt: Path, ticket_id: str, round_no: int,
     if p.returncode != 0:
         return ConflictSettleResult(ok=False, error="git add 失败: %s"
                                     % (p.stderr or "")[-300:])
+    # t261016-19 Face 1 (review comment 2, KI-020② family): the lane venv is an
+    # engine-provisioned runtime artifact — add -A stages everything, so unstage
+    # the exempt set right after (named in the log, never silent; reset of a
+    # prefix unstages the whole directory tree). Without this, a conflict-
+    # resolution round could commit the recreated lane venv.
+    _rt = [f for f in _fi_dirty if shared.is_engine_runtime_path(f)]
+    if _rt:
+        _rt_prefixes = sorted({("server/engine/.venv" if f.startswith("server/engine/.venv/")
+                                else f.split("/")[0]) for f in _rt})
+        _git(["reset", "-q", "--", *_rt_prefixes], wt)
+        activity.logger.warning(
+            "conflict-settle：engine-runtime writes exempt (t261016-19, unstaged, "
+            "never committed): %d file(s) under %s", len(_rt), ", ".join(_rt_prefixes))
     # .dsh 与两个协调目录名都没被暂存（协同目录被 .gitignore 兜住时本就进不了暂存）；
     # reset 目标从 shared 真源派生（与 _settle_worktree_lane 同一元组，不再各抄一份）。
     _git(["reset", "-q", "--", *_SETTLE_RESET_PATHS], wt)
@@ -7887,6 +8856,69 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                        error="；".join(warns))
 
 
+def _line_landing_closeout_refusal_for(ticket_id: str) -> str:
+    """The t261019-02 close-out fence, project-free (261019 move into the activity).
+
+    Returns "" when no declared line has a landing row for this ticket (the legacy
+    squash close-out may proceed), else the named refusal. Reads every project's
+    delivery ledger under the per-key projects root and the line declarations beside
+    it: the activity does not receive a project key on old workflow histories, and the
+    landing row itself names its line, so scanning is the honest way to answer without
+    adding a workflow input (a new input would leave old histories unfenced forever -
+    the same trap the in-workflow guard hit). A malformed declaration or an unreadable
+    ledger refuses by name: the fence never guesses over records it cannot read.
+
+    Deliberately reads the ledger with plain JSON instead of the delivery-certify
+    module: this call site sits outside that module's declared gate region, and the
+    surface-confinement guard (t261009-18) forbids a new reference there. The row shape
+    read here is only kind/ticket/line/id - the append-only record contract."""
+    tid = str(ticket_id or "").strip()
+    if not tid:
+        return "close-out refused: the landing guard needs a ticket id"
+    import shared as _shared
+    try:
+        root = _shared.perkey_projects_root()
+    except Exception as e:  # noqa: BLE001
+        return "close-out refused: cannot resolve the projects root (%s: %s)" % (
+            type(e).__name__, str(e)[:160])
+    if not root.is_dir():
+        return ""
+    for proj_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        if not (proj_dir / "data" / "develop" / "lines.json").is_file():
+            continue  # no declared line in this project: the fence is vacuous there
+        ledger = proj_dir / "ledger" / "delivery.jsonl"
+        if not ledger.is_file():
+            continue
+        try:
+            rows = []
+            bad = 0
+            with open(ledger, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rows.append(json.loads(line))
+                    except ValueError:
+                        bad += 1
+        except OSError as e:
+            return ("close-out refused: delivery ledger unreadable at %s (%s: %s)"
+                    % (ledger, type(e).__name__, str(e)[:160]))
+        if bad:
+            return ("close-out refused: delivery ledger has %d malformed line(s) at %s"
+                    % (bad, ledger))
+        for row in rows:
+            if (isinstance(row, dict) and row.get("kind") == "landing"
+                    and str(row.get("ticket") or "") == tid
+                    and str(row.get("line") or "")):
+                return ("close-out refused by host ruling 261019: %r already landed on line %r "
+                        "(landing %s). Main moves only through a green line certification and a "
+                        "signed promotion; a landed ticket must not be squash-closed out. Ways "
+                        "out: let the line round certify it (then the promotion carries it), or "
+                        "withdraw the landing first." % (tid, row.get("line"), row.get("id")))
+    return ""
+
+
 @activity.defn
 async def merge(args: MergeArgs) -> MergeResult:
     """The real merge after human sign-off (KI-006 switched to a squash close-out: one
@@ -7900,6 +8932,19 @@ async def merge(args: MergeArgs) -> MergeResult:
     defer_teardown=True (the M1-3 three-stage close-out): **no inline cleanup** after
     booking; teardown_lane takes over.
     """
+    # t261019-02 fence, evaluated HERE (activity code, outside the workflow sandbox): a
+    # ticket that already landed on a declared line must not leave through the legacy
+    # direct squash close-out. The check scans the project ledgers for a landing row of
+    # this ticket, so it needs no new workflow input — old and new workflow histories
+    # alike reach this activity and get the same judgement, and the sandbox never sees a
+    # ledger read again (261019: the in-workflow version was refused with
+    # RestrictedWorkflowAccessError and blocked every close-out).
+    _closeout_refusal = _line_landing_closeout_refusal_for(args.ticket_id)
+    if _closeout_refusal:
+        return MergeResult(ok=False, action="failed",
+                           error=_closeout_refusal,
+                           reason="line_landing_closeout")
+
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
@@ -9737,6 +10782,11 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                                        progress=dict(_res.get("progress") or {}),
                                        wall_s=time.monotonic() - _act_t0,
                                        subprocess_wall_s=time.monotonic() - _sub_t0)
+        # t261019-45: the receipt names the tree the integ gate judged. The
+        # dataclass lives in shared.py (outside this ticket's write set), so
+        # the field rides as a defaulted dynamic attribute — getattr consumers
+        # see "" on old replays, and no replayed history is required to have it.
+        out_err.gate_root = str(_res.get("root") or "")
         for _k in ("pass", "fail", "env_fail"):
             try:
                 setattr(out_err, "passed" if _k == "pass" else
@@ -9750,6 +10800,9 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     # t261002-03：并发校准面回执（additive，纯观测）——本轮宽度/依据/注入 env。
     out.conc_calibration = {"width": _cal_width, "reason": _cal_reason,
                             "injected": dict(_cal_env)}
+    # t261019-45: same dynamic-attribute passthrough as the red leg above —
+    # the named judged tree rides on the success receipt too.
+    out.gate_root = str(res.get("root") or "")
     # 宿主令 260930（B 档）：把「本轮是谁用哪份代码验的」钉进回执（additive，**不进判定**）。
     # identity 与 SDK 的 worker identity 同构（`<pid>@<gethostname()>`，见 temporalio.service
     # 的默认值），因此与 Temporal 事件历史里的 ActivityTaskStarted.identity 可直接对账；
@@ -10047,6 +11100,40 @@ async def surface_plan(args: shared.SurfacePlanArgs) -> shared.SurfacePlanResult
     return shared.SurfacePlanResult(
         mode=mode, names=names, surfaces=surfaces, reason=reason, error=err,
         wall_s=round(time.time() - t0, 1))
+
+
+@activity.defn
+async def bundle_out_ws_prefixes(args: shared.BundleOutWsArgs) -> shared.BundleOutWsResult:
+    """261019: the declared build-chain OUTPUT prefixes this lane may write.
+
+    The merge gate has always widened its whitelist with the declared `out`
+    prefixes whose `src` the ticket write set covers (t261009-38). The IMPLEMENT
+    stage never did, so the lane agent could not commit the rebuilt artefact at
+    all: measured on t261019-09, the gate rebuilt the workbench bundle through
+    the declared entry, found the committed copy stale, and asked for a rebuild
+    that the write-set gate then refused - a declaration deadlock that no number
+    of reworks could clear (it hits every ticket touching a declared `src`).
+
+    Read-only and fail-closed: a missing/unreadable/malformed declaration widens
+    nothing and says so; an empty ticket write set widens nothing (the same
+    stance as the merge gate's `bundle_out_prefixes`)."""
+    note = ""
+    prefixes: List[str] = []
+    try:
+        tree = Path(args.worktree or ".")
+        text = (tree / MERGE_CHECKS_CFG).read_text(encoding="utf-8")
+        pairs = _parse_bundle_pairs(_strip_bundle_optional_keys(text))
+        prefixes = path_gates.bundle_out_prefixes(list(args.write_set or []), pairs)
+        if prefixes:
+            note = ("declared build-chain output prefixes inside this ticket's reach: %s "
+                    "(paired src is in the write set; %s)"
+                    % (", ".join(prefixes), path_gates.BUNDLE_OUT_FACE_NOTE))
+    except FileNotFoundError:
+        note = "no %s in the lane: nothing widened (a project that declares no build chain)" % MERGE_CHECKS_CFG
+    except Exception as e:  # noqa: BLE001 — a bad declaration must not block the lane
+        note = "declaration unreadable (%s: %s): nothing widened, fail-closed" % (
+            type(e).__name__, str(e)[:200])
+    return shared.BundleOutWsResult(prefixes=prefixes, note=note)
 
 
 @activity.defn
@@ -11129,9 +12216,9 @@ async def run_inspection_surface(args: Dict[str, Any]) -> Dict[str, Any]:
     """
     from shared import INSPECTION_DIR
     from inspection_surface import (
-        DEFAULT_SHARED_SCAN_OWNER, compute_surface, load_shared_surface,
-        normalize_thresholds, resolve_prev_base, resolve_this_base,
-        surface_file_name, surface_unavailable)
+        DEFAULT_SHARED_SCAN_OWNER, compute_surface, load_declared_bootstrap,
+        load_shared_surface, normalize_thresholds, resolve_prev_base,
+        resolve_this_base, surface_file_name, surface_unavailable)
     from inspection_inspect import read_prev_ledger_doc
 
     def _err(msg: str) -> Dict[str, Any]:
@@ -11175,15 +12262,41 @@ async def run_inspection_surface(args: Dict[str, Any]) -> Dict[str, Any]:
                 "this period's base point unavailable (%s: %s)" % (type(e).__name__, e))}
     this_base = str(this_res["base"])
 
-    # ---- Previous base (B2: only the previous REPORT chain, no fourth level, never self-seeded) ----
+    # ---- Previous base (B2: only the previous REPORT chain, no fourth level, never self-seeded).
+    # t261018-12 lawful restart: when the chain is dead (every level unavailable — e.g. the
+    # previous period was written by _blocked with no base at all), an OPERATOR-DECLARED
+    # bootstrap file (surface-bootstrap-<instance>.json, full 40-hex sha of a real past
+    # commit) may supply the base. This is NOT self-seeding (the ruling is recorded on the
+    # ticket): absent file → the period still fails loudly, byte-identical to before;
+    # malformed or unresolvable bootstrap → unavailable NAMING the defect. No fallback
+    # beyond this one explicit declared path. ----
     prev_doc, prev_note = await asyncio.to_thread(
         read_prev_ledger_doc, ledger_dir, instance_id, period)
     prev_res = resolve_prev_base(prev_doc)
     prev_base = str(prev_res.get("base") or "")
+    bootstrap_note = ""
     if prev_res.get("verdict") != "ok":
-        return {"ok": True, "surface": surface_unavailable(
-            "no usable previous-period base point (%s) — the change-surface diff was "
-            "not made" % (prev_note or "the previous ledger has no recorded base"))}
+        chain_reason = ("no usable previous-period base point (%s) — the change-surface "
+                        "diff was not made"
+                        % (prev_note or "the previous ledger has no recorded base"))
+        bp_res = await asyncio.to_thread(
+            load_declared_bootstrap, ledger_dir, instance_id, base)
+        if bp_res.get("state") != "ok":
+            # Absent bootstrap → the ORIGINAL unavailable reason verbatim (regression pin:
+            # the pile-up symptom must stay loud). A present-but-defective bootstrap names
+            # the file and the defect instead of being silently ignored.
+            reason = chain_reason if bp_res.get("state") == "absent" else (
+                chain_reason + "; declared bootstrap refused: " + str(bp_res.get("reason") or "?"))
+            return {"ok": True, "surface": surface_unavailable(reason)}
+        prev_base = str(bp_res["base"])
+        prev_res = {"base": prev_base, "verdict": "ok",
+                    "base_source": "declared bootstrap file"}
+        bootstrap_note = ("previous-period base is the OPERATOR-DECLARED bootstrap (%s) for "
+                          "instance %s period %s%s — explicit restart per t261018-12, never "
+                          "self-seeded; the next period inherits this base through the normal "
+                          "report chain" % (prev_base[:12], instance_id, period,
+                                            ("; reason: " + str(bp_res["reason"]))
+                                            if bp_res.get("reason") else ""))
 
     # ---- B4 extra face (computed first: the reuse path must carry it too) ----
     owner = str((args.get("shared_scans") or {}).get("lane-watchdog")
@@ -11217,6 +12330,8 @@ async def run_inspection_surface(args: Dict[str, Any]) -> Dict[str, Any]:
     if shared is not None:
         shared["shared"] = True
         shared["note"] = "reused the period's shared surface (%s)" % shared_note
+        if bootstrap_note:
+            shared["note"] += "；" + bootstrap_note
         return {"ok": True, "surface": shared, "shared_scan": shared_scan}
     try:
         proc = await asyncio.to_thread(
@@ -11239,6 +12354,8 @@ async def run_inspection_surface(args: Dict[str, Any]) -> Dict[str, Any]:
     notes = [shared_note]
     if endpoint_note:
         notes.append(endpoint_note)
+    if bootstrap_note:
+        notes.append(bootstrap_note)
     surface["note"] = "；".join(n for n in notes if n)
     # Write the shared file back (idempotent by shas; a write failure does not block the
     # period — both faces run the same pure functions, recomputation is equivalent)
@@ -11350,6 +12467,7 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
     # 上期基点=上期台账 doc 的 lane.base_ref；缺/烂=「无基点差分」显式 note（review
     # R1 口径 U5），绝不以全仓普查兜底。
     from inspection_inspect import (build_change_scope_text, ki_open_entries,
+                                    ki_ledger_candidates,
                                     parse_name_status, suite_receipt_rows)
     scope_notes: Dict[str, Any] = {}
     # ---- Change surface (t261006-13): ONE computation per period, shared ----
@@ -11384,10 +12502,22 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
         if prev_res.get("verdict") == "ok":
             scope_notes["base_source"] = str(prev_res.get("base_source") or "")
         else:
-            scope_notes["scope_note"] = scope_notes.get("scope_note") or (
-                "no base-point diff: %s — the change surface was not computed, the "
-                "review scope holds receipt-red / missed-run / KI / previous ledger only"
-                % (prev_note or "the previous ledger has no usable base point"))
+            # t261018-12: the defensive local path resolves the SAME declared
+            # bootstrap as run_inspection_surface (one shared resolver — no
+            # behavior fork between the preferred and defensive paths).
+            from inspection_surface import load_declared_bootstrap
+            bp = load_declared_bootstrap(ledger_dir, instance_id, base)
+            if bp.get("state") == "ok":
+                prev_base = str(bp["base"])
+                scope_notes["base_source"] = "declared bootstrap file"
+            elif bp.get("state") == "defective":
+                scope_notes["bootstrap_note"] = ("declared bootstrap refused: %s"
+                                                 % bp.get("reason"))
+            if bp.get("state") != "ok":
+                scope_notes["scope_note"] = scope_notes.get("scope_note") or (
+                    "no base-point diff: %s — the change surface was not computed, the "
+                    "review scope holds receipt-red / missed-run / KI / previous ledger only"
+                    % (prev_note or "the previous ledger has no usable base point"))
         this_base = str(base_head or "").strip()
         if not this_base:
             # HEAD as THIS period's diff endpoint only (B2): used to aim the diff,
@@ -11429,7 +12559,13 @@ async def run_inspection_inspect(args: Dict[str, Any]) -> Dict[str, Any]:
             scope_notes["diff_error"] = "git diff 不可执行：%s: %s" % (type(e).__name__, e)
     suite_rows, smeta = suite_receipt_rows(suite_receipt)
     scope_notes.update(smeta)
-    ki_rows, kmeta = ki_open_entries(Path(base) / "notes" / "debts" / "known-issues.md")
+    # 261020: the fault ledger moved to the project store (host order). Read the
+    # FIRST candidate that parses — the store ledger, else the repo pointer.
+    ki_rows, kmeta = [], {"ki_note": "KI register unreadable: no candidate path"}
+    for _cand in ki_ledger_candidates(base):
+        ki_rows, kmeta = ki_open_entries(_cand)
+        if ki_rows:
+            break
     scope_notes.update(kmeta)
     # ---- Review ledger + rotation slice (t261006-12; L2): the 40-60 files the
     # ledger ranks as least recently reviewed; ordering / tie rules are declared
@@ -11864,6 +13000,10 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     changed_files,
     # t260930-02：面计划只读查询（快反馈面 = 本次改动面 ∪ 上轮红名；漏注册=运行时才炸）
     surface_plan,
+    # 261019: declared build-chain OUTPUT prefixes this lane may write (the
+    # implement-stage half of the merge gate's bundle-out widening; a missing
+    # registration only surfaces at runtime)
+    bundle_out_ws_prefixes,
     # t261011-10: fast-set declaration read-only query (develop-buffer lane
     # proof face; a missing registration only surfaces at runtime)
     fast_set_declaration,

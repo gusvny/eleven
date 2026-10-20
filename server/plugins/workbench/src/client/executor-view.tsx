@@ -30,7 +30,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { consoleThemeName, executorPanelUrl } from './executor-view-model.ts'
-import { panelFaceFromMessage, OPEN_FACE_MSG_TYPE, type PanelFace } from './face-overlay-model.ts'
+import { panelFaceFromMessage, closeOverlayFromMessage, CLOSE_OVERLAY_MSG_TYPE, OPEN_FACE_MSG_TYPE, type PanelFace } from './face-overlay-model.ts'
 // t261008-36: the two existing faces the panel's Settings tab now drives. They are
 // mounted exactly as the retired More-views entry mounted them — one importer, one
 // face; the panel gains no second read or write path for model routes.
@@ -63,6 +63,9 @@ export const SHOW_EPIC_MSG_TYPE = 'sandbar-executor-panel:show-epic'
  *  result receipt: the face renders in this same document, so success is visible
  *  without an ack. */
 export { OPEN_FACE_MSG_TYPE }
+/** t261019-09: re-exported to keep the constant surface one-deep for tests; the
+ *  page's copy must stay byte-identical (unit-anchored both sides). */
+export { CLOSE_OVERLAY_MSG_TYPE }
 
 export interface ExecutorViewProps {
   projectKey: string
@@ -72,9 +75,14 @@ export interface ExecutorViewProps {
    *  sidebar handleTicketClick chain). Absent = a no-op — the overlay is not this
    *  surface's to build; no error is raised. */
   openTicketOverlay?: (ticketId: string) => void
+  /** t261019-09: the panel switched its own content (showTab) or opened a read
+   *  face, so the ticket-detail overlay must go (it would float over content the
+   *  panel replaced). Sidebar implementation: closeTicketOverlay. Absent = a
+   *  no-op; closing when nothing is open is a no-op too. */
+  closeTicketOverlay?: () => void
 }
 
-export function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay }: ExecutorViewProps) {
+export function ExecutorView({ projectKey, openExecutorSession, openTicketOverlay, closeTicketOverlay }: ExecutorViewProps) {
   const [panelState, setPanelState] = useState<{ ok: boolean; detail: string }>({ ok: false, detail: 'checking…' })
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   // t261008-36: the face the panel Settings tab asked for. One face at a time,
@@ -190,10 +198,21 @@ export function ExecutorView({ projectKey, openExecutorSession, openTicketOverla
         }
         return
       }
+      // t261019-09: the panel switched its own content (showTab) or is opening a
+      // read face — the ticket-detail overlay must not float over content it no
+      // longer describes. Shape gate lives in closeOverlayFromMessage
+      // (face-overlay-model.ts, unit-tested with malformed shapes); a rejected
+      // message is ignored — the accepted surface does not grow. Closing when
+      // nothing is open is a no-op (closeTicketOverlay is idempotent), which also
+      // makes the panel's boot-time showTab post harmless.
+      if (d.type === CLOSE_OVERLAY_MSG_TYPE) {
+        if (closeOverlayFromMessage(d) && closeTicketOverlay) closeTicketOverlay()
+        return
+      }
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [openExecutorSession, openTicketOverlay, openTicketWins, projectKey])
+  }, [openExecutorSession, openTicketOverlay, openTicketWins, closeTicketOverlay, projectKey])
 
   // t261008-18: the PANEL_GOTO_EVENT forward effect went with the strip button
   // that dispatched it. The panel-side wayfinding message contract (SHOW_TAB/_EPIC)

@@ -16,7 +16,7 @@ updated: 2026-10-04
 > Source: host order 261004. The host asked for one page that says what must be an
 > end-to-end case and what must not, so that the suite does not grow for no reason.
 > The host also asked the inspection to check this page's rules.
-> The Chinese draft is `notes/discussions/261004-测试层级与e2e准入-草稿.md`.
+> The Chinese draft is `notes/discussions/261004-test-tiers-and-e2e-admission-draft.md`.
 
 ## Why this page exists
 

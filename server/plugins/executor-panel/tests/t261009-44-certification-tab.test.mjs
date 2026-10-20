@@ -83,15 +83,27 @@ const RF_SECTION = {
 // ---- frozen render: the mock's layout law ----
 {
   const html = buildCertificationCore(routeAnswer(frozenFace))
-  // one bar, one boundary: the cap + exactly one boundary line
-  assert(html.includes('class="linebar"'), 'the line bar is present')
-  assert(html.includes('class="s cap"'), 'the delivered part is a fixed cap, not a segment')
-  assert((html.match(/certified \d?\d:\d\d/g) ?? []).length === 1, 'exactly one boundary moment on the face')
-  // counts inside segments only: the numbers live in .n spans and the promote button
-  assert(html.includes('<span class="n">2</span>') && html.includes('<span class="n">3</span>'), 'segment counts render inside the segments')
+  // t261019-23 (F1): the count-proportional bar is gone; three labelled
+  // figures replace it, and no segment scale exists anywhere.
+  assert(html.includes('id="certBar"') && html.includes('id="certFigCertified"')
+    && html.includes('id="certFigWaiting"') && html.includes('id="certDelivered"'),
+    'the figure strip renders (certified / delivered / waiting)')
+  assert(!html.includes('linebar') && !html.includes('style="flex:'), 'no proportional bar, no segment scale')
+  assert((html.match(/certified \d{4}-\d{2}-\d{2} \d?\d:\d\d/g) ?? []).length === 1, 'exactly one boundary moment on the face (dated)')
+  // figures render the numbers; t261019-23 (F7): promotable appears ONCE —
+  // on the Promote button only (the certified-not-delivered set and the
+  // promotable set are the same set).
+  assert(html.includes('<b class="mono">4</b>') && html.includes('<b class="mono">3</b>'), 'the figure numbers render (certified 4 / waiting 3)')
+  assert((html.match(/data-promotable=/g) ?? []).length === 1, 'promotable renders exactly once')
+  // t261019-23 rework (F7): the WORD appears once too — no second occurrence
+  // in ids, titles or copy (integration scenario F7.1 counts it verbatim).
+  // Judged on a title-blanked face: ticket titles are DATA and may legally
+  // contain the word.
+  const bare = { ...frozenFace, certified: frozenFace.certified.map((c) => ({ ...c, title: '' })), waiting: frozenFace.waiting.map((w) => ({ ...w, title: '' })) }
+  assert(buildCertificationCore(routeAnswer(bare)).split('Promote').length - 1 === 1, 'the word Promote appears exactly once on the chrome (data titles excluded)')
   assert(!/Tally|tally/.test(html), 'no tally row exists (counts appear once)')
   // Promote disabled only at zero: promotable 2 stays alive through the freeze
-  assert(html.includes('data-promotable="2"') && !html.includes('id="certPromote" disabled'), 'Promote stays alive through a freeze (promotable 2)')
+  assert(html.includes('data-promotable="2"') && !html.includes('id="certPromo" disabled'), 'Promote stays alive through a freeze (promotable 2)')
   // trigger enum: only auto|manual, joined from the headers the tab carries
   assert(roundTrigger(RF_RUNS, 'run-a') === 'auto' && roundTrigger(RF_RUNS, 'run-b') === 'manual', 'trigger joins the headers by run id')
   assert(roundTrigger(RF_RUNS, 'run-none') === '—', 'an unknown run renders the em-dash, never a guessed trigger')
@@ -99,7 +111,15 @@ const RF_SECTION = {
   const rfHtml = buildCertificationCore(routeAnswer(frozenFace, 'develop-buffer', RF_SECTION))
   assert(rfHtml.includes('data-round-link="run-live"') && rfHtml.includes('data-round-link="run-a"'), 'the live face leads and the terminal faces follow')
   assert(rfHtml.includes('<td>auto</td>') && rfHtml.includes('<td>manual</td>'), 'trigger words render per row')
-  assert(rfHtml.includes('data-k="run"') && rfHtml.includes('>running<'), 'the live round renders as running')
+  // t261019-23 (F5): the fixture's engine face says roundState idle, so the
+  // live running face reads STALE with its (absent) write time named — never
+  // a bare 'running'.
+  assert(rfHtml.includes('>stale · no write since write time unreadable<'), 'a running face the engine does not back reads stale, never bare running')
+  assert(!rfHtml.includes('>running<'), 'no bare running pill anywhere in the table')
+  // ...and when the engine DOES report a running round, the pill carries the
+  // face's own last-write moment.
+  const liveHtml = buildCertificationCore(routeAnswer({ ...frozenFace, roundState: 'running' }, 'develop-buffer', RF_SECTION))
+  assert(liveHtml.includes('>running · last write write time unreadable<'), 'a backed running pill names its last-write moment')
   assert(rfHtml.includes('data-k="red"') && rfHtml.includes('data-k="green"'), 'terminal verdicts render their own pill keys')
   assert(rfHtml.includes(countsCell({ pass: 8, fail: 2, env_fail: 0 }, '')), 'the labelled counts render')
   assert(rfHtml.includes('terminal face not written'), 'a run dir without its face names the absence, never zeros')
@@ -107,7 +127,8 @@ const RF_SECTION = {
   assert(roundPill({ state: 'failed', outcome: null }).text === 'could not run', 'a failed state never reads as an outcome word')
   assert(roundPill({ state: 'done', outcome: { verdict: 'no_proof', reason: 'ran nothing' } }).text === 'no proof', 'no_proof renders the none pill')
   assert(roundPill({ state: 'done', outcome: { verdict: 'weird' } }).text === 'unreadable outcome', 'an unknown verdict never reads green')
-  assert(roundMeasured({ sandbar: '6efc7b3e' }) === 'sandbar:6efc7b3e' && rfHtml.includes('sandbar:6efc7b3e'), 'measured renders as repo:rev')
+  // t261019-23 (F6): the measured cell is a labelled short revision
+  assert(roundMeasured({ sandbar: '6efc7b3eabcd' }) === 'line sandbar:6efc7b3e' && rfHtml.includes('line sandbar:6efc7b3e'), 'measured renders as line repo:sha8')
   // the one-line freeze banner naming its blockers
   assert(html.includes('id="certBanner"') && html.includes(frozenFace.frozenFace.blockers[0]), 'the freeze banner names its blockers')
   // every ticket row carries id, title and epic
@@ -124,10 +145,10 @@ const RF_SECTION = {
 {
   const zeroFace = { ...greenFace, promotable: 0, certified: [] }
   const zeroHtml = buildCertificationCore(routeAnswer(zeroFace))
-  assert(zeroHtml.includes('id="certPromote" data-promotable="0" disabled'), 'Promote is disabled exactly at zero')
+  assert(zeroHtml.includes('id="certPromo" data-promotable="0" disabled'), 'Promote is disabled exactly at zero')
   assert(!zeroHtml.includes('id="certBanner"'), 'no freeze banner when not frozen')
   const aliveHtml = buildCertificationCore(routeAnswer(greenFace))
-  assert(aliveHtml.includes('data-promotable="2"') && !aliveHtml.includes('id="certPromote" disabled'), 'Promote alive at promotable 2, unfrozen')
+  assert(aliveHtml.includes('data-promotable="2"') && !aliveHtml.includes('id="certPromo" disabled'), 'Promote alive at promotable 2, unfrozen')
   n += 3
 }
 
@@ -141,7 +162,8 @@ const RF_SECTION = {
 // ---- the switch renders records only (rule 9: no scheduler face) ----
 {
   const html = buildCertificationCore(routeAnswer(frozenFace))
-  assert(html.includes('auto rounds') && html.includes('id="certRoundState"'), 'the auto rounds face renders')
+  // t261019-23 (F2): the dead switch is gone; only the records' state word renders
+  assert(!html.includes('auto rounds') && html.includes('id="certRoundState"'), 'the auto-rounds switch is gone, the state word stays')
   assert(html.includes('>idle<') || html.includes('>running<'), 'the round state is the records word')
   assert(!html.includes('run now'), 'no run-now control (round chaining is another ticket)')
   n += 3

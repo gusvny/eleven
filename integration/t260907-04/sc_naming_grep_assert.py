@@ -61,6 +61,13 @@ MERGE_DEBT_FILES = frozenset((
     "server/engine/client.py",
     "server/engine/tests/test_t260907_07_epic_project_anchor.py",
     "integration/run_scenarios.py",
+    # t261019-45: the integ gate's _INTEG_MANIFEST_RELPATHS legacy-read entry
+    # (.suyou/repo_worktrees.json) — the manifest path the shared helper already
+    # carries; an in-line naming-compat marker on this line was applied twice and
+    # lost twice by the settle face (production-file edits do not survive), so the
+    # debt is registered here per the MERGE_DEBT_FILES precedent (supervised,
+    # sweep-ticket disposal), not silently whitelisted.
+    "server/tools/verify_lane.py",
 ))
 SELF = "integration/t260907-04/sc_naming_grep_assert.py"
 UT = "server/engine/tests/test_t260907_04_naming_compat.py"

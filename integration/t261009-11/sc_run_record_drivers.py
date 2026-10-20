@@ -47,7 +47,7 @@ SLUG = "t261009-11-run-record-fixture"
 
 sys.path.insert(0, str(REPO / "integration"))
 import scenario_ledger as sl  # noqa: E402
-from lib_env import clean_narrowing_env  # noqa: E402
+from lib_env import clean_narrowing_env, owned_env_note  # noqa: E402
 from lib_result import ScenarioCheck  # noqa: E402
 
 _ck = ScenarioCheck(detail_cap=600, flush=True)
@@ -204,6 +204,10 @@ def _recount(rows, run_id):
 # ---------------------------------------------------------------- 主程序
 
 def main():
+    # t261017-10 spec item 2: this case proves run-record minting; an inherited
+    # reuse kill switch flips exactly that face — scrubbed (the bare name now
+    # joins the NARROWING_ENV_NAMES family) and owned BY NAME.
+    owned_env_note(("SANDBAR_LEDGER_REUSE", "SANDBAR_INTEG_LEDGER_SOURCE"))
     if shutil.which("git") is None:
         env_fail("git missing: this scenario's judgement face (clean HEAD "
                  "fixture tree) is entirely on git")

@@ -155,11 +155,14 @@ ns = {
         # 桩语义=已打过补丁（True）：让 patched 分支照常执行，本场景要验的是补丁后的行为。
         # 注意：本段在 JS 模板字符串里，注释里不得出现反引号（会截断 PY 字符串）。
         patched=lambda *a, **k: True,
-        # 261016 (同族第四次踩坑，同款根治在下方常量/方法抽取): _persist_stage_memo
-        # 现在真写 Temporal memo（workflow.upsert_memo），失败路径经
-        # workflow.logger.warning 记账。桩面缺这两个面 → 每次跑都在 pure half 里
-        # AttributeError（先是 upsert_memo，异常处理里再是 logger.warning），
-        # 一条判断都没走到。桩语义：记录调用（下面的自证锁住接线确实发生）+ 静默日志。
+        # 261016 (fourth trap in this family; same root fix in the constant/method
+        # extraction below): _persist_stage_memo now really writes the Temporal memo
+        # (workflow.upsert_memo) and books failures via workflow.logger.warning.
+        # A stub missing either face died in the pure half with AttributeError
+        # (first upsert_memo, then logger.warning in the except path) before a
+        # single judgement ran. The 261012 lane-side fix (logger.warning only) is
+        # subsumed: the merged stub records upsert_memo calls (the self-proof
+        # below locks that the wiring happened) and silences info/warning/error.
         upsert_memo=lambda *a, **k: MEMO_CALLS.append((a, k)),
         logger=SimpleNamespace(info=lambda *a, **k: None,
                                warning=lambda *a, **k: None,
@@ -178,8 +181,9 @@ exec(m_roles.group(0), ns)
 # module constant (STAGE_MEMO_HISTORY_CAP = 50, used by _persist_stage_memo's
 # history slice) never reached the stub namespace and every run died with
 # NameError before a single judgement - the same "engine grows a surface, the
-# stub drifts" trap this block already records twice. Integer literals are as
-# lazy as string ones, so they are extracted verbatim too.
+# stub drifts" trap this block already records twice (261012 lane side hit the
+# same wall with the same anchor). Integer literals are as lazy as string
+# ones, so they are extracted verbatim too.
 _extra_consts = re.findall(r"""^([A-Z][A-Z0-9_]*)\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|\d+)\s*$""", src, re.M)
 for _name in _extra_consts:
     _m = re.search(r'^%s\s*=\s*(.+)$' % re.escape(_name), src, re.M)
@@ -346,9 +350,15 @@ ok(bool(lane.timeline[-1].get('reason')), '空 note：reason 兜底非空')
 ok(len(re.findall(r'^\s+self\._mark\(target,\s*["\']rework["\']', src, re.M)) == 1,
    'state=rework 时间线记录唯一生产者（恰好 1 处真实 _mark 调用）——不双落')
 # The merge human-review reject keeps logging via the shell (existing behavior);
-# the merge failure branch must no longer set self._rework
-ok(len(re.findall(r'self\._rework = ReworkRequest\(', src)) == 1,
-   'dev_lane.py 仅存 1 处 ReworkRequest 塞值（merge 人审 reject，经壳留痕）')
+# since t261009-47 (KI-212, a06560d4) it goes through the coalescing queue
+# (_queue_rework) instead of a direct self._rework assignment — the invariant
+# this guard protects (single rework-timeline producer, no double-log) still
+# holds, so the pinned face moves to the new shape: zero direct assignments,
+# exactly one queued ReworkRequest construction (the merge human-gate reject).
+ok(len(re.findall(r'self\._rework = ReworkRequest\(', src)) == 0,
+   'dev_lane.py 零处 ReworkRequest 直塞（t261009-47 起人审 reject 走合并队列，不留旁路塞值面）')
+ok(len(re.findall(r'self\._queue_rework\(\s*ReworkRequest\(', src)) == 1,
+   'dev_lane.py 恰 1 处排队 ReworkRequest 构造（merge 人审 reject 经 _queue_rework，防双落不变量的新形态）')
 i_fail = src.find('if not mr.ok:')
 i_fin = src.find('self._finish("merge"', i_fail)
 ok(i_fail >= 0 and i_fin > i_fail and
@@ -363,8 +373,11 @@ ok(i_fail >= 0 and i_fin > i_fail and
 # 冲突消解回 implement 再加第 9 个内部点 → 10（9 内部 + 1 壳委托）。
 # 核过「不双落」不变量未破：
 # 真正的 rework 时间线生产者仍恰 1 处（上一条断言），新点在其自己的拒收校验之后。
-ok(len(re.findall(r'self\._auto_rework\(', src)) == 11,
-   '_auto_rework 调用点=11（1 壳委托 + 10 内部自动打回点；第 10 内部点=t261006-07 主同步 blocked 被成功 settle 反超的自动逃生回 implement）')
+# 261012 对齐：t260917（7993697a）主同步 settle 失败自动重跑再加第 11 个内部点
+# （_sync_phase 第三处）→ 12（11 内部 + 1 壳委托）；t260922-18 那批的同款同步欠账——
+# 当时只改了孪生看守 sc_check_auto_rework_trace.py，本文件的宽口径计数没跟上。
+ok(len(re.findall(r'self\._auto_rework\(', src)) == 12,
+   '_auto_rework 调用点=12（1 壳委托 + 11 内部自动打回点；第 11 内部点=t261009-17 主同步 settle 失败自动重跑回 implement）')
 
 print('PYDONE pass=%d fail=%d' % (p_pass, p_fail))
 sys.exit(0 if p_fail == 0 else 1)
@@ -408,7 +421,12 @@ async function sceneF(t, api, sdkPython, fixture) {
   stamp('sceneF: stub worker 已起')
   try {
     const ready = await waitFor(api, tid,
-      (s) => !!s?.meta?.workspace_prep?.ok, 'workspace ready', 120_000, t)
+      // t261012-05 (acceptance re-run): 120s -> 600s readiness budget — the patched 240s lost by 5s under a concurrent arbitration lane (workspace_prep landed at 244.9s); 600s still sits inside the executor's 900s per-entry cap. Gate receipts show
+      // workspace_prep landing at ~127s under width-4 load (KI-072/184 family):
+      // a readiness wait, not an assertion — the assertion is what happens
+      // AFTER prep is ready. 240s still sits well inside the executor's 900s
+      // per-entry cap (this entry's whole run is ~130s of which prep is most).
+      (s) => !!s?.meta?.workspace_prep?.ok, 'workspace ready', 600_000, t)
     stamp('sceneF: workspace_prep 就绪')
     if (!ready) return
 

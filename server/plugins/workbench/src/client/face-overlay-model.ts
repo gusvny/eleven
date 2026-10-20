@@ -31,6 +31,31 @@ export const PANEL_FACES: ReadonlyArray<PanelFace> = ['routes', 'project-setting
 export const OPEN_FACE_MSG_TYPE = 'sandbar-executor-panel:open-face'
 
 /**
+ * t261019-09: the panel's close request. One new panel-to-console type — when the
+ * panel switches its own content (showTab) or asks for a read face, the console's
+ * ticket-detail overlay must not keep floating over content the panel replaced.
+ * Paired with CLOSE_OVERLAY_MSG_TYPE in panel-page.ts (declared once here; the
+ * page's copy must stay byte-identical, unit-anchored on both sides).
+ */
+export const CLOSE_OVERLAY_MSG_TYPE = 'sandbar-executor-panel:close-overlay'
+
+/**
+ * Judge one close-overlay message payload: the message is payload-less by design.
+ * Fault modes carried over from panelFaceFromMessage: non-object/null -> false,
+ * wrong type -> false, never throws. Dropped by design: the face whitelist and the
+ * projectKey equality — an empty payload has nothing to whitelist and no identity
+ * to carry, because the sender is already pinned by the stronger existing layer,
+ * the same-origin + e.source === frame.contentWindow guards in the message
+ * effect. true means the caller may close the host overlay; every other shape
+ * returns false and the caller ignores the message (the accepted surface does not
+ * grow). Closing when nothing is open is the caller's no-op.
+ */
+export function closeOverlayFromMessage(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false
+  return (data as { type?: unknown }).type === CLOSE_OVERLAY_MSG_TYPE
+}
+
+/**
  * Judge one open-face message payload: valid -> return the face; every other shape
  * -> null (the caller ignores it). expectedProjectKey is the projectKey prop this
  * view (the host) holds — byte-for-byte equality is required. The type field is

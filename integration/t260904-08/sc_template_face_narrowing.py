@@ -3,9 +3,10 @@
 
 intent（用户可感知行为）：工单模板面只留内置面——
   A. 真源三表收窄：TEMPLATE_CLASS_NAMES / TEMPLATE_CLASSES / TEMPLATE_DISPLAY_NAMES
-     的 key 集合都恰为内置面 {dev-lane, light-lane}（宿主令 260930 轻道登记令：轻道是
-     宿主定案的第二条道，与 dev-lane 同级；四退役模板仍从「可用面」消失=建票入口
-     收窄的根）；
+     的 key 集合都恰为内置面 {dev-lane, light-lane}（宿主令 260930 轻道登记令：轻道
+     是宿主定案的第二条道，与 dev-lane 同级；四退役模板仍从「可用面」消失=建票入口
+     收窄的根）。t261019-32 注记：quickmanual-lane 在其登记步（名面+类面+yaml 原子
+     落地，arbitrate gen0 item 1）随本守卫同步扩面——落地面=整面相等，绝不半登记）；
   B. 物理退役面与幸存面：四退役 .py/.yaml 退场、dev-lane.yaml 在位；v1 步1
      ContentPipelineWorkflow 与 DispatcherScanWorkflow（不在删除面）幸存不过删；
   C. 拒收面文案精度：ticket-start / ticket create 传四退役模板任一被拒，报错文案

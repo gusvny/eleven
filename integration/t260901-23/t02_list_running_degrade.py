@@ -177,15 +177,19 @@ def main():
     ok(r is not None and r.get("project") == "suyou" and r.get("epic") == "ki-003",
        "降级行保留 SA 直取的 project/epic：%r/%r" % (r and r.get("project"), r and r.get("epic")))
 
-    # C. COMPLETED 超窗 → 匿名最小行回归不变
+    # C. COMPLETED 超窗最小行（t261018-11 改约）：不再与等待词 pairing——status=closed
+    #    的行必须出终态词 closed，对账标签进既有 title 键（行族 parity：不加新行键；
+    #    原「匿名 + awaiting」契约被票面诚实要求取代，仲裁返工轮裁定于此）。
     import time
     w = FakeListWf("t-c", "COMPLETED", q, sa)
     w.close_time = datetime.fromtimestamp(time.time() - 10**7, tz=timezone.utc)  # 远超回填窗
     h = FakeHandle([], result_value=None)
     res = run_list([w], {"t-c": h})
     r = row_of(res, "t-c")
-    ok(r is not None and r.get("title") == "" and r.get("stage_state") == "awaiting",
-       "COMPLETED 超窗仍匿名最小行（title=%r）" % (r and r.get("title"),))
+    ok(r is not None and r.get("stage_state") == "closed"
+       and "stage_state reconciled: awaiting -> closed" in str(r.get("title") or ""),
+       "COMPLETED 超窗最小行出终态词+title 内对账标签（title=%r stage_state=%r）"
+       % (r and r.get("title"), r and r.get("stage_state")))
 
     # C2. 畸形：RUNNING 查询回非 dict / 缺 meta → 不崩，降级或空 meta 均可，不能裸抛
     h = FakeHandle(["ok"], snapshot="garbage")

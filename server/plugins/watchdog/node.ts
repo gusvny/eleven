@@ -5,7 +5,7 @@
  * 对账看板、唤醒 executor、叫人（全部可配置）。一进程看多项目，按项目分账。
  * 绝不重启/停止/占用控制台（3099 是用户面）；测试不碰生产 Temporal。
  *
- * 设计基准：notes/discussions/260927-项目执行器-设计稿.md（守望者框；决策 1/4/6/9；
+ * 设计基准：notes/discussions/260927-project-executor-design.md（守望者框；决策 1/4/6/9；
  * 重启与孤儿协议）+ 本票过审方案 .sandbar/plan_watchdog.md（gen1）。
  *
  * 挂载与降级（头注自述纪律，KI-079 族）：

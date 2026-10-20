@@ -228,6 +228,164 @@ def test_prep_ki090_modify_delete_conflict_then_settle_selfheal(tmp_path):
     assert not _prep(repo).conflict_files               # 回路收敛：再同步已追平
 
 
+# ---------- B2: t261016-13 branch-behind guard (detached / branch-behind named refusals) ----------
+
+DETACHED_SENTENCE = "lane checkout is detached - the branch would not advance"
+
+
+def test_prep_detached_checkout_refused_by_name_fast_path(tmp_path):
+    """R1a (ticket regression, host order 261016): detached lane + main already an
+    ancestor of HEAD (the fast-path shape = the measured silent-success shape of
+    t261014-04) -> named refusal, the branch ref untouched. Idempotent on retry."""
+    repo = _lane_repo(tmp_path)
+    _main_advance(repo, "b.txt", "main\n", "main advance")
+    _git("merge", "main", cwd=repo)                      # lane catches up with main
+    branch_tip_before = _git("rev-parse", "lane", cwd=repo)
+    _git("checkout", "--detach", "HEAD", cwd=repo)       # lawful engine state (pin_lane_revision alike)
+    r = _prep(repo)
+    assert not r.ok
+    assert DETACHED_SENTENCE in (r.error or "")          # verbatim sentence (no smart quotes / em-dash drift)
+    assert _git("rev-parse", "lane", cwd=repo) == branch_tip_before  # branch not advanced
+    assert not r.up_to_date                              # the face reports no success
+    assert DETACHED_SENTENCE in (_prep(repo).error or "")            # idempotent: retry, same refusal
+
+
+def test_prep_detached_checkout_refused_before_merge(tmp_path):
+    """R1b: detached lane + main advanced (the shape that would really land a merge
+    commit) -> the refusal fires BEFORE any merge: MERGE_HEAD absent, worktree
+    clean, neither HEAD nor the branch moves - all-or-nothing."""
+    repo = _lane_repo(tmp_path)
+    _commit_file(repo, "a.txt", "lane\n", "lane work")
+    _main_advance(repo, "b.txt", "main\n", "main advance")
+    branch_tip_before = _git("rev-parse", "lane", cwd=repo)
+    head_before = _git("rev-parse", "HEAD", cwd=repo)
+    _git("checkout", "--detach", "HEAD", cwd=repo)
+    r = _prep(repo)
+    assert not r.ok and DETACHED_SENTENCE in (r.error or "")
+    assert _git("rev-parse", "lane", cwd=repo) == branch_tip_before
+    assert _git("rev-parse", "HEAD", cwd=repo) == head_before        # HEAD unmoved too
+    p = subprocess.run(["git", "rev-parse", "--verify", "MERGE_HEAD"],
+                       cwd=str(repo), capture_output=True, text=True)
+    assert p.returncode != 0                                          # no merge opened
+    assert not _repo_dirty(repo)
+    assert "re-attach" in (r.error or "")                             # recovery named (review comment 1)
+
+
+def test_prep_attached_lane_unchanged_with_branch_tip_receipt(tmp_path):
+    """R2 (ticket regression): the three attached-lane shapes keep today's behaviour,
+    and every success receipt carries branch_tip == lane_head (branch follows HEAD).
+    - up-to-date fast path: zero action, idempotent (HEAD unmoved, up_to_date=True
+      semantics untouched - the KI-209 recovery contract, review comment 4);
+    - clean merge: full sha receipts, true two-parent merge commit, clean tree;
+    - conflict scene: no false refusal, branch_tip = the pre-merge HEAD."""
+    # shape 1: up-to-date fast path
+    repo = _lane_repo(tmp_path)
+    head_before = _git("rev-parse", "HEAD", cwd=repo)
+    r = _prep(repo)
+    assert r.ok and r.up_to_date and r.already_clean
+    assert r.lane_head == _git("rev-parse", "--short", "HEAD", cwd=repo)
+    assert r.branch_tip == r.lane_head                     # branch == HEAD (receipt self-evidence)
+    assert _git("rev-parse", "HEAD", cwd=repo) == head_before  # zero action
+    # shape 2: clean merge
+    repo = tmp_path / "lane2"
+    repo.mkdir(parents=True)
+    _git("init", "-b", "main", cwd=repo)
+    _git("config", "user.email", "ut@example.com", cwd=repo)
+    _git("config", "user.name", "ut", cwd=repo)
+    _commit_file(repo, "base.txt", "base\n", "c0")
+    _git("checkout", "-b", "lane", cwd=repo)
+    _commit_file(repo, "a.txt", "lane\n", "lane work")
+    _main_advance(repo, "b.txt", "main\n", "main advance")
+    r = _prep(repo)
+    assert r.ok and r.already_clean and not r.up_to_date
+    assert r.branch_tip == r.lane_head
+    assert _git("rev-parse", "lane", cwd=repo) == _git("rev-parse", "HEAD", cwd=repo)
+    parents = _git("rev-list", "--parents", "-n", "1", "HEAD", cwd=repo).split()
+    assert len(parents) == 3
+    # shape 3: conflict scene
+    repo = tmp_path / "lane3"
+    repo.mkdir(parents=True)
+    _git("init", "-b", "main", cwd=repo)
+    _git("config", "user.email", "ut@example.com", cwd=repo)
+    _git("config", "user.name", "ut", cwd=repo)
+    _commit_file(repo, "base.txt", "base\n", "c0")
+    _git("checkout", "-b", "lane", cwd=repo)
+    _commit_file(repo, "f.txt", "lane edit\n", "lane touch")
+    _main_advance(repo, "f.txt", "main edit\n", "main touch")
+    r = _prep(repo)
+    assert r.ok and r.conflict_files == ["f.txt"]
+    assert r.branch_tip == r.lane_head
+    _git("merge", "--abort", cwd=repo)                     # clean up, no scene left behind
+
+
+def test_prep_branch_behind_head_refused_on_attached_checkout(tmp_path):
+    """R3 (the measured instance pinned): the worktree is attached to branch A while
+    the sync judges branch B, and B lags behind HEAD (with an attached checkout HEAD
+    IS the branch, so update-ref moves both - the reachable branch-behind-HEAD
+    shapes are "the judged branch differs from the attached one" plus detached) ->
+    named refusal with the measured numbers (tip / HEAD / commits behind)."""
+    repo = _lane_repo(tmp_path)
+    _commit_file(repo, "a.txt", "lane\n", "lane work")
+    _main_advance(repo, "b.txt", "main\n", "main advance")
+    head_full = _git("rev-parse", "HEAD", cwd=repo)
+    _git("branch", "other", cwd=repo)                 # other = current HEAD
+    _git("checkout", "other", cwd=repo)               # worktree attached to other (not the judged branch)
+    _git("update-ref", "refs/heads/lane", "HEAD~1", cwd=repo)  # judged branch one behind
+    r = asyncio.run(aa.prepare_conflict_resolution(
+        ConflictPrepArgs(ticket_id="t", worktree=str(repo),
+                         branch="lane", base_ref="main")))
+    assert not r.ok
+    assert "behind the worktree HEAD" in (r.error or "")
+    assert _git("rev-parse", "--short", head_full, cwd=repo) in (r.error or "")
+    assert "1 commits behind" in (r.error or "")
+    # the merge lands on the attached branch (other), advancing HEAD while the judged
+    # branch stays behind -> every further sync refuses by name (the face never
+    # reports a clean sync; recovery = re-attach the judged branch, named, human)
+    r = _prep(repo)
+    assert not r.ok and "behind the worktree HEAD" in (r.error or "")
+    # the attached branch itself (other, carrying the merge commit) -> goes through,
+    # the receipt self-evidences that the branch follows the worktree
+    r2 = asyncio.run(aa.prepare_conflict_resolution(
+        ConflictPrepArgs(ticket_id="t", worktree=str(repo),
+                         branch="other", base_ref="main")))
+    assert r2.ok and r2.branch_tip == r2.lane_head
+    # sync again: caught up -> fast path, zero action (up_to_date=True idempotent
+    # semantics unchanged, the KI-209 contract)
+    r3 = asyncio.run(aa.prepare_conflict_resolution(
+        ConflictPrepArgs(ticket_id="t", worktree=str(repo),
+                         branch="other", base_ref="main")))
+    assert r3.ok and r3.up_to_date and r3.branch_tip == r3.lane_head
+
+
+def test_prep_malformed_branch_refusal_and_legacy_empty_branch(tmp_path):
+    """R4 (malformed input): a branch naming a nonexistent ref -> named refusal, no
+    exception; an empty branch keeps the legacy caller behaviour (no branch to
+    judge = no widened check, outside this ticket's scope)."""
+    repo = _lane_repo(tmp_path)
+    _commit_file(repo, "a.txt", "lane\n", "lane work")
+    r = asyncio.run(aa.prepare_conflict_resolution(
+        ConflictPrepArgs(ticket_id="t", worktree=str(repo),
+                         branch="lane/ghost", base_ref="main")))
+    assert not r.ok
+    assert "unreadable" in (r.error or "") and "lane/ghost" in (r.error or "")
+    r = asyncio.run(aa.prepare_conflict_resolution(
+        ConflictPrepArgs(ticket_id="t", worktree=str(repo), branch="", base_ref="main")))
+    assert r.ok and r.up_to_date and r.branch_tip == ""
+
+
+def test_struct_detached_refusal_and_additive_keys():
+    """R5 (source anchors): the verbatim refusal sentence sits in exactly one place
+    in the activity source (gate 1); `branch_tip` is defaulted on the shared
+    dataclass (the D-group compatibility stance); every dev_lane rebuild point
+    carries the key (review comment 2: not two sites, all of them)."""
+    src = (POC / "agent_activities.py").read_text(encoding="utf-8")
+    assert src.count(DETACHED_SENTENCE) == 1
+    shared_src = (POC / "shared.py").read_text(encoding="utf-8")
+    assert 'branch_tip: str = ""' in shared_src
+    dl_src = (POC / "dev_lane.py").read_text(encoding="utf-8")
+    assert dl_src.count('branch_tip=str(praw.get("branch_tip") or "")') == 2
+
+
 # ---------- A：纯函数 ----------
 
 def test_route_matrix_cap_and_anchors():

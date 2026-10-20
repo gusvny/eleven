@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// t261007-07 场景：平台横幅压制（设计稿 notes/discussions/261004-顶栏横幅-设计稿.md 最后一项，宿主令 261007）。
+// t261007-07 场景：平台横幅压制（设计稿 notes/discussions/261004-top-banner-design.md 最后一项，宿主令 261007）。
 // （灰盒 L3 渲染层，browser-free 池；两层式，镜 t261005-09/sc_left_column_ui_journey.mjs。）
 //
 // 用户场景（工单 t261007-07 派发规格）：人打开控制台，第一眼看到的表头是我们自己的——

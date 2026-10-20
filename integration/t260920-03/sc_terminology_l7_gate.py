@@ -136,6 +136,13 @@ def build_tree(root: Path, baseline_counts: dict, files: dict) -> Path:
     integ = root / "integration"
     integ.mkdir(parents=True)
     shutil.copy2(LINT, integ / "lint_tests.py")
+    # t261012-05 修复（副本烂根，S1 干净树红实案）：lint_tests.py 的 integration 本地
+    # 模块依赖必须随脚本一起进副本，否则 `import lint_tests` 在临时树内 ModuleNotFoundError
+    # →探针 traceback 退出→S1/S4/S5 全部假红。来源实锚：lint_tests.py:141 模块级
+    # `import lib_fault_injection`（t261009-52 落地，晚于本场景）。
+    # 261012 收口：main 侧 2a23c658 批的集成直修（b3033112）与本票撞在同一病灶——
+    # 并集取 main 的更宽实现（import/from 双形 + lint_* 同族 + 排除主件自身），
+    # 本票的事件注记保留在案。
     _LOCAL_DEP_RE = re.compile(r"^\s*(?:import|from)\s+(lib_\w+|lint_\w+)", re.M)
     for mod in sorted(set(_LOCAL_DEP_RE.findall(LINT.read_text(encoding="utf-8")))):
         src = INTEG / (mod + ".py")

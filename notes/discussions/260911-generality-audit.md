@@ -16,7 +16,7 @@
    `git grep -n -E "(/Users/|/home/[a-z]|C:\\\\|/opt/)" -- . ':!*.lock' ':!node_modules' ':!.dsh'`
    → 按目录归类计数，圈出**代码面**（排除 notes/docs 与夹具/smoke）。
 2. **机器绑定形态补扫**：
-   `git grep -n -E "(user|Documents|/opt/homebrew|/usr/local/bin|which\()" -- 'server/**' 'integration/**'`
+   `git grep -n -E "(xingu|Documents|/opt/homebrew|/usr/local/bin|which\()" -- 'server/**' 'integration/**'`
    （可执行文件绝对路径、`Documents` 类目录假设、用户名残影）。
 3. **逐条读实现判「用途」**——分类规则：
    - 违规＝**拿这个路径去读/写文件、去执行程序**；

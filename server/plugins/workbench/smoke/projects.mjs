@@ -32,10 +32,10 @@ projects:
   - key: suyou
     name: 溯游
     dirs:
-      - /Users/user/Documents/sandbar   # 行尾注释
+      - /Users/xingu/Documents/sandbar   # 行尾注释
 `)
   ok(r.length === 1 && r[0].key === 'suyou' && r[0].name === '溯游'
-    && r[0].dirs.length === 1 && r[0].dirs[0] === '/Users/user/Documents/sandbar', '单项目解析正确')
+    && r[0].dirs.length === 1 && r[0].dirs[0] === '/Users/xingu/Documents/sandbar', '单项目解析正确')
 }
 
 section('B 多项目 + 多目录（1:N）')
@@ -44,15 +44,15 @@ section('B 多项目 + 多目录（1:N）')
   - key: suyou
     name: 溯游
     dirs:
-      - /Users/user/Documents/sandbar
-      - /Users/user/Documents/sandbar-mirror
+      - /Users/xingu/Documents/sandbar
+      - /Users/xingu/Documents/sandbar-mirror
   - key: misc
     name: 杂项
     dirs:
       - /tmp/misc
 `)
   ok(r.length === 2, '两个项目')
-  ok(r[0].dirs.length === 2 && r[0].dirs[1] === '/Users/user/Documents/sandbar-mirror', 'suyou 双目录保序')
+  ok(r[0].dirs.length === 2 && r[0].dirs[1] === '/Users/xingu/Documents/sandbar-mirror', 'suyou 双目录保序')
   ok(r[1].key === 'misc' && r[1].dirs[0] === '/tmp/misc', '第二项目正确')
 }
 

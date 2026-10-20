@@ -110,6 +110,44 @@ ALLOW = [
     # 「no SKIP / SKIP-free」是同一件事，只差语言与语气。只锚**否定式连写**（不静默/
     # 不悄悄/不许 + skip），裸词 skip 与任何 skip 状态值照旧红——T1b 自证同组照旧咬得住。
     re.compile(r"(?:不静默|不悄悄|不许|不得|不可)[^，。；\n]{0,8}skip", re.I),
+    # ---- 261012 新增（t261012-05 清账）：260928-261006 落地的新场景/库文件在交付树上的
+    # 存量（静态复算=120 行残留，全部为行为描述/产品命名/局部变量形态，无一是套件三态
+    # 状态值）；ALLOW 台账 261001 后未随落地同步——与 261002 退役批漏扫消费方清单同族的
+    # 「落地必须同步台账」欠账。逐类只锚具体形态；裸词状态值/静默跳过形状/旧计数形状照旧红
+    # （T1b 自证组不变，另增一类具名绿样）。
+    re.compile(r"silent(?:ly)?[^,，\n]{0,12}skips?|never a skip\b|silently swallow", re.I),
+                                        # 英文否定式契约声明族：「never a silent skip」「silently
+                                        # skipping」「named not-checked, never a silent skip」——
+                                        # 全部是**声明不静默跳过**，与既有「no/without/never + SKIP」
+                                        # 同族（t261004-26/-35/-44、t261009-50/-59/-68、t261011-18、
+                                        # lib_emit_anchor、lib_wait_bound、line_round_runner 等）。
+    re.compile(r"named[-\s]skip|skip\s+(?:is\s+)?named|names\s+the\s+skip|skip\s+names\b|name\s+the\s+skip", re.I),
+                                        # 具名跳过契约（跳过必须点名原因）——行为描述非状态值
+                                        # （sc_d2b_carrier_wait_contract、sc_watchdog_silent_faces、
+                                        # tests/test_t261009_11、sc_quarantine_recovery 等）。
+    re.compile(r"skip_slow"),                                            # verify.yaml 慢检查跳过开关名（产品域旋钮，
+                                        # t260901-18/t260902-10/t260903-01 消费）——非套件状态值。
+    re.compile(r"skip_when_unchanged|SKIP_ANCHOR|skip_txt"),             # 引擎行为名 + 其源码锚正则名 + 场景局部变量
+                                        # （t260906-12 对 activities.py 分支的捕获面）——产品域。
+    re.compile(r"SOURCE_SKIP"),                                          # 陈旧桩扫描排除表常量名（lib_stale_pin；
+                                        # 与既有 SKIP_DIRS 同类：目录排除面，非状态词）。
+    re.compile(r"skip criterion|seed-skip|loader skip face", re.I),      # 注册表迁移标记判据/加载器跳过面（行为描述，
+                                        # t261005-16/t261006-03）。
+    re.compile(r"pytest\.skip\("),                                       # pytest 框架 API（同 skipTest/skipif 族）。
+    re.compile(r"SUITE_SKIP_HEADER"),                                    # 线轮夹具 env 旋钮名（tests 注入面）。
+    re.compile(r"\bskip\s*=\s*(?:set\(\)|docstring_nodes)|\bin skip\b|SKIPPED by switch|skip\.add\("),
+                                        # 场景内局部变量名/反证开关叙述（sc_carrier_verbatim_port_guard
+                                        # 的 skip=set()/skip.add()/sc_engine_refusal_copy_english 的
+                                        # skip=docstring_nodes/t261006-03 的 A SKIPPED by switch）——
+                                        # 代码标识符与测试自身流程叙述，非套件状态值。
+    re.compile(r"run_record_skip_reason|test_skip_matrix|no_change_skip|skipped_and_named|skipped_named"),
+                                        # 引擎函数名与测试名（产品域命名，t261009-11/
+                                        # t261004-20/t261011-21/t261011-26）。
+    re.compile(r"empty = skip|skip choice|skip/fail reasons|skip injections|skip that empties|would skip certified|cert-skipping|skip when root|skip \+ count|P1 skip|skip/stub|skip verdict|skip branch|warn-and-skip|defensive: skip|effect is to SKIP|booking = skip|skip-switch|无\s*SKIP|rotation / skip / stub|SKIP\)\. Pre-fix|skip\): %s|: skip matrix"),
+                                        # 长尾单点行为描述/引擎叙述（t261009-16/-23/-28/-35、
+                                        # t261006-12/-13、scenario_ledger、t260928-29、t261002-10、
+                                        # t261004-20/-22、t261008-45、t261003-14、t261009-69）——
+                                        # 每形只锚此处列出的字面，不含任何状态值赋值/计数形状。
 ]
 
 hits = []
@@ -154,6 +192,7 @@ _green_samples = [
     "pool(...) verdict(pass|fail|env_fail|%s)" % _SK,                       # 协议词表原文
     "@pytest.mark.%sif(not HAS_ZSTD, reason='x')" % _SK,                    # 框架 API
     "def test_dep_links_%s_when_src_absent():" % _SK,                       # 被测产品行为名
+    "degrade by a named %s when the carrier is absent" % _SK,               # 261012 新族：具名跳过契约（行为描述）
 ]
 ok(all(_still_red(s) for s in _red_samples),
    "T1b 白名单自证：裸状态词/静默跳过/旧计数形状仍判红（%d 条合成样本）" % len(_red_samples))

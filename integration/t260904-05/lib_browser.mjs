@@ -42,33 +42,13 @@ export function refuseProductionConsole() {
   }
 }
 
-/** playwright-core 四路探测（t260907-03 对齐 lib_fix17 同口径；env 指定 → 裸包 →
- *  ui-check 本地依赖 → 主仓安装位）。缺失返回 null=调用方记 ENV_FAIL。
- *  第③路 t260904-05 验收走查 gen0 修正：原按 process.cwd() 相对拼路径，泳道开在
- *  主仓 .lane/ 子目录时 ../../ 会指到主仓树（其 ui-check 无 node_modules）——改为
- *  基于本模块 import.meta.url 解析，与泳道布局解耦。
- *  第④路 t260907-03 增（KI-036 家族 env_fail 根因修正）：泳道是干净 worktree，
- *  第③路在泳道布局必死（ui-check 无 node_modules）——经 git common-dir 解析主树根
- *  只读借用主仓安装位（与 lib_fix17 mainRoot() 同语义，只读不写）。 */
-export async function loadPlaywright() {
-  const localPw = new URL('../../server/ui-check/node_modules/playwright-core/index.mjs', import.meta.url).href;
-  let mainPw = null;
-  try {
-    const { spawnSync } = await import('node:child_process');
-    const repoRoot = new URL('../..', import.meta.url).pathname;
-    const r = spawnSync('git', ['-C', repoRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' });
-    const dir = (r.stdout || '').trim();
-    if (r.status === 0 && dir) {
-      const p = `${dir.replace(/\/$/, '')}/../server/ui-check/node_modules/playwright-core/index.mjs`;
-      if ((await import('node:fs')).existsSync(p)) mainPw = (await import('node:url')).pathToFileURL(p).href;
-    }
-  } catch { /* 第④路可选：解析失败静默降级为三路 */ }
-  for (const c of [process.env.SANDBAR_PLAYWRIGHT_PATH, 'playwright-core', localPw, mainPw]) {  // naming-compat（t260907-04 改名；旧名由 env 双向桥兼容）
-    if (!c) continue;
-    try { return await import(c); } catch { /* next */ }
-  }
-  return null;
-}
+/** playwright-core 探测：t261012-05 起收敛到 lib_pw_deps.mjs 单源（五路：新名 env →
+ *  旧名 env 双认 → 裸包 → 本树 import.meta.url 位 → 主树 git-common-dir 位）。
+ *  此前这里是 261002 前的四路内联副本：无旧名 env 桥（capture 族下游仍消费
+ *  SANDBAR_PLAYWRIGHT_MODULE）、失败文案不点名候选面——KI-036 家族的 env_fail
+ *  「缺什么/怎么补」两半都缺。缺失仍返回 null=调用方记 ENV_FAIL；文案用
+ *  pwMissingDetail()（事实点名全部候选面，无归因话术）。 */
+export { loadPlaywright, pwMissingDetail } from '../lib_pw_deps.mjs';
 
 /** 隔离台健康检查（workbench API 可达）。 */
 export async function consoleHealthy() {

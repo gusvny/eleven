@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""B 零新增红口径（260923 宿主直修令，不开票）回归棒。
+"""Regression rod for the zero-new-red caliber (host direct-fix order 260923, no ticket).
 
-背景（集成轮次瘦身提案·定稿，notes/discussions/260923-集成轮次瘦身提案.md）：
-闸 blockers 为空=红面全为基线既有欠账/外部环境记录面（decide 判 record 的
-不堵票面）＝零新增红，但仲裁仍可能判 tests-fault 重跑已知红——重跑已知红不会绿、
-只会烧轮次到「迭代超限转人工」。本文件钉三层：
+Background (integration round slimming proposal, final:
+notes/discussions/260923-integration-round-slimming-proposal.md): an empty gate blocker set
+means the red face is all pre-existing baseline debt or an external-environment record face
+(the decide face records it without blocking the ticket) - zero new red - but the arbitrator
+may still judge tests-fault and rerun known reds. A known-red rerun never turns green; it only
+burns rounds until the iteration cap hands the ticket to a human. This file pins three layers:
 
-- known_red 豁免面：tests_round_step 新增第三豁免形态（不计轮、记连续豁免轮）；
-  畸形入参 fail-closed 照计（多计不少计）；注记优先级 env-side-red >
-  jitter-green > known-red。
-- **转人工触发不许归零**（宿主回归棒）：已知红豁免轮耗尽仍走 MAX_TESTS_EXEMPT_ROUNDS
-  独立上限封盖转人工（出路四条在场）；tests-fault 计满上限照样 blocked——豁免面
-  永不吞掉「见到人」的触发。
-- 结构锁（防回退成「重跑已知红烧轮次」）：dev_lane 接线（known_red= 实参）与
-  仲裁判词锚（零新增红判 pass + 禁止重跑已知红）在位；tests_round_step 签名在位。
+- known-red exemption face: tests_round_step gains a third exempt shape (the round is not
+  counted, the consecutive exempt rounds are); malformed inputs still fail closed (counted, never
+  undercounted); the note priority is env-side-red > jitter-green > known-red.
+- The hand-over-to-human trigger must never be zeroed (host regression rod): when the known-red
+  exempt rounds are exhausted the independent MAX_TESTS_EXEMPT_ROUNDS cap still routes the ticket
+  to a human (all four exits present); a tests-fault count that reaches its cap still blocks - the
+  exemption face never swallows the "a human sees this" trigger.
+- Structural lock (against regressing into "rerun known reds and burn rounds"): the dev_lane
+  wiring (the known_red= argument) and the arbitration wording anchors (zero-new-red judged pass
+  plus the ban on rerunning known reds) are in place; the tests_round_step signature is present.
 """
 from __future__ import annotations
 

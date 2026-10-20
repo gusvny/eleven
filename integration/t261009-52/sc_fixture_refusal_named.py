@@ -43,7 +43,7 @@ SCENARIO = "t261004-20-test-anchor-brakes"
 LIB = REPO / "integration" / "lib_fault_injection.py"
 ENGINE = REPO / "server" / "engine" / "agent_activities.py"
 NAME = "t261009-52-fixture-refusal-named"
-LEAK_BODY = 'BAD = "/home/user/Documents/sandbar/inspection.yaml"\n'  # the exact KI-222 residue (the /home shape)
+LEAK_BODY = 'BAD = "/home/xingu/Documents/sandbar/inspection.yaml"\n'  # the exact KI-222 residue (the /home shape)
 
 _ck = ScenarioCheck(detail_cap=800, flush=True)
 ok, finish = _ck.ok, _ck.finish

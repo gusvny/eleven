@@ -34,7 +34,7 @@ pytestmark = pytest.mark.skipif(shutil.which("zstd") is None,
 TICKET = "t260922-06"
 ROLE = TICKET + "-developer"
 SESSION_ID = ROLE                    # 写/续侧确定性 id = <ticket>-<role>
-PROJECT_KEY = "--Users-user-Documents-sandbar--.lane-t260922-06--"  # 0.1.5 projectKey 形态样例
+PROJECT_KEY = "--Users-xingu-Documents-sandbar--.lane-t260922-06--"  # 0.1.5 projectKey 形态样例
 
 
 # ---------- 夹具工具（与 dualname 套件同制式） ----------

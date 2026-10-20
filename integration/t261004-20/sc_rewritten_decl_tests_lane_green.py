@@ -4,14 +4,14 @@
 用户场景（工单正文 261004 两条事故）：宿主把 doc face 改成每天跑的**合法改动**
 把 test_real_decl_parses_and_existing_instances_unchanged 打红（它锚生产声明当前
 cron/suite 值=production-snapshot 锚）；skip-switch 测试经硬编码机器路径
-/Users/user/Documents/sandbar/inspection.yaml 读生产声明——在泳道 worktree 里
+/Users/xingu/Documents/sandbar/inspection.yaml 读生产声明——在泳道 worktree 里
 读的是主 checkout 的树（检错了对象）。修复后用户可感知契约：
 
   R1 两条测试在本泳道 worktree 真跑全绿（engine venv pytest、cwd=仓根）——
      不变式对任何合法声明成立，合法改动（改 cron/开关集合）不再打红。
   R2 cwd 无关：从无关目录（temp dir）调用 pytest 同样全绿——测试不绑调用
      位置（绑 cwd 是绑机器形态的近亲）。
-  R3 事故字面量回归钉：两个点名文件内零 `/Users/user/Documents/sandbar` 字面量
+  R3 事故字面量回归钉：两个点名文件内零 `/Users/xingu/Documents/sandbar` 字面量
      （事故根源=机器路径绑定；全树扫描是 L17 的面，本条只钉本票点名两文件的
      复发，KI 事故回归纪律）。
   R4 事故当前值断言回归钉：事故中的**等值断言形态**（cron == "0 10 * * 1" /
@@ -36,7 +36,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 NAME = "t261004-20-rewritten-decl-tests-lane-green"
 TARGETS = ["server/engine/tests/test_t260915_18_inspection_stage.py",
            "server/engine/tests/test_260929_inspection_no_change_skip.py"]
-MACHINE_PATH = "/Users/user/Documents/sandbar"
+MACHINE_PATH = "/Users/xingu/Documents/sandbar"
 INCIDENT_LITERALS = ['== "30 9 * * *"', '== "0 10 * * 1"', 'suite == "full"']
 
 _ck = ScenarioCheck(detail_cap=800, flush=True)

@@ -114,6 +114,14 @@ export interface TicketRow {
 
 export interface CertifiedRow extends TicketRow {
   certifiedBy: string
+  /** t261016-09 (D4): the delivered split is STATED on the row — a delivered
+   *  ticket stays on the certified list (coverage outlives promotion) with
+   *  this marker, instead of silently emptying the table. */
+  delivered: boolean
+  /** t261019-23 (F3/F4): the row's own landing moment, dated ('' when the
+   *  wait record carried no readable waiting_since — the row then sorts
+   *  last and names the absence by showing nothing, never a guessed time). */
+  landedAt: string
 }
 
 export interface WaitingRow extends TicketRow {
@@ -153,7 +161,12 @@ export interface CertificationFace {
   deliveredTotal: number
   certified: CertifiedRow[]
   waiting: WaitingRow[]
+  /** What one signature would still promote: the UNDELIVERED certified part
+   *  (a freeze never holds the certified part hostage — design goal 8). */
   promotable: number
+  /** t261016-09 (D4): the refusal face — non-empty exactly when promotable
+   *  is 0, naming WHY nothing can be promoted. Never a mute "Promote 0". */
+  promoteBlock: string
   /** The moment of the boundary: the round that certified the covered set. */
   boundary: { at: string; runId: string } | null
   rounds: RoundFace[]
@@ -165,7 +178,8 @@ function emptyFace(reason: string): CertificationFace {
   return {
     ok: false, reason, lineId: '', state: 'GREEN', frozen: false,
     frozenFace: null, deliveredTotal: 0, certified: [], waiting: [],
-    promotable: 0, boundary: null, rounds: [], roundState: 'idle',
+    promotable: 0, promoteBlock: 'nothing is certified yet',
+    boundary: null, rounds: [], roundState: 'idle',
   }
 }
 
@@ -236,7 +250,19 @@ function freezeSummaryFace(v: unknown): {
   return { cause: str(v.cause).trim(), fixChain }
 }
 
-/** HH:MM, 24h local — the only clock the face shows. */
+/** 'YYYY-MM-DD HH:MM', 24h local — every moment the face shows carries its
+ *  date (t261019-23 F3: a clock-only '10:45' reads as today even when the
+ *  landing is a week old). */
+export function formatStamp(ms: unknown): string {
+  const n = num(ms)
+  if (Number.isNaN(n) || n < 0) return ''
+  const d = new Date(n)
+  const p = (x: number) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` + p(d.getHours()) + ':' + p(d.getMinutes())
+}
+
+/** Legacy clock-only shape (HH:MM), kept for callers that render a moment
+ *  whose date is on-screen already. No face field uses it since t261019-23. */
 export function formatClock(ms: unknown): string {
   const n = num(ms)
   if (Number.isNaN(n) || n < 0) return ''
@@ -256,11 +282,37 @@ export function verdictFace(cases: unknown): { verdict: 'green' | 'red'; blocker
   return { verdict: green ? 'green' : 'red', blockers: failed + env, result: { pass: passed, fail: failed, env } }
 }
 
-/** 'line <sha>' — the measured column's only legal shape. Never 'main@… +N'. */
+/** t261016-09 (D4): the engine's OWN green caliber — the run ledger row's
+ *  `verdict` field, exactly what develop_promote._is_green_reader reads
+ *  (obj.verdict == "green"; absent/unknown/unreadable -> not green, never
+ *  guessed). The panel used to recompute the absolute roll-up here and so
+ *  painted red the very rounds the engine certifies. This is the one green
+ *  answer for coverage and boundary decisions; `verdictFace` stays display-
+ *  side only (the counts line). */
+export function ledgerGreen(run: unknown): boolean {
+  return isObj(run) && run.verdict === 'green'
+}
+
+/** 'line <repo>:<sha8>' — the measured column's only legal shape. The repo
+ *  word comes off the run record's own repos entry so the short sha reads as
+ *  a revision of a named repo, not a serial number (t261019-23 F6). Never
+ *  'main@… +N'; an absent sha stays 'line ?'. */
 export function measuredToken(repos: unknown): string {
   const arr = Array.isArray(repos) ? repos.filter(isObj) : []
-  const rev = str(arr[0]?.revision)
-  return 'line ' + (rev ? rev.slice(0, 8) : '?')
+  const first = arr[0] ?? {}
+  const rev = str(first.revision)
+  const repo = str(first.repo)
+  const sha = rev ? rev.slice(0, 8) : '?'
+  return repo ? `line ${repo}:${sha}` : 'line ' + sha
+}
+
+/** Newest-first sort KEY over a wait record's own moment: the waiting_since
+ *  number itself, or -Infinity when it is missing/non-numeric (the row then
+ *  sorts LAST and still renders — named by its empty landedAt — never
+ *  dropped) (t261019-23 F4, review C1). */
+export function waitingMoment(v: unknown): number {
+  const n = num(isObj(v) ? v.waiting_since : NaN)
+  return Number.isNaN(n) ? -Infinity : n
 }
 
 /** Trigger word from the run record's own `source`. Records carry 'scheduled'
@@ -311,14 +363,21 @@ export function deriveCertificationFace(input: CertificationInput): Certificatio
   const deliveredTotal = delivered.size
 
   // Certified / waiting: the engine's own wait-state words decide the side.
-  // A delivered ticket is still `certified` to the engine's wait-state face
-  // (coverage outlives promotion), so the delivered set is subtracted here —
-  // the bar's certified side is what one signature would still promote.
+  // t261016-09 (D4): a delivered ticket STAYS on the certified list with its
+  // own marker — coverage outlives promotion, and silently subtracting it
+  // emptied the table by construction once everything was promoted (the
+  // host-measured "certified table is always empty"). What one signature
+  // would still promote is the UNDELIVERED part; the split is stated, never
+  // hidden.
+  // t261019-23 (F4, review C1): BOTH lists sort newest-first by the row's own
+  // waiting_since (the engine puts it on every wait-state row, certified
+  // included); a row without a readable moment sorts last and still renders.
+  const orderedWaits = waits.slice().sort((a, b) => waitingMoment(b) - waitingMoment(a))
   const certified: CertifiedRow[] = []
   const waiting: WaitingRow[] = []
-  for (const w of waits) {
+  for (const w of orderedWaits) {
     const ticket = str(w.ticket).trim()
-    if (!ticket || delivered.has(ticket)) continue
+    if (!ticket) continue
     const state = str(w.state)
     const meta = metaFor(input.ticketMeta, ticket)
     const row: TicketRow = {
@@ -327,16 +386,23 @@ export function deriveCertificationFace(input: CertificationInput): Certificatio
       epic: str(meta.epic),
     }
     if (state === 'certified') {
-      certified.push({ ...row, certifiedBy: str(w.covered_by) })
+      certified.push({ ...row, certifiedBy: str(w.covered_by), delivered: delivered.has(ticket), landedAt: formatStamp(w.waiting_since) })
     } else if (state === 'waiting' || state === 'red_implicated') {
       waiting.push({
         ...row,
-        landedAt: formatClock(w.waiting_since),
+        landedAt: formatStamp(w.waiting_since),
         redImplicated: state === 'red_implicated',
       })
     }
     // 'reverted' and every other engine word: not on this tab's two lists.
   }
+  const promotableCount = certified.filter((c) => !c.delivered).length
+  // The refusal face: promotable === 0 always names its reason (t261016-09).
+  const promoteBlock = promotableCount > 0
+    ? ''
+    : (certified.length
+      ? `all ${certified.length} certified ticket(s) are already delivered`
+      : 'nothing is certified yet')
 
   // The boundary: the latest green certification that covers the certified set.
   const coveredIds = new Set(certified.map((c) => c.certifiedBy))
@@ -344,25 +410,32 @@ export function deriveCertificationFace(input: CertificationInput): Certificatio
     .filter((c) => coveredIds.has(str(c.id)))
     .filter((c) => {
       const run = runs.find((r) => str(r.id) === str(c.run))
-      // 261013: an absent run record is NOT green (it used to pass `!run`,
-      // which would let a cert whose run record was lost count as covering —
-      // the same fail-closed rule the adapter keeps). Unknown is never green.
-      return !!run && verdictFace(run.cases).verdict === 'green'
+      // t261016-09 (D4): the engine's own caliber (ledgerGreen) decides — an
+      // absent run record or an absent/unknown verdict is never green.
+      return !!run && ledgerGreen(run)
     })
     .sort((a, b) => (num(a.at) || 0) - (num(b.at) || 0))
   const boundaryCert = covering[covering.length - 1] ?? null
   const boundary = boundaryCert
-    ? { at: formatClock(boundaryCert.at), runId: str(boundaryCert.run) }
+    ? { at: formatStamp(boundaryCert.at), runId: str(boundaryCert.run) }
     : null
 
   const rounds: RoundFace[] = runs.map((r) => {
-    const v = verdictFace(r.cases)
+    // Display verdict: the row's OWN verdict word decides when it is a known
+    // word (the engine's caliber); only an absent/unknown word falls back to
+    // the absolute roll-up shape, and that fallback can still never read a
+    // ledger row green against its own word (ledgerGreen guards coverage).
+    const own = str((isObj(r) ? r : {}).verdict)
+    const v = verdictFace(isObj(r) ? r.cases : undefined)
+    const verdict: 'green' | 'red' = own === 'green' ? 'green'
+      : own === 'red' || own === 'no_proof' ? 'red'
+      : v.verdict
     return {
       runId: str(r.id),
-      startedAt: formatClock(r.started_at),
+      startedAt: formatStamp(r.started_at),
       trigger: triggerWord(r.source),
       result: v.result,
-      verdict: v.verdict,
+      verdict,
       blockers: v.blockers,
       measured: measuredToken(r.repos),
     }
@@ -380,7 +453,8 @@ export function deriveCertificationFace(input: CertificationInput): Certificatio
     deliveredTotal,
     certified,
     waiting,
-    promotable: certified.length,
+    promotable: promotableCount,
+    promoteBlock,
     boundary,
     rounds,
     roundState: rs,

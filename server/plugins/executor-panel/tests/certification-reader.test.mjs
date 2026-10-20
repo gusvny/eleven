@@ -120,8 +120,8 @@ function adapterEnv(home, runsPath) {
   assert(face.face.deliveredTotal === 1 && face.face.promotable === 0
     && face.face.state === 'GREEN', 'derived face: delivered 1, promotable 0, GREEN')
   assert(face.face.rounds.length === 1 && face.face.rounds[0].trigger === 'auto'
-    && face.face.rounds[0].verdict === 'green' && /^line [0-9a-f]{8}$/.test(face.face.rounds[0].measured),
-  'rounds face: auto trigger, green verdict, line <sha> shape')
+    && face.face.rounds[0].verdict === 'green' && /^line sandbar:[0-9a-f]{8}$/.test(face.face.rounds[0].measured),
+  'rounds face: auto trigger, green verdict, line <repo>:<sha8> shape (F6)')
   n += 2
 
   // fail-closed run-header rule: certs on the line + no READABLE runs ledger =

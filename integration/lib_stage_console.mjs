@@ -137,6 +137,11 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
     const probe = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'],
       { encoding: 'utf8', timeout: 5000 });
     if (probe.error || probe.status !== 0) {
+      // t261012-05: also emit the README contract token on STDOUT — the gate's
+      // evidence tail truncates at 500 chars and the bracket form alone left
+      // the round face reading as an unjudged "not-checked/external" instead
+      // of a named environment red. Keep this line short; details on stderr.
+      console.log('ENV_FAIL: docker daemon unreachable (start the container runtime, e.g. OrbStack/Docker Desktop, then rerun)');
       console.error('[ENV_FAIL] stage-console — docker 守护进程不可达（5s 预检无响应/失败：'
         + `${probe.error?.code ?? probe.status ?? 'rc=' + probe.status}）。`
         + '先起容器运行时（OrbStack/Docker Desktop）再重跑；宿主 3099 红线不碰。');
@@ -253,6 +258,10 @@ export async function ensureStageConsole({ services = 'full', project = TREE_PRO
       : `rc=${p.status} ${String(p.stderr ?? '').slice(0, 200)}`;
     // Precision: after the STAGE_ line, append the tail of the CLI stderr
     // (compose diagnostics) — never keep just a conclusion and drop evidence.
+    // t261012-05: STDOUT contract token first (short, survives the 500-char
+    // evidence tail) so the round face shows a NAMED environment red with the
+    // remedy, not an unjudged "not-checked/external".
+    console.log(`ENV_FAIL: isolated test console could not be ensured (${named ?? why}) — provide it by docker (stage supply) or set SANDBAR_TEST_CONSOLE=http://<host>:<port>`);
     console.error(`[ENV_FAIL] stage-console — ${named ?? why}\n${String(p.stderr ?? '').slice(-600)}`);
     process.exit(2);
   }

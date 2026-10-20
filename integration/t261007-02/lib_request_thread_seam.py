@@ -67,7 +67,10 @@ def make_world(caller_role: str = "executor"):
     epics = Path(root) / "epics"
     epics.mkdir(parents=True)
     for code in EPICS:
-        (epics / (code + ".md")).write_text("# epic %s\nfixture register entry\n" % code, "utf-8")
+        # t261019-12: registry entries carry front-matter; retired:false accepts.
+        (epics / (code + ".md")).write_text(
+            "---\ncode: %s\nretired: false\nsummary: fixture register entry.\n---\n\n# %s\n" % (code, code),
+            "utf-8")
     env = base_env(root)
     env["SANDBAR_CALLER_PROJECT"] = KEY
     if caller_role == "executor":
@@ -169,7 +172,10 @@ def seed_world(root: str, caller_role: str = "executor"):
     epics = Path(root) / "epics"
     epics.mkdir(parents=True, exist_ok=True)
     for code in EPICS:
-        (epics / (code + ".md")).write_text("# epic %s\nfixture register entry\n" % code, "utf-8")
+        # t261019-12: registry entries carry front-matter; retired:false accepts.
+        (epics / (code + ".md")).write_text(
+            "---\ncode: %s\nretired: false\nsummary: fixture register entry.\n---\n\n# %s\n" % (code, code),
+            "utf-8")
     env = base_env(root)
     env["SANDBAR_CALLER_PROJECT"] = KEY
     decl = {"version": 1, "grants": {}, "executor_sessions": []}

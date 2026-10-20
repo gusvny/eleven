@@ -3,7 +3,7 @@
 contract over a fixture library (t261006-11, grey-box L3, offline seconds, zero
 docker/Temporal/browser, never touches 3099).
 
-User-perceivable contract under test (design notes/discussions/261004-文档面巡检-设计稿.md
+User-perceivable contract under test (design notes/discussions/261004-docs-face-inspection-design.md
 section 3): the daily doc-face period produces MECHANICAL findings with the SAME
 shape as agent findings, governed by all three false-positive disciplines
 (narrow by class / narrow the rules / explicit in-comment exemption), so the

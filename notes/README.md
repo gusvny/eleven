@@ -12,7 +12,7 @@
 | `discussions/` | 讨论纪要（调研、方案探讨） | 探讨中 → 有结论 → 转立项或搁置 |
 | `epics/` | 立项单（一个交付攻坚一个文件） | 已立项 → 执行中 → 已归档 |
 | `debts/` | 债务台账（known-issues 等） | open → closed（附票号） |
-| 根级单文件 | 决策速记（如 `会话tab全项目显示决策.md`） | 宿主拍板即定档；被 epic 吸收后注链接 |
+| 根级单文件 | 决策速记（如 `session-tab-all-projects-decision.md`） | 宿主拍板即定档；被 epic 吸收后注链接 |
 
 ## 与 docs/ 的分工（毕业规则）
 

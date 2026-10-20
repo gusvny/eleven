@@ -27,6 +27,7 @@ two explicitly IO-marked helpers (surface file load).
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -106,6 +107,121 @@ def resolve_prev_base(prev_doc: Any) -> Dict[str, Any]:
                         "base_source": "prev scan_meta.inspect.base_head",
                         "verdict": "ok"}
     return {"base": "", "base_source": "unavailable", "verdict": "unavailable"}
+
+
+# ---------------------------------------------------------------------------
+# Declared bootstrap base (t261018-12): the lawful restart for a dead prev-base
+# chain. DESIGN RULING (recorded on ticket t261018-12): B2 forbids SELF-seeding
+# — the engine picking the current HEAD as its own previous base, which erases
+# the diff. It does NOT forbid an OPERATOR-DECLARED base: a human writes
+# surface-bootstrap-<instance_id>.json (schema below) naming a real past commit;
+# the activity uses it as prev_base ONLY when the report chain is unavailable,
+# records the fact in the surface, and the next period inherits a real base
+# through the normal report chain. There is NO second fallback and NO HEAD
+# seeding: absent file → the period still fails loudly (unchanged); malformed
+# or unresolvable bootstrap → unavailable naming the defect (fail-closed).
+# ---------------------------------------------------------------------------
+
+#: schema marker for the bootstrap file (consumers reject foreign schemas)
+BOOTSTRAP_SCHEMA = 1
+
+
+def bootstrap_file_name(instance_id: str) -> str:
+    """Bootstrap file for one instance. Pure. The instance id must be a plain
+    basename (no separators) — defense in depth against a path-shaped id ever
+    reaching a filename."""
+    iid = str(instance_id or "")
+    if not iid or "/" in iid or "\\" in iid or iid in (".", ".."):
+        raise ValueError("invalid instance id (bootstrap filename): %r" % iid)
+    return "surface-bootstrap-%s.json" % iid
+
+
+def parse_bootstrap_base(raw: Any) -> Dict[str, Any]:
+    """Validate the CONTENT of a bootstrap file (pure; the file read and the
+    repo existence check are the caller's job).
+
+    Returns {"base": <sha>, "verdict": "ok"} or
+    {"base": "", "verdict": "unavailable", "reason": <named defect>}.
+
+    Policy: `base_ref` must be the FULL 40-hex commit sha. No prefixes (an
+    abbreviated sha is ambiguous by design; a ref name would drift). The pure
+    side checks syntax only — the caller must additionally confirm the commit
+    exists in the reviewed repo (`git rev-parse --verify <sha>^{commit}`) before
+    the base flows into a diff."""
+    if not isinstance(raw, dict):
+        return {"base": "", "verdict": "unavailable",
+                "reason": "bootstrap content is not an object (%s)" % type(raw).__name__}
+    if raw.get("schema") != BOOTSTRAP_SCHEMA:
+        return {"base": "", "verdict": "unavailable",
+                "reason": "bootstrap schema %r is not %r" % (raw.get("schema"), BOOTSTRAP_SCHEMA)}
+    ref = raw.get("base_ref")
+    if not isinstance(ref, str) or not ref.strip():
+        return {"base": "", "verdict": "unavailable",
+                "reason": "bootstrap base_ref missing/not a string (%r)" % (ref,)}
+    ref = ref.strip()
+    if len(ref) != 40 or any(c not in "0123456789abcdef" for c in ref.lower()):
+        return {"base": "", "verdict": "unavailable",
+                "reason": "bootstrap base_ref %r is not a full 40-hex commit sha "
+                          "(full sha required, no prefixes/refs)" % ref[:12]}
+    base: Dict[str, Any] = {"base": ref.lower(), "verdict": "ok"}
+    reason = raw.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        base["reason"] = reason.strip()[:200]
+    return base
+
+
+def load_declared_bootstrap(ledger_dir: Any, instance_id: str, base_dir: Any
+                            ) -> Dict[str, Any]:
+    """Read + validate + EXISTENCE-CHECK the instance's declared bootstrap base
+    (t261018-12; IO + git — the second explicitly IO-marked helper in this module).
+
+    Returns one of:
+      {"state": "absent"}                      — no bootstrap file (the period keeps
+                                                 its original unavailable reason)
+      {"state": "defective", "reason": ...}    — present but unreadable / malformed /
+                                                 wrong schema / bad sha syntax /
+                                                 UNRESOLVABLE in the reviewed repo —
+                                                 named, never silently ignored
+      {"state": "ok", "base": <40-hex sha>, "reason": ...?}
+                                                 — a real commit in the reviewed repo
+
+    The `git rev-parse --verify <sha>^{commit}` check is the boundary the pure
+    validator (parse_bootstrap_base) cannot cross: a syntactically valid but
+    nonexistent (typo / GC'd / foreign) sha must never flow into a diff. Never
+    raises."""
+    try:
+        fname = bootstrap_file_name(instance_id)
+    except ValueError as e:
+        return {"state": "defective", "reason": "bootstrap file name refused: %s" % e}
+    p = Path(str(ledger_dir or "")) / fname
+    if not p.is_file():
+        return {"state": "absent"}
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return {"state": "defective",
+                "reason": "%s unreadable (%s: %s)" % (fname, type(e).__name__, e)}
+    res = parse_bootstrap_base(raw)
+    if res.get("verdict") != "ok":
+        return {"state": "defective", "reason": "%s: %s" % (fname, res.get("reason"))}
+    sha = str(res["base"])
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(base_dir), "rev-parse", "--verify", "--quiet",
+             "%s^{commit}" % sha],
+            timeout=30, capture_output=True, text=True, check=False)
+    except (OSError, subprocess.TimeoutExpired, ValueError) as e:
+        return {"state": "defective",
+                "reason": "%s: existence check not runnable (%s: %s)"
+                          % (fname, type(e).__name__, e)}
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return {"state": "defective",
+                "reason": ("%s: base_ref %s does not resolve to a commit in the "
+                           "reviewed repo (typo, GC'd or foreign sha)" % (fname, sha[:12]))}
+    out: Dict[str, Any] = {"state": "ok", "base": sha}
+    if res.get("reason"):
+        out["reason"] = str(res["reason"])
+    return out
 
 
 def resolve_this_base(base_head: Any) -> Dict[str, Any]:

@@ -442,6 +442,34 @@ def failed_names(log_path):
     return sorted(out)
 
 
+def unverified_names(log_path):
+    """The names this round did NOT verify (status not-checked: an environment
+    face - no bench, no console, connection refused), reported separately from
+    the fail set (host order 261019, KI-01M55FVE2QZ0NR5AHQRHBNXX7S): a round
+    that could not verify a case must not read as a content regression, and a
+    red certificate opens a freeze on content guilt only. The names are still
+    published, never swallowed - "not verified" is not "green". Same source as
+    failed_names: the per-scenario result lines."""
+    try:
+        text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    out = set()
+    for line in text.splitlines():
+        s = line.strip()
+        if not s.startswith('{"name"'):
+            continue
+        try:
+            row = json.loads(s)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("status") == "not-checked":
+            name = row.get("name")
+            if isinstance(name, str) and name.strip():
+                out.add(name.strip())
+    return sorted(out)
+
+
 def tail(text, n=300):
     return (text or "").strip()[-n:]
 
@@ -615,6 +643,8 @@ def run(env=None):
             # so the engine can judge new-regressions-vs-main, not just counts
             if isinstance(header, dict):
                 header["failed_names"] = failed_names(log_path)
+                # published, never swallowed: the environment face of this round
+                header["unverified_names"] = unverified_names(log_path)
         sys.stdout.write(json.dumps(header, ensure_ascii=False) + "\n")
         sys.stdout.flush()
         return 0

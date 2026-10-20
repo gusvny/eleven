@@ -1383,11 +1383,11 @@ HOME_PATH_RE = re.compile(r"(?<![\w.])/(?:Users|home)/[A-Za-z0-9._-]+/")
 L17_IN_SCOPE = ("server/engine/tests/", "integration/")
 L17_EXEMPT = {
     "server/engine/tests/test_t260915_12_t01_caller_gate.py":
-        [("/Users/user/Documents/dengzhufpv", "fixture domain data (foreign project path), never opened")],
+        [("/Users/xingu/Documents/dengzhufpv", "fixture domain data (foreign project path), never opened")],
     "server/engine/tests/test_t260916_21_admin_log_rotation.py":
-        [("/Users/user/Documents/dengzhufpv", "fixture domain data (foreign project path), never opened")],
+        [("/Users/xingu/Documents/dengzhufpv", "fixture domain data (foreign project path), never opened")],
     "server/engine/tests/test_260929_inspection_lane_residue_repair.py":
-        [("git worktree add /Users/user/Documents/sandbar", "verbatim quoted REAL_OCCUPIED failure message")],
+        [("git worktree add /Users/xingu/Documents/sandbar", "verbatim quoted REAL_OCCUPIED failure message")],
     "server/engine/tests/test_t260917_02_inspection_redirect.py":
         [("Users/x/Documents/sandbar", "synthetic identity fixture (deliberately fake username), compared for equality, never resolved")],
     "server/engine/tests/test_t260921_14_dsh_path_pin.py":
@@ -1396,16 +1396,16 @@ L17_EXEMPT = {
         [("/Users/x/sandbar/server/engine/executor_grants.py",
           "author's verbatim probing case for the ../-escape/absolute-path authority-surface shapes, compared as a string against the protected-surface verdict, never opened")],
     "integration/t260907-01/sc_migration_path_hygiene.mjs":
-        [("Users/user/Documents/", "the old-repo hygiene guard's own NEEDLE (split-constructed) and its docstring story — exempt by file: regex-blind by design")],
+        [("Users/xingu/Documents/", "the old-repo hygiene guard's own NEEDLE (split-constructed) and its docstring story — exempt by file: regex-blind by design")],
     "integration/t261004-20/sc_test_anchor_brakes.py":
-        [("Users/user/Documents/sandbar/inspection.yaml", "fault-injection constant (the /Users shape this ticket's brake scenario plants and removes)"),
-         ("home/user/Documents/sandbar/inspection.yaml", "fault-injection constant (the /home shape, same brake scenario)")],
+        [("Users/xingu/Documents/sandbar/inspection.yaml", "fault-injection constant (the /Users shape this ticket's brake scenario plants and removes)"),
+         ("home/xingu/Documents/sandbar/inspection.yaml", "fault-injection constant (the /home shape, same brake scenario)")],
     "integration/t261009-52/sc_fixture_leak_brakes.py":
-        [("home/user/Documents/sandbar/inspection.yaml", "fault-injection constant (the exact 261008 KI-222 residue shape, planted by hand to exercise the pre-flight leak report, never resolved)")],
+        [("home/xingu/Documents/sandbar/inspection.yaml", "fault-injection constant (the exact 261008 KI-222 residue shape, planted by hand to exercise the pre-flight leak report, never resolved)")],
     "integration/t261009-52/sc_fixture_refusal_named.py":
-        [("home/user/Documents/sandbar/inspection.yaml", "fault-injection constant (the exact KI-222 residue shape, planted to prove lint names it a fixture, never resolved)")],
+        [("home/xingu/Documents/sandbar/inspection.yaml", "fault-injection constant (the exact KI-222 residue shape, planted to prove lint names it a fixture, never resolved)")],
     "integration/t261004-20/sc_rewritten_decl_tests_lane_green.py":
-        [("Users/user/Documents/sandbar", "the regression-pin needle itself (R3 asserts the two incident files no longer contain it)")],
+        [("Users/xingu/Documents/sandbar", "the regression-pin needle itself (R3 asserts the two incident files no longer contain it)")],
     "integration/t260929-03/sc_executor_panel_page.mjs":
         [("home/x/.sandbar/projects/alpha", "synthetic config fixture (deliberately fake username), rendered as provenance text, never resolved")],
 }

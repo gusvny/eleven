@@ -24,9 +24,9 @@ export const EPIC_CODE = 'demo-x'
 export const EPICS_PREFIX = '/sandbar-workbench/api/epics'
 export const TICKETS_PREFIX = '/sandbar-workbench/api/wf/tickets'
 
-export const EPIC_MD_A = `# 立项单：sandbar 侧演示立项\n\n| 字段 | 值 |\n| --- | --- |\n| 代号 | \\\`demo-x\\\` |\n| 状态 | 已立项（执行中） |\n`
-export const EPIC_MD_B = `# 立项单：fpv 侧演示立项\n\n| 字段 | 值 |\n| --- | --- |\n| 代号 | \\\`demo-x\\\` |\n| 状态 | 已立项（执行中） |\n`
-export const EPIC_MD_ENV = `# 立项单：env 覆盖侧演示立项\n\n| 字段 | 值 |\n| --- | --- |\n| 代号 | \\\`demo-x\\\` |\n| 状态 | 已立项（执行中） |\n`
+export const EPIC_MD_A = `---\ncode: demo-x\nretired: false\nsummary: sandbar side demo epic.\nstarted: 2026-09-11\n---\n\n# demo-x\n`
+export const EPIC_MD_B = `---\ncode: demo-x\nretired: false\nsummary: fpv side demo epic.\nstarted: 2026-09-11\n---\n\n# demo-x\n`
+export const EPIC_MD_ENV = `---\ncode: demo-x\nretired: false\nsummary: env override side demo epic.\nstarted: 2026-09-11\n---\n\n# demo-x\n`
 
 /** 断言登记：FAIL 进 failures，退出码按三态收敛。 */
 export function makeJudge(label) {
@@ -76,7 +76,7 @@ async function writeRegistry(root, repoA, repoB) {
 }
 
 /**
- * 建夹具：repoA/repoB 各有 notes/epics/<demo-x>.md（同代号不同标题=撞码面）。
+ * 建夹具：repoA/repoB 各有 docs/epics/<demo-x>.md（t261019-12：front-matter 形状，同代号不同 summary=撞码面）。
  * 返回 {root, repoA, repoB, regDir, cleanup, withEnv, drive}。
  */
 export async function makeFixture() {
@@ -84,11 +84,11 @@ export async function makeFixture() {
   const repoA = join(root, 'repoA')
   const repoB = join(root, 'repoB')
   for (const repo of [repoA, repoB]) {
-    await mkdir(join(repo, 'notes', 'epics'), { recursive: true })
+    await mkdir(join(repo, 'docs', 'epics'), { recursive: true })
     await mkdir(join(repo, 'server', 'dsh'), { recursive: true })
   }
-  await writeFile(join(repoA, 'notes', 'epics', `${EPIC_CODE}.md`), EPIC_MD_A, 'utf8')
-  await writeFile(join(repoB, 'notes', 'epics', `${EPIC_CODE}.md`), EPIC_MD_B, 'utf8')
+  await writeFile(join(repoA, 'docs', 'epics', `${EPIC_CODE}.md`), EPIC_MD_A, 'utf8')
+  await writeFile(join(repoB, 'docs', 'epics', `${EPIC_CODE}.md`), EPIC_MD_B, 'utf8')
   const regDir = await writeRegistry(root, repoA, repoB)
 
   // 项目键解析必须读本夹具注册表：registryRoot() 每次现读 SANDBAR_PROJECTS_DIR，

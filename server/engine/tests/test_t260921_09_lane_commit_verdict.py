@@ -84,6 +84,31 @@ def test_verdict_query_failed_sentinel_and_malformed():
         assert shared.lane_commit_verdict(0, 0, bad) == (False, "commit_query_failed")
 
 
+def test_verdict_face_query_failed_sentinel_is_not_no_commits():
+    """t261019-02: a face that failed to answer (-1) is a query failure, never
+    "no_commits". The old fall-through read as "0 commits;  — implementation not
+    persisted" with an empty face list and blamed a branch-position fault."""
+    for failed in (shared.LANE_COMMITS_QUERY_FAILED,):
+        assert shared.lane_commit_verdict(0, failed, 0) == (False, "commit_query_failed")
+        assert shared.lane_commit_verdict(0, 0, failed) == (False, "commit_query_failed")
+        assert shared.lane_commit_verdict(0, failed, failed) == (False, "commit_query_failed")
+    # real-diff control: a real diff still reads no_commits (never launder a true red into a query failure)
+    assert shared.lane_commit_verdict(0, 0, 1) == (False, "no_commits")
+    assert shared.lane_commit_verdict(0, 1, 0) == (False, "no_commits")
+
+
+def test_gate_probe_retries_transient_git_fault():
+    """t261019-02: the diff-face probes go through _git_retry (bounded retry of a
+    transient git fault, e.g. index.lock under parallel lanes), and the mutating
+    call sites stay on plain _git."""
+    src = (Path(__file__).resolve().parents[1] / "agent_activities.py").read_text()
+    assert 'pd = _git_retry(["diff", "--name-only", base_ref, branch], repo)' in src
+    assert '"status", "--porcelain", "-z", "--"] + SETTLE_PATHSPEC, tree)' in src
+    assert 'ps = _git_retry(["status", "--porcelain", "-z", "--"]' in src
+    # bounded: at most a few attempts, short delay (a frozen probe must not stall the gate)
+    assert "def _git_retry(" in src and "attempts: int = 3" in src
+
+
 # ---------- 纯函数：multirepo_zero_commit_error（整票零 commit 全局闸） ----------
 
 def test_global_gate_all_zero_names_repos():
@@ -144,10 +169,10 @@ def test_item_red_uncommitted_face_names_not_landed(tmp_path):
     item, n = aa._lane_commits_check_item("main", "lane/x", repo, repo)
     assert item["green"] is False and n == 0
     assert item["reason_code"] == "no_commits"
-    assert "实现未落盘" in item["next_action"]
+    assert "not persisted" in item["next_action"]  # t261018-05: copy in English
     # review C3：脏文件越写集形态互指「工作区干净」项处置，不再误导发 rework
-    assert "收回写集内" in item["next_action"]
-    assert "工作区有未提交改动" in item["detail"]
+    assert "pull them back into the write set" in item["next_action"]
+    assert "uncommitted working-tree changes" in item["detail"]
 
 
 def test_item_red_committed_face_names_position_anomaly(tmp_path):
@@ -160,7 +185,7 @@ def test_item_red_committed_face_names_position_anomaly(tmp_path):
     assert item["green"] is False and n == 0
     assert item["reason_code"] == "no_commits"
     assert "position abnormal" in item["next_action"]
-    assert "树与 base 有差异" in item["detail"]
+    assert "diverges from base" in item["detail"]
 
 
 def test_item_query_failed_never_asserts_not_landed(tmp_path):

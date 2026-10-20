@@ -21,7 +21,7 @@ docker image ls | grep sandbar-agent         # 新旧两个 tag 都应在场（�
 
 ```yaml
 paths:
-  dsh_bin: /Users/user/.sandbar/dsh-015/bin/dsh
+  dsh_bin: /Users/xingu/.sandbar/dsh-015/bin/dsh
 ```
 
 翻转后起第一张票前先看票面：`dsh_pin_<tag>.json` 的 `cmd[0]` 必须就是该绝对路径、

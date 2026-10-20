@@ -41,13 +41,13 @@ try {
     const rFpv = await fx.drive(fx.repoA)(EPICS_PREFIX, `${EPICS_PREFIX}?project=fpv`)
     j.ok(rFpv.status === 200 && rFpv.body?.ok === true, `epics 列表 ?project=fpv → 200（实得 ${rFpv.status}）`)
     const tFpv = rFpv.body?.result?.epics?.find((e) => e.code === EPIC_CODE)
-    j.ok(tFpv?.title === 'fpv 侧演示立项', `fpv 视图看到 fpv 仓立项单（实得 ${JSON.stringify(tFpv?.title)}）`)
+    j.ok(tFpv?.summary === 'fpv side demo epic.', `fpv 视图看到 fpv 仓立项单（实得 ${JSON.stringify(tFpv?.summary)}）`)
     const rA = await fx.drive(fx.repoA)(EPICS_PREFIX, `${EPICS_PREFIX}?project=sandbar`)
     const tA = rA.body?.result?.epics?.find((e) => e.code === EPIC_CODE)
-    j.ok(tA?.title === 'sandbar 侧演示立项', `sandbar 视图看到 sandbar 仓立项单（实得 ${JSON.stringify(tA?.title)}）`)
+    j.ok(tA?.summary === 'sandbar side demo epic.', `sandbar 视图看到 sandbar 仓立项单（实得 ${JSON.stringify(tA?.summary)}）`)
     const rD = await fx.drive(fx.repoA)(EPICS_PREFIX, `${EPICS_PREFIX}/${EPIC_CODE}?project=fpv`)
-    j.ok(typeof rD.body?.result?.markdown === 'string' && rD.body.result.markdown.includes('fpv 侧演示立项'),
-      'fpv 视图详情读 fpv 仓全文')
+    j.ok(rD.body?.result?.summary === 'fpv side demo epic.' && rD.body?.result?.path === 'docs/epics/demo-x.md',
+      'fpv 视图详情读 fpv 仓 front-matter（t261019-12：详情=meta+path，不回全文）')
   }
 
   // ── 子用例B next-hint 面退役（t260910-14 主题一收口重写）：预跑缓存与 dismiss 动作

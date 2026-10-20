@@ -227,6 +227,64 @@ def reopen_journal_rows(ledger_dir: Any) -> List[Dict[str, Any]]:
     return rows
 
 
+# ---- t261016-10: the inspection store as a dismiss existence-gate population ------
+#: Pointer-file glob for inspection_known_ticket_ids: every reserved period id
+#: lives in one of these (`inspection-<instance>-<period>.ticket`, pointer_path
+#: encoding single point).
+KNOWN_ID_POINTER_GLOB = "inspection-*.ticket"
+
+
+def inspection_known_ticket_ids(ledger_dir: Any) -> set:
+    """Every ticket id the inspection store can vouch for (t261016-10): the
+    population the dismiss existence gate unions with the engine ticket-list,
+    so an id that exists nowhere as a ticket face — a reserved-then-superseded
+    id (a pointer's `supersedes_ticket_id`), a terminated reopen source, a
+    collapsed same-period ticket — is still dismissible by name instead of
+    pressed-and-dead.
+
+    Sources (all read-only, all tolerant — carried verbatim from this module's
+    existing readers, per the t261009-31 "copy the shape deliberately" rule:
+    missing file = empty set; malformed JSON / non-dict / torn pointer skipped,
+    never a crash; blank strings dropped; a corrupt pointer counts as absent —
+    its id chain is double-recorded in the journals):
+
+      - `inspection-<instance>-<period>.ticket` pointer payloads: `ticket_id`
+        AND `supersedes_ticket_id`;
+      - `inspection-spawn.jsonl` rows: `ticket_id`;
+      - `inspection-reopen.jsonl` rows: `terminated_ticket_id`, `new_ticket_id`,
+        each entry of `collapsed_ticket_ids`.
+
+    The `.jsonl` suffixes are deliberate (deadman scans only `.json`) and are
+    consumed here through the same named readers the writers use, so reader and
+    writer can never drift. ledger_dir comes from the caller (tools/ticket.py
+    passes shared.INSPECTION_DIR), keeping this function pure and tmp_path-able.
+    """
+    directory = Path(str(ledger_dir))
+    out: set = set()
+
+    def _take(value: Any) -> None:
+        text = str(value or "").strip()
+        if text:
+            out.add(text)
+
+    for pointer in sorted(directory.glob(KNOWN_ID_POINTER_GLOB)):
+        try:
+            data = json.loads(pointer.read_text("utf-8"))
+        except (OSError, ValueError):
+            continue          # torn/corrupt pointer = absent; journals still vouch
+        if isinstance(data, dict):
+            _take(data.get("ticket_id"))
+            _take(data.get("supersedes_ticket_id"))
+    for row in spawn_journal_rows(directory):
+        _take(row.get("ticket_id"))
+    for row in reopen_journal_rows(directory):
+        _take(row.get("terminated_ticket_id"))
+        _take(row.get("new_ticket_id"))
+        for collapsed in (row.get("collapsed_ticket_ids") or []):
+            _take(collapsed)
+    return out
+
+
 # ---- t261008-22: the named void face for terminal blocked inspection tickets ------
 #: Void audit journal (t261008-22, host order 261008 "a mechanically-rejected
 #: inspection ticket needs a human exit"). Naming/suffix rationale is verbatim the

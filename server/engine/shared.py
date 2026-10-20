@@ -84,7 +84,7 @@ def _out_dir() -> pathlib.Path:
 
 def _epics_dir() -> pathlib.Path:
     return pathlib.Path(os.environ.get("SANDBAR_EPICS_DIR")
-                        or (_repo_root() / "notes" / "epics"))
+                        or (_repo_root() / "docs" / "epics"))
 
 
 def _scan_dir() -> pathlib.Path:
@@ -196,7 +196,7 @@ def project_search_attributes(project: str):
 
 # ---- Epic linkage (260824): a ticket workflow can be tied to an epic code ----
 # EpicCode = a Keyword search attribute whose value = the file stem of
-# notes/epics/<code>.md.
+# docs/epics/<code>.md (t261019-12: the registry moved from notes/epics; hard cut).
 # Registration: run_server.sh's launch arguments carry it; for a running server use
 #   bin/temporal operator search-attribute create --name EpicCode --type Keyword
 # The test environment (docker-compose.test.yml temporalite) does the same operator
@@ -241,17 +241,18 @@ def resolve_epics_dir(project_key):
     """The single resolution point for the epic document directory (ticket t260907-07:
     the CLI validation anchor = the project registry entry's home directory, same
     source and same rule as the ticket console UI's resolveEpicsDir — the same
-    registry, the same assembly rule <home>/notes/epics).
+    registry, the same assembly rule <home>/docs/epics; t261019-12 moved the store
+    from notes/epics to docs/epics with a hard cut — no notes/epics fallback).
 
     Three-level resolution (mirroring registry_root's "read env fresh on every call"
     precedent):
       1. env SANDBAR_EPICS_DIR non-empty → use it as read (self-test semantics
-         unchanged);
-      2. otherwise resolve_project_root(project_key) / notes/epics (an unknown
+         unchanged; an explicit operator override, not a fallback);
+      2. otherwise resolve_project_root(project_key) / docs/epics (an unknown
          key / an isolated entry is a fail-closed ValueError, never a silent retreat to
          the engine repo; the resolver is shared with t260915-20's inspection
          repo_root — one registry, one dirs[0] rule);
-      3. empty/None project_key → fall back to REPO_ROOT/notes/epics (the engine
+      3. empty/None project_key → fall back to REPO_ROOT/docs/epics (the engine
          anchor; unreachable in production, kept only for fixture / in-flight ticket
          compatibility — not a semantic promise).
     """
@@ -261,7 +262,42 @@ def resolve_epics_dir(project_key):
     key = str(project_key or "").strip()
     if not key:
         return _epics_dir()
-    return resolve_project_root(key) / "notes" / "epics"
+    return resolve_project_root(key) / "docs" / "epics"
+
+
+def parse_epic_front_matter(markdown: str):
+    """Parse the `docs/epics/*.md` front-matter block (t261019-12): the text between
+    two leading `---` lines, one `key: value` pair per line. Returns a dict (values
+    stripped, keys lowercased). Deliberately stdlib-only — no yaml dependency; the
+    shape is fixed by docs/design/epic-registry-v1.md (code/retired/summary/started).
+    A missing or malformed block raises ValueError with the reason — callers decide
+    whether that is fatal; the enforcement path treats it as retired-by-defect."""
+    if not markdown.startswith("---"):
+        raise ValueError("no front-matter block (file must start with '---')")
+    lines = markdown.splitlines()
+    end = None
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            end = i
+            break
+    if end is None:
+        raise ValueError("unterminated front-matter block (no closing '---')")
+    fields = {}
+    for line in lines[1:end]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if ":" not in stripped:
+            raise ValueError("malformed front-matter line (no 'key: value'): %r" % stripped)
+        key, _, value = stripped.partition(":")
+        fields[key.strip().lower()] = value.strip()
+    return fields
+
+
+def _epic_refuses(code: str, path: pathlib.Path, reason: str) -> ValueError:
+    return ValueError(
+        "epic '%s' refuses tickets — %s (%s). Open a new epic or ask the host to fix the document."
+        % (code, reason, path))
 
 
 def validate_epic_code(code: str, epics_dir=None) -> str:
@@ -277,7 +313,12 @@ def validate_epic_code(code: str, epics_dir=None) -> str:
     An empty string passes (tickets without an epic are allowed) → returns "". An
     illegal shape / a missing epic document → ValueError (the message carries the
     directory actually queried — key diagnostic information under a project anchor).
-    Returns the normalized code (as-is; the whitelist already constrains the shape)."""
+    Returns the normalized code (as-is; the whitelist already constrains the shape).
+
+    t261019-12: the retired boolean is enforced here. `retired: true` in the epic's
+    front-matter refuses a new ticket by name, in the same voice as the unknown-code
+    refusal. Fail-closed: a missing or unreadable front-matter block, or a `retired`
+    value that is not exactly `false`, is treated as refusing — never as accepting."""
     code = str(code or "").strip()
     if not code:
         return ""
@@ -291,6 +332,24 @@ def validate_epic_code(code: str, epics_dir=None) -> str:
         raise ValueError(
             "epic code not found: %r (%s has no such file). Existing codes: %s"
             % (code, path, "、".join(existing) if existing else "(directory empty or missing)"))
+    try:
+        markdown = path.read_text(encoding="utf-8")
+    except OSError as e:
+        raise _epic_refuses(code, path, "the document could not be read: %s" % e) from e
+    try:
+        fields = parse_epic_front_matter(markdown)
+    except ValueError as e:
+        raise _epic_refuses(code, path, "unreadable front-matter (%s)" % e) from e
+    retired = fields.get("retired", "")
+    if retired == "true":
+        raise ValueError(
+            "epic '%s' is retired — it no longer accepts tickets (%s, retired: true). "
+            "Open a new epic or ask the host to un-retire it." % (code, path))
+    if retired != "false":
+        raise _epic_refuses(
+            code, path,
+            "the front-matter has no readable 'retired: false' (found: %r); a defective "
+            "registry entry never accepts tickets" % (retired if retired else "(missing)"))
     return code
 
 
@@ -423,6 +482,31 @@ class IntegrationRunArgs:
     # expected=点名在册、fail-closed 校验在册性）。空=全量跑（放行唯一依据的收口
     # 跑形态）。爆炸半径/首轮决策在 dev_lane 调用点（单写者=targeted_rerun_plan）。
     only_names: List[str] = field(default_factory=list)
+
+
+@dataclass
+class BundleOutWsArgs:
+    """261019: which declared build-chain OUTPUT prefixes this lane may write.
+
+    Read from the lane's own `server/merge-checks.yaml` (`bundle_pairs`), keeping
+    only the pairs whose `src` the ticket write set covers - the same rule the
+    merge gate applies (`path_gates.bundle_out_prefixes`). The workflow cannot
+    read files, so this runs as an activity once per instance and the answer is
+    cached in meta; it is deliberately the ONLY widening path, so a project with
+    no declaration widens nothing."""
+
+    ticket_id: str
+    worktree: str = ""                          # lane root (the declaration lives there)
+    write_set: List[str] = field(default_factory=list)
+
+
+@dataclass
+class BundleOutWsResult:
+    """The declared build-chain output prefixes this lane may write (261019).
+    `note` always says what was decided and why (empty widening is never silent)."""
+
+    prefixes: List[str] = field(default_factory=list)
+    note: str = ""
 
 
 @dataclass
@@ -852,6 +936,30 @@ def gate_round_signature(receipt: Any) -> str:
                 det.append((str(d.get("name") or ""), int(d.get("exit") or 0)))
             except (TypeError, ValueError):
                 det.append((str(d.get("name") or ""), -999))
+    # 261019: a REUSED receipt measured nothing new — it must never count as a
+    # second identical round (the round that produced it already counted).
+    # Measured: t261019-44 stopped on "two identical faces" while the only red
+    # had been fixed and committed inside the ticket's own fixture; the two
+    # "rounds" were the same receipt read twice, so the stop asserted "a rerun
+    # cannot produce new information" about a run that never happened.
+    reuse = _g("reuse") or {}
+    if isinstance(reuse, dict) and (reuse.get("reused") or reuse.get("all_reused")):
+        return ""
+    # 261019: the MEASUREMENT ENVIRONMENT is part of the measurement. A round
+    # taken on a different engine code stamp (a fresh worker, an engine fix
+    # landed between rounds) or over a different lane revision can legitimately
+    # produce a different face, so those must break the tie rather than be
+    # ignored — otherwise the guard freezes a ticket whose world moved.
+    stamp = _g("code_stamp") or {}
+    stamp_id = ""
+    if isinstance(stamp, dict):
+        stamp_id = str(stamp.get("stamp_line") or stamp_id)
+    head = ""
+    for key in ("revision", "head", "lane_sha", "head_sha"):
+        v = _g(key)
+        if isinstance(v, str) and v.strip():
+            head = v.strip()
+            break
     payload = "|".join([
         ",".join(sorted(str(b) for b in blockers)),
         ",".join(sorted(str(x) for x in env_red)),
@@ -859,6 +967,8 @@ def gate_round_signature(receipt: Any) -> str:
         str(_g("affiliation_confidence", "") or ""),
         str(_g("baseline_ref", "") or ""),
         ";".join("%s=%d" % (n, e) for n, e in sorted(det)),
+        stamp_id,
+        head,
     ])
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -883,6 +993,153 @@ def integration_route(verdict: str, tests_rounds: int, code_rounds: int) -> str:
             "blocked:bounced to developer %d rounds exceed the cap (cap %d); needs human review%s" % (
                 code_rounds, MAX_CODE_FAULT_ROUNDS, _ARBITRATION_CAP_EXITS)
     return "blocked:arbitration verdict unknown verdict=%r; needs human review" % verdict
+
+
+# ---- Stop tiers (ticket t261019-26; authority = docs/design/
+# executor-operational-envelope-v1.md section 2, host-ruled 261019) ----
+# Three tiers of a blocked stop, decided by the workflow at _blocked time from the
+# RECORDED reason text alone. A lifter-supplied claim never feeds this classifier
+# (the freeze-exemption lesson: a ticket claiming to be a fix must not thereby
+# become liftable). Fail-closed: text matching no marker is judgement, i.e. a
+# person — the human gate is never weakened by an unmatched shape.
+
+STOP_TIER_EVIDENCE = "evidence"
+STOP_TIER_MECHANICAL = "mechanical"
+STOP_TIER_JUDGEMENT = "judgement"
+
+# Judgement shapes win FIRST: the records cannot settle them, so even a reason
+# that also mentions an environment word stays a person's ruling (measured case
+# t261016-11: "two consecutive rounds with a byte-identical gate measurement
+# face" — the underlying cause was an environment shutdown, but the SHAPE is a
+# content-face tie the records cannot disprove).
+_STOP_JUDGEMENT_MARKERS = (
+    "byte-identical gate measurement face",
+    "design conflict",
+    "needs human review",
+    "tests-fault",
+    "arbitration verdict unknown",
+)
+
+# Evidence shapes: the reason names a condition the records can disprove.
+# (marker, evidence_kind).
+_STOP_EVIDENCE_MARKERS = (
+    # 261020: a landing's certification wait that timed out is EVIDENCE-tier, not
+    # judgement — the records can disprove it the moment a round certifies the
+    # line. Measured: t261019-41 waited the whole bound (96 polls x 300 s) while
+    # no certification round ran at all (the line-round guard had leaked held),
+    # then stopped "for a human" although the only missing thing was a round.
+    ("no certification covered this landing", "cert_wait"),
+    ("certification wait", "cert_wait"),
+    ("bench unreachable", "environment_face"),
+    ("environment face", "environment_face"),
+    ("environment shutdown", "environment_face"),
+    ("worker shutdown", "environment_face"),
+    ("main moved", "main_moved"),
+    ("behind main", "main_moved"),
+    ("non-fast-forward", "main_moved"),
+    ("freeze episode", "freeze_release"),
+    ("freeze", "freeze_release"),
+)
+
+# Mechanical shapes: a front-door refusal a rework or retry_qc can clear.
+_STOP_MECHANICAL_MARKERS = (
+    ("zero-run supply", "zero_run_supply"),
+    ("zero-run receipt", "zero_run_supply"),
+    ("path gate", "path_gate"),
+    ("path-gate", "path_gate"),
+    ("write-set entry", "write_set_entry"),
+    ("write set entry", "write_set_entry"),
+    ("missing write-set", "write_set_entry"),
+    ("gate round", "gate_round"),
+)
+
+#: Upper bound for a cited ledger row id (structural validation only; the
+#: workflow takes no IO, so it cannot re-read the delivery ledger row — that
+#: deeper check is the executor's duty plus the written record).
+STOP_LIFT_ROW_ID_MAX = 200
+
+
+#: The marker the workflow writes next to an "identical face" stop (261020).
+IDENTICAL_FACE_STAMP_MARKER = "measured under code stamp "
+
+
+def identical_face_stop_is_stale(reason_text: Any, current_stamp: Any) -> bool:
+    """Is an "identical face" stop's premise already FALSE? (pure, 261020)
+
+    The stop says "a full rerun cannot produce new information". That is a claim
+    about the measurement environment, and the engine code is part of it: with a
+    different code stamp the next round measures something else, so the stop is
+    stale and a rerun IS informative. Measured cost of not asking: t261019-28 sat
+    stopped for 15+ hours across several engine fixes, waiting for a human.
+
+    Returns False unless ALL hold (fail-closed: an unprovable claim keeps the
+    human path):
+      * the reason carries the identical-face marker;
+      * the reason carries a recorded stamp (the workflow writes it);
+      * the caller supplies a current stamp and the two DIFFER.
+    """
+    if not isinstance(reason_text, str) or not reason_text.strip():
+        return False
+    text = reason_text.lower()
+    if "byte-identical gate measurement face" not in text:
+        return False
+    cur = str(current_stamp or "").strip()
+    if not cur:
+        return False
+    i = reason_text.find(IDENTICAL_FACE_STAMP_MARKER)
+    if i < 0:
+        return False
+    tail = reason_text[i + len(IDENTICAL_FACE_STAMP_MARKER):]
+    recorded = tail.split(" —")[0].split(")")[0].strip()
+    return bool(recorded) and recorded != cur
+
+
+def classify_stop_tier(reason_text: Any) -> Tuple[str, str]:
+    """Classify a recorded block reason into (tier, evidence_kind) (pure function).
+
+    Reads ONLY the reason text `_blocked` was called with. Any input that is not a
+    string (None, bytes, a dict...) is treated as an unknown shape → judgement.
+    Unmatched text → (judgement, ""). Judgement markers are checked first, so a
+    text that mentions both a judgement shape and an environment word classifies
+    judgement (the t261016-11 lesson: the shape, not the suspected cause, rules)."""
+    if not isinstance(reason_text, str) or isinstance(reason_text, bytes):
+        return (STOP_TIER_JUDGEMENT, "")
+    text = reason_text.lower()
+    if not text.strip():
+        return (STOP_TIER_JUDGEMENT, "")
+    for marker in _STOP_JUDGEMENT_MARKERS:
+        if marker in text:
+            return (STOP_TIER_JUDGEMENT, "")
+    for marker, kind in _STOP_EVIDENCE_MARKERS:
+        if marker in text:
+            return (STOP_TIER_EVIDENCE, kind)
+    for marker, kind in _STOP_MECHANICAL_MARKERS:
+        if marker in text:
+            return (STOP_TIER_MECHANICAL, kind)
+    return (STOP_TIER_JUDGEMENT, "")
+
+
+def stop_lift_row_id_error(row_id: Any, kind: Any) -> str:
+    """Structural validation of a cited ledger row id (pure function). Returns ""
+    when the row id is well-formed, else a named refusal reason. Only the shape is
+    checked (non-empty, bounded length, no control characters, at least one
+    alphanumeric); the semantic check that the row really says what the lifter
+    claims is deliberately NOT here — the workflow takes no IO (see the doc note
+    in executor-operational-envelope-v1.md)."""
+    if not isinstance(row_id, str):
+        return "cited row id is not a string"
+    rid = row_id.strip()
+    if not rid:
+        return "cited row id is empty (an evidence lift without a cited row id is a defect, not a shortcut)"
+    if len(rid) > STOP_LIFT_ROW_ID_MAX:
+        return "cited row id over the length cap (%d > %d)" % (len(rid), STOP_LIFT_ROW_ID_MAX)
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in rid):
+        return "cited row id carries control characters"
+    if not any(ch.isalnum() for ch in rid):
+        return "cited row id carries no alphanumeric character"
+    if kind is not None and not isinstance(kind, str):
+        return "recorded evidence kind is not a string"
+    return ""
 
 
 def tests_round_step(verdict: str, tests_rounds: int, exempt_rounds: int, *,
@@ -2177,7 +2434,15 @@ def main_sync_note(receipt: Any) -> str:
     head = str(receipt.get("lane_head") or "").strip()
     if mode not in ("merged", "up_to_date") or not sha:
         return ""
-    head_txt = (", lane HEAD=%s" % head) if head else ""
+    # t261016-13: the branch tip joins the note (optional - old receipts lack the key,
+    # nothing is minted). Omitted when absent or equal to lane_head; a real difference
+    # is named explicitly (the face never claims the branch follows).
+    tip = str(receipt.get("branch_tip") or "").strip()
+    if tip and head and tip != head:
+        head_txt = (", lane HEAD=%s, branch tip=%s (BRANCH BEHIND WORKTREE)"
+                    % (head, tip))
+    else:
+        head_txt = (", lane HEAD=%s" % head) if head else ""
     if mode == "merged":
         return "main@%s merged into the lane (pre-verification main sync%s)" % (sha[:7], head_txt)
     return "main@%s already up to date (fast path, zero action%s)" % (sha[:7], head_txt)
@@ -3913,7 +4178,7 @@ class TicketInput:
     ticket_id: str
     template_id: str
     project: str = ""                            # the project key (the machine-level per-key registry ~/.sandbar/projects/<key>/project.yaml); empty = illegal, blocked at the ticket-start entry
-    epic: str = ""                               # the epic code (notes/epics/<code>.md must exist); empty = not tied to an epic
+    epic: str = ""                               # the epic code (docs/epics/<code>.md must exist, retired: false); empty = no epic
     title: str = ""
     lane: str = ""
     workspace: Optional[Dict[str, str]] = None   # {type: worktree|dir, path} | None
@@ -3950,6 +4215,13 @@ class TicketInput:
     # mechanical re-check gate then skips the 「lane has 0 commits」 test.
     no_file_changes: bool = False
     acceptance_extra: List[str] = field(default_factory=list)  # A5.5: per-instance additions (appended to the first stage's checklist)
+    # t261019-32 (quickmanual lane): the mandatory evidence declaration (guardrail 3
+    # of docs/design/quickmanual-lane-v1.md) — shape {"kind": ..., "name": ...}, kind
+    # ∈ QUICK_EVIDENCE_KINDS ("l1_battery" | "scenario" | "check"; "check" is the
+    # document-only form: the check that ran). Validated at the quickmanual `open`
+    # stage by quick_evidence_validate; defaulted empty = non-quickmanual templates
+    # never see it and old in-flight instances replay unchanged.
+    evidence: Dict[str, str] = field(default_factory=dict)
     deliverables: str = ""
     # Body = the original user request (ticket t260822-m16: user_request kept verbatim,
     # taking precedence when present; the default falls back to body);
@@ -4188,6 +4460,98 @@ class ReworkRequest:
     cross_project_note: str = ""
 
 
+# ---- Quickmanual lane (t261019-32; design docs/design/quickmanual-lane-v1.md) ----
+
+#: The evidence kinds a quickmanual ticket may declare (guardrail 3: an L1 battery, a
+#: scenario, or — document-only — the check that ran). The single source of truth for
+#: quick_evidence_validate and its UT truth table.
+QUICK_EVIDENCE_KINDS = ("l1_battery", "scenario", "check")
+
+#: work_done intake limits (an intake gate: oversized payloads never enter the event
+#: history; same discipline as HOST_RULING_NOTE_INPUT_LIMIT).
+QUICK_WORK_NOTE_INPUT_LIMIT = 2000
+QUICK_WORK_EVIDENCE_REF_LIMIT = 500
+
+
+def quick_evidence_validate(raw: Any) -> Tuple[bool, str, Dict[str, str]]:
+    """Validate the quickmanual evidence declaration (pure function, UT truth table).
+
+    Returns (ok, reason, normalized). Malformed input is refused with a NAMED reason,
+    never silently coerced (external-input discipline): non-dict shape, missing/blank
+    kind, kind outside QUICK_EVIDENCE_KINDS, missing/blank name, non-string shapes,
+    and an over-limit name are each named. The check validates the DECLARATION only —
+    whether the delivered work actually contains the declared battery/scenario/check
+    is the merge human gate's judgment (recorded on the merge stage acceptance, not
+    silently trusted to the machine)."""
+    if not isinstance(raw, dict):
+        return (False, "evidence declaration must be an object {kind, name} (got %s)"
+                % type(raw).__name__, {})
+    kind = raw.get("kind")
+    name = raw.get("name")
+    if kind is None:
+        return (False, "evidence kind missing (expected one of: %s)"
+                % ", ".join(QUICK_EVIDENCE_KINDS), {})
+    if not isinstance(kind, str):
+        return (False, "evidence kind must be a string (got %s)" % type(kind).__name__,
+                {})
+    if not kind.strip():
+        return (False, "evidence kind missing or blank (expected one of: %s)"
+                % ", ".join(QUICK_EVIDENCE_KINDS), {})
+    if kind not in QUICK_EVIDENCE_KINDS:
+        return (False, "evidence kind %r is not one of: %s"
+                % (kind, ", ".join(QUICK_EVIDENCE_KINDS)), {})
+    if name is None:
+        return (False, "evidence name missing (name the battery/scenario/check that "
+                "proves this fix)", {})
+    if not isinstance(name, str):
+        return (False, "evidence name must be a string (got %s)" % type(name).__name__,
+                {})
+    if not name.strip():
+        return (False, "evidence name missing or blank (name the battery/scenario/"
+                "check that proves this fix)", {})
+    if len(name) > QUICK_WORK_EVIDENCE_REF_LIMIT:
+        return (False, "evidence name over %d characters (%d) — name the proof, do "
+                "not paste its output" % (QUICK_WORK_EVIDENCE_REF_LIMIT, len(name)), {})
+    return (True, "", {"kind": kind, "name": name.strip()})
+
+
+@dataclass
+class WorkDoneSignal:
+    """The quickmanual `work_done` signal payload (t261019-32): the session that
+    worked the lane signals done. `session` is MANDATORY and non-blank (identity
+    guardrail: the lane records who worked, never a borrowed role name) — blank or
+    whitespace-only values are refused by the workflow side into `refused` and never
+    wake the parked work stage. All defaulted fields = replay-safe decoding of old
+    history events (TicketInput precedent)."""
+
+    session: str
+    role: str = ""
+    note: str = ""
+    evidence_ref: str = ""
+    # t260915-12 cross-project stamp (same family contract as Signature; the client
+    # stamps it after the caller gate, the caller-supplied value is overwritten).
+    caller_project: str = ""
+    cross_project_note: str = ""
+
+
+@dataclass
+class StopLiftRequest:
+    """The lift_stop signal payload (t261019-26): the executor's request to clear a
+    blocked stop. The cited_row_id is required for evidence stops (the design calls an
+    evidence lift without a cited row id a defect, not a shortcut); note is the
+    written reason every lift must carry. No field here can change the stop's tier —
+    the tier is derived from the recorded block reason alone (classify_stop_tier)."""
+
+    who: str
+    tier: str = ""
+    cited_row_id: str = ""
+    note: str = ""
+    # t260915-12 cross-project gate stamp (Signature-family contract; defaults
+    # keep the payload replay-safe).
+    caller_project: str = ""
+    cross_project_note: str = ""
+
+
 @dataclass
 class HostRulingRequest:
     """The host_ruling signal payload (KI-053): the formal injection channel for the
@@ -4203,7 +4567,7 @@ class HostRulingRequest:
     cross_project_note: str = ""
 
 
-# ---- Ticket pause（工单 t260908-01，设计基准=notes/epics/ticket-pause.md）----
+# ---- Ticket pause (ticket t260908-01; design basis = docs/epics/ticket-pause.md) ----
 # pause/resume 与 sign/rework/ruling 同族：只从 client.py CLI 信号通道进，agent
 # prompt/activities 无发送入口。粒度=段间暂停（当前段含在飞 activity 自然跑完，
 # workflow 停在段间门口等 resume）。机制真源=base.py 的 TicketPauseMixin。
@@ -5335,9 +5699,21 @@ def lane_commit_verdict(lane_commits, committed_diff_count, uncommitted_count):
                                查询失败=不可判定，fail-closed 红，但绝不断言「未落盘」
                                （error precision：报错必须与事实同向）。
     畸形输入（None/bool/非 int/意外负数）一律不抛、按查询失败红 fail-closed；差异计数
-    畸形=不可证「无差异」→ 不给 amber（宁可红，不可假绿）。"""
+    畸形=不可证「无差异」→ 不给 amber（宁可红，不可假绿）。
+
+    t261019-02 (line round cert-01M5618R90KBGG8RT1KD3BFGT4, case
+    t261008-24-zero-run-gate-stop): a diff face that failed to answer carries the
+    LANE_COMMITS_QUERY_FAILED sentinel. That sentinel must classify as
+    commit_query_failed; it used to fall through the "count != 0" test into
+    no_commits, so the receipt read "0 commits;  — implementation not persisted"
+    with an EMPTY face list and pointed the reader at a branch-position fault that
+    was never observed (error precision: the report must name the check that
+    failed)."""
     def _bad(v):
         return (not isinstance(v, int)) or isinstance(v, bool) or v < LANE_COMMITS_QUERY_FAILED
+
+    def _face_unknown(v):
+        return _bad(v) or v == LANE_COMMITS_QUERY_FAILED
 
     if _bad(lane_commits):
         return False, "commit_query_failed"
@@ -5345,8 +5721,8 @@ def lane_commit_verdict(lane_commits, committed_diff_count, uncommitted_count):
         return True, "has_commits"
     if lane_commits == LANE_COMMITS_QUERY_FAILED:
         return False, "commit_query_failed"
-    # lane_commits == 0：无提交，看两差异面（面计数畸形=不可证无差异，fail-closed）
-    if _bad(committed_diff_count) or _bad(uncommitted_count):
+    # lane_commits == 0：无提交，看两差异面（面畸形/查询失败=不可证无差异，fail-closed）
+    if _face_unknown(committed_diff_count) or _face_unknown(uncommitted_count):
         return False, "commit_query_failed"
     if committed_diff_count == 0 and uncommitted_count == 0:
         return True, "no_changes_no_diff"
@@ -5477,6 +5853,11 @@ class MergeCheckResult:
     # the merge review face reads the record, not the quarantine diffs. Defaulted
     # EMPTY so RUNNING instances replaying historical events do not break.
     write_set_history: List[str] = field(default_factory=list)
+    # 261019: the self-healing decision as DATA (the workflow has no file IO, so
+    # the policy is resolved here, where the lane's declaration is readable).
+    # None = no auto route (an un-opted-in or mixed red: a human decides).
+    # Shape: {"stage", "code", "note"} from path_gates.auto_rework_plan.
+    auto_rework: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -5511,6 +5892,12 @@ class ConflictPrepResult:
     target_sha: str = ""                      # 本次合并目标 ref 的完整 sha（机械证据：main@sha 进票面）
     lane_head: str = ""                       # 动作后泳道 HEAD 短 sha（快路径/干净合并/冲突现场语义见活动 docstring）
     up_to_date: bool = False                  # True = 目标 ref 已是 HEAD 祖先（is-ancestor 快路径零动作返回，幂等）
+    # t261016-13 (branch-behind guard) evidence face: the lane branch tip short sha.
+    # Additive key with a default - old history dicts rebuild with zero change. On a
+    # success receipt branch_tip must equal lane_head (with the worktree attached the
+    # branch moves with the commit); any mismatch = the sync activity refused by
+    # name, never an ok=True face.
+    branch_tip: str = ""
     # t260925-12 闸段分相计时（additive，口径同 ChangedFilesResult.wall_s）。
     wall_s: float = 0.0
 
@@ -5942,6 +6329,14 @@ TEMPLATE_CLASS_NAMES: Dict[str, str] = {
     # 此登记。收窄守卫（sc_template_face_narrowing 等）随之把默认面由 {dev-lane} 更新为
     # {dev-lane, light-lane}——退役模板仍不得复活，守卫语义不变。
     "light-lane": "LightLaneWorkflow",
+    # t261019-32 (quickmanual-lane v1): the third builtin template — one session
+    # works the lane, no agent stages. Deliberately NOT registered here yet: a
+    # NAMES-ONLY entry would let a ticket be accepted onto a workflow no worker
+    # runs (arbitrate gen0 item 1). The registration lands as ONE atomic step in
+    # the follow-up round, on BOTH faces (this table + TEMPLATE_DISPLAY_NAMES +
+    # default_gate_for + workflows_v2.TEMPLATE_CLASSES / ALL_WORKFLOWS_V2) together
+    # with the generated server/workflows/quickmanual-lane.yaml and the guard
+    # widenings — the class is already implemented and UT-covered in dev_lane.py.
 }
 # 夹具模板环境门（工单 t260908-01）：SANDBAR_FIXTURE_TEMPLATES=1 时把测试夹具模板
 # fixture-two-step 挂进注册表——生产/闸内默认面恰为 {dev-lane}（sc_template_face
@@ -6978,6 +7373,43 @@ def engine_venv_python(repo_root) -> Optional[pathlib.Path]:
     return None
 
 
+# ---- engine-runtime write exemption (ticket t261016-19, Face 1) ----
+
+def is_engine_runtime_path(path) -> bool:
+    """Is this path an engine-provisioned runtime artifact of the lane itself, never
+    a deliverable write (t261016-19 Face 1)?
+
+    The exempt set, named exactly (review comment 4 — both shapes pinned):
+      1. the first path component is `.venv` or `.venv-<suffix>` (`.venv-<ticket>/...`)
+         — the lane's own virtualenv, recreated by every stage that needs an
+         interpreter (deliberately narrower than a glob `.venv*`: `.venvfoo` is
+         NOT exempt);
+      2. the literal prefix `server/engine/.venv/` — the engine venv when a lane
+         tree carries it.
+    Anything else is NOT exempt: a nested `src/.venv/`, a bare `venv/`, a name
+    merely containing "venv", or any real source edit stays in scope and keeps
+    being judged (an over-broad match would exempt a genuine out-of-write-set
+    edit).
+
+    Fail-closed (KI-009 parser stance): non-str, empty, absolute, a `..` or empty
+    component → False, i.e. judged in scope, never exempted by accident. Pure
+    function, no stored state — replay-safe by construction; a False from here
+    always means "no exemption".
+    """
+    if not isinstance(path, str) or not path:
+        return False
+    parts = path.split("/")
+    if path.startswith("/") or ".." in parts or "" in parts:
+        return False
+    first = parts[0]
+    # deliberately narrower than a glob `.venv*`: only `.venv` itself and
+    # `.venv-<suffix>` (the lane-venv naming convention) are exempt — a name like
+    # `.venvfoo` stays in scope (an over-broad match would exempt a real edit)
+    if first == ".venv" or first.startswith(".venv-"):
+        return True
+    return path.startswith("server/engine/.venv/")
+
+
 # ---- worker 停机取消的归因面（t260916-29）----
 # 缺陷链：票专属 worker 是 console 子进程；修复前 Worker 未设 graceful_shutdown_timeout
 # （SDK 缺省 0=立即取消），console 重启/重载 → 全部子 worker SIGTERM → 在飞 agent 活动
@@ -7285,6 +7717,32 @@ except Exception as _pt_err:  # 加载器故障：点名挂账，不静默、不
 _PROCESS_STARTED_AT = ""
 _PROCESS_PID = 0
 
+# ---- delivery ledger root (261019 direct fix, the sandbox trap) -----------
+#
+# t261019-02 put the ledger read on the close-out path, which runs INSIDE the Temporal
+# workflow sandbox, and develop_certify.ledger_path() reads os.environ.get() there ->
+# RestrictedWorkflowAccessError -> every merge close-out refused (measured: t261019-10
+# and t261019-11 blocked at "delivery ledger unreadable"). Same shape as the code_stamp
+# lesson above: the value is pinned by the PROCESS ENTRY (worker.py, not sandboxed) and
+# read later without touching the environment. An unstashed process keeps the legacy
+# env-read path byte-identically (CLI/tests).
+_DELIVERY_LEDGER_DIR = ""
+
+
+def note_delivery_ledger_dir(path: Optional[str] = None) -> str:
+    """Pin the delivery ledger root for this process (worker entry calls this).
+    Idempotent, first pin wins. Empty/whitespace = nothing pinned."""
+    global _DELIVERY_LEDGER_DIR
+    value = str(path or "").strip()
+    if value and not _DELIVERY_LEDGER_DIR:
+        _DELIVERY_LEDGER_DIR = value
+    return _DELIVERY_LEDGER_DIR
+
+
+def delivery_ledger_dir() -> str:
+    """The pinned delivery ledger root ("" when unpinned). Never reads env."""
+    return _DELIVERY_LEDGER_DIR
+
 
 def note_process_start(when: Optional[str] = None) -> str:
     """进程入口（worker.py）调用：把**真·启动时刻**钉进本进程。幂等：首钉为准。
@@ -7385,6 +7843,13 @@ CODE_STAMP_MODULES: Tuple[Tuple[str, str], ...] = (
     ("integration_discipline", "server/engine/integration_discipline.py"),
     ("path_gates", "server/engine/path_gates.py"),
     ("authz_gates", "server/engine/authz_gates.py"),
+    # t261016-11: foreign_write holds the pure predicates the foreign-file
+    # repair face judges through — line!=lane ownership (a path whose blob
+    # matches a line candidate is never foreign) and the importer
+    # self-consistency floor (a removal with importers left refuses the whole
+    # repair). It decides merge_check red/green verdicts, so its freshness
+    # must be visible on the stamp (tripwire criterion (a)).
+    ("foreign_write", "server/engine/foreign_write.py"),
     # t261004-27: the delivery face decides authority verdicts (forged raised_by /
     # unknown face / missing identity block / key-identity mismatch / a declared
     # caller_project are each named refusals) — an enforcement module, so it must

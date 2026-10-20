@@ -862,6 +862,44 @@ def suite_receipt_rows(path: Any) -> Tuple[List[str], Dict[str, Any]]:
     return rows, meta
 
 
+#: 261020 (host order: move the KI ledger out of notes, do not keep it in git): the fault ledger
+#: lives in the project store, outside the repository. Readers consult the store
+#: FIRST (the ledger itself) and may fall back to a repository pointer file that
+#: carries only the pinned entries, so an inspection run on a checkout that has no
+#: store still degrades to whatever the repo keeps.
+KI_STORE_SUBPATHS = (("kb", "known-issues.jsonl"), ("kb", "known-issues.md"))
+
+
+def ki_ledger_candidates(base: Any) -> List[Path]:
+    """Where to look for the ledger, in order (pure; missing paths are skipped).
+
+    1. the project store: ``<projects root>/<key>/kb/known-issues.md`` — derived
+       from the repository path's project key when the caller passed a base tree;
+    2. the repository pointer ``<base>/notes/debts/known-issues.md`` (pinned
+       entries only, kept for a reader in the repo)."""
+    out: List[Path] = []
+    # the tree being inspected comes FIRST: an inspection of a fixture or a
+    # checkout must read the ledger that travels with it. The project store is the
+    # fallback, which is what a real checkout needs now that the repository keeps
+    # only a pointer (261020).
+    if base:
+        out.append(Path(base) / "notes" / "debts" / "known-issues.md")
+        out.append(Path(base) / "notes" / "debts" / "known-issues.jsonl")
+    try:
+        import shared  # local: this module stays importable from the tool layer
+        root = shared.perkey_projects_root()
+        for key_dir in sorted(Path(root).iterdir()):
+            if not key_dir.is_dir():
+                continue
+            for sub in KI_STORE_SUBPATHS:
+                cand = key_dir.joinpath(*sub)
+                if cand.is_file():
+                    out.append(cand)
+    except Exception:  # noqa: BLE001 — a store we cannot read is simply not a candidate
+        pass
+    return out
+
+
 def ki_open_entries(path: Any) -> Tuple[List[str], Dict[str, Any]]:
     """KI 册（notes/debts/known-issues.md）→ open 条目清单。
 

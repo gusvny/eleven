@@ -1,0 +1,115 @@
+# t261016-11 wiring patch for the line-side foreign-repair face.
+# Apply point: server/engine/agent_activities.py as of the t261012-09 landing
+# (commit 496aa0c8, blob this diff was generated against). The face lives only
+# on the line; this lane's base (main @ 30420bb8) does not carry it.
+# Content: (a) _line_candidate_refs helper; (b) line!=lane guard injected into
+# both foreign_files classification calls; (c) the self-consistency floor in
+# _repair_foreign_files (importer present => whole repair refused, reason_code
+# foreign_repair_refused_importers at the merge_check face). allow_commit
+# gating and the MERGE_HEAD stage-only rule are carried verbatim, unchanged.
+# Companion module: server/engine/foreign_write.py (this lane carries it in
+# full; unit batteries test_t261016_11_*.py).
+diff --git a/server/engine/agent_activities.py b/server/engine/agent_activities.py
+--- a/server/engine/agent_activities.py
++++ b/server/engine/agent_activities.py
+@@ -2869,6 +2869,33 @@ def _live_lane_candidates(tree: Path, in_flight_ids: Any = None,
+     return [c for c in cands if c["ref"] != (exclude_ref or "").strip()]
+ 
+ 
++def _line_candidate_refs(tree: Path) -> List[str]:
++    """t261016-11 ②: the line candidate refs for the line!=lane guard.
++
++    The line is not a lane: it legitimately carries landed content main does
++    not have yet. Candidate refs are the known line-carrier branch names
++    (`develop`, anything under `develop/`, and `line`/`line-*`/`lane-line`);
++    only refs that actually resolve are returned. The caller feeds them to
++    foreign_write.foreign_files via the line_owned injection — a path whose
++    blob is byte-identical at a line ref is never classified foreign.
++    Unknown/unresolvable refs are skipped, never guessed."""
++    p = _git(["for-each-ref", "refs/heads", "--format=%(refname:short)"], tree)
++    if p.returncode != 0:
++        return []
++    names = {ln.strip() for ln in (p.stdout or "").splitlines()}
++    out: List[str] = []
++    for name in sorted(names):
++        if not name:
++            continue
++        short = name.split("/")[-1]
++        if (name == "develop" or name.startswith("develop/")
++                or short == "line" or short.startswith("line-")
++                or short == "lane-line"):
++            if _git(["rev-parse", "--verify", "--quiet", name], tree).returncode == 0:
++                out.append(name)
++    return out
++
++
+ def _current_branch(tree: Path) -> str:
+     """The lane's current branch name (empty on a detached HEAD) — the
+     ownership candidates must exclude the carrier lane itself."""
+@@ -2925,6 +2952,22 @@ def _repair_foreign_files(tree: Path, foreign: List[str],
+         return out
+     own = _git(["rev-parse", "--verify", "--quiet", "HEAD"], tree)
+     head_ref = (own.stdout or "").strip() if own.returncode == 0 else ""
++    # t261016-11 ③ self-consistency floor: a removal whose module is still
++    # imported refuses the WHOLE repair (no rm, no restore, no commit) — a
++    # tree that cannot import its own engine is the measured bb73e620 defect.
++    planned_rm = [f for f in foreign
++                  if isinstance(f, str) and f.strip()
++                  and _blob_hash(tree, src, f) is None]
++    if planned_rm:
++        importers = foreign_write.importers_remain(tree, planned_rm)
++        if importers:
++            out["refused_importers"] = ["%s <- %s" % (m, i) for i, m in importers]
++            out["skipped"] = (
++                "self-consistency floor: removing %s would leave importers "
++                "(%s) — the whole repair is refused; the tree must stay "
++                "importable" % (", ".join(m for _i, m in importers[:6]),
++                                "; ".join(sorted({i for i, _m in importers}))[:200]))
++            return out
+     for f in foreign:
+         if not isinstance(f, str) or not f.strip():
+             continue
+@@ -2985,14 +3028,32 @@ def _foreign_repair_check_item(tree: Path, branch: str, write_set: Any,
+                 "detail": "git diff failed: %s" % ((p.stderr or "").strip())[-200:],
+                 "id": FOREIGN_REPAIR_ID, "reason_code": "foreign_file_unjudgeable"}
+     changed = [f for _st, f in foreign_write.parse_name_status_z(p.stdout)]
++    line_refs = _line_candidate_refs(tree)
++    head_own = _git(["rev-parse", "--verify", "--quiet", "HEAD"], tree)
++    head_sha = (head_own.stdout or "").strip() if head_own.returncode == 0 else ""
++
++    def _line_face(pp: str) -> bool:
++        return foreign_write.line_owned(
++            pp, _blob_hash(tree, head_sha, pp) or "",
++            lambda q, r: _blob_hash(tree, r, q), line_refs)
++
+     foreign = foreign_write.foreign_files(
+         changed, write_set, str(ticket_id or ""),
+         test_face=lambda f: path_gates.is_ticket_test_face(f, str(ticket_id or "")),
+-        protected_paths=path_gates.PROTECTED_PATHS)
++        protected_paths=path_gates.PROTECTED_PATHS,
++        line_owned=_line_face)
+     if not foreign:
+         return None
+     cands = _live_lane_candidates(tree, in_flight_ids, exclude_ref=str(branch or ""))
+     rep = _repair_foreign_files(tree, foreign, cands, write_set, allow_commit=True)
++    if rep.get("refused_importers"):
++        return {"item": "out-of-write-set foreign files (engine returns main's version)",
++                "green": False,
++                "detail": "%s | refused: %s" % (rep["skipped"],
++                                                "; ".join(rep["refused_importers"][:6])),
++                "id": FOREIGN_REPAIR_ID,
++                "reason_code": "foreign_repair_refused_importers",
++                "files": list(foreign)}
+     if rep["skipped"]:
+         return {"item": "out-of-write-set foreign files (engine returns main's version)", "green": False,
+                 "detail": "%s | foreign files: %s | ownership: %s" % (
+@@ -3007,7 +3068,8 @@ def _foreign_repair_check_item(tree: Path, branch: str, write_set: Any,
+     remaining = foreign_write.foreign_files(
+         still, write_set, str(ticket_id or ""),
+         test_face=lambda f: path_gates.is_ticket_test_face(f, str(ticket_id or "")),
+-        protected_paths=path_gates.PROTECTED_PATHS)
++        protected_paths=path_gates.PROTECTED_PATHS,
++        line_owned=_line_face)
+     parts = []
+     if rep["restored"]:
+         parts.append("restored to main's version: %s" % ", ".join(rep["restored"]))

@@ -43,7 +43,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from t18lib import (ok, finish, import_engine, VerifyLaneCapture,  # noqa: E402
                     git, make_repo, commit, mkdtemp, rmtree, write_verify_yaml,
-                    whitelist_items, verify_lane_code)
+                    whitelist_items, verify_lane_code, lane_root,
+                    tree_snapshot, assert_tree_untouched)
 
 
 def _mb(repo, a, b):
@@ -51,6 +52,9 @@ def _mb(repo, a, b):
 
 
 def main() -> int:
+    # t261016-11 1: this case drives only fixture repos; snapshot the real
+    # lane tree and assert byte-identity at the end (never written, never dirtied)
+    snap_t05 = tree_snapshot(lane_root())
     tmp = mkdtemp()
     try:
         repo = make_repo(tmp)
@@ -136,6 +140,7 @@ def main() -> int:
            "is really passed down)")
         ok(pay.get("base") != pay.get("base_other"),
            "E: the two baselines really differ (not the same value twice)")
+        assert_tree_untouched(snap_t05, tree_snapshot(lane_root()), "t05")
         return finish()
     finally:
         rmtree(tmp)

@@ -3,7 +3,7 @@
 """sc_epic_anchor_two_projects.py — 立项目录锚项目感知×env 自测语义（t260907-07，GAP-B）。
 
 intent（用户可感知行为，验收①②的校验面+工单正文 env 口径）：项目把立项单放自己
-主目录 notes/epics/ 时，CLI 开票校验（validate_epic_code×resolve_epics_dir）取
+主目录 docs/epics/ 时（t261019-12 换库后口径），CLI 开票校验（validate_epic_code×resolve_epics_dir）取
 **该项目**的立项单——外部项目不再误报「立项代号不存在」、引擎桶项目行为不变；
 env SANDBAR_EPICS_DIR 覆盖保持「自测指向」语义（两项目同指 env 目录、优先于项目锚、
 空串回落项目锚）；未知项目 key fail-closed（不静默退引擎仓）；env 指不存在目录
@@ -56,17 +56,17 @@ def main():
         fx.write_epic(ext, "gap-b")
         fx.write_epic(eng, "engine-only")
         fx.write_epic(ext, "external-only")
-        eng_epics = str(eng / "notes" / "epics")
-        ext_epics = str(ext / "notes" / "epics")
+        eng_epics = str(eng / "docs" / "epics")
+        ext_epics = str(ext / "docs" / "epics")
 
         def resolve(key):
             return shared.resolve_epics_dir(key)
 
-        # ---- A 解析各取各的（项目主目录 notes/epics，非引擎仓） ----
+        # ---- A 解析各取各的（项目主目录 docs/epics，非引擎仓；t261019-12 换库） ----
         check(resolve(eng_name) == pathlib.Path(eng_epics),
-              "A1 engine 锚自己主目录 notes/epics", resolve(eng_name))
+              "A1 engine 锚自己主目录 docs/epics", resolve(eng_name))
         check(resolve(ext_name) == pathlib.Path(ext_epics),
-              "A2 external 锚自己主目录 notes/epics", resolve(ext_name))
+              "A2 external 锚自己主目录 docs/epics", resolve(ext_name))
         check(resolve(eng_name) != resolve(ext_name), "A3 两桶锚点互异（不串桶）")
 
         # ---- B 同名立项单：各自通过（验收①②） ----
@@ -99,10 +99,10 @@ def main():
 
         # ---- E env 覆盖自测语义：两项目同指 env 目录、优先于项目锚 ----
         env_root = tempfile.mkdtemp(prefix="t26090707-epics-env-")
-        env_dir = os.path.join(env_root, "notes", "epics")
+        env_dir = os.path.join(env_root, "docs", "epics")
         os.makedirs(env_dir)
         with open(os.path.join(env_dir, "env-only.md"), "w") as f:
-            f.write("# env-only\n")
+            f.write("---\ncode: env-only\nretired: false\nsummary: One English sentence for the fixture epic.\nstarted: 2026-10-19\n---\n\n# env-only\n")
         os.environ["SANDBAR_EPICS_DIR"] = env_dir
         try:
             check(resolve(eng_name) == pathlib.Path(env_dir)

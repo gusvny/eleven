@@ -37,6 +37,7 @@ import {
   refuseProductionConsole,
   consoleHealthy,
   loadPlaywright,
+  pwMissingDetail,
   openTestPage,
   makeResults,
 } from '../t260904-05/lib_browser.mjs';
@@ -56,26 +57,11 @@ const SERVED_CLIENT = '/plugins/sandbar-workbench/client.js'
 
 const results = makeResults()
 
-/** 泳道/worktree 兜底（同 sc_multi_tab_coexistence mainRepoRoot 先例）：worktree 不带
- *  node_modules，lib_browser 三路探测（泳道 ui-check 软链，KI-036 supply 面）可能全空；
- *  经 worktree gitfile 解析主检出，直取主树 playwright-core。解析不到=null=ENV_FAIL。 */
+/** t261012-05：lib_browser.loadPlaywright 已收敛到 lib_pw_deps 单源（含主树
+ *  git-common-dir 位与新旧两个 env 名）——本文件的本地 main-tree 兜底副本成了
+ *  冗余第四路重复实现，改为单点委托；缺失文案用 pwMissingDetail() 点名全部候选面。 */
 async function loadPlaywrightRobust() {
-  const pw = await loadPlaywright()
-  if (pw) return pw
-  try {
-    const common = execFileSync('git', ['rev-parse', '--git-common-dir'],
-      { cwd: REPO, encoding: 'utf8', timeout: 5000 }).trim()
-    if (!common) return null
-    const main = resolve(REPO, common, '..')
-    for (const sub of ['server/ui-check/node_modules/playwright-core/index.mjs',
-      'server/plugins/workbench/node_modules/playwright-core/index.mjs']) {
-      const p = join(main, sub)
-      if (existsSync(p)) {
-        try { return await import(pathToFileURL(p).href) } catch { /* next */ }
-      }
-    }
-  } catch { /* not a worktree */ }
-  return null
+  return loadPlaywright()
 }
 
 // ------------------------------------------------------------- 产物面探测
@@ -238,7 +224,7 @@ async function main() {
   }
   const pw = await loadPlaywrightRobust()
   if (!pw) {
-    results.record('L0 precheck', 'env_fail', 'playwright-core not resolvable')
+    results.record('L0 precheck', 'env_fail', pwMissingDetail())
     return results.summarize()
   }
 

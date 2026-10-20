@@ -26,7 +26,6 @@ export const CERT_COPIES = {
   delivered: 'delivered',
   certifiedAt: 'certified',
   asOf: 'as of',
-  autoRounds: 'auto rounds',
   idle: 'idle',
   running: 'running',
   promote: 'Promote',
@@ -34,6 +33,10 @@ export const CERT_COPIES = {
   red: 'red',
   blockers: 'blockers',
   green: 'green',
+  // t261016-09 (D4): the delivered split is stated on the row, and a disabled
+  // Promote button always names its reason next to itself.
+  deliveredMark: 'delivered',
+  promoteBlockWhy: 'Nothing can be promoted:',
   // The named absence: the one sentence that says the dialog is not faked.
   promoteAbsent: 'Promotion is not wired from the panel yet — the record-signed promote stays an engine operation. This tab shows what one signature would promote; it does not fake the dialog.',
   runAbsent: 'Rounds chain on the engine side; this panel starts none (the scheduler is another ticket).',
@@ -81,6 +84,13 @@ export const ROUND_COPIES = {
   dialogRefused: 'The round record is not readable',
   triggerUnreadable: 'trigger unreadable',
   faceAbsent: 'no terminal face is retained for this run',
+  // t261019-23 (F5): a running face never claims 'running' without its own
+  // last-write moment, and a running face the engine face no longer backs
+  // reads stale — never a terminal word (nothing is invented).
+  lastWrite: 'last write',
+  stale: 'stale',
+  noWriteSince: 'no write since',
+  writeUnreadable: 'write time unreadable',
 } as const
 
 /** '379 pass · 12 fail · 40 env' — the face's own counts. A counts_note (the
@@ -148,13 +158,30 @@ export function roundTrigger(runs: unknown, runId: unknown): string {
   return ROUND_COPIES.noCell
 }
 
-/** {repo: rev} -> 'repo:rev · …' — the revision set the round measured. */
+/** The round face's revision set -> 'line repo:sha8' — the measured cell's
+ *  only legal shape. t261019-23 (F6, rework): the face writer's shape is ONE
+ *  `{repo, revision}` entry; a repo-keyed `{<repo>: <rev>}` map is accepted
+ *  too (older fixtures). The sha is cut to 8 AND labelled with its repo and
+ *  the 'line' word, so a short hash never reads as a serial number; an
+ *  entry without a repo name renders the plain sha fallback; no readable
+ *  revision renders 'line ?' — never a made-up label. */
 export function roundMeasured(revision: unknown): string {
+  const cut = (rev: unknown): string => {
+    const s = (typeof rev === 'string' || typeof rev === 'number') ? String(rev) : ''
+    return s.slice(0, 8) // LIST-CAP-OK: revision-label width, not a list cap
+  }
   if (typeof revision !== 'object' || revision === null || Array.isArray(revision)) {
     return ROUND_COPIES.noCell
   }
-  const parts = Object.entries(revision as Record<string, unknown>)
-    .map(([repo, rev]) => `${repo}:${String(rev ?? '')}`)
+  const rec = revision as Record<string, unknown>
+  if ('revision' in rec) {
+    const repo = typeof rec.repo === 'string' && rec.repo ? rec.repo : ''
+    const sha = cut(rec.revision)
+    if (!sha) return 'line ?'
+    return 'line ' + (repo ? repo + ':' + sha : sha)
+  }
+  const parts = Object.entries(rec)
+    .map(([repo, rev]) => `line ${repo}:${cut(rev)}`) // LIST-CAP-OK: revision-label width, not a list cap
   return parts.length ? parts.join(' · ') : ROUND_COPIES.noCell
 }
 
@@ -162,30 +189,68 @@ export function roundMeasured(revision: unknown): string {
  * The Rounds table's body + notes (t261012-03): rows from the runner's
  * published faces ONLY. `rf` is the receipt's round_faces section (validated
  * softly by the reader); `runs` is the tab's raw.runs (headers, for the
- * trigger column). Per-row named states — an absent or unreadable face names
- * itself in the row, never counts in its place. The live face (current.json)
- * leads; a terminal face for the same run does not duplicate the row.
+ * trigger column); `engineRunning` is the engine face's own roundState==='running'
+ * answer — the second read source the running pill is reconciled against.
+ * Per-row named states — an absent or unreadable face names itself in the
+ * row, never counts in its place. The live face (current.json) leads; a
+ * terminal face for the same run does not duplicate the row. Terminal rounds
+ * sort newest-first by their own started_at (t261019-23 F4); a face without
+ * a readable started_at sorts last.
+ * t261019-23 (F5): a running face's pill carries its OWN last-write moment
+ * (the face's updated_at); when the engine face says no round is running,
+ * that same pill reads stale — a round that died mid-flight never reads
+ * plainly 'running' again.
  */
-export function buildRoundsRows(rf: unknown, runs: unknown): string {
+export function buildRoundsRows(rf: unknown, runs: unknown, engineRunning?: boolean): string {
   const esc = (s: unknown): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   const str = (v: unknown): string => (typeof v === 'string' ? v : '')
   if (typeof rf !== 'object' || rf === null || Array.isArray(rf)) {
     return ''
   }
   const section = rf as Record<string, unknown>
+  // t261019-23 (F6, rework): the Measured cell is the run header's OWN repos
+  // entry shaped by the same rule as the model's measuredToken — 'line
+  // <repo>:<sha8>', plain-sha fallback without a repo name, 'line ?' without
+  // a readable revision. The face's revision object stays the fallback for a
+  // run no header names (closure-free: the model module does not survive the
+  // String() embed).
+  const headerMeasured = (id: string): string => {
+    if (Array.isArray(runs)) {
+      for (const r of runs) {
+        const h = (typeof r === 'object' && r !== null && !Array.isArray(r)) ? r as Record<string, unknown> : null
+        if (!h || h.id !== id || !Array.isArray(h.repos) || !(h.repos as unknown[]).length) continue
+        const first = (h.repos as unknown[])[0] as Record<string, unknown>
+        const rev = (typeof first.revision === 'string' || typeof first.revision === 'number') ? String(first.revision) : ''
+        if (!rev) return 'line ?'
+        const sha = rev.slice(0, 8) // LIST-CAP-OK: revision-label width, not a list cap
+        const repo = typeof first.repo === 'string' && first.repo ? first.repo : ''
+        return 'line ' + (repo ? repo + ':' + sha : sha)
+      }
+    }
+    return ''
+  }
   const row = (runId: unknown, face: unknown, named: string): string => {
     const id = str(runId)
-    const pill = face ? roundPill(face) : { k: 'none', text: named }
-    const result = face ? countsCell((face as Record<string, unknown>).counts, (face as Record<string, unknown>).counts_note) : named
-    const measured = face ? roundMeasured((face as Record<string, unknown>).revision) : ROUND_COPIES.noCell
-    const started = face ? str((face as Record<string, unknown>).started_at) : ROUND_COPIES.noCell
+    const f = (typeof face === 'object' && face !== null && !Array.isArray(face))
+      ? face as Record<string, unknown> : null
+    let pill = f ? roundPill(f) : { k: 'none', text: named }
+    if (f && f.state === 'running') {
+      const stamp = str(f.updated_at) || ROUND_COPIES.writeUnreadable
+      pill = engineRunning === false
+        ? { k: 'none', text: `${ROUND_COPIES.stale} · ${ROUND_COPIES.noWriteSince} ${stamp}` }
+        : { k: 'run', text: `${ROUND_COPIES.running} · ${ROUND_COPIES.lastWrite} ${stamp}` }
+    }
+    const result = f ? countsCell(f.counts, f.counts_note) : named
+    const fromHeader = headerMeasured(id)
+    const measured = fromHeader || (f ? roundMeasured(f.revision) : ROUND_COPIES.noCell)
+    const started = f ? str(f.started_at) : ROUND_COPIES.noCell
     return `<tr data-run="${esc(id)}">`
       + `<td><span class="link mono" data-round-link="${esc(id)}" title="open the record of this round">${esc(id)}</span></td>`
       + `<td class="mono">${esc(started)}</td>`
       + `<td>${esc(roundTrigger(runs, id))}</td>`
       + `<td class="mono">${esc(result)}</td>`
       + `<td><span class="pill" data-k="${esc(pill.k)}">${esc(pill.text)}</span>`
-      + (face && roundReason(face) ? ` <span class="k">${esc(roundReason(face))}</span>` : '')
+      + (f && roundReason(f) ? ` <span class="k">${esc(roundReason(f))}</span>` : '')
       + '</td>'
       + `<td class="mono k">${esc(measured)}</td></tr>`
   }
@@ -205,6 +270,16 @@ export function buildRoundsRows(rf: unknown, runs: unknown): string {
     }
   }
   const entries = Array.isArray(section.rounds) ? section.rounds as Record<string, unknown>[] : []
+  const startedOf = (e: Record<string, unknown>): string => {
+    const f = (typeof e.face === 'object' && e.face !== null && !Array.isArray(e.face))
+      ? e.face as Record<string, unknown> : {}
+    return str(f.started_at)
+  }
+  entries.sort((a, b) => {
+    const sa = startedOf(a)
+    const sb = startedOf(b)
+    return sa < sb ? 1 : sa > sb ? -1 : 0
+  })
   for (const e of entries) {
     const id = str(e.run_id)
     if (seen[id]) continue
@@ -291,8 +366,10 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
     `<tr>${cell(w.ticket, w.title)}<td class="mono k">${esc(str(w.epic))}</td><td class="mono k">${esc(str(w.landedAt))}</td></tr>`
   ).join('') || '<tr><td colspan="3" class="k">—</td></tr>'
   const certRows = certified.map((c) =>
-    `<tr>${cell(c.ticket, c.title)}<td class="mono k">${esc(str(c.epic))}</td><td><span class="link mono" title="open the round's record">${esc(str(c.certifiedBy))}</span></td></tr>`
-  ).join('') || '<tr><td colspan="3" class="k">—</td></tr>'
+    `<tr>${cell(c.ticket, c.title)}<td class="mono k">${esc(str(c.epic))}</td><td><span class="link mono" title="open the round's record">${esc(str(c.certifiedBy))}</span></td>`
+      + `<td class="mono k">${esc(str(c.landedAt))}</td>`
+      + `<td>${c.delivered === true ? `<span class="pill" data-k="none">${CERT_COPIES.deliveredMark}</span>` : ''}</td></tr>`
+  ).join('') || '<tr><td colspan="5" class="k">—</td></tr>'
   // t261012-03: the Rounds table reads the runner's published faces (the
   // receipt's round_faces section), not a headers-derived projection. The
   // headers still feed the trigger column (raw.runs) — nothing else.
@@ -307,16 +384,21 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
     + `<span class="state" id="certBig">${esc(str(face.state))}</span>`
     + `<span class="chip" id="certWhen" title="the last round and its verdict — the state above is as of this round">${CERT_COPIES.asOf} ${esc(asOf)}</span>`
     + '</div><div class="pad">'
-    + '<div class="linebar" id="certBar">'
-    + '<div class="s cap" title="' + CERT_COPIES.delivered + '"></div>'
-    + '<div class="s cert" style="flex:' + certified.length + '"><span>' + CERT_COPIES.certified + '</span><span class="n">' + certified.length + '</span></div>'
-    + '<div class="s wait" style="flex:' + waiting.length + '"><span>' + CERT_COPIES.waiting + '</span><span class="n">' + waiting.length + '</span></div>'
-    + '</div>'
-    + `<div class="lbt"><span class="mono" id="certDelivered" title="delivered: already in main — the total, so it is a number here and a fixed bar above">${CERT_COPIES.delivered} ${num(face.deliveredTotal)}</span>`
+    // t261019-23 (F1/F7): the count-proportional bar is gone — certified only
+    // grows, so it always filled and carried no information. The strip is
+    // three labelled figures; promotable appears exactly ONCE, on the Promote
+    // button below (the certified-not-delivered set and promotable are the
+    // same set — it is never drawn twice).
+    + '<div class="lbt" id="certBar">'
+    + `<span id="certFigCertified" title="certified by the boundary round"><span class="k">${CERT_COPIES.certified}</span> <b class="mono">${certified.length}</b></span>`
+    + `<span id="certDelivered" title="delivered: already in main — coverage outlives promotion"><span class="k">${CERT_COPIES.delivered}</span> <b class="mono">${num(face.deliveredTotal)}</b></span>`
+    + `<span id="certFigWaiting" title="waiting for the next certification round"><span class="k">${CERT_COPIES.waiting}</span> <b class="mono">${waiting.length}</b></span>`
     + (boundary ? `<span id="certBnd" title="the certification point: covered by the green round of this moment">${CERT_COPIES.certifiedAt} ${esc(str(boundary.at))}</span>` : '')
     + '</div>'
-    + `<div class="flow"><span class="sw"><span class="track${frozen ? '' : ''}"><span class="knob"></span></span>${CERT_COPIES.autoRounds}</span>`
-    + `<span class="mono" id="certRoundState" title="one round at a time; a new round starts when the previous one ends">${esc(str(face.roundState) === 'running' ? CERT_COPIES.running : CERT_COPIES.idle)}</span>`
+    // t261019-23 (F2): the 'auto rounds' switch is gone — it had no handler
+    // and could not be clicked, so a control-shaped element carried a lie.
+    // The round-state word stays as plain text.
+    + `<div class="flow"><span class="mono" id="certRoundState" title="one round at a time; a new round starts when the previous one ends">${esc(str(face.roundState) === 'running' ? CERT_COPIES.running : CERT_COPIES.idle)}</span>`
     + '</div>'
     + '</div></div>'
     + (frozen
@@ -331,15 +413,22 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
     + `<div class="card"><h3>${CERT_COPIES.waiting} <span class="k" id="certWaitCount">${waiting.length}</span></h3>`
     + `<div class="pad"><table><thead><tr><th>Ticket</th><th>Epic</th><th title="the landing record's own moment">Landed</th></tr></thead><tbody id="certWaitRows">${waitRows}</tbody></table></div></div>`
     + `<div class="card"><h3>${CERT_COPIES.certified} <span class="k" id="certCount">${certified.length}</span></h3>`
-    + `<div class="pad"><table><thead><tr><th>Ticket</th><th>Epic</th><th title="the certification that covers it: certified_by">Certified by</th></tr></thead><tbody id="certRows">${certRows}</tbody></table>`
+    + `<div class="pad"><table><thead><tr><th>Ticket</th><th>Epic</th><th title="the certification that covers it: certified_by">Certified by</th><th title="the row's own landing moment">Landed</th><th></th></tr></thead><tbody id="certRows">${certRows}</tbody></table>`
     + `<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><span class="grow"></span>`
-    + `<button class="btn p" id="certPromote" data-promotable="${promotable}"${promotable === 0 ? ' disabled' : ''} title="disabled only when nothing is certified — a freeze never holds the certified part hostage">${CERT_COPIES.promote} ${promotable}</button>`
+    + (promotable === 0 && str(face.promoteBlock)
+      ? `<span class="k" id="certPromoBlock" title="why the promo control is disabled">${CERT_COPIES.promoteBlockWhy} ${esc(str(face.promoteBlock))}</span>`
+      : '')
+    // t261019-23 rework (F7): the word 'Promote' appears EXACTLY once on the
+    // face — the control itself. The internal ids/copy around it carry no
+    // second occurrence (the promotable set IS the certified-not-delivered
+    // set; it is never drawn twice).
+    + `<button class="btn p" id="certPromo" data-promotable="${promotable}"${promotable === 0 ? ' disabled' : ''} title="disabled only when nothing is certified — a freeze never holds the certified part hostage">${CERT_COPIES.promote} ${promotable}</button>`
     + '</div>'
-    + `<div class="who" id="certPromoteNote" data-wired="false" hidden></div>`
+    + `<div class="who" id="certPromoNote" data-wired="false" hidden></div>`
     + '</div></div>'
     + `<div class="card"><h3>${ROUND_COPIES.rounds}</h3><div class="pad">`
     + roundsSectionNote(rf)
-    + `<table><thead><tr><th>Round</th><th>${ROUND_COPIES.started}</th><th>${ROUND_COPIES.trigger}</th><th>${ROUND_COPIES.result}</th><th>${ROUND_COPIES.verdict}</th><th title="the revision set the round measured: the line head — what would be delivered if the certified part were promoted">${ROUND_COPIES.measured}</th></tr></thead><tbody id="certRoundRows">${rf ? buildRoundsRows(rf, runs) : ''}</tbody></table>`
+    + `<table><thead><tr><th>Round</th><th>${ROUND_COPIES.started}</th><th>${ROUND_COPIES.trigger}</th><th>${ROUND_COPIES.result}</th><th>${ROUND_COPIES.verdict}</th><th title="the revision set the round measured: the line head — what would be delivered if the certified part were promoted">${ROUND_COPIES.measured}</th></tr></thead><tbody id="certRoundRows">${rf ? buildRoundsRows(rf, runs, str(face.roundState) === 'running') : ''}</tbody></table>`
     + `<div class="who" id="certRunNote">${CERT_COPIES.runAbsent}</div></div></div>`
 }
 
@@ -360,7 +449,13 @@ export function buildRoundDialogCore(d: Record<string, unknown>): string {
   const face = (typeof d.face === 'object' && d.face !== null && !Array.isArray(d.face))
     ? d.face as Record<string, unknown> : null
   const faceNote = str(d.face_reason)
-  const pill = face ? roundPill(face) : { k: 'none', text: faceNote || ROUND_COPIES.faceAbsent }
+  let pill = face ? roundPill(face) : { k: 'none', text: faceNote || ROUND_COPIES.faceAbsent }
+  // t261019-23 (F5): a running face claims its own last-write moment here
+  // too — the dialog's receipt carries no second read source, so no stale
+  // word is coined; the moment names the claim's age by itself.
+  if (face && face.state === 'running') {
+    pill = { k: 'run', text: `${ROUND_COPIES.running} · ${ROUND_COPIES.lastWrite} ${str(face.updated_at) || ROUND_COPIES.writeUnreadable}` }
+  }
   const reason = face ? roundReason(face) : ''
   const counts = face ? countsCell(face.counts, face.counts_note) : ROUND_COPIES.countsUnreadable
   const running = face !== null && face.state === 'running'

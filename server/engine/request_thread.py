@@ -68,6 +68,14 @@ CLI (same shape as the other engine entries: one JSON argv):
                answering is a structured refusal).
   op="state" : append a state row (the engine side only allows resolved;
                evidence required).
+  op="condition" : attach a `resolves_when` to an open head (t261019-44) --
+                append-only (one condition row per attach; the latest per head
+                wins), attributed (by = the resolved caller session,
+                identity-gated like every other op, direct-write closure
+                included). The condition vocabulary is a CLOSED set validated
+                by request_sweep.validate_resolves_when; the engine-side sweep
+                (request_sweep.py) resolves such heads by itself, under its own
+                named identity -- the host gates stay untouched.
   op="link"  : append a link row (supersedes derives the superseded state row).
   op="read"  : the engine's read face over the caller's project ledger -- head
                states plus the named malformed-answer report (KI-01M4HPGHVWAKB62TXYV4G7ENEB:
@@ -148,7 +156,7 @@ RESIDENT_EXECUTOR_CHANNELS = executor_requests.RESIDENT_EXECUTOR_CHANNELS
 DIRECT_WRITE_REFUSAL = executor_requests.DIRECT_WRITE_REFUSAL
 
 USAGE = ("usage: python3 server/engine/request_thread.py "
-         "'{\"op\":\"file|reply|state|link|read\",\"project\":\"<key>\",...}'")
+         "'{\"op\":\"file|reply|state|link|condition|read\",\"project\":\"<key>\",...}'")
 
 
 def _refuse(field: str, error: str) -> Dict[str, Any]:
@@ -533,6 +541,16 @@ def file_thread_op(body: Dict[str, Any], now_ms: int, seq: int,
     extras = validate_head_extras(body, epics_dir)
     if not extras.get("ok"):
         return extras
+    resolves_when = body.get("resolves_when")
+    checked_cond: Optional[Dict[str, Any]] = None
+    if resolves_when is not None:
+        # t261019-44: an optional declarative resolution condition, validated
+        # against the CLOSED vocabulary at filing (unknown kind = named
+        # refusal, never stored for a sweep to trip over later).
+        import request_sweep
+        checked_cond = request_sweep.validate_resolves_when(resolves_when)
+        if not checked_cond.get("ok"):
+            return checked_cond
     fields = checked["fields"]
     xf = extras["fields"]
     path = str(executor_requests.ledger_file(key, env))
@@ -569,6 +587,8 @@ def file_thread_op(body: Dict[str, Any], now_ms: int, seq: int,
             row["epic_reason"] = xf["epic_reason"]
         if xf["source_ticket"]:
             row["source_ticket"] = xf["source_ticket"]
+        if checked_cond is not None:
+            row["resolves_when"] = checked_cond["condition"]
         if fields["options"] is not None:
             row["options"] = fields["options"]
         if delivered_via:
@@ -801,6 +821,57 @@ def link_op(body: Dict[str, Any], now_ms: int, seq: int,
         return {"ok": True, "rows": out_rows, "file": path}
 
 
+def condition_op(body: Dict[str, Any], now_ms: int, seq: int,
+                 env: Optional[Dict[str, str]] = None, cwd: str = "",
+                 projects: Optional[Sequence[Dict[str, Any]]] = None,
+                 exclude_trees: Sequence[str] = (),
+                 load_decl: Optional[Callable[[str], Dict[str, Any]]] = None,
+                 delivered_via: Optional[str] = None) -> Dict[str, Any]:
+    """op=condition (t261019-44): attach a `resolves_when` to an OPEN head.
+    Append-only -- the ledger is never rewritten; the engine-side sweep reads
+    the latest condition row per head as the head's effective condition. The
+    attachment is attributed (by = the resolved caller session) and passes the
+    same identity three-gate + direct-write closure as every other op."""
+    env = dict(os.environ if env is None else env)
+    body = executor_requests._sanitize(body)
+    gated = _resolve_and_gate(body, env, cwd, projects, exclude_trees, load_decl, delivered_via)
+    if not gated.get("ok"):
+        return gated
+    caller = gated["caller"]
+    key = caller["project"]
+    session, refusal = _session_of(body, caller)
+    if refusal:
+        return refusal
+    import request_sweep
+    checked = request_sweep.validate_resolves_when(body.get("resolves_when"))
+    if not checked.get("ok"):
+        return checked
+    target = body.get("id")
+    if not isinstance(target, str) or target.strip() == "":
+        return _refuse("id", "id must be a non-empty string (the head to attach the condition to)")
+    path = str(executor_requests.ledger_file(key, env))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with _locked_append(path) as fd:
+        rows, _mal = _read_rows_unlocked(fd)
+        states = head_states(rows)
+        if target not in states:
+            return _refuse("id", "no such request id: %s" % target)
+        if states[target] in TERMINAL_STATES:
+            return _refuse("state", "request %s is already %s (terminal — a condition "
+                                    "attaches to a live question only)"
+                           % (target, states[target]))
+        row: Dict[str, Any] = {"type": "condition",
+                               "id": "cnd-%d-%04d" % (now_ms, seq),
+                               "condition_for": target,
+                               "resolves_when": checked["condition"],
+                               "at": now_ms, "by": session,
+                               "surface": SURFACE_ENGINE}
+        if delivered_via:
+            row["delivered_via"] = delivered_via
+        _append_line_unlocked(fd, row)
+        return {"ok": True, "row": row, "file": path}
+
+
 def read_op(body: Dict[str, Any], now_ms: int, seq: int,
             env: Optional[Dict[str, str]] = None, cwd: str = "",
             projects: Optional[Sequence[Dict[str, Any]]] = None,
@@ -831,6 +902,10 @@ def read_op(body: Dict[str, Any], now_ms: int, seq: int,
     finally:
         os.close(fd)
     out["states"] = head_states(rows)
+    # t261019-44: the declared/attached resolution conditions, additive (no
+    # existing key changes shape; the panel tolerates unknown receipt keys).
+    import request_sweep
+    out["conditions"] = request_sweep.effective_conditions(rows)
     out["malformed_answer_rows"] = malformed_answer_rows(rows)
     out["malformed_lines"] = mal
     return out
@@ -838,8 +913,94 @@ def read_op(body: Dict[str, Any], now_ms: int, seq: int,
 
 # ---------- CLI ----------
 
+def sweep_op(body: Dict[str, Any], now_ms: int, seq: int,
+             env: Optional[Dict[str, str]] = None, cwd: str = "",
+             projects: Optional[Sequence[Dict[str, Any]]] = None,
+             exclude_trees: Sequence[str] = (), load_decl: Any = None,
+             delivered_via: Optional[str] = None) -> Dict[str, Any]:
+    """op=sweep (261020): retire the request heads whose day is over.
+
+    Measured on sandbar: 261 heads, 249 open, none carrying an expiry, spanning
+    ten days. Only the host's panel can close a row, so the ledger could only
+    grow — every agent that filed a question left it open forever, and the panel
+    turned into a wall nobody reads (the worse failure mode: the real question
+    gets lost in it).
+
+    This is the MACHINE's own retirement face, and it is deliberately narrow:
+      * a head is retired ONLY when the ticket it names is in the caller-supplied
+        terminal set (the caller probes liveness; this function takes no IO and
+        makes no liveness claim of its own) — an agent's question about live work
+        is never swept away by age;
+      * the retired row is a `state` row with `state=superseded` (a MACHINE state,
+        which no hand may set) plus a `supersedes` link, so the history keeps the
+        question and says why it ended;
+      * a head naming NO ticket is left alone unless `include_unbound` is set,
+        because nothing proves it moot.
+    """
+    env = dict(os.environ if env is None else env)
+    body = executor_requests._sanitize(body)
+    gated = _resolve_and_gate(body, env, cwd, projects, exclude_trees, load_decl,
+                              delivered_via)
+    if not gated.get("ok"):
+        return gated
+    caller = gated["caller"]
+    key = caller["project"]
+    terminal = body.get("terminal_tickets")
+    if not isinstance(terminal, list) or not all(isinstance(t, str) for t in terminal):
+        return _refuse("terminal_tickets",
+                       "terminal_tickets must be a list of ticket ids (the caller's own "
+                       "liveness probe result — this function makes no liveness claim)")
+    terminal = {t.strip() for t in terminal if t.strip()}
+    include_unbound = bool(body.get("include_unbound"))
+    path = str(executor_requests.ledger_file(key, env))
+    retired: List[Dict[str, str]] = []
+    with _locked_append(path) as fd:
+        rows, _mal = _read_rows_unlocked(fd)
+        states = head_states(rows)
+        heads = {r.get("id"): r for r in rows if r.get("type") == "request"}
+        for head_id, head in heads.items():
+            if states.get(head_id) in TERMINAL_STATES:
+                continue
+            tickets = ticket_ids_in(head)
+            if tickets:
+                if not tickets & terminal:
+                    continue
+            elif not include_unbound:
+                continue
+            row = {"type": "state", "id": "st-%d-%04d" % (now_ms, len(retired) + 1),
+                   "state_for": head_id, "state": STATE_SUPERSEDED, "at": now_ms,
+                   "by": "engine:sweep", "source_class": gated["source_class"],
+                   "surface": SURFACE_ENGINE,
+                   "supersedes": [t for t in sorted(tickets)] or [],
+                   "reason": ("retired by op=sweep: the ticket it names is terminal "
+                              "(%s)" % (", ".join(sorted(tickets)) or "unbound head"))}
+            _append_line_unlocked(fd, row)
+            retired.append({"id": head_id, "tickets": sorted(tickets)})
+    return {"ok": True, "retired": retired, "count": len(retired), "file": path}
+
+
+_TICKET_ID_RE = re.compile(r"\bt\d{6}-\d{2}\b")
+
+
+def ticket_ids_in(row: Any) -> set:
+    """Ticket ids named anywhere in a request row (261020, pure).
+
+    The ledger has no structured ticket field (measured: 261 heads, none), so the
+    sweeper reads the ids out of the question/detail text. A row naming no ticket
+    yields an empty set, which keeps it OUT of the terminal-ticket sweep."""
+    if not isinstance(row, dict):
+        return set()
+    found = set()
+    for key in ("question", "detail", "ticket", "ticket_id"):
+        v = row.get(key)
+        if isinstance(v, str):
+            found.update(_TICKET_ID_RE.findall(v))
+    return found
+
+
 _OPS = {"file": file_thread_op, "reply": reply_op, "state": state_op,
-        "link": link_op, "read": read_op}
+        "link": link_op, "condition": condition_op, "read": read_op,
+        "sweep": sweep_op}
 
 
 def _emit(out: Dict[str, Any]) -> None:

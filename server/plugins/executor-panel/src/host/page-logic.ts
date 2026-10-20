@@ -232,7 +232,13 @@ export function themeParamOf(v: unknown): 'light' | 'dark' | null {
  */
 export function countDocsTree(j: unknown): number | null {
   if (typeof j !== 'object' || j === null) return null
-  const groups = (j as Record<string, unknown>).groups
+  // t261019-04: the live endpoint answers {ok,result:{groups}}; a bare tree is
+  // still accepted (the view model is shared with fixtures that pass one or the
+  // other). Reading only the bare shape made every count read '— pages'.
+  const env = (j as Record<string, unknown>).result
+  const tree = (env !== null && typeof env === 'object') ? env as Record<string, unknown>
+                                                         : (j as Record<string, unknown>)
+  const groups = tree.groups
   if (!Array.isArray(groups)) return null
   let n = 0
   for (const g of groups) {
@@ -253,4 +259,52 @@ export function docEntryRow(scope: string, label: string, count: number | null):
     + '<b>' + scope + '/</b><span>' + label + '</span>'
     + '<span class="meta">' + (count === null ? '— pages' : count + ' pages') + '</span>'
     + '<button class="backbtn" data-docopen="' + scope + '">Open</button></div>'
+}
+
+/** t261019-43: one reply line's face fields. Escaping stays at the page (esc is a
+ *  DOM helper there); this core returns raw field values only, so the unit test and
+ *  the page run one implementation without a second escape path. */
+export interface ReplyFaceLine {
+  by: string
+  intent: string
+  source_class: string
+  via: string
+  anchor: string
+  text: string
+}
+
+/** t261019-43: collapsed-head badge for a row's replies. '1 reply' / 'N replies';
+ *  a non-array (legacy rows, malformed reads) is an empty string, never a throw. */
+export function replyBadge(replies: unknown): string {
+  if (!Array.isArray(replies)) return ''
+  const n = replies.length
+  if (n === 0) return ''
+  return n === 1 ? '1 reply' : n + ' replies'
+}
+
+/** t261019-43: the reply face for an expanded row — every reply as its own named
+ *  line (by / intent / source_class / via / anchor / text). The 11px trace was the
+ *  only surface a reply had, so the host read 'no reply' and re-asked; this core is
+ *  the single implementation (embedded via String(fn)). Malformed entries never
+ *  vanish silently: a non-object row or a reply without usable text is a literal
+ *  placeholder line and is counted in `malformed` (ledger discipline). */
+export function replyFace(replies: unknown): { lines: ReplyFaceLine[]; malformed: number } {
+  const out: ReplyFaceLine[] = []
+  let malformed = 0
+  if (!Array.isArray(replies)) return { lines: out, malformed }
+  for (const e of replies) {
+    if (typeof e !== 'object' || e === null) { malformed += 1; continue }
+    const r = e as Record<string, unknown>
+    const hasText = typeof r.text === 'string' && r.text.length > 0
+    if (!hasText) malformed += 1
+    out.push({
+      by: typeof r.by === 'string' && r.by ? r.by : '(unknown by)',
+      intent: typeof r.intent === 'string' && r.intent ? r.intent : '',
+      source_class: typeof r.source_class === 'string' && r.source_class ? r.source_class : '',
+      via: typeof r.via === 'string' && r.via ? r.via : '',
+      anchor: typeof r.anchor === 'string' && r.anchor ? r.anchor : '',
+      text: hasText ? r.text as string : '(reply text missing)',
+    })
+  }
+  return { lines: out, malformed }
 }

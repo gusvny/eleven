@@ -38,7 +38,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib_main_sync_fixture import (
     branch_tip, commit_files, drop_branch, git, git_ok, head, is_ancestor,
-    ls_files, make_lane, make_repo, merge_base, parent_count, porcelain,
+    lane_branch, ls_files, make_lane, make_repo, merge_base, parent_count,
+    porcelain,
 )
 
 # 红线桩：先钉不可达 host 再 import 引擎模块（shared 在 import 期读 TARGET_HOST），
@@ -60,22 +61,29 @@ def ok(cond, label, detail=""):
         print("  FAIL " + label + ((" | " + str(detail)[:300]) if detail else ""))
 
 
-def prep(lane):
-    """直调真活动（注入手段）：worker 视角在泳道跑 git merge main。"""
+def prep(lane, ticket):
+    """直调真活动（注入手段）：worker 视角在泳道跑 git merge main。
+
+    t261016-13 起主同步按「点名分支」裁决（分支不可读/落后 HEAD=按名拒绝），
+    注入必须传泳道真分支（lane_branch(ticket)），不能再钉死字面量——本场景
+    t261016-16 之前钉的 "lane/t260922-18-sc" 在夹具仓里不存在，被闸按名拒绝，
+    三个形态全红（根因，已修）。「拒绝按名」这条验收要求由真正构造 detached/
+    不可读分支形态的兄弟场景 sc_main_sync_gate_evidence.py 与 developer UT
+    test_t260922_18_main_sync.py 继续持有，本场景只守合法形态仍可同步。"""
     import agent_activities as aa
     from shared import ConflictPrepArgs
     import asyncio
     return asyncio.run(aa.prepare_conflict_resolution(ConflictPrepArgs(
-        ticket_id="t260922-18-sc", worktree=str(lane), branch="lane/t260922-18-sc",
+        ticket_id=ticket, worktree=str(lane), branch=lane_branch(ticket),
         base_ref="main")))
 
 
-def settle(lane, round_no=1):
+def settle(lane, ticket, round_no=1):
     import agent_activities as aa
     from shared import ConflictSettleArgs
     import asyncio
     return asyncio.run(aa.settle_conflict_resolution(ConflictSettleArgs(
-        ticket_id="t260922-18-sc", worktree=str(lane), branch="lane/t260922-18-sc",
+        ticket_id=ticket, worktree=str(lane), branch=lane_branch(ticket),
         base_ref="main", round_no=round_no)))
 
 
@@ -95,7 +103,7 @@ def main() -> int:
     lane1 = make_lane(repo1, "t260922-18-shapes-a", base=poll_c)  # 分叉点早于清账删除
     ok(POLLUTED in " ".join(ls_files(lane1, ".sandbar/")),
        "① 前提：老泳道仍 tracked 该路径（KI-090 现场形态）")
-    r = prep(lane1)
+    r = prep(lane1, "t260922-18-shapes-a")
     ok(r.ok, "① 主同步自动合并成功（ok=True）", r.error)
     ok(not porcelain(lane1).strip(), "① 泳道工作区 porcelain 净（待删文件不再挂脏）",
        porcelain(lane1)[:200])
@@ -115,12 +123,12 @@ def main() -> int:
     lane2 = make_lane(repo2, "t260922-18-shapes-b", base=poll_c2)
     commit_files(lane2, {NOTE: "lane touched it\n"}, "泳道侧改过该路径")
     commit_files(repo2, {NOTE: None}, "main 侧删除该路径")
-    r2 = prep(lane2)
+    r2 = prep(lane2, "t260922-18-shapes-b")
     ok(r2.ok and NOTE in (r2.conflict_files or []),
        "② modify/delete 留冲突现场且点名该文件", str(r2.conflict_files))
     # 消解=agent 只编辑工作区（unlink），不写 .git（真实分工：agent 无 git 元数据权）
     (Path(lane2) / NOTE).unlink()
-    s2 = settle(lane2)
+    s2 = settle(lane2, "t260922-18-shapes-b")
     ok(s2.ok, "② settle 代提交自愈（ok=True）", s2.error)
     ok(not porcelain(lane2).strip(), "② 消解落盘后工作区净")
     ok(not ls_files(lane2, NOTE), "② 路径清空（无残留 tracked 污染）")
@@ -137,13 +145,13 @@ def main() -> int:
     before = head(lane3)
     ok(merge_base("main", before, lane3) == base_c,
        "③ 前提：泳道分叉点=旧基点（落后 main 3 提交，KI-082 现场）")
-    r3 = prep(lane3)
+    r3 = prep(lane3, "t260922-18-shapes-c")
     ok(r3.ok, "③ 主同步成功", r3.error)
     after = head(lane3)
     ok(merge_base("main", after, lane3) == tip0,
        "③ 基点追平：merge-base(main, HEAD)==main tip（验证树不再落旧基线）")
     ok(not porcelain(lane3).strip(), "③ 追平后工作区净")
-    r3b = prep(lane3)
+    r3b = prep(lane3, "t260922-18-shapes-c")
     ok(r3b.ok and head(lane3) == after,
        "③ 二次同步幂等：HEAD 逐字节不动（已追平=零动作零新提交）")
     ok(parent_count(head(lane3), lane3) == 2,

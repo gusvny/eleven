@@ -479,10 +479,17 @@ def main(argv):
                        % (len(hbad), hbad[0]))
     headers = headers or []
     by_id = {h.get("id"): h for h in headers}
+    # t261016-09 (D4): the green caliber is the LEDGER ROW'S OWN verdict —
+    # exactly what develop_promote._is_green_reader reads (obj.verdict ==
+    # "green"; absent/unknown -> not green, never guessed). This used to
+    # recompute dc.run_verdict(cases), the ABSOLUTE roll-up, so the panel
+    # painted red the very rounds the engine's own readers certify (the host
+    # 261016 measurement: a promoted, ledger-green round read red with
+    # blockers = fail + env). One caliber, both sides.
     green_ids = {hid for hid, h in by_id.items()
-                 if dc.run_verdict(h.get("cases")) == "green"}
+                 if h.get("verdict") == "green"}
     runs = [{"id": h.get("id"), "cases": h.get("cases"),
-             "verdict": dc.run_verdict(h.get("cases")),
+             "verdict": h.get("verdict"),
              "source": h.get("source"), "started_at": h.get("started_at"),
              "repos": h.get("repos")} for h in headers]
 

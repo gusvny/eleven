@@ -93,8 +93,8 @@ def main():
     fx.write_epic(ext, "gap-b")
     fx.write_epic(eng, "engine-only")
     fx.write_epic(ext, "external-only")
-    ext_epics = str(ext / "notes" / "epics")
-    eng_epics = str(eng / "notes" / "epics")
+    ext_epics = str(ext / "docs" / "epics")
+    eng_epics = str(eng / "docs" / "epics")
     stage = None
     try:
         # ---- N 负路径（连接前拒收，零 Temporal 依赖）----

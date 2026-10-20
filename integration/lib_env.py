@@ -86,6 +86,11 @@ NARROWING_ENV_NAMES = (
     "SANDBAR_UNDECLARED_POLICY",             # 调用方身份策略（影响引擎写操作闸）
     "SANDBAR_STAGE_SWEEP_ORPHANS",           # 引擎每轮注入：挂点孤儿清扫总闸
     "SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX",     # 引擎每轮注入：清扫半径前缀
+    # t261017-10（宿主令 261012 实测）：台账绿行复用的 kill switch 也是轮级行为钉——
+    # 线轮自钉 SANDBAR_LEDGER_REUSE=0 时，前缀族剥不掉（裸名），漏进夹具自起的
+    # 执行器子进程，复用/Run-record 被测面被外层环境翻转成片假红。同纪律：要测
+    # 复用行为（含 kill switch 面）的夹具用 extra 显式声明自己那一档。
+    "SANDBAR_LEDGER_REUSE",                  # 台账复用 kill switch（行为钉，非收窄面）
 )
 # 261004（执行器请求 -0023，t261004-26）：继承的**调用方身份**与本表同族同纪律——
 # ticket.py/client.py 的 spawn 链往下注入 SANDBAR_CALLER_PROJECT +
@@ -133,6 +138,31 @@ def clean_narrowing_env(extra=None, base=None) -> dict:
     for k, v in (extra or {}).items():
         env[str(k)] = str(v)
     return env
+
+
+# ======================================================================================
+# t261017-10（宿主令 261012 规格②「具名认领」）：夹具剥掉与自己被测面相矛盾的继承钉时，
+# 必须在自己的 stdout 通道**点名**剥了哪些（名=值），不许无声剥（红得没头绪）也不许
+# 假绿（继承值悄悄改了被测面）。输出走夹具自己的 stdout——绝不写进被夹具捕获的
+# 子进程流，解析面字节兼容不受扰。空 env=静默（无矛盾可认领）。
+# ======================================================================================
+OWNED_ENV_NOTE_PREFIX = "INTEG_ENV_OWNED:"
+
+
+def owned_env_note(names, env=None, out=None):
+    """点名列出 env 里还在的继承钉（限 names 全集内），返回所发行文；干净 env 返回 None。
+
+    畸形值（空串/空白/任意字节）原样点名为 `名=值`——认领面是「剥了什么」的诚实
+    声明，不做值断言；值判断归各夹具自己的子用例。"""
+    src = os.environ if env is None else env
+    knobs = inherited_narrowing_knobs(src)
+    hits = ["%s=%s" % (k, knobs[k]) for k in names if k in knobs]
+    if not hits:
+        return None
+    line = "%s scrubbed inherited %s — this case owns its env" % (
+        OWNED_ENV_NOTE_PREFIX, ", ".join(hits))
+    print(line, file=out if out is not None else sys.stdout, flush=True)
+    return line
 
 
 class no_narrowing_env:

@@ -270,9 +270,14 @@ def test_source_lock_authorized_advance_same_shape_as_pass():
 
 def test_source_lock_settle_args_carry_authorizations():
     src = _src("server/engine/dev_lane.py")
-    assert src.count("authorizations=self._protected_authz_records()") == 4, \
-        "四处 settle args 构造点（agent 段 / join settle_lane / arbitrate settle_lane / " \
-        "merge_check）都必须带授权记录"
+    # t261019-32: +2 = the quickmanual lane's work-stage settle_lane and its
+    # merge_check call - same discipline, the protected-path authorization
+    # record travels into every settle/merge_check construction.
+    assert src.count("authorizations=self._protected_authz_records()") == 6, \
+        ("six settle-args construction sites (the agent stage / the join "
+         "settle_lane / the arbitrate settle_lane / merge_check / the "
+         "quickmanual work-stage settle_lane / the quickmanual merge_check) "
+         "must all carry the authorization record")
     aa = _src("server/engine/agent_activities.py")
     assert "exempt_authorized(" in aa and "authorized_passage_note(" in aa
     assert "authorizations: Optional[List[Dict[str, Any]]] = None" in aa

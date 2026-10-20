@@ -235,6 +235,19 @@ def ledger_path(project, ledger_dir=None):
     SANDBAR_DELIVERY_LEDGER_DIR means a flat directory holding
     ``<project>.jsonl`` (tests/isolation); default is the project store:
     ``~/.sandbar/projects/<project>/ledger/delivery.jsonl``."""
+    # 261019: the close-out guard runs inside the workflow sandbox, where reading
+    # os.environ raises RestrictedWorkflowAccessError. Prefer the root pinned by the
+    # process entry (shared.note_delivery_ledger_dir); only an unpinned process (CLI,
+    # tests, activities started outside the worker) falls back to the environment.
+    if not ledger_dir:
+        # Deployment-window guard (261019): a worker started before the pin existed runs a
+        # shared module without delivery_ledger_dir(). getattr keeps old and new workers
+        # compatible instead of failing the close-out with an AttributeError - the fallback
+        # is the env path, exactly what an unpinned process uses anyway.
+        import shared as _shared_local
+        _pin = getattr(_shared_local, "delivery_ledger_dir", None)
+        if callable(_pin):
+            ledger_dir = _pin()
     d = ledger_dir or os.environ.get(LEDGER_DIR_ENV, "").strip() or None
     if d:
         return Path(d) / ("%s.jsonl" % project)
@@ -1052,6 +1065,17 @@ def relative_round_verdict(project, candidate, header, runner, roster):
     if not isinstance(names, list):
         raise CouldNotRun("line_fail_set_missing")
     line_fails = {x.strip() for x in names if isinstance(x, str) and x.strip()}
+    # 261019 (host order + KI-01M55FVE2QZ0NR5AHQRHBNXX7S): a case the round could NOT
+    # verify (status not-checked: no bench, connection refused) is not content guilt.
+    # The runner publishes that set separately; subtract it from the regression compare
+    # and carry it in the record as `unverified` - named, never swallowed, and never
+    # read as a pass. A name in both sets is a real failure (content wins).
+    _unverified_raw = header.get("unverified_names") if isinstance(header, dict) else None
+    unverified = set()
+    if isinstance(_unverified_raw, list):
+        unverified = {x.strip() for x in _unverified_raw
+                      if isinstance(x, str) and x.strip()}
+    content_fails = line_fails - unverified
     if isinstance(counts, dict):
         try:
             _failed_counts = int(counts.get("failed", 0))
@@ -1067,11 +1091,11 @@ def relative_round_verdict(project, candidate, header, runner, roster):
         baseline, note = _ensure_baseline(project, name, runner, flaky)
         if baseline is None:
             per_repo[name] = {"verdict": "red", "note": note,
-                              "new_regressions": sorted(line_fails),
+                              "new_regressions": sorted(content_fails),
                               "carried_debt": [], "flaky_hits": []}
             regressions.extend(sorted(line_fails))
             continue
-        v, detail = relative_verdict(line_fails, baseline)
+        v, detail = relative_verdict(content_fails, baseline)
         detail["note"] = note
         detail["verdict"] = v
         # t261016-01: the record must NAME the baseline source — which tip
@@ -1084,7 +1108,8 @@ def relative_round_verdict(project, candidate, header, runner, roster):
         regressions.extend(detail["new_regressions"])
     verdict = "red" if regressions else "green"
     detail = {"per_repo": per_repo,
-              "new_regressions": sorted(set(regressions))}
+              "new_regressions": sorted(set(regressions)),
+              "unverified": sorted(unverified & line_fails)}
     return verdict, detail
 
 

@@ -53,6 +53,13 @@ const CONSUMERS = [
   "baselines/sc_ticket_evidence_images.mjs",
   "baselines/sc_capture_chat_active.mjs",
 ];
+// 261012 sweep (ticket t261012-05): the 261002 retirements of
+// t260903-07-chat-project-tag / t260904-07-charter-injection-journey /
+// t260905-09-platform-context-fold-stacked (integration/retired-scenarios.md)
+// deleted their case files but this in-tree consumer list was not swept —
+// G1 red "文件缺失" on the delivered tree. All three names are gone from
+// SCENARIOS (retire markers run_scenarios.py 1014/1336/1563), so they leave
+// the list under the same rule as the 261001 narrowing above.
 
 let passed = 0, failed = 0, envFailed = 0;
 function ok(cond, label, detail = "") {

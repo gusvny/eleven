@@ -74,6 +74,7 @@ from shared import (
     ReworkRequest,
     Signature,
     TicketInput,
+    WorkDoneSignal,
     check_paths_under_project,
     derive_lane_workspace,
     lookup_project,
@@ -611,7 +612,11 @@ async def cmd_schedule_list(args: Dict[str, Any]) -> Dict[str, Any]:
 # signal（260904 已退役=结构化拒收）、ticket-prune/ticket-archive-legacy（只触 closed+已
 # 归档票，自带双 fail-closed，README 决策记录）。
 _GATED_TICKET_OPS = ("sign", "authorize", "rework", "retry_qc", "ruling",
-                     "pause", "resume", "update")
+                     "pause", "resume", "update",
+                     # t261019-32 (quickmanual lane): the working session's done
+                     # signal is a gated write op (stamped through the caller gate
+                     # like sign/rework; the handler re-judges at intake).
+                     "work_done")
 # 记名分档（review C3）：这些 op 载荷契约不收盖章字段（retry_qc=裸 who 字符串、
 # update=@workflow.update 同步面、cancel/ticket-start=无 workflow 侧落点）——undeclared
 # 记名只在 admin.log，查询面 cross_project_uses 列不出；回执 notice 必须按 op 说实话。
@@ -990,6 +995,9 @@ async def cmd_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
         await handle.terminate(reason=reason)
     except Exception as e:  # already finished / missing etc. always produce a structured receipt, never a stack trace
         return _err(f"terminate 失败：{type(e).__name__}: {e}")
+    # t261019-40: the bare cancel stays release-free by contract (engine-internal
+    # cleanup entry; the named ticket-cancel / ticket-close-out entries own the
+    # slot release, and the ledger's stale-holder sweep is the backstop).
     return _gate_receipt(_ok({"workflow_id": wf_id, "terminated": True, "reason": reason}),
                          gate, "cancel")
 
@@ -999,6 +1007,29 @@ async def cmd_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
 # 言 COMPLETED=票已 closed 终态（无需清场）；活票只有 RUNNING 与 CONTINUED_AS_NEW
 # （巡检 watcher 换代中，属未收口——KI-025 红线：不许把活报成终）。
 _TICKET_CANCEL_ALIVE = ("RUNNING", "CONTINUED_AS_NEW")
+
+
+def _release_slot_after_cancel(project: str, ticket: str) -> Dict[str, Any]:
+    """Return the cancelled ticket's concurrency slot (261019).
+
+    Best-effort by design: the caller has just performed the irreversible act
+    (terminate), so a slot-release failure must be a NAMED note on the receipt,
+    never a failed cancel. An empty project (the gate could not read one) is
+    reported as such rather than guessed: releasing in the wrong project's
+    ledger would free somebody else's slot."""
+    if not project:
+        return {"released": False, "reason": "project_unknown"}
+    try:
+        import concurrency as _conc  # local: keeps this module's SDK surface minimal
+        res = _conc.release(project, ticket, cause="terminated")
+        return {"released": bool(res.get("released")),
+                "promoted": res.get("promoted"),
+                "dropped_stale": res.get("dropped_stale") or [],
+                "holders": res.get("holders"), "waiting": res.get("waiting")}
+    except Exception as e:  # noqa: BLE001 — a dead slot is repairable, a failed cancel is not
+        return {"released": False,
+                "reason": "%s: %s (run ticket.py op=concurrency reconcile=true)"
+                          % (type(e).__name__, e)}
 
 
 async def cmd_ticket_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1086,7 +1117,17 @@ async def cmd_ticket_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("terminate 失败：%s: %s——cancel_notice 记名信号已入事件历史，本次"
                     "未终结（可能自然完单/已被终结）；重试安全（已终态将回幂等回执）"
                     % (type(e).__name__, e))
+    # 261019 (t261019-31/-40): a terminated ticket must not keep its concurrency
+    # slot. The workflow cannot do this itself (terminate runs no cleanup), and
+    # until now nothing did: measured twice in one night, five terminated tickets
+    # held all five slots while live tickets queued for hours. Release right
+    # here, where a live actor still exists, and NEVER fail the cancel because
+    # of it (a slot left behind is repairable with
+    # `ticket.py op=concurrency reconcile=true`; a half-done cancel is not).
+    _slot = _release_slot_after_cancel(
+        str(((gate or {}).get("snap") or {}).get("meta", {}).get("project") or ""), tid)
     return _gate_receipt(_ok({"ticket_id": tid, "terminated": True,
+                              "slot_released": _slot,
                               "reason": reason, "who": who,
                               "signal": "cancel_notice", "delivered": True,
                               "receipt_note": ("delivered=signal 已落事件历史（不承诺 "
@@ -1171,9 +1212,13 @@ async def cmd_ticket_close_out(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("terminate 失败：%s: %s——close_out_notice 记名信号已入事件历史，"
                     "本次未终结（可能自然完单/已被终结）；重试安全（已终态将回幂等回执）"
                     % (type(e).__name__, e))
+    # t261019-31/-40: the workflow is dead — release its concurrency slot here
+    # (best-effort, named either way; the close-out itself never fails on it).
+    _slot = _release_slot_after_cancel(gate["stamp"] if gate else _project_from_describe(desc), tid)
     return _gate_receipt(_ok({"ticket_id": tid, "terminated": True,
                               "reason": reason, "terminate_reason": term_reason,
                               "who": who, "signal": "close_out_notice", "delivered": True,
+                              "slot_released": _slot,
                               "receipt_note": ("delivered=signal 已落事件历史（不承诺 "
                                                "handler 已执行，KI-081）；权威对账=事件"
                                                "历史（close_out_notice 先于 terminated）"
@@ -1422,7 +1467,15 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
             return gate["err"]
 
     if op == "sign":
-        raw = args.get("input") or {}
+        # 261019 (measured on t261019-32's walkthrough): `args.get("input") or {}`
+        # treated a MISSING input as "an empty payload", so the isinstance
+        # fallback below never fired and EVERY top-level field was swallowed -
+        # the signal carried who="" which then matched nothing in the no-self-sign
+        # handler, and the merge booked with an empty signer. The authorize op
+        # right below has always had the correct shape: read the key WITHOUT the
+        # `or {}` so a missing key stays None and the fallback to the flat args
+        # fires. Two lines, two faces, one rule.
+        raw = args.get("input")
         if not isinstance(raw, dict):
             raw = args
         sig = Signature(
@@ -1534,6 +1587,28 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         # t260915-12：retry_qc 载荷契约只收裸 who（base.py 契约），不盖章——undeclared
         # 记名仅 admin.log（_gate_receipt 按档补 notice，C3 不许谎称查询面可列）。
         return _gate_receipt(_ok({"ticket_id": tid, "signal": "retry_qc", "who": who,
+                                  "delivered": True}), gate, op)
+
+    if op == "work_done":
+        # t261019-32 (quickmanual lane): the working session signals done. The
+        # session id is MANDATORY and non-blank (identity guardrail: the lane
+        # records who worked) - refused here before a signal ever enters the
+        # history; role/note/evidence_ref are optional. Stamped through the same
+        # caller gate as sign/rework (the handler re-judges at intake).
+        session = str(args.get("session") or args.get("who") or "").strip()
+        if not session:
+            return _err("work_done requires session (the working session's id; the "
+                        "lane records who worked - never a borrowed role name)")
+        req = WorkDoneSignal(
+            session=session,
+            role=str(args.get("role") or ""),
+            note=str(args.get("note") or ""),
+            evidence_ref=str(args.get("evidence_ref") or ""),
+            caller_project=gate["stamp"] if gate else "",
+            cross_project_note=gate["note"] if gate else "")
+        await handle.signal("work_done", req)
+        return _gate_receipt(_ok({"ticket_id": tid, "signal": "work_done",
+                                  "session": session, "role": req.role,
                                   "delivered": True}), gate, op)
 
     if op == "ruling":
@@ -1651,6 +1726,36 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
 # stub-scenario family). The opt-in path pays the import; absence (every legacy
 # ticket, every stub replay) never does.
 
+def _default_line_for_project(project_key: Any, template_id: Any) -> str:
+    """The line a dev-lane ticket defaults to (261019, host ruling a1).
+
+    Returns the declared line id ONLY when all of these hold; "" otherwise (no
+    declaration, an unreadable one, or an ambiguous one simply leaves the ticket
+    on the legacy path exactly as before - never a guess, never a refusal):
+      * the template is dev-lane (the only workflow that carries these fields);
+      * the project declares exactly ONE line in its lines.json;
+      * that line declares exactly ONE repository (the per-ticket landing wires
+        the single-repository phase; a multi-repo line is refused by name there,
+        so defaulting to one would refuse every ticket).
+    """
+    if template_id != "dev-lane":
+        return ""
+    key = str(project_key or "").strip()
+    if not key:
+        return ""
+    try:
+        import develop_line  # local: KI-227 heavy-import rule
+        lines = develop_line.load_lines(key)
+    except Exception:      # no declaration / unreadable: no default, no refusal
+        return ""
+    if len(lines) != 1:
+        return ""
+    line = next(iter(lines.values()))
+    if len(getattr(line, "repositories", ())) != 1:
+        return ""
+    return str(getattr(line, "line_id", "") or "")
+
+
 def lane_optin_intake(args: Dict[str, Any], template_id: str,
                       project_key: str) -> "Tuple[bool, str, str, str]":
     """Intake validation of the per-ticket lane-version opt-in (t261009-76, spec
@@ -1685,6 +1790,21 @@ def lane_optin_intake(args: Dict[str, Any], template_id: str,
                 "ticket-start refused: lane_version/develop_line_id are only read "
                 "by the dev-lane workflow (template %r does not carry them)" % template_id)
     if not lv_present and not dl_present:
+        # 261019 (host ruling a1): a SINGLE-REPOSITORY project that declares
+        # exactly one line defaults to it. The declaration is the project's
+        # statement of where its delivery flows; leaving the default at "legacy"
+        # meant every ticket silently took the un-lined path (measured: thirteen
+        # 261019 dev-lane tickets ran full-suite gate rounds and squash-landed
+        # straight onto main because nobody repeated the opt-in on each one).
+        # Deliberate limits, each fail-closed:
+        #   * multi-repo projects are NOT defaulted - the per-ticket landing
+        #     refuses a multi-repository line BY NAME, so a default there would
+        #     turn every ticket into a refusal;
+        #   * more than one declared line is ambiguous - a human picks;
+        #   * nothing declared / unreadable declaration = today's behaviour.
+        default_line = _default_line_for_project(project_key, template_id)
+        if default_line:
+            return (True, develop_line.LANE_VERSION_DEVELOP_BUFFER, default_line, "")
         return (True, "", "", "")  # absence = the ticket did not opt in (legacy)
     try:
         lane_version = develop_line.parse_lane_version(lv_raw)
@@ -1733,7 +1853,7 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     mapping), with every business attribute pinned into TicketInput (state lives only in
     the workflow, no JSON projection).
     epic-linkage: when args.epic is given it is strictly validated (code shape + the
-    existence of notes/epics/<code>.md); if valid, the workflow gets the EpicCode search
+    existence of docs/epics/<code>.md plus its retired:boolean); if valid, the workflow gets the EpicCode search
     attribute and can be fished out by querying EpicCode="...". """
     tpl = str(args.get("template_id") or args.get("workflow") or "")
     cls = TEMPLATE_CLASSES.get(tpl)
@@ -1788,7 +1908,7 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
     # Epic linkage (epic-linkage): the single strict-validation point for --epic — a
     # code-shape whitelist + the epic archive existing. The validation directory comes
     # from resolve_epics_dir(project) — anchored to the project registry entry's main
-    # directory notes/epics (same source as the workbench UI's resolveEpicsDir); the
+    # directory docs/epics (same source as the workbench UI's epic resolution); the
     # SANDBAR_EPICS_DIR env wins, keeping the self-test semantics. Empty = no epic
     # linkage (allowed).
     # t261004-19 (arbitrate gen1 code-fault fix): this block must sit before the
@@ -1927,6 +2047,12 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         write_set=[str(x) for x in (args.get("write_set") or [])],
         no_file_changes=bool(ws_flags.get("no_file_changes")),
         acceptance_extra=[str(x) for x in (args.get("acceptance_extra") or [])],
+        # t261019-32 (quickmanual lane): the mandatory evidence declaration travels
+        # with the creation input verbatim - the mechanical gate lives at the
+        # quickmanual `open` stage (a malformed declaration blocks THERE with a
+        # named remedy), so the create face passes it through without judging.
+        evidence=dict(args["evidence"]) if isinstance(args.get("evidence"), dict)
+        else {},
         deliverables=str(args.get("deliverables") or ""),
         # M16: body = the original user request (user_request kept verbatim, explicit
         # and preferred; falls back to body when absent); spec independent
@@ -3216,6 +3342,135 @@ def _classify_infra_error(e: BaseException) -> Dict[str, Any]:
     return _err(f"{type(e).__name__}: {e}", kind)
 
 
+# ---------- t261018-11: terminal-face reconciliation at the read boundary ----------
+#
+# A COMPLETED workflow's return snapshot is frozen history (dev_lane.py close-out
+# writes status=closed + stage_state=awaiting for every normally ended ticket, and
+# the merge Stage's acceptance template carries "Human sign-off recorded" even on
+# the develop-buffer path where the gate is satisfied by the engine landing, not by
+# a human signature). The served face must not keep a waiting word for a workflow
+# that has ended, and the acceptance line must agree with the real gate disposition.
+# The reconciliation happens HERE (the read boundary) because already-COMPLETED
+# tickets' return snapshots are immutable — no producer-side edit can heal them.
+# Precedent for read-boundary snapshot mutation: the epic SA backfill in
+# cmd_ticket_query below.
+
+#: The template acceptance item that claims a human sign-off (dev_lane merge Stage).
+_TERMINAL_SIGN_OFF_CLAIM = "Human sign-off recorded"
+#: Honest replacement when the frozen record proves the engine:land disposition.
+_TERMINAL_LANDED_ACCEPTANCE = ("Merge gate satisfied by develop-buffer landing "
+                               "(engine:land) — no human sign-off")
+#: Honest replacement when the disposition is unreadable — never keep a false
+#: sign-off claim, never fabricate a cause (KI-025 family).
+_TERMINAL_UNREADABLE_ACCEPTANCE = ("Merge gate disposition unreadable in the "
+                                   "terminal record — not signed")
+
+
+def _engine_land_proof_of(snap: Any) -> bool:
+    """True when the frozen checks prove the merge stage was finished by engine:land.
+
+    Defensive read (the snapshot is untrusted external input): any malformed shape
+    reads as "no proof" and the caller falls to the explicit unreadable line."""
+    meta = snap.get("meta") if isinstance(snap, dict) and isinstance(snap.get("meta"), dict) else {}
+    checks = meta.get("checks") if isinstance(meta.get("checks"), dict) else {}
+    entries = checks.get("merge")
+    if not isinstance(entries, list):
+        return False
+    for c in entries:
+        if isinstance(c, dict) and str(c.get("by") or "").startswith("engine:land"):
+            return True
+    return False
+
+
+def _reconcile_acceptance_list(items: Any, signatures_empty: bool,
+                               land_proof: bool) -> Any:
+    """Replace a false sign-off claim in one acceptance list per the honesty ladder.
+
+    Returns (list, changed). Untouched when there is no claim item (nothing
+    dishonest to fix) or when a real signature exists (the claim is true).
+    Malformed lists pass through unchanged."""
+    if not isinstance(items, list) or _TERMINAL_SIGN_OFF_CLAIM not in [
+            str(x) for x in items if isinstance(x, str)]:
+        return items, False
+    if not signatures_empty:
+        return items, False
+    replacement = (_TERMINAL_LANDED_ACCEPTANCE if land_proof
+                   else _TERMINAL_UNREADABLE_ACCEPTANCE)
+    return [replacement if (isinstance(x, str) and x == _TERMINAL_SIGN_OFF_CLAIM) else x
+            for x in items], True
+
+
+def _terminal_face_reconcile(snap: Any, exec_status: str, close_ts: float) -> Any:
+    """Serve an honest terminal face for a COMPLETED dev-lane ticket (t261018-11).
+
+    Returns the (possibly reconciled) snapshot copy. Rules:
+      - applies ONLY to exec COMPLETED + status closed + a non-terminal waiting
+        word (awaiting / awaiting-human) on stage_state; RUNNING snapshots,
+        failed faces and non-closed snapshots pass through byte-identical;
+      - stage_state -> "closed" (the engine's own terminal word from the close-out
+        timeline), in the snapshot top level and the meta mirror;
+      - the merge-stage acceptance claim "Human sign-off recorded" is replaced by
+        the real gate disposition when signatures is empty (engine:land proof ->
+        landing line; unreadable -> explicit not-signed line); a real signature
+        leaves acceptance untouched;
+      - close_ts / close_time_txt ride the served meta (same additive keys the
+        inspection detail face uses, t260921-03); unreadable close time is named
+        in the note, never guessed;
+      - every reconciliation appends meta["terminal_face_note"] so a reader can
+        tell the frozen snapshot words from the reconciled serving; malformed
+        input degrades to "no reconciliation", never throws.
+    Inspection snapshots are out of scope (their branch returns before this runs).
+    """
+    if exec_status != "COMPLETED" or not isinstance(snap, dict):
+        return snap
+    if str(snap.get("status") or "") != "closed":
+        return snap
+    ss = snap.get("stage_state")
+    if ss not in ("awaiting", "awaiting-human"):
+        return snap
+    notes = ["stage_state reconciled: %s -> closed (workflow COMPLETED)" % ss]
+    out = dict(snap)
+    out["stage_state"] = "closed"
+    meta = out.get("meta") if isinstance(out.get("meta"), dict) else {}
+    meta = dict(meta)
+    if meta.get("stage_state") == ss:
+        meta["stage_state"] = "closed"
+    sigs = out.get("signatures")
+    signatures_empty = not sigs  # {} / None / missing = no human sign-off recorded
+    land_proof = _engine_land_proof_of(out)
+    # The FROZEN result() snapshot stores the acceptance list at meta["acceptance"]
+    # (dev_lane._enter copies the Stage template there; the top-level
+    # stage_acceptance is a query-time projection that does not survive into the
+    # frozen return value). Sweep the meta list as the primary carrier and the
+    # top-level keys defensively (a live snapshot query may carry them) — every
+    # carrier the claim appears on must agree (the ticket: the signature state
+    # must agree with the acceptance line).
+    acc_note_added = False
+    for key in ("stage_acceptance", "acceptance"):
+        new_items, changed = _reconcile_acceptance_list(out.get(key),
+                                                        signatures_empty, land_proof)
+        if changed:
+            out[key] = new_items
+            acc_note_added = True
+    meta_acc, meta_changed = _reconcile_acceptance_list(meta.get("acceptance"),
+                                                        signatures_empty, land_proof)
+    if meta_changed:
+        meta["acceptance"] = meta_acc
+        acc_note_added = True
+    if acc_note_added:
+        notes.append("acceptance reconciled: %s" % (
+            _TERMINAL_LANDED_ACCEPTANCE if land_proof
+            else _TERMINAL_UNREADABLE_ACCEPTANCE))
+    if close_ts and close_ts > 0:
+        meta["close_ts"] = close_ts
+        meta["close_time_txt"] = _terminal_face_ts_txt(close_ts)
+    else:
+        notes.append("close time unavailable")
+    meta["terminal_face_note"] = "; ".join(notes)
+    out["meta"] = meta
+    return out
+
+
 async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
     """Single-ticket query (v2): the full snapshot + meta (a JSON-compatible ticket
     shape, consumed directly by ticket.py show).
@@ -3318,6 +3573,11 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
             "ticket": _inspection_query_meta(tid, snap, exec_status, _close_txt),
             "pulse": _pulse_from_desc(desc) if exec_status == "RUNNING" else None,
         })
+    # t261018-11: terminal-face reconciliation on the COMPLETED dev-lane detail
+    # face — no window, any age (the list face heals in-window via hydrate and
+    # past-window via the minimal row; the three faces stay in lockstep).
+    _recon_close_ts = _terminal_face_ts_of(getattr(desc, "close_time", None))
+    snap = _terminal_face_reconcile(snap, exec_status, _recon_close_ts)
     # t261009-31: the detail face carries the same dismissal facts as the list
     # rows (dismissed:{at,who,reason}; read failure = key absent + dismissed_note
     # in the payload — never a silent "not dismissed").
@@ -3774,6 +4034,11 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                     if isinstance(snap, dict) and snap.get("kind") == "inspection":
                         return {"_inspection_snap": snap}
                     return {"_inspection_closed_degraded": True}
+                # t261018-11: reconcile the frozen terminal face before projecting
+                # the hydrate meta (stage_state word + honest acceptance; the
+                # meta-level note rides along; _row_from_meta's explicit key
+                # projection keeps the row keyset unchanged).
+                snap = _terminal_face_reconcile(snap, exec_status, close_ts)
                 m = dict((snap or {}).get("meta") or {})
                 m["paused"] = bool((snap or {}).get("paused"))
                 m["paused_phase"] = str((snap or {}).get("paused_phase") or "")
@@ -3934,11 +4199,22 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
             row["close_ts"] = e["close_ts"]
             rows.append(row)
         else:  # snapshot unavailable (closed past the window / worker never ran / old code) → minimal row
+            # t261018-11: a COMPLETED minimal row must not carry the waiting word —
+            # past the hydrate window this branch is the only face a closed ticket
+            # has, and "awaiting" sent readers hunting a signature a COMPLETED
+            # workflow can never deliver. The reconciliation label rides INSIDE
+            # the existing title key (row-family parity: labels are never new
+            # top-level row keys, t260919-02 arbitrate gen1); non-COMPLETED
+            # minimal rows keep the legacy shape byte-identical.
             rows.append({"id": tid, "project": sa_project, "epic": sa_epic,
                          "role": None,
                          "status": "closed" if exec_status == "COMPLETED" else "",
-                         "title": "", "workflow": "", "proposal_id": "",
-                         "stage": None, "stage_state": "awaiting",
+                         "title": ("workflow COMPLETED; snapshot past the hydrate "
+                                   "window; stage_state reconciled: awaiting -> closed"
+                                   if exec_status == "COMPLETED" else ""),
+                         "workflow": "", "proposal_id": "",
+                         "stage": None,
+                         "stage_state": "closed" if exec_status == "COMPLETED" else "awaiting",
                          "handoff_count": 0, "pending_count": 0, "worktree": "",
                          # t261009-76: row-keyset parity with the live row (spec (4));
                          # no snapshot = nothing to read, honest empty, never a guess
@@ -4882,6 +5158,51 @@ async def cmd_lane_reclaim(args: Dict[str, Any]) -> Dict[str, Any]:
                 "actions": actions})
 
 
+async def cmd_request_sweep(args: Dict[str, Any]) -> Dict[str, Any]:
+    """Engine entry for the request-condition sweep (t261019-44): evaluate
+    every open request head that declares a `resolves_when` condition against
+    the delivery ledger and append one resolved state row per head whose
+    condition now reads true. Body truth: server/engine/request_sweep.py; this
+    face is the per-tick wiring contract (a follow-up registers a
+    request_sweep_tick activity beside line_round_tick_engine and calls THIS
+    command). args: {project?: "<key>"} — one project, or every project that
+    has a requests ledger. Skips are named in the receipt (unreadable face =
+    skip, never a silent close); a skip-only sweep is still ok=true."""
+    import request_sweep
+    import time as _time
+    project = str(args.get("project") or "")
+    now_ms = int(_time.time() * 1000)
+    if project:
+        import shared
+        if not shared.PROJECT_KEY_RE.match(project):
+            return _err("request-sweep: project key shape invalid: %r" % project,
+                        KIND_INTERNAL)
+        out = request_sweep.sweep_project(project, now_ms, 1)
+    else:
+        out = request_sweep.sweep_all_projects(now_ms, 1)
+    if out.get("ok"):
+        return _ok(out)
+    return _err("request-sweep: %s" % out.get("error", "sweep refused"),
+                KIND_INTERNAL)
+
+
+async def cmd_run_watch(args: Dict[str, Any]) -> Dict[str, Any]:
+    """t261019-25: the FORCED run-watch pass (design
+    executor-operational-envelope-v1 section 1; body truth run_watch.run_watch_now).
+    One pass NOW, one project (args.project) or every line-declaring project.
+    In-process, no Temporal round trip: the watch is read-only over the ledger
+    and the rounds directory, and its writes (fix ticket / closure row /
+    request) go through the engine's own writers. The receipt is the tick's
+    per-line decisions and results, verbatim — including the refusals."""
+    import run_watch
+    project = str(args.get("project") or "").strip()
+
+    def _all():
+        return run_watch.run_watch_now(project or None)
+    result = await asyncio.to_thread(_all)
+    return _ok({"project": project, "result": result})
+
+
 COMMANDS = {
     "start": cmd_start,
     "query": cmd_query,
@@ -4905,10 +5226,12 @@ COMMANDS = {
     "deliver": cmd_deliver,
     "lane-orphans": cmd_lane_orphans,
     "lane-reclaim": cmd_lane_reclaim,
+    "request-sweep": cmd_request_sweep,
+    "run-watch": cmd_run_watch,
 }
 
 USAGE = (
-    "usage: python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|ticket-archive-terminal|cancel-audit|template-faces|executor-grants-write|concurrency-limit-write|deliver|lane-orphans|lane-reclaim> [argsJSON]\n"
+    "usage: python client.py <start|query|schedule-list|cancel|ticket|ticket-start|ticket-list|ticket-query|ticket-cancel|ticket-prune|ticket-archive-legacy|ticket-archive-terminal|cancel-audit|template-faces|executor-grants-write|concurrency-limit-write|deliver|lane-orphans|lane-reclaim|request-sweep|run-watch> [argsJSON]\n"
     "安全红线：工具面只暴露上述子命令，无 set-stage / force_stage / 改状态入口。\n"
     "signal 子命令已退役（260904 宿主令）：调用一律返回结构化退役报错（sign/retry_qc\n"
     "  只服务 v1 content-pipeline 人门段，该模板已删）；签字走 ticket op=sign，\n"

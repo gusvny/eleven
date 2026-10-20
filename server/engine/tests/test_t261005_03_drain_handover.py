@@ -172,12 +172,18 @@ class ShutdownWiringTest(unittest.TestCase):
         import inspect
         src = inspect.getsource(worker._graceful_shutdown)
         assert "mark_meta_draining(meta_path)" in src
-        assert src.index("mark_meta_draining(meta_path)") < src.index("_log_shutdown_disposition()")
+        # t261019-42: the disposition call now takes the workers so the roll-call
+        # can print the SDK-side running-activity count; the ordering anchor is
+        # unchanged (draining marker strictly before the pollers stop).
+        assert src.index("mark_meta_draining(meta_path)") < src.index("_log_shutdown_disposition(workers)")
 
     def test_run_worker_passes_meta_path(self):
         import inspect
         src = inspect.getsource(worker.run_worker)
-        assert "_graceful_shutdown(workers, run_tasks, watch_task, meta_path=meta_path)" in src
+        # t261019-24: the call also reaps the code-stamp watch task (stamp_task kwarg);
+        # the meta path is still the drain hand-over's key argument.
+        assert ("_graceful_shutdown(workers, run_tasks, watch_task, meta_path=meta_path,\n"
+                "                             stamp_task=stamp_task)") in src
 
 
 if __name__ == "__main__":

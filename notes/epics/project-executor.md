@@ -7,8 +7,8 @@
 | 立项日期 | 2026-09-27 |
 | 起草人 | integration（sandbar 项目会话） |
 | 来源 | 宿主 260927 连续会话：从「dsh 有没有"需要人介入就出声"的能力」起，六轮到「每个项目都应该有一个执行器会话」，架构与界面逐轮定稿（原话见设计稿来源段） |
-| 设计基准 | `notes/discussions/260927-项目执行器-设计稿.md`（**本文不重复其内容**；口径、判据、界面、通用性审查都在那里） |
-| 界面 mock | `notes/discussions/260927-项目执行器-mock.html` |
+| 设计基准 | `notes/discussions/260927-project-executor-design.md`（**本文不重复其内容**；口径、判据、界面、通用性审查都在那里） |
+| 界面 mock | `notes/discussions/260927-project-executor-mock.html` |
 
 ## ⓪ 说人话版（一分钟）
 
@@ -53,9 +53,9 @@
 
 ## 四、相关文档
 
-- 设计稿（真源）：`notes/discussions/260927-项目执行器-设计稿.md`
-- 界面 mock：`notes/discussions/260927-项目执行器-mock.html`
-- 被本文取代的早期草稿：`notes/discussions/260927-会话哨兵-设计稿.md`（其提醒部分已并入设计稿）
+- 设计稿（真源）：`notes/discussions/260927-project-executor-design.md`
+- 界面 mock：`notes/discussions/260927-project-executor-mock.html`
+- 被本文取代的早期草稿：`notes/discussions/260927-session-sentinel-design.md`（其提醒部分已并入设计稿）
 - 既有机制：`docs/design/ticket-workflow-console-design.md`、`docs/design/project-external-workflow-templates.md`
 
 ## 五、开票授权的分级：**按 epic 授权**（261004 宿主裁定）

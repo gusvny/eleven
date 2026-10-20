@@ -312,12 +312,18 @@ def test_land_to_line_refuses_unknown_line_and_empty_fields(env, tmp_path):
 
 
 def test_land_to_line_refuses_multirepo_line_by_name(env, tmp_path):
+    """t261019-41: the refusal stays, but the named reason is the NEW
+    contract — a multi-repository line lands only on a DECLARED per-repo
+    proven anchoring (repo_proven); undeclared, it refuses by name and
+    nothing moves."""
     project, repo, proven = _landing_setup(
         env, tmp_path, line_repos=(("r", "develop"), ("r2", "develop2")))
     res = asyncio.run(aa.land_to_line(aa.LandToLineArgs(
         ticket_id="t46", project_key=project, line_id="buffer",
         worktree=str(repo), proven_sha=proven)))
-    assert not res.ok and "single-repository" in res.error
+    assert not res.ok and "per-repo proven anchoring" in res.error
+    rows, _ = dc.read_rows(dc.ledger_path(project))
+    assert not [r for r in rows if r.get("kind") == dc.KIND_LANDING]
 
 
 def test_land_to_line_duplicate_is_a_named_refusal(env, tmp_path):
@@ -437,6 +443,13 @@ def test_dev_lane_new_surface_references_stay_in_declared_seams():
     tree = ast.parse(DEV_LANE)
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == "is_develop_buffer_ticket":
+            continue
+        # t261019-02 (host ruling 261019): the line-landing close-out guard is
+        # a declared seam of its own — the pure verdict core over the
+        # develop-line/delivery-ledger read faces; its one workflow call site
+        # is version-gated (LINE_LANDING_CLOSEOUT_GUARD_PATCH_ID) and pinned
+        # by the registered scenario t261019-02-line-landing-closeout-guard.
+        if isinstance(node, ast.FunctionDef) and node.name == "line_landing_closeout_verdict":
             continue
         if isinstance(node, ast.ClassDef):  # methods checked below
             for sub in node.body:

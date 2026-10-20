@@ -104,6 +104,7 @@ fail-fast。declared 身份与目标票项目不符由 client.py 闸拒收（cro
 """
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -155,6 +156,7 @@ TOOL = {
             'op': {'type': 'string', 'enum': ['create', 'update', 'list', 'show', 'accept',
                                               'advance', 'dispatch-next', 'rework',
                                               'sign', 'retry_qc', 'pause', 'resume',
+                                              'work_done',
                                               'authorize', 'ruling', 'cancel',
                                               'close_out', 'concurrency',
                                               'dismiss', 'restore']},
@@ -190,6 +192,10 @@ TOOL = {
             'lane_version': {'type': 'string', 'description': 'create 逐票 lane 版本 opt-in（t261009-76，仅 dev-lane 模板）：registry=legacy-v1|develop-buffer-v1；缺省/空=未 opt-in（legacy，绝不静默迁移）。未知/畸形名在建票口具名拒收（附 registry 清单）；校验单点=client.py'},
             'develop_line_id': {'type': 'string', 'description': 'create 声明的 develop line id（仅 dev-lane；lane_version=develop-buffer-v1 时必填）：必须已在 <develop_dir>/lines.json 声明（声明文件是唯一真源，未声明的 id 具名拒收并列出已声明 id）'},
             'by': {'type': 'string', 'description': 'rework/sign/retry_qc/pause/resume/cancel/dismiss/restore 操作人（身份注入，who 语义由调用方负责；等价别名 who 也收；pause/resume/cancel/dismiss/restore 必填非空——正规入口不落 op-local；dismiss/restore 拒收 agent 角色名）'},
+            'session': {'type': 'string', 'description': 'work_done: the working session id (required, non-blank; identity guardrail - the lane records who worked on the ticket face, never a borrowed role name; falls back to by|who)'},
+            'role': {'type': 'string', 'description': 'work_done: the working session role (optional; defaults to session)'},
+            'note': {'type': 'string', 'description': 'work_done: completion note (optional; carried onto the ticket face in the stage handoff)'},
+            'evidence_ref': {'type': 'string', 'description': 'work_done: evidence pointer (optional, e.g. result file / test name)'},
             'who': {'type': 'string', 'description': '操作人别名（=by，信号语义名；rework/sign/retry_qc/pause/resume/cancel/dismiss/restore 收）'},
             'gate': {'type': 'string', 'description': 'sign：审批门标识（可选，缺省空串透传）'},
             'decision': {'type': 'string', 'enum': ['approve', 'reject'], 'description': 'sign：审批决定（缺省 approve=放行推进；reject=打回）'},
@@ -814,6 +820,9 @@ def _create(a):
         # （validate_write_set_args：空写集+声明才放行，meta 记 no_file_changes）。
         'allow_empty_write_set': bool(a.get('allow_empty_write_set')),
         'acceptance_extra': extra,
+        # t261019-32 (quickmanual lane): the evidence declaration rides verbatim —
+        # thin-shell discipline, the gate lives at the quickmanual open stage.
+        'evidence': dict(a['evidence']) if isinstance(a.get('evidence'), dict) else {},
         'deliverables': a.get('deliverables') or '',
         # 正文=原始用户需求（user_request 逐字保留，显式优先；缺省回落 body）
         'user_request': a.get('user_request') or '',
@@ -1067,6 +1076,34 @@ def _retry_qc(a):
                          'update pending_add，或 ruling 注入裁决')
     payload = {'op': 'retry_qc', 'ticket_id': tid,
                'who': _who(a) or 'op-local'}
+    flag = _cross_project_flag(a)
+    if flag:
+        payload['cross_project'] = flag
+    out = _write_op_poc('ticket', payload, a)
+    return _poc_ok(out)
+
+
+def _work_done(a):
+    """Quickmanual lane (t261019-32): the working session signals done. The
+    session id is mandatory and non-blank (identity guardrail: the lane records
+    who worked, never a borrowed role name) - refused here so the signal never
+    enters the history; role/note/evidence_ref are optional. Stamped through the
+    same caller gate as sign/rework."""
+    tid = a.get('id') or ''
+    if not tid:
+        raise ValueError('work_done requires id')
+    session = str(a.get('session') or _who(a) or '').strip()
+    if not session:
+        raise ValueError('work_done requires session (the working session id; '
+                         'the lane records who worked, never a borrowed role '
+                         'name)')
+    payload = {'op': 'work_done', 'ticket_id': tid, 'session': session}
+    if a.get('role'):
+        payload['role'] = str(a.get('role'))
+    if a.get('note'):
+        payload['note'] = str(a.get('note'))
+    if a.get('evidence_ref'):
+        payload['evidence_ref'] = str(a.get('evidence_ref'))
     flag = _cross_project_flag(a)
     if flag:
         payload['cross_project'] = flag
@@ -1595,10 +1632,19 @@ def _hatch_check_breakage(a):
     if ki:
         if not re.match(r'^KI-[0-9A-Za-z]+$', ki):
             raise ValueError('repair_hatch 的 known_issue 形状非法（KI-<n> 或 KI-<ULID>）：%r' % ki[:64])
-        ki_file = REPO / 'notes' / 'debts' / 'known-issues.md'
-        if not ki_file.exists() or not _ki_known_in(ki, ki_file.read_text(encoding='utf-8', errors='replace')):
-            raise ValueError('repair_hatch 拒收：known_issue %s 未在 known-issues.md 登记'
-                             '（破损必须是已记账事实，不是口头形容）' % ki)
+        # 261020 (host order): the ledger lives in the project store, outside git.
+        # A pin file in the repo still counts (a pinned entry is a recorded fact),
+        # so both are consulted; neither present = the id is not recorded.
+        ki_texts = []
+        for _cand in _ki_ledger_paths():
+            try:
+                ki_texts.append(_cand.read_text(encoding='utf-8', errors='replace'))
+            except OSError:
+                continue
+        if not ki_texts or not any(_ki_known_in(ki, t) for t in ki_texts):
+            raise ValueError('repair_hatch 拒收：known_issue %s 未在 KI 账本登记'
+                             '（破损必须是已记账事实，不是口头形容；账本在项目 store 的 '
+                             'kb/known-issues.md，仓内只留 pinned 条目）' % ki)
         return {'known_issue': ki}
     if desc:
         return {'description': desc}
@@ -1606,12 +1652,33 @@ def _hatch_check_breakage(a):
                      '——授权记录必须能回答修的是什么）')
 
 
+def _ki_ledger_paths():
+    """The KI ledger candidates, store first (261020): every path that exists."""
+    out = []
+    try:
+        root = pathlib.Path(os.path.expanduser("~/.sandbar/projects"))
+        for key_dir in sorted(root.iterdir()):
+            for name in ("known-issues.jsonl", "known-issues.md"):
+                cand = key_dir / "kb" / name
+                if cand.is_file():
+                    out.append(cand)
+    except OSError:
+        pass
+    pinned = REPO / 'notes' / 'debts' / 'known-issues.md'
+    if pinned.is_file():
+        out.append(pinned)
+    return out
+
+
 def _ki_known_in(ki, text):
     """known-issues.md 登记表核对（纯函数，文本注入便于单测）：id 出现在表行首列
     （| KI-… |）即视为已登记——不解析表语义，只做存在性。"""
     for line in text.splitlines():
         stripped = line.strip()
+        # a table row (the pinned/legacy shape) or a jsonl record (the store shape)
         if stripped.startswith('|') and re.match(r'^\|\s*%s\s*\|' % re.escape(ki), stripped):
+            return True
+        if stripped.startswith('{') and ('"id": "%s"' % ki) in stripped:
             return True
     return False
 
@@ -1763,10 +1830,11 @@ def _dismiss_restore(a, action):
     """t261009-31 人工处置失败票：dismiss（摘出板面）/ restore（撤回摘除）。
 
     契约：人工动作——who/by 必填非空且非 agent 角色名、reason 必填非空（绝不默认），
-    这些在 CLI 层先具名拒收一遍（引擎层同规则复核）；工单存在性走 engine ticket-list
-    全量做存在闸（查不到全量=拒收，绝不静默跳过闸）；只记 audit journal（append-only），
-    绝不发 workflow 信号、不改状态机、不写票 meta——workflow 自己的历史仍是票怎么结束的
-    真源。拒绝路径零写入（引擎层 dir-digest 用例钉死）。"""
+    这些在 CLI 层先具名拒收一遍（引擎层同规则复核）；工单存在性走存在闸
+    （t261016-10 双源人口=engine ticket-list ∪ 巡检台账：储备/被超票如 t261008-17
+    只活在巡检店，单看 ticket-list 会「按了没用」；两源全不可得=拒收，绝不静默
+    跳过闸）；只记 audit journal（append-only），绝不发 workflow 信号、不改状态机、
+    不写票 meta——workflow 自己的历史仍是票怎么结束的真源。拒绝路径零写入。"""
     tid = str(a.get('id') or '').strip()
     if not tid:
         raise ValueError('%s 需要 id（工单 id 必填）' % action)
@@ -1777,15 +1845,16 @@ def _dismiss_restore(a, action):
     if not reason:
         raise ValueError('%s 需要 reason（处置理由必填非空，绝不默认）' % action)
     mod = _ticket_dismiss_mod()
-    known = _known_ticket_ids()
+    known, sources = _dismiss_ticket_population()
     if known is None:
-        raise ValueError('%s 拒收：无法核验工单存在（ticket-list 全量不可得）——'
-                         '存在闸宁拒不猜' % action)
+        raise ValueError('%s 拒收：无法核验工单存在（ticket-list 与巡检台账均不可得）'
+                         '——存在闸宁拒不猜' % action)
     fn = mod.dismiss_ticket if action == 'dismiss' else mod.restore_ticket
     res = fn(mod.journal_dir(), ticket_id=tid, who=who, reason=reason,
              known_ticket_ids=known)
     if not res.get('ok'):
         raise ValueError(res.get('error') or '%s refused' % action)
+    res['population_sources'] = sources
     return res
 
 
@@ -1797,6 +1866,40 @@ def _ticket_dismiss_mod():
     if engine_dir not in _sys.path:
         _sys.path.insert(0, engine_dir)
     return importlib.import_module('ticket_dismiss')
+
+
+def _inspection_ticketing_mod():
+    """engine inspection_ticketing 模块单点（lazy import，同族纪律；读面不触发
+    任何 workflow 依赖——该模块本体零 workflow import）。"""
+    import importlib
+    import sys as _sys
+    engine_dir = str(TEMP_POC)
+    if engine_dir not in _sys.path:
+        _sys.path.insert(0, engine_dir)
+    return importlib.import_module('inspection_ticketing')
+
+
+def _dismiss_ticket_population():
+    """存在闸人口（t261016-10）：engine ticket-list 全量 ∪ 巡检台账可证票号
+    （shared.INSPECTION_DIR 下的 *.ticket 指针 + inspection-spawn.jsonl /
+    inspection-reopen.jsonl）。返回 (population, sources)：
+    population=None 仅当**两源都不可得**（ticket-list 查挂且巡检店读挂）——按 id
+    fail-closed：任一源可读，人口即成立；id 不在人口由引擎层具名拒收（点名两源）。
+    只读，不缓存（每次处置现查，防陈旧名单放行幽灵票）。"""
+    dev = _known_ticket_ids()          # None = ticket-list 不可得
+    inspection, insp_ok = set(), False
+    try:
+        mod = _inspection_ticketing_mod()   # 先入 sys.path，shared 才可解析
+        import shared  # lazy：INSPECTION_DIR 走 SANDBAR_INSPECTION_DIR 覆盖链
+        inspection = mod.inspection_known_ticket_ids(shared.INSPECTION_DIR)
+        insp_ok = True
+    except Exception:
+        insp_ok = False                # 巡检店读挂：不炸，退化成单源闸
+    if dev is None and not insp_ok:
+        return None, []
+    sources = (['engine-ticket-list'] if dev is not None else []) + \
+              (['inspection-store'] if insp_ok else [])
+    return ((dev or set()) | inspection), sources
 
 
 def _known_ticket_ids():
@@ -1838,6 +1941,8 @@ def run(args):
         return _ruling(args)
     if op == 'retry_qc':
         return _retry_qc(args)
+    if op == 'work_done':
+        return _work_done(args)
     if op == 'cancel':
         return _cancel(args)
     if op == 'close_out':

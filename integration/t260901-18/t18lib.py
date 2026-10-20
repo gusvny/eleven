@@ -105,6 +105,23 @@ def mkdtemp() -> Path:
     return Path(tempfile.mkdtemp(prefix="t18-it-"))
 
 
+def tree_snapshot(repo: Path) -> str:
+    """One canonical string for 'the tree is byte-identical' judgments
+    (t261016-11 ①): HEAD sha + `git status --porcelain` output. Any commit,
+    deletion or untracked artifact left behind changes the snapshot."""
+    head = git(repo, "rev-parse", "HEAD")
+    st = git(repo, "status", "--porcelain")
+    return "HEAD=%s\nSTATUS:\n%s" % (head.stdout.strip(), st.stdout)
+
+
+def assert_tree_untouched(before: str, after: str, label: str) -> None:
+    """t261016-11 ①: a case that drives the real merge_check face must never
+    write to the tree under test. A changed snapshot = the case committed,
+    deleted or dirtied something — red, never tolerated."""
+    ok(before == after, "%s: the tree under test is byte-identical after the "
+                        "run (no commit, no deletion, no dirtying)" % label)
+
+
 def rmtree(root: Path) -> None:
     shutil.rmtree(str(root), ignore_errors=True)
 

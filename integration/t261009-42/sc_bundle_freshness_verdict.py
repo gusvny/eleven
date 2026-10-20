@@ -143,9 +143,19 @@ def run_merge(wt, merge_base):
     import asyncio
     import agent_activities
     from agent_activities import MergeCheckArgs
+    # t261019-28: this fixture PLANTS its own files (the build entry under
+    # tools/, the merge-checks declaration under server/, the committed bundle
+    # under builds/). They must be inside the declared write set, or the
+    # merge_check foreign-file repair (t261012-09, KI-01M4PAVBP6EZFGYC2VVQ0Z90J7)
+    # correctly reverts them to main's version BEFORE the bundle item judges:
+    # the failing entry becomes main's working one and the declaration vanishes,
+    # so T3a/T3c read green and T5 falls back to the diff heuristic. The engine
+    # rule is right (a lane owns only its declared paths); the fixture was the
+    # party out of date. Every assertion is untouched.
     res = asyncio.run(agent_activities.merge_check(MergeCheckArgs(
         ticket_id="t26100942sc", worktree=str(wt), branch="lane",
-        base_ref=merge_base, write_set=["srcs/"])))
+        base_ref=merge_base,
+        write_set=["srcs/", "tools/", "server/", "builds/"])))
     return bundle_items(res.checks)
 
 

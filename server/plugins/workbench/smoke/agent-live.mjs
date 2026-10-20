@@ -45,9 +45,9 @@ try {
   /* ------------------------------------------------------------ A. projectDirKey */
   section('A projectDirKey（cwd-slug 规则与 dsh 侧一致）')
   {
-    // Check against the real directory name (measured in this lane on 260907: .lane/<ticket> layout): /Users/user/Documents/sandbar/.lane/t260907-01
-    const real = projectDirKey('/Users/user/Documents/sandbar/.lane/t260907-01')
-    ok(real === '--Users-user-Documents-sandbar-.lane-t260907-01--', `真实泳道 cwd → ${real}`)
+    // Check against the real directory name (measured in this lane on 260907: .lane/<ticket> layout): /Users/xingu/Documents/sandbar/.lane/t260907-01
+    const real = projectDirKey('/Users/xingu/Documents/sandbar/.lane/t260907-01')
+    ok(real === '--Users-xingu-Documents-sandbar-.lane-t260907-01--', `真实泳道 cwd → ${real}`)
     ok(projectDirKey('/a//b\\\\c:d') === '--a-b-c-d--', '分隔符 / \\ : 连续串坍缩成一个 -')
     ok(projectDirKey('/tmp/a~b') === '--tmp-a~007Eb--', '~ → ~XXXX 转义')
     ok(projectDirKey('/') === '--root--', '全分隔符 → root')

@@ -81,8 +81,8 @@ def run_lint():
     return r.returncode, r.stdout + r.stderr
 
 
-HOME_LINE = 'BAD = "/Users/user/Documents/sandbar/inspection.yaml"\n'
-HOME_LINE_POSIX = 'BAD = "/home/user/Documents/sandbar/inspection.yaml"\n'
+HOME_LINE = 'BAD = "/Users/xingu/Documents/sandbar/inspection.yaml"\n'
+HOME_LINE_POSIX = 'BAD = "/home/xingu/Documents/sandbar/inspection.yaml"\n'
 MARKER_NOSYNC = ("import pytest\n\n\n"
                  "@pytest.mark.production_snapshot\n"
                  "def test_zz_planted_snapshot_without_sync():\n"

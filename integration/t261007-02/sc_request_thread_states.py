@@ -79,10 +79,13 @@ def put_sessions(tmp, key, sids):
 
 
 def put_epics(tmp, *codes):
+    """t261019-12: epic docs are docs/epics front-matter; validation is fail-closed."""
     d = tmp / "epics"
     d.mkdir(parents=True, exist_ok=True)
     for c in codes:
-        (d / (c + ".md")).write_text("# " + c + "\n", encoding="utf-8")
+        (d / (c + ".md")).write_text(
+            "---\ncode: %s\nretired: false\nsummary: One English sentence for the fixture epic.\n"
+            "started: 2026-10-19\n---\n\n# %s\n" % (c, c), encoding="utf-8")
     return str(d)
 
 

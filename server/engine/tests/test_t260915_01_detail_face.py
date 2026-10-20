@@ -445,13 +445,18 @@ def test_source_wiring_locks_apply_settle_note_chain():
     assert "def _apply_settle_note(res: StageResult, note: str," in aa
     assert "refusal: Optional[Dict[str, Any]] = None" in aa
     assert aa.count("_apply_settle_note(") >= 5         # 定义 + 四调用点
-    # t260916-19 ④：_settle_with_gate 内透传带 face="agent"（ refusal 后置逗号）
-    assert "refusal=refusal,\n        face=\"agent\")" in aa
+    # t261016-21 (KI-01M52NS7A3290FBAWY1XYSBG0E): _settle_with_gate went per-scope,
+    # so the refusal collector is per-scope (sc_refusal) and the repo anchor rides
+    # with the scope; face="agent" unchanged
+    assert "refusal=sc_refusal,\n            repo=sc[\"repo\"],\n            face=\"agent\")" in aa
     for token in ("refusal=refusal2)", "refusal=refusal3)", "refusal=refusal4)"):
         assert token in aa, f"调用点缺接线：{token}"
     assert aa.count("_settle_worktree_lane(") >= 4
     assert "refusal=sc_refusal,\n                                        face=\"join\")" in aa  # settle_lane 收集口
-    assert "refusal=heal_refusal,\n                        face=\"heal\")" in aa              # merge_check 自愈
+    # t261016-21: the merge_check self-heal carries the repo= anchor (root-causes the
+    # "settle empty" incident — member-tree ownership used to resolve to REPO_ROOT and
+    # the guard returned "" for every member scope)
+    assert "refusal=heal_refusal,\n                        repo=sc[\"repo\"],\n                        face=\"heal\")" in aa              # merge_check self-heal
     assert "gate_refusal=(dict(sc_refusal) or None)" in aa
     assert "res.gate_refusal = dict(refusal)" in aa      # 挂载点
 
@@ -461,7 +466,10 @@ def test_source_wiring_locks_dev_lane_consumers():
     assert "import path_gates" in src                    # C-2：imports 块内
     assert "self._pin_agent_refusal(res)" in src         # A2 单点覆盖
     assert "self._pin_settle_refusal(s)" in src          # A3 两 join 点
-    assert src.count('self._pin_settle_refusal(s)') == 2
+    # t261019-32: +1 = the quickmanual work stage's settle-refusal branch (the
+    # session's work_done settle hits the same write-set gate; pin + named
+    # blocked, same discipline as the two join points).
+    assert src.count('self._pin_settle_refusal(s)') == 3
     assert "gate_refusal=raw.get(\"gate_refusal\")" in src  # dict 重建透传
     assert "self._detail_face_on = workflow.patched(DETAIL_FACE_PATCH_ID)" in src  # 唯一求值点（契约锚形状）
     assert src.count("workflow.patched(DETAIL_FACE_PATCH_ID)") == 1
@@ -475,7 +483,13 @@ def test_source_a4_pins_adjacent_to_blocked():
     src = _read("dev_lane.py")
     lines = src.splitlines()
     pin_lines = [i for i, ln in enumerate(lines) if "_pin_merge_red_detail(" in ln and "def " not in ln]
-    assert len(pin_lines) == 3
+    # 261019: a fourth site joined for the stale-build-output bound (the
+    # over-bound case is a real block, so it pins + blocks like the rest);
+    # the auto-rework path deliberately pins nothing because it never blocks.
+    # t261019-32: a fifth site joined - the quickmanual lane's merge_check
+    # phase pins its red detail and blocks merge_check (adjacent, same
+    # lifecycle).
+    assert len(pin_lines) == 5
     for i in pin_lines:
         window = "\n".join(lines[i:i + 8])
         assert 'self._blocked("merge_check"' in window or 'await self._blocked(' in window, \

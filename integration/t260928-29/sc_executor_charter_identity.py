@@ -2,7 +2,7 @@
 """执行器身份·charter 分段身份面（t260829-29 → t260928-29，registry: t260928-29-executor-charter-identity）。
 
 意图（灰盒 L2 级静态契约，ro 池离线秒级，零 docker 零网络）：
-设计稿决定 8（notes/discussions/260927-项目执行器-设计稿.md L482-484/L575）＝每个项目
+设计稿决定 8（notes/discussions/260927-project-executor-design.md L482-484/L575）＝每个项目
 一份执行器人设 + 一段 charter。本票把 sandbar 的执行器身份块落进
 server/session_charter.md 的 `## project:sandbar` 分段（唯一已到达每个新建项目会话的
 通道）。用户可感知承诺与故障面：

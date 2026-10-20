@@ -43,7 +43,7 @@ BRAKE = REPO / "integration" / "t261004-20" / "sc_test_anchor_brakes.py"
 FIXTURE = REPO / "server" / "engine" / "tests" / "test_zz_t26100420_planted_anchor_case.py"
 MANIFEST = REPO / "integration" / "test_anchors.json"
 NAME = "t261009-52-fixture-leak-brakes"
-LEAK_BODY = 'BAD = "/home/user/Documents/sandbar/inspection.yaml"\n'  # the exact 261008 residue (KI-222, /home shape)
+LEAK_BODY = 'BAD = "/home/xingu/Documents/sandbar/inspection.yaml"\n'  # the exact 261008 residue (KI-222, /home shape)
 
 _ck = ScenarioCheck(detail_cap=800, flush=True)
 ok, finish = _ck.ok, _ck.finish

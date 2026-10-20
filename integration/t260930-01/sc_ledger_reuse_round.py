@@ -40,7 +40,8 @@ import shutil
 import subprocess
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from lib_env import clean_narrowing_env, no_narrowing_env  # noqa: E402
+from lib_env import (  # noqa: E402
+    clean_narrowing_env, no_narrowing_env, owned_env_note)
 import tempfile
 import time
 from pathlib import Path
@@ -323,6 +324,9 @@ def _reuse_names(res):
 # ---------------------------------------------------------------- 主程序
 
 def main():
+    # t261017-10 规格②：本场景测的就是复用行为，继承的复用 kill switch 与被测面
+    # 直接矛盾——剥掉（clean_narrowing_env 现已收编该裸名）并**点名**认领。
+    owned_env_note(("SANDBAR_LEDGER_REUSE", "SANDBAR_INTEG_LEDGER_SOURCE"))
     if shutil.which("git") is None:
         env_fail("git 缺席：本场景的判据面（HEAD/脏树/commit 切换）全在 git 上")
     tmp = Path(tempfile.mkdtemp(prefix="t260930-01-reuse-"))

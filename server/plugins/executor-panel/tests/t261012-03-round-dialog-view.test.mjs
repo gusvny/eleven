@@ -54,7 +54,8 @@ const RED = (over = {}) => ({
 {
   const html = buildRoundDialogCore(LIVE)
   assert(html.includes('id="roundRunId"') && html.includes('run-live'), 'the run id leads the dialog')
-  assert(html.includes('data-k="run"') && html.includes(`>${ROUND_COPIES.running}<`), 'a running round renders the run pill')
+  // t261019-23 (F5): the running pill claims its own last-write moment
+  assert(html.includes('data-k="run"') && html.includes(`>${ROUND_COPIES.running} · ${ROUND_COPIES.lastWrite} `), 'a running round renders the run pill with its last write')
   assert(html.includes('353b2479') && html.includes('develop-buffer'), 'revision + line render')
   assert(html.includes(ROUND_COPIES.resultSoFar) && html.includes(countsCell(LIVE.face.counts, '')), 'result-so-far renders the live counts')
   assert(html.includes('sc-a') && html.includes('PASS'), 'the last judged case renders with its verdict')

@@ -3,7 +3,7 @@
 > 工单 t260903-08 implement 段产物（developer，2026-09-03）。方案（gen0/gen1）
 > 经 review 两轮收口：gen0 reject（R1 执行钩子/R2 写集边界/R3 集成可执行面）、
 > gen1 conditional 放行（附条 V1-V5 已全部吸收）。本单是 **sandbar 仓代码票的
-> 硬输入**——代码落点 `/Users/user/Documents/sandbar`（suyou 仓写集之外，
+> 硬输入**——代码落点 `/Users/xingu/Documents/sandbar`（suyou 仓写集之外，
 > KI-021 写集冻结无扩写集机制，故代码归新票，起票方式见 §6）。
 > 契约面真源已先行落地：`docs/design/sandbar-project-onboarding-contract-v1.md` v1.7 ⑧节。
 

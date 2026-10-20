@@ -136,8 +136,15 @@ def main():
         #       surface sits between the declared gate-region markers;
         #   B3  in dev_lane, every AST reference to the new surface sits in
         #       the declared seams (is_develop_buffer_ticket, the _init
-        #       intake, the _dev_buffer_* steps) — no other old-flow code
-        #       path reaches it;
+        #       intake, the _dev_buffer_* steps, and since t261019-02 the
+        #       close-out guard seam: the pure module-level decision core
+        #       line_landing_closeout_verdict + the workflow method
+        #       _line_landing_closeout_guard — host ruling 261019 lawfully
+        #       makes the LEGACY merge phase consult the line landing
+        #       records; the seam is version-gated behind
+        #       LINE_LANDING_CLOSEOUT_GUARD_PATCH_ID, call-site order pinned
+        #       by t261019-02-line-landing-closeout-guard leg G) — no other
+        #       old-flow code path reaches it;
         #   B4  workflows_v2 names no new surface at all.
         # (Gray-box per the review condition: declared marker/seam NAMES only,
         # never private line numbers or branch-internal order.)
@@ -218,15 +225,21 @@ def main():
         lane_tree = ast.parse(open(os.path.join(engine, "dev_lane.py"),
                                    encoding="utf-8", errors="replace").read())
         breaches = []
+        # Declared seams (t261019-02, host ruling 261019): the close-out
+        # guard — the pure module-level decision core and the one workflow
+        # method that raises the named block — lawfully read the new surface
+        # on the LEGACY merge phase, version-gated (see the B3 docstring).
+        GUARD_CORE_FN = "line_landing_closeout_verdict"
+        GUARD_METHOD = "_line_landing_closeout_guard"
         for node in lane_tree.body:
             if isinstance(node, ast.FunctionDef):
-                if node.name != "is_develop_buffer_ticket":
+                if node.name not in ("is_develop_buffer_ticket", GUARD_CORE_FN):
                     breaches.extend("%s" % node.name for _ in [0]
                                     if _new_names(node))
             elif isinstance(node, ast.ClassDef):
                 for sub in node.body:
                     if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        if sub.name.startswith("_dev_buffer") or sub.name == "_init":
+                        if sub.name.startswith("_dev_buffer") or sub.name in ("_init", GUARD_METHOD):
                             continue
                         if _new_names(sub):
                             breaches.append("%s.%s" % (node.name, sub.name))

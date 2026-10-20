@@ -424,7 +424,12 @@ def test_d_devlane_failed_row_key_parity():
     assert r_fail["exec_status"] == "FAILED"
     assert "执行失败" in str(r_fail["title"]) and "刷新重试" not in str(r_fail["title"])
     assert r_fail["project"] == "sandbar"           # SA 直读保留
-    assert r_old["status"] == "closed" and r_old["title"] == ""  # 超窗匿名行零回归
+    # t261018-11: the past-window COMPLETED minimal row no longer pairs the closed
+    # status with the waiting word — it serves the terminal word 'closed' and the
+    # reconciliation label rides inside the existing title key (row-family parity
+    # kept: no new top-level row key, keyset still equal to the FAILED row above).
+    assert r_old["status"] == "closed" and r_old["stage_state"] == "closed"
+    assert "stage_state reconciled: awaiting -> closed" in str(r_old["title"])
 
 
 def test_d_regression_running_completed_terminated_rows():

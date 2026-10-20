@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 285,
-      "scenarios": 736
+      "engine_tests": 322,
+      "scenarios": 776
     },
     "vocab": [
       "behaviour",
@@ -14,6 +14,15 @@
     "what": "anchor label per engine test and per registered scenario (vocabulary: behaviour | contract | production-snapshot | source-text); enforced by integration/lint_tests.py L16 (coverage/vocabulary/sync) and L18 (production-snapshot marker discipline); added by t261004-20"
   },
   "engine_tests": {
+    "server/engine/tests/test_quickmanual_lane.py": {
+      "anchor": "contract",
+      "note": "t261019-32 L1: the quickmanual lane contract - stage chain open/work/run_integration_tests/merge_check/merge with no plan/review/test-design/arbitrate/walkthrough stage and no agent stage; rework vocabulary refusals; reuse source-locks (parent helpers, settle_lane, main-sync single implementation); evidence validator malformed matrix; work_done blank-session refusals; no-self-sign sign gate; gate verdict truth table; blocked digest caps; registration deliberately absent from every face until the atomic step-0 amendment (never names-only - arbitrate gen0 item 1) pinned xfail; SDK definition isolation (parent and light-lane definitions unchanged)."
+    },
+    "server/engine/tests/test_t261016_19_disposal_hygiene.py": {
+      "anchor": "behaviour",
+      "note": "t261016-19 L1: the engine-runtime exemption predicate truth table (first-component .venv / .venv-<suffix>, literal server/engine/.venv/, nested and lookalike names NOT exempt, malformed inputs fail closed), the disposal matrix (untracked still moved with manifest; modified left in place named unhandled - never reverted; missing source and unknown XY fail closed), and the import-integrity check (incident shape flagged naming both files, clean when unimported or importer deleted too, malformed/traversal inputs named skip or fail closed, exempt note only on nonempty)",
+      "sync_path": "server/engine/agent_activities.py; server/engine/shared.py"
+    },
     "server/engine/tests/test_t26101121_tick_budget_reap_abort.py": {
       "anchor": "behaviour",
       "note": "t261011-21 host order 261011: line-round tick budget dominates CHAIN_LIMIT x runner timeout and is the constant at the workflows call site; resolve_runner spawns its own session, registers the live pid, and timeout/unwind reaps the whole process group (TERM-first, ESRCH/EPERM tolerated, idempotent, failed spawn never registers); abort_inflight_ticks leaves one could_not_run row per in-flight line through the real validator, never releases a guard, never masks the caller's exception; shutdown face reaps+appends+clears; the activity wrapper aborts, reaps and re-raises the original exception",
@@ -1428,9 +1437,192 @@
       "anchor": "behaviour",
       "note": "t261016-01: main-baseline reuse across main tips, named on the record — docs-only main advance reuses the nearest surface-clean ancestor baseline (one suite run, baseline_source 'reused' + baseline_tip/judged_tip + mechanical note), a judged-surface commit (suite or product code) rebuilds at the NEW tip, every ambiguity (non-ancestor tip, git failure, malformed/filename-mismatched cache, unreadable JSON) fails closed to rebuild, newest-ancestor tie-break, and the round row carries duration_ms",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261016_11_line_not_lane.py": {
+      "anchor": "behaviour",
+      "note": "t261016-11 req2: line_owned hash-equality truth table - line-carried absent-on-main is not foreign, mismatch stays foreign, malformed refs fail closed",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261016_11_line_shaped_tree.py": {
+      "anchor": "behaviour",
+      "note": "t261016-11 req2 evidence: real git fixture tree, main vs line branch over real 496aa0c8 blobs - foreign_files end to end keeps line-carried paths, non-vacuous positive control",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261016_11_repair_self_consistency.py": {
+      "anchor": "contract",
+      "note": "t261016-11 req3: importers_remain unit contract - module-name derivation, ast import matching, unparseable fail-closed, malformed path reported, prefix imports not importers",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261016_10_dismiss_inspection_population.py": {
+      "anchor": "contract",
+      "note": "t261016-10: dismiss existence gate covers the inspection store — inspection_known_ticket_ids unions pointer ticket_id/supersedes_ticket_id, spawn-journal and reopen-journal (terminated/new/collapsed) ids with malformed-input tolerance; tools gate works with ticket-list down (reserved id dismisses + restores, population_sources names the provenance), refuses named when both sources are down or the id is in neither; dev-lane journal shape and human+reason rules unchanged",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t26101621_settle_multirepo.py": {
+      "anchor": "behaviour",
+      "note": "t261016-21 KI-01M52NS7A3290FBAWY1XYSBG0E L1 pair: _settle_with_gate produces a commit per scope on a multi-repo lane and stays byte-identical for one repo (file arrived in the worktree during this ticket's developer lane; anchor declared by integration)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261018_05_lane_commit_face_honesty.py": {
+      "anchor": "contract",
+      "note": "t261018-05: the lane-commits check item answers every undecidable shape with a NAMED fail-closed red - empty base_ref (fork point never recorded), a -1 sentinel on a diff-face count (sanitized at the I/O shell; the pure verdict truth table stays frozen), and a real 0-commits red names the changed files and the implement-settle stage with a retry_qc remedy; the manual-inspect remedy phrase is banned and truly-zero-change stays a named green",
+      "sync_path": "server/engine/agent_activities.py"
+    },
+    "server/engine/tests/test_t261018_01_buffer_scoped_feedback.py": {
+      "anchor": "contract",
+      "note": "t261018-01 L1: scoped_feedback_plan (own ∪ prev-red, dedup/stable, malformed inputs never raise, zero scenarios = named KI-01M551AR1XT01W9DNR2AN88B52 refusal) and closing_face_plan (declared members only; empty/refused/errored/malformed shapes = named error never full); structural property: run_only or named reason, never an empty-means-everything shape",
+      "sync_path": "server/engine/dev_lane.py"
+    },
+    "server/engine/tests/test_t261018_12_surface_bootstrap.py": {
+      "anchor": "contract",
+      "note": "t261018-12 L1: the bootstrap validator truth table (non-object/schema mismatch/missing-or-non-string ref/non-40-hex ref refused with a named reason; full 40-hex ok, reason kept), the loader states (absent/malformed/unresolvable refused by name; valid resolves the commit in the reviewed repo), and the wiring source lock (the surface activity and the defensive inspect branch share load_declared_bootstrap)",
+      "sync_path": "server/engine/inspection_surface.py; server/engine/agent_activities.py"
+    },
+    "server/engine/tests/test_t261019_02_line_landing_closeout_guard.py": {
+      "anchor": "behaviour",
+      "note": "t261019-02 L1: the line_landing_closeout_verdict decision core truth table (vacuous pass on missing lines.json / absent ledger / no landing row; named block on landing row present with ruling+line+both ways out, malformed lines.json, corrupt ledger bad face, malformed/empty keys)",
+      "sync_path": "server/engine/dev_lane.py"
+    },
+    "server/engine/tests/test_t261018_11_terminal_face_honesty.py": {
+      "anchor": "contract",
+      "note": "t261018-11 L1: _terminal_face_reconcile truth table (awaiting/awaiting-human + COMPLETED closed -> closed; signed acceptance untouched; unreadable disposition -> explicit not-signed; pass-through for non-closed/RUNNING/failed; close_ts attachment; terminal_face_note; malformed inputs never throw) and the query/hydrate/minimal-row call-site wiring",
+      "sync_path": "server/engine/client.py"
+    },
+    "server/engine/tests/test_t261019_03_unverified_not_regression.py": {
+      "anchor": "behaviour",
+      "note": "t261019-03 L1: the relative round caliber compares CONTENT failures only - an environment-unverified case (status not-checked) is excluded from new_regressions and published by name in detail['unverified']; a name in both sets is a real failure; an older runner that publishes no set keeps the old caliber byte-identically",
+      "sync_path": "server/engine/develop_certify.py; integration/line_round_runner.py"
+    },
+    "server/engine/tests/test_t261019_12_epic_registry.py": {
+      "anchor": "contract",
+      "note": "t261019-12: the enforcement contract on shared.validate_epic_code/parse_epic_front_matter over the shared fixture corpus - retired:true refuses by name naming the file, retired:false accepts, missing/malformed front-matter and prose retired fail closed, unknown/shape/empty voices unchanged, resolution ends in docs/epics at both anchors and the env override still wins",
+      "sync_path": "server/engine/shared.py"
+    },
+    "server/engine/tests/test_t261019_17_sandbox_ledger_read.py": {
+      "anchor": "behaviour",
+      "note": "t261019-17 L1: the sandbox trap - the delivery-ledger root is pinned at the process entry (worker.py) and read without touching os.environ, so the in-workflow close-out guard can resolve the ledger; an unpinned process keeps the legacy env path, and an unpinned sandbox still fails loudly (fail-closed, never a silent empty ledger)",
+      "sync_path": "server/engine/shared.py; server/engine/develop_certify.py; server/engine/worker.py"
+    },
+    "server/engine/tests/test_t261019_23_closeout_fence_in_activity.py": {
+      "anchor": "behaviour",
+      "note": "t261019-23 L1: the line-landed close-out fence lives in the merge activity (activity code, no sandbox) and answers from the project ledgers alone - it refuses a landed ticket, allows an unlanded one, refuses an empty id by name, runs before the first squash, and the workflow no longer reads the ledger",
+      "sync_path": "server/engine/agent_activities.py; server/engine/dev_lane.py"
+    },
+    "server/engine/tests/test_t261019_24_worker_stale_turnover.py": {
+      "anchor": "behaviour",
+      "note": "t261019-24 developer L1: stale_modules_for_self injectable truth table over shared.worker_code_stamp, process_stale_tick tick counter/debounce/stop/meta shapes, record_self_stop best-effort failure, keep_meta_on_self_stop guard truth table, watch-loop wiring in run_worker (stop event shared with SIGTERM, failure paths logged)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_run_watch.py": {
+      "anchor": "behaviour",
+      "note": "t261019-25 developer L1: run-watch decision table (green silence, env-only release/ticket, mixed-red precedence, stalled/silent ladder), malformed-input matrix and state-file fail direction - the L3 journeys over the real activity face live in integration/t261019-25",
+      "sync_path": "server/engine/run_watch.py"
+    },
+    "server/engine/tests/test_t261019_26_stop_tiers.py": {
+      "anchor": "contract",
+      "note": "t261019-26 developer L1: classify_stop_tier truth tables (judgement markers win first, evidence/mechanical kinds, fail-closed unknown incl. malformed input, no claim parameter can lift), stop_lift_row_id_error structural validation, and the lift_stop signal-handler battery (wake via the retry token, refusal matrix, refused-entry shape, counters never reset by a lift, cross-project gate first)"
+    },
+    "server/engine/tests/test_t261019_29_queue_stale.py": {
+      "anchor": "behaviour",
+      "note": "261019 integration L1: the slot queue's two measured holes - a queue entry's `since` is a HEARTBEAT refreshed on every poll (staleness provable from the ledger alone), `_is_stale` truth table (expired / missing / non-numeric fail closed), acquire prunes corpse heads and names them while never pruning the caller's own entry and never dropping a live head, and release/reconcile promote only the first LIVE head (a dead head no longer parks a slot). Workflow side pinned as source anchors: the wait backs off behind a patch marker and sleeps through the delay helper (a flat 5 s sleep reintroduces the 51,200-event death).",
+      "sync_path": "server/engine/concurrency.py (QUEUE_STALE_S/_promote_live_head), server/engine/dev_lane.py (CONC_GATE_POLL_MAX/_conc_gate_delay)"
+    },
+    "server/engine/tests/test_t261019_39_bundle_rework.py": {
+      "anchor": "behaviour",
+      "note": "261019 integration L1: merge_check self-healing is declaration-driven - the policy parser truth table (absent / valid / registry defaults / unknown red code / foreign stage / bad or over-ceiling rounds / unparseable line / line before the first entry / non-string, each a named refusal), the planner (fires only when every red is opted in and shares one target stage, a sole-red remedy refuses to batch, the note carries the gate's measurement and the registered remedy), and the wiring as anchors: the receipt carries the decision as data, the workflow branch sits behind a patch marker, routes through the single rework entry and is bounded with a named block over the bound.",
+      "sync_path": "server/engine/path_gates.py (parse_auto_rework_policy/auto_rework_plan/REMEDIABLE_RED_CODES), server/engine/dev_lane.py (AUTO_REWORK_PATCH_ID branch), server/engine/agent_activities.py (policy resolved in the merge_check activity)"
+    },
+    "server/engine/tests/test_t261019_31_terminal_slot_release.py": {
+      "anchor": "behaviour",
+      "note": "t261019-31 L1: terminal-ending slot-leak fix behaviour - the three client.py terminal entries release the slot by name after terminate (best-effort, named refusal, never fatal, human-gate cause untouched), the already-holding acquire refreshes the holder heartbeat, the stale-holder sweep drops stale RUNNING holders by name with the freed slot served on the waiter's NEXT poll (room judged pre-sweep - acquire never grants on a holder it just condemned, the t261019-29 main-green contract), a HUMAN-HOLD holder is never swept at any age (review R1) and over_limit is named on read_state and the acquire refusal."
+    },
+    "server/engine/tests/test_t261019_40_cancel_releases_slot.py": {
+      "anchor": "behaviour",
+      "note": "261019 integration L1: cancelling a ticket returns its concurrency slot - the helper releases in the project the gate read and refuses to guess one (an unknown project must never free another project's slot), a release fault is a NAMED note on the receipt rather than a failed cancel (the terminate is already irreversible and a dead slot is repairable with reconcile), and the cancel path anchors: the release is called after terminate, guarded by its own except, and rides the receipt as slot_released.",
+      "sync_path": "server/engine/client.py (_release_slot_after_cancel), server/engine/concurrency.py (release)"
+    },
+    "server/engine/tests/test_t261019_41_line_default.py": {
+      "anchor": "behaviour",
+      "note": "261019 integration L1 (host ruling a1): a single-repository project's declared line is the default for dev-lane intake - the truth table pins each limit to the machinery it feeds (single-repo line defaults; a multi-repository line is NEVER defaulted because per-ticket landing refuses it by name; two declared lines are ambiguous; a missing or unreadable declaration keeps the legacy path without failing intake; a foreign template never defaults), plus the live declarations read as they are (sandbar -> develop-buffer, dengzhufpv/nusuyou stay legacy).",
+      "sync_path": "server/engine/client.py (_default_line_for_project / lane_optin_intake), server/engine/develop_line.py (load_lines)"
+    },
+    "server/engine/tests/test_t261019_45_integ_root_resolution.py": {
+      "anchor": "contract",
+      "note": "t261019-45 L1 truth table over the gate's named multi-root declaration resolution (single root / second candidate / named refusal listing candidates + raw caller path)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261019_46_bundle_out_write_set.py": {
+      "anchor": "behaviour",
+      "note": "261019 integration L1: the implement stage may write the DECLARED build-chain output - the activity's four faces over a real fixture tree (a covered src widens its declared out prefix, an uncovered src widens nothing, an empty write set widens nothing, an absent declaration widens nothing and says so, a malformed declaration fails closed), plus the wiring anchors: the activity is registered in the agent list, the workflow resolves it ONCE behind a patch marker and caches it in meta, _effective_write_set appends the prefixes without duplicating them, and the legacy branch is decided first so a pre-patch history replays its stored write set byte for byte.",
+      "sync_path": "server/engine/agent_activities.py (bundle_out_ws_prefixes), server/engine/dev_lane.py (BUNDLE_OUT_WS_PATCH_ID / _effective_write_set), server/engine/shared.py (BundleOutWsArgs/Result)"
+    },
+    "server/engine/tests/test_t261019_47_sign_payload_unwrap.py": {
+      "anchor": "behaviour",
+      "note": "261019 integration L1 (host-visible safety): a FLAT sign payload must reach the workflow with its fields intact - the unwrap shape for both documented payload shapes (a flat who/gate/decision payload keeps every field, a nested input payload still works, a non-dict input falls back), the incident assertion that a MISSING input is never read as an empty payload, and a source anchor that the sign op no longer uses the `or {}` shape that blanked the signer and walked past the no-self-sign gate.",
+      "sync_path": "server/engine/client.py (sign op payload unwrap)"
+    },
+    "server/engine/tests/test_t261019_48_landing_conflict_rewind.py": {
+      "anchor": "behaviour",
+      "note": "261019 integration L1: a conflicted line landing re-merges itself instead of parking - the discriminator is the conflict refusal text (only that shape is routed; a drifted checkout / undeclared line / duplicate landing keeps its human stop), the route goes through the single rework entry to the gate phase that re-syncs the line, the branch is patch-guarded (an older history replays the block path), and the round counter is bounded with a named block over the bound.",
+      "sync_path": "server/engine/dev_lane.py (LANDING_CONFLICT_PATCH_ID / _dev_buffer_land_step), server/engine/develop_line.py (the conflict refusal)"
+    },
+    "server/engine/tests/test_t261019_49_signature_environment.py": {
+      "anchor": "behaviour",
+      "note": "261019 integration L1: the anti-churn 'two identical faces' guard must mean two REAL measurements in ONE world - identical measurements still tie (the guard keeps its teeth), a REUSED receipt contributes no signature (counting it fabricates a tie; the empty-signature contract means do-not-stop, fail-safe), a different engine code stamp or lane head breaks the tie (a fix landed / a fresh worker / a new commit legitimately changes the next measurement), a measured change still breaks it, and a malformed receipt yields no signature rather than a false tie.",
+      "sync_path": "server/engine/shared.py (gate_round_signature)"
+    },
+    "server/engine/tests/test_t261019_50_finding_counter.py": {
+      "anchor": "behaviour",
+      "note": "261019 integration L1: the walkthrough send-back cap counts REPEATS of one finding, not rounds in general - different findings have different digests, the same finding reworded as a later round or a later gen is still the same finding, whitespace is normalised, an empty report yields no digest (the counter then behaves as before), the counter resets ONLY on a new finding and remembers the previous one in meta, and the whole branch is patch-guarded so an in-flight history keeps its recorded counter semantics.",
+      "sync_path": "server/engine/dev_lane.py (ACC_FINDING_PATCH_ID / _acc_finding_sig / the send-back branch)"
+    },
+    "server/engine/tests/test_t261019_42_idle_shutdown_fast_exit.py": {
+      "anchor": "behaviour",
+      "note": "t261019-42 L1: idle-deadline env parser fault-tolerance matrix (default/valid/blank/malformed/NaN/Inf/negative, \"0\" disables), the three-face idle gate over stub workers (registry + spawns + SDK-introspected count; introspection degrade is fail-safe NOT-idle), fast exit with epilogue on a hanging stub, non-idle keeps the full grace window",
+      "sync_path": "server/engine/worker.py"
+    },
+    "server/engine/tests/test_t261019_41_multirepo_line_acts.py": {
+      "anchor": "behaviour",
+      "note": "t261019-41 L1 (developer; anchor declared by integration): the multi-repo ACT truth table - land_to_line with a repo_proven map covering exactly the declared set lands every repo (pin-then-land, one landing row), missing/extra/empty proven and corrupt manifest and per-repo contains-main failure refuse by name BEFORE anything pins or moves, landing all-or-nothing proven on two repos, certification and promotion follow the same repository set, act-phase promotion rollback restores moved mains, single-repo path byte-identical",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261020_02_sign_identity.py": {
+      "anchor": "behaviour",
+      "note": "261020 integration L1 (host-visible safety): the human gate requires a NAMED signature - a blank who is refused by name with who/want/why on the refused face, the refusal keeps the ticket awaiting-human (the consumed signal leaves the gate open for a real one) and never falls through into the merge, a named signature takes the existing path unchanged, and the whole branch is patch-guarded so a history that already booked with a blank signer replays unchanged.",
+      "sync_path": "server/engine/dev_lane.py (SIGN_IDENTITY_PATCH_ID / the merge gate)"
+    },
+    "server/engine/tests/test_t261020_01_cert_wait_stop_tier.py": {
+      "anchor": "behaviour",
+      "note": "261020 integration L1: a certification-wait timeout is an EVIDENCE stop, not a human one - the wait-timeout text classifies evidence/cert_wait in both wordings (a round that certifies the landing disproves the stop), judgement shapes still win, unmatched text stays judgement, and the workflow's block text no longer claims the schedule is unbuilt (it exists; it simply did not run) and names retry_qc as the lift.",
+      "sync_path": "server/engine/shared.py (_STOP_EVIDENCE_MARKERS), server/engine/dev_lane.py (the wait block text)"
+    },
+    "server/engine/tests/test_t261020_03_stale_identical_face.py": {
+      "anchor": "behaviour",
+      "note": "261020 integration L1: an identical-face stop must record the world it measured - the workflow writes the receipt's own code stamp into the stop reason with the instruction that a moved stamp makes the premise stale, an absent stamp reads as unknown (never as same), and the pure staleness check fires only when marker + recorded stamp + a DIFFERENT current stamp are all present (fail-closed on each missing piece).",
+      "sync_path": "server/engine/shared.py (identical_face_stop_is_stale), server/engine/dev_lane.py (_stamp_clause / the identical-face stop reason)"
+    },
+    "server/engine/tests/test_t261020_04_request_sweep.py": {
+      "anchor": "contract",
+      "note": "261020 integration L1: the request ledger can retire its own dead heads - ticket ids are read out of the row text (the ledger carries no structured ticket field, measured on 261 heads), lookalike tokens are not ticket ids, the sweep is registered as a machine face, superseded is the machine's word and reads as terminal, and the sweep refuses by name without the caller's own liveness result (this face never guesses what is live).",
+      "sync_path": "server/engine/request_thread.py (sweep_op / ticket_ids_in / _OPS)"
+    },
+    "server/engine/tests/test_t261019_44_request_sweep.py": {
+      "anchor": "contract",
+      "note": "t261019-44: the resolves_when closed vocabulary (validate accepts only the four kinds, refuses unknown kind/extra keys/bad param shapes), effective-conditions attach-wins, the four evaluators' verdict/evidence contracts (green_cert_after first-later-green + fail-closed unreadable runs + dangling red skip, landing evidence = ldg id, ticket_closed evidence names the projection, freeze evidence = episode id with the closing change named), sweep append/idempotency/terminal-and-conditionless-untouched/race-pin/skip-naming/malformed-count/broken-project isolation, and the thread faces (filing stores resolves_when, op=condition attach and refusals, CLI bad argv)",
+      "sync_path": "server/engine/request_sweep.py; server/engine/request_thread.py"
+    },
+    "server/engine/tests/test_t261020_06_ki_ledger_out_of_git.py": {
+      "anchor": "behaviour",
+      "note": "261020 integration L1 (host order: the KI ledger leaves git): the ledger lives in the project store and the repo keeps a pointer - the candidate list puts the store first and keeps the repo pointer as fallback, a reader with no base still resolves the store, the reader parses a ledger file and names an absent one instead of crashing, and the repository file is asserted to be a pointer (fewer than five KI sections) so the 300+ entry ledger cannot creep back in.",
+      "sync_path": "server/engine/inspection_inspect.py (ki_ledger_candidates), server/engine/agent_activities.py (the scope-face read), server/tools/ticket.py (_ki_ledger_paths)"
     }
   },
   "scenarios": {
+    "integration/t261016-19/sc_t26101619_disposal_hygiene.py": {
+      "anchor": "contract",
+      "note": "t261016-19: the out-of-scope disposal spares the lane's own venv (no unauth quarantine batch, no venv commit - KI-0202 judge-filter-not-add-widening), an out-of-write-set in-flight fix survives TWO consecutive settle rounds byte-identical behind a named refusal, a missing write set stays fail-closed, and the import-integrity guard flags a deleted module still imported by a delivered source while wiring is source-locked",
+      "sync_path": "server/engine/agent_activities.py; server/engine/shared.py"
+    },
     "integration/t261009-47/sc_t26100947_rework_hold.py": {
       "anchor": "contract",
       "note": "t261009-47 KI-01M4H53WAP7FFS2CN3YP7XENPQ: rework deliver-or-refuse source locks + landing-decision invariant micro replay",
@@ -4819,6 +5011,18 @@
       "note": "t261009-74: verdict matrix live/draining/dead/unknown over probe+pidfile+meta fixtures; receipt evidence contract",
       "sync_path": "server/tools/ticket.py (op=concurrency reconcile face)"
     },
+    "integration/t261019-31/sc_t261019_31_terminal_cancel_releases_slot.py": {
+      "anchor": "behaviour",
+      "note": "t261019-31 scenario: cancelling a slot-holding ticket through the engine terminal entry releases the slot in the same operation."
+    },
+    "integration/t261019-31/sc_t261019_31_over_limit_named.py": {
+      "anchor": "behaviour",
+      "note": "t261019-31 scenario: an over-limit holder count is named on the concurrency face instead of a silent at_work>limit rendering."
+    },
+    "integration/t261019-31/sc_t261019_31_stale_holder_sweep.py": {
+      "anchor": "behaviour",
+      "note": "t261019-31 scenario: a stale RUNNING holder is swept by the next acquire with a named receipt and the waiting head is promoted; human-hold holders are exempt."
+    },
     "integration/t261009-53/sc_t26100953_lane_map_pipe.mjs": {
       "anchor": "behaviour",
       "note": "t261009-53 lane map slim-pipe geometry: one baseline of slim equal-height bars, two-level alternating clamped non-overlapping labels above, diamond at the bar head, partner second track inside a both-track dashed window, cursor spanning both tracks, state-by-fill, width proportions survive",
@@ -5100,10 +5304,190 @@
       "note": "t261016-01 grey-box L3: the real run_line_round face over a real tmp git repo + stub runner — A named reuse after a docs-only advance (one suite run, record names reused/old/new), B rebuild on a server/engine commit judged against the NEW fail set, C fail-closed rebuilds on corrupted cache and non-ancestor tip, D duration_ms positive int on the round row",
       "sync_path": ""
     },
+    "integration/t261016-11/sc_t26101611_mergecheck_carrier_no_self_write.py": {
+      "anchor": "behaviour",
+      "note": "t261016-11 host order 261016 req1: the merge_check carrier harness leaves the tree under test byte-identical and its carrier legs still pass over fixture trees",
+      "sync_path": ""
+    },
+    "integration/t261016-11/sc_t26101611_line_not_lane_keeps_line_content.py": {
+      "anchor": "behaviour",
+      "note": "t261016-11 host order 261016 req2: real line-shaped fixture tree over real 496aa0c8 blobs - landed content never judged foreign, guard proven non-vacuous",
+      "sync_path": ""
+    },
+    "integration/t261016-11/sc_t26101611_repair_self_consistency_floor.py": {
+      "anchor": "contract",
+      "note": "t261016-11 host order 261016 req3: importer-scan refusal contract - named pairs, zero-write refusal, fail-closed on unparseable, reason code foreign_repair_refused_importers carried at the delivery face",
+      "sync_path": ""
+    },
+    "integration/t261016-09/sc_t26101609_cert_green_agreement.py": {
+      "anchor": "behaviour",
+      "note": "t261016-09 D4a: the panel's green caliber must BE the engine's own verdict reader over the same scenario-runs ledger - a row whose own verdict says green certifies even over red counts, an absent verdict never certifies, a torn ledger refuses by name; the live red_implicated-everywhere incident class",
+      "sync_path": ""
+    },
+    "integration/t261016-09/sc_t26101609_cert_tab_envelope_face.mjs": {
+      "anchor": "behaviour",
+      "note": "t261016-09 D1/D2/D3 + model D4: the reader's SUCCESS envelope carries round_faces, the tab renders rounds rows and a non-empty certified list from it, the round-dialog backdrop is closed by the CSS cascade (hidden without an inline display, :not([hidden]) the only flex grant, script toggles hidden only), the auto-rounds control's classes are scoped under #paneCert, and the model keeps delivered rows listed with a stated promotable===0 reason",
+      "sync_path": ""
+    },
+    "integration/t261019-23/sc_t26101923_cert_tab_host_findings.mjs": {
+      "anchor": "behaviour",
+      "note": "t261019-23: the Certification tab tells the host the truth about state, time and identity (host review 261019, seven findings, a READ face) - no always-filling proportional bar, no handler-less switch chrome, full date+time stamps, newest-first lists by each row's own moment, a stale week-dead running round named not bare-running, measured cells naming the repo, one promotable figure; malformed moments sort last without throwing",
+      "sync_path": ""
+    },
+    "integration/t261012-05/sc_t26101205_fix_pins.py": {
+      "anchor": "contract",
+      "note": "ticket-own anchor: case-level pins of the t261012-05 FIX-group repairs (capture live-view subset, dev_lane structural counts, S9 named exemptions, FINDING_ID_HEX=16, CONSUMERS sweep, ro own-set non-empty, ENV supply seam + ENV_FAIL contract token)",
+      "sync_path": ""
+    },
+    "integration/t261016-10/sc_t26101610_dismiss_inspection_population.py": {
+      "anchor": "behaviour",
+      "note": "t261016-10: the dismiss existence gate proves an id from the inspection store (pointer ticket_id/supersedes_ticket_id + spawn/reopen journals) as well as the engine ticket-list — the reserved t261008-17 shape dismisses and restores with ticket-list down, dev-lane shape and human+reason rules unchanged, malformed store input degrades, an id in neither population is refused by name naming both sources, zero-write on every refusal",
+      "sync_path": ""
+    },
     "integration/t261016-12/sc_t26101612_line_round_full_pool_default.py": {
       "anchor": "behaviour",
       "note": "t261016-12: a bare worker environment (var absent) yields a FULL certifiable round - empty declared exclusion, no --exclude-pools, no NARROWED announcement - while an explicit pool name narrows and still names NO certification, an empty value stays byte-identical to absent, and a whitespace-only value narrows nothing",
       "sync_path": "integration/run_scenarios.py; integration/line_round_runner.py"
+    },
+    "integration/t261016-13/sc_t26101613_detached_sync_refusal.py": {
+      "anchor": "behaviour",
+      "note": "t261016-13: a detached lane main-sync never reports success while the branch stays behind - incident-shape named refusal (verbatim sentence, branch ref untouched), fast-path hole refused, attached lanes keep behaviour (branch==HEAD, contains main, up_to_date idempotent), malformed branch named, one-implementation family tripwire",
+      "sync_path": ""
+    },
+    "integration/t261017-10/sc_owned_env_pins.py": {
+      "anchor": "behaviour",
+      "note": "t261017-10 host order 261012: with only SANDBAR_LEDGER_REUSE=0 and SANDBAR_INTEG_LEDGER_SOURCE=lane:line-round in the env, t260930-01-ledger-reuse-round and t261009-11-run-record-drivers stay green (A/B) and name the inherited pins they own on stdout (C); malformed pin values do not flip the verdict (D)",
+      "sync_path": ""
+    },
+    "integration/t261016-21/sc_t26101621_multirepo_agent_settle.py": {
+      "anchor": "behaviour",
+      "note": "t261016-21 KI-01M52NS7A3290FBAWY1XYSBG0E: multi-repo lane agent settle lands a commit per scope (incident chain A), single-repo byte identity with no scope tag (B), corrupt manifest = named RuntimeError fail-closed (C)",
+      "sync_path": ""
+    },
+    "integration/t261018-05/tests/sc_lane_commit_face_honesty.py": {
+      "anchor": "contract",
+      "note": "t261018-05: the merge_check lane-commits item answers every undecidable shape (empty base_ref, malformed sha, failed diff-face query) with a NAMED fail-closed red carrying a retry_qc remedy, never asserts implementation-not-persisted from an undecidable face, names the change and the persisting stage on a real 0-commits red, keeps truly-zero-change and has-commits green, and the manual-inspect remedy phrase is banned from the whole family",
+      "sync_path": "server/engine/agent_activities.py; server/engine/shared.py"
+    },
+    "integration/t261018-01/sc_t26101801_buffer_scoped_feedback.py": {
+      "anchor": "contract",
+      "note": "t261018-01: the develop-buffer gate-round feedback face is exactly own ∪ last-round red names (shared/unclassified path never widens it, fast members never enter), zero assembled scenarios refuse by name with the KI-01M551AR1XT01W9DNR2AN88B52 id before any run, no planner output can equal the full-suite caliber, and the behaviour sits behind its own patch id (KI-061)",
+      "sync_path": "server/engine/dev_lane.py"
+    },
+    "integration/t261018-01/sc_t26101801_closing_fast_once.py": {
+      "anchor": "contract",
+      "note": "t261018-01: the develop-buffer closing run is exactly the declared fast-set membership from the one CLI face, exactly once with a named receipt, refusal shapes (empty members / REFUSED declaration / query error / malformed output) refuse by name with no full-suite fallback, and the t261011-10 legacy closing branch stays consulted",
+      "sync_path": "server/engine/dev_lane.py; integration/run_scenarios.py"
+    },
+    "integration/t261018-11/sc_t26101811_terminal_face_honesty.py": {
+      "anchor": "behaviour",
+      "note": "t261018-11: terminal-face honesty through the real client.py command boundary — a COMPLETED closed ticket is served the terminal word closed (never awaiting), an honest gate-disposition line (landing / explicit not-signed; real signature untouched), a populated close time and a terminal_face_note; list rows never pair status=closed with awaiting",
+      "sync_path": "server/engine/client.py"
+    },
+    "integration/t261018-12/sc_t26101812_surface_bootstrap.py": {
+      "anchor": "contract",
+      "note": "t261018-12: the dead prev-base chain restart journey - fail-closed kept with no bootstrap (original unavailable reason verbatim, no invented diff), one operator-declared bootstrap revives the period against a real declared base (source and note name it), a live chain beats a stale bootstrap, malformed/unresolvable bootstrap refused by name, and period P+1 inherits the base through the normal report chain with the file gone",
+      "sync_path": "server/engine/agent_activities.py; server/engine/inspection_surface.py; server/engine/inspection_inspect.py"
+    },
+    "integration/t261019-09/sc_t26101909_panel_nav_closes_ticket_overlay.mjs": {
+      "anchor": "contract",
+      "note": "t261019-09 host report 261019: a panel content change (showTab) posts close-overlay to the console behind the embedded guard, a face entry posts close BEFORE open-face, the console's one close branch calls the wired overlay-close callback (renderer must pass it - a no-op fix is a red), and the close payload gate rejects malformed external input without throwing",
+      "sync_path": "server/plugins/executor-panel/src/host/panel-page.ts; server/plugins/workbench/src/client/executor-view.tsx; server/plugins/workbench/src/client/face-overlay-model.ts; server/plugins/workbench/src/client/sidebar.tsx"
+    },
+    "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {
+      "anchor": "contract",
+      "note": "t261019-02: a line-landed ticket is refused at the legacy merge gate named (ruling quoted, line named, both ways out, merge step, no signature), never-landed and line-less/corrupt-free shapes pass, corrupt ledger and malformed declaration block named, and the call site sits after the develop-buffer fork and before prepare_human_gate inside a unique patch id verdict",
+      "sync_path": "server/engine/dev_lane.py"
+    },
+    "integration/sc_t261019_24_stale_worker_turnover.py": {
+      "anchor": "contract",
+      "note": "t261019-24: the missing CONSEQUENCE for staleness - stale_modules_for_self over shared.worker_code_stamp judged consumed-not-forked (newer-than-baseline stale, older current, malformed mtime never stale, missing baseline no crash); the real per-tick reflex process_stale_tick driven to the turnover threshold sets the existing stop event while one stale tick and clean ticks do not (debounce), the loud English log names the stale modules and the bounded worst case; the self_stop record is machine-readable from the meta and keep_meta_on_self_stop spares it from the t261005-03 exit-time unlink (plain meta still goes, foreign-pid meta never touched, write failure best-effort); the watch loop spawns no process and signals no pid (replacement is the console keepalive, drain path and graceful cap untouched, t261019-19's subject); shared.worker_code_stamp key set and engine_ops drift detection unchanged",
+      "sync_path": ""
+    },
+    "integration/t261019-12/sc_t26101912_epic_refusal_hard_cut.py": {
+      "anchor": "contract",
+      "note": "t261019-12: the enforcement journey on the real validate_epic_code - retired:true refuses naming code/file/fact in the unknown-code voice, malformed front-matter (none/empty/non-boolean/truncated) is retired-by-defect naming the file, retired:false and empty-code and shape/unknown voices unchanged, resolution ends in docs/epics at both anchor levels with a missing dir named and a notes/epics corpse ignored, and SANDBAR_EPICS_DIR stays a visible operator override",
+      "sync_path": "server/engine/shared.py"
+    },
+    "integration/t261019-12/sc_t26101912_epics_api_store_move.mjs": {
+      "anchor": "contract",
+      "note": "t261019-12: the /api/epics wire face - list serves code+retired+summary+started with no title/status vocabulary and a malformed doc failing closed to a defect face, a missing epic dir is a named error never an empty 200, a notes/epics-only corpse is not served, and POST close/status are dead 4xx while GET detail and /tickets survive",
+      "sync_path": "server/plugins/workbench/node.ts"
+    },
+    "integration/quickmanual-lane/sc_quickmanual_faces.py": {
+      "anchor": "contract",
+      "note": "t261019-32 L2: the NO-HALF-REGISTRATION invariant (every names-face id present on the class face with the same class name - a names-only registration would accept a ticket onto a workflow no worker runs); the fixture env adds only fixture-two-step; the live class STAGES are exactly the quickmanual chain with no excluded stage; TicketInput carries the defaulted evidence field; every builtin id appears in the suite (isolation-seam observed)."
+    },
+    "integration/quickmanual-lane/sc_quickmanual_journey.py": {
+      "anchor": "behaviour",
+      "note": "t261019-32 L3: the real-Temporal quickmanual journey over the fixture world - explicit creation with an empty stub-brain ledger (no agent dispatch anywhere), evidence-less ticket blocked at open, the work stage parks quietly (no timeline churn), session-less work_done refused, the identity face lands session+role, the existing gates run the declared command, no dev-lane-only stage on the timeline, the working session cannot sign the merge, the executor signs and the ticket closes; the template is startable in the fixture world through the sanctioned project-external loader seam (qm_fixture_template.py) while the production face stays fail-closed until the step-0 amendment."
+    },
+    "integration/t261019-42/sc_t261019_42_idle_worker_fast_turnover.py": {
+      "anchor": "behaviour",
+      "note": "t261019-42: TERM an idle worker -> process exits 0 in seconds (judged from the parent, pre-fix shape holds ~1800s); a genuinely running activity is never hard-cut by the fast idle exit (gate never arms, activity completes ok); the roll-call names sdk_running_activities and the reclaim-receipt epilogue runs on the fast path",
+      "sync_path": "server/engine/worker.py"
+    },
+    "integration/t261019-43/sc_t26101943_request_replies_visible.mjs": {
+      "anchor": "behaviour",
+      "note": "t261019-43 redo of t261019-20 (host report 261019): a request's replies are VISIBLE on the panel page - collapsed head carries a '1 reply'/'N replies' badge, the expanded body shows each reply as its own readable line naming by, intent ('fact') and source_class ('project-session') with the delegated trio (via/anchor) distinct, reply text left traceLine (one rendering home) and every rowBody branch renders the reply block outside the trace div; a dedicated .replies rule is not the trace's faint 11px treatment; non-array/missing-text/missing-by/junk entries and hostile markup are counted placeholders, never a crash or a silent drop",
+      "sync_path": ""
+    },
+    "integration/t261019-44/sc_t26101944_request_sweep_resolution.py": {
+      "anchor": "contract",
+      "note": "t261019-44: a declared resolves_when resolves on live ledger evidence under the engine identity and by nothing else - green_cert_after resolves on the releasing green cert id, landing_on_line on the ldg- id, freeze_closed on the freeze id, all read back from the requests ledger (writer receipts are not evidence); the host-only answer gate and no-condition heads are untouched and a second sweep is idempotent; op=condition attaches an attributed condition (latest wins) while the out-of-scope expiry_archive kind is a named refusal; an unreadable run store never fabricates a green",
+      "sync_path": "server/engine/request_sweep.py; server/engine/request_thread.py; server/engine/client.py"
+    },
+    "integration/t261019-45/sc_t26101945_integ_gate_root_resolution.py": {
+      "anchor": "contract",
+      "note": "t261019-45: the integ gate receipt contract over a real multi-repo lane - judged tree named (root/root_source/root_candidates), declaration found at the second candidate, declaration-less lane fails closed by name (2b), empty-cmd refusal unchanged, no skip-past-malformed",
+      "sync_path": ""
+    },
+    "integration/t261019-45/sc_t261019_45_integ_gate_multi_root.py": {
+      "anchor": "contract",
+      "note": "t261019-45 L3: the integ gate resolves verify.yaml over NAMED candidate roots on the assembled shape — real git-init member repos + on-disk repo_worktrees.json manifest + the real gate entry. A spanning write set judged at the container with the receipt naming root/root_source/candidates; declaration only in a member tree found and named; nothing anywhere = named refusal listing every candidate + raw caller path (contract 2b); malformed declaration = named red with no silent fallback; non-directory write-set segment skipped by rule. The truth-table/malformed-matrix side belongs to developer L1 (test_t261019_45_integ_root_resolution.py)."
+    },
+    "integration/t261019-25/sc_t26101925_watch_green_silence_one_action.py": {
+      "anchor": "behaviour",
+      "note": "t261019-25 L3: green tick writes nothing anywhere (reader-side byte-identical snapshots over delivery ledger, runs file, requests ledger, rounds face) and a two-conditions-at-once fixture yields exactly the one higher-precedence action (one closure row, zero requests, zero ticket-seam calls)",
+      "sync_path": "server/engine/run_watch.py; server/engine/activities.py; server/engine/workflows.py; server/engine/client.py"
+    },
+    "integration/t261019-25/sc_t26101925_watch_env_red_release_rule.py": {
+      "anchor": "behaviour",
+      "note": "t261019-25 L3: env-only red release journey - one closed freeze_change row citing red cert id + run id + releasing cert id through the engine writer with every pre-existing record unedited; no releasing green -> ticket; mixed red -> ticket never closure; torn case evidence fails toward ticket (R4)",
+      "sync_path": "server/engine/run_watch.py; server/engine/activities.py; server/engine/workflows.py; server/engine/client.py"
+    },
+    "integration/t261019-25/sc_t26101925_watch_content_red_fix_ticket.py": {
+      "anchor": "behaviour",
+      "note": "t261019-25 L3: content red opens exactly one ticket via the declared run_watch.start_fix_ticket seam naming run id, regressing scenarios and evidence cert row; reuse on the second tick (no duplicate); runs file and rounds face byte-identical across ticks (never a rerun)",
+      "sync_path": "server/engine/run_watch.py; server/engine/activities.py; server/engine/workflows.py; server/engine/client.py"
+    },
+    "integration/t261019-25/sc_t26101925_watch_stalled_silent_requests.py": {
+      "anchor": "behaviour",
+      "note": "t261019-25 L3: run-stalled request naming last round, verdict and pending landing, deduped; silent round ladder - first tick retries (no request), second silent end files one run-silent request; row appearing cancels it; corrupt run_watch_state.json fails toward re-action (R2)",
+      "sync_path": "server/engine/run_watch.py; server/engine/activities.py; server/engine/workflows.py; server/engine/client.py"
+    },
+    "integration/t261019-26/sc_t26101926_stop_tier_classification.py": {
+      "anchor": "contract",
+      "note": "t261019-26 grey-box L3: the recorded reason text alone decides the stop tier over the real blocked-reason literal corpus, unknown stays human, malformed never raises, the vocabulary is exactly the three STOP_TIER_* constants"
+    },
+    "integration/t261019-26/sc_t26101926_lift_stop_gate_journeys.py": {
+      "anchor": "behaviour",
+      "note": "t261019-26 grey-box L3: lift_stop authorization journeys on the real signal handler - judgement human-only, evidence needs a cited row id, tier mismatch and no-recorded-tier refused, granted lift wakes via the retry token and records who/tier/row/note, counters untouched, cross-project gate first"
+    },
+    "integration/t261019-41/sc_t26101941_multirepo_line_journey.py": {
+      "anchor": "behaviour",
+      "note": "t261019-41 L3: the two-repo develop-line journey end to end - a proven map covering the declared set lands BOTH repos (one landing row naming both, each repo realises its own declared branch), a map missing a repo refuses by name with nothing moved, the certification names the same repo set, a promotion with one not-fast-forwardable repo refuses with the OTHER main unmoved and no row, then fast-forwards both mains with per-repo main_before/after, and the single-repo line stays byte-identical",
+      "sync_path": ""
     }
+  },
+  "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {
+    "anchor": "behaviour",
+    "note": "t261019-02 host ruling 261019: a ticket with a landing row on a declared develop line is refused named at the LEGACY merge gate (ruling quoted, line named, both ways out, retry_qc does not clear) through the ONE declared seam DevLaneWorkflow._line_landing_closeout_guard; never-landed passes, line-less project and absent ledger vacuous, corrupt ledger and malformed declaration block named, call-site source lock (after the develop-buffer fork, before prepare_human_gate, behind a unique patch id)",
+    "sync_path": ""
+  },
+  "server/engine/tests/test_t261019_02_line_landing_closeout_guard.py": {
+    "anchor": "behaviour",
+    "note": "t261019-02 developer L1: line_landing_closeout_verdict truth tables - vacuous passes (missing lines.json, absent ledger, no landing row), named blocks (landing row with ruling+line+ways-out+retry_qc wording, per-ticket/per-line isolation, malformed declaration, corrupt-ledger bad face, malformed/empty keys), blank ledger lines are not corruption, patch id literal pinned",
+    "sync_path": ""
   }
 }

@@ -3,7 +3,7 @@
  * sc_t26100615_period_archive_route.mjs — t261006-15, grey-box L3, "ro" pool.
  *
  * User-perceivable face under test (design source: notes/discussions/
- * 261004-巡检两面重塑-测试面与简化面.md §7–§8, host rulings; dispatch spec P2/P5):
+ * 261004-inspection-two-faces-tests-simplify.md §7–§8, host rulings; dispatch spec P2/P5):
  * the Inspection tab's period browser is served by a real period-archive route,
  * NOT by the latest-scan endpoint. The tab's periods, per-period report and
  * coverage must come from the report archive

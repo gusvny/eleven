@@ -298,9 +298,18 @@ async function browserScenarios() {
   // 生产面行 worktree 在项目根内不会触发）。只豁免这一点名端点的 400；其余任何
   // >=400 响应或 pageerror 照旧红。
   const GHOST = /\/api\/wf\/tickets\/[^/?]+\/agent-usage\?/;
-  const stray = badResponses.filter((u) => !GHOST.test(u));
+  // t261012-05 second named exemption (same URL-aware doctrine): the shared
+  // stage registry does not hold every host-registry project, so the engine
+  // channel endpoints answer 4xx/502 for them (/wf/concurrency polled by the
+  // detail drawer, host-shell /sessions). Stage provisioning, not the
+  // ticket-session contract; counted and named, never silent.
+  const STAGE_CHANNEL = /5\d\d .*\/(api\/wf\/concurrency|sessions)(\?|$)|4\d\d .*\/sessions(\?|$)/;
+  const stray = badResponses.filter((u) => !GHOST.test(u) && !STAGE_CHANNEL.test(u));
+  const stageFace = badResponses.filter((u) => STAGE_CHANNEL.test(u));
   const other = consoleErrors.filter((t) => !/Failed to load resource/.test(t));
-  if (stray.length === 0 && other.length === 0) record('browser/console-hygiene', 'pass');
+  if (stray.length === 0 && other.length === 0 && stageFace.length === 0) record('browser/console-hygiene', 'pass');
+  else if (stray.length === 0 && other.length === 0) record('browser/console-hygiene', 'env_fail',
+    `${stageFace.length} x engine-channel 4xx/502 (named exemptions: /api/wf/concurrency, /sessions) — stage registry does not hold every host project; ticket-session legs all judged`);
   else record('browser/console-hygiene', 'fail', [...stray, ...other].slice(0, 3).join(' | ').slice(0, 300));
 
   try { await browser.close(); } catch { /* noop */ }

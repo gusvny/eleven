@@ -95,7 +95,10 @@ def _rejs(root):
 # ---- A2 零登记零漂移 ----
 
 def test_a2_empty_registry_default_face(empty_root):
-    # 宿主令 260930：内置面加一格 light-lane（轻道）；「空注册根=恰为内置面全集」语义不变。
+    # host order 260930: + light-lane. t261019-32 note: quickmanual-lane joins
+    # this face only with its ATOMIC registration step (names + class + yaml);
+    # never names-only (arbitrate gen0 item 1). The "empty registry root =
+    # exactly the builtin face" semantics is unchanged.
     assert _names(empty_root) == {"dev-lane": "DevLaneWorkflow",
                                   "light-lane": "LightLaneWorkflow"}
     assert _rejs(empty_root) == []
@@ -244,7 +247,8 @@ def test_loader_is_import_neutral(empty_root):
     sys.modules["_poc_shared_alias"] = mod
     spec.loader.exec_module(mod)
     assert hasattr(mod, "project_template_names_merged")
-    # 宿主令 260930：内置面 = {dev-lane, light-lane}（轻道登记令）。
+    # host order 260930: builtin face = {dev-lane, light-lane}. t261019-32 note:
+    # quickmanual-lane joins only with its atomic registration step.
     assert mod.project_template_names_merged(root=str(empty_root)) == {
         "dev-lane": "DevLaneWorkflow", "light-lane": "LightLaneWorkflow"}
     # project_templates 模块源码零 shared import 语句（结构锁，防双装载裂表回归；

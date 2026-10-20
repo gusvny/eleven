@@ -221,7 +221,7 @@ def test_resolve_epics_dir_regression_via_shared_resolver(fixture_registry, monk
     from shared import resolve_epics_dir, EPICS_DIR
     monkeypatch.delenv("SANDBAR_EPICS_DIR", raising=False)
     assert str(resolve_epics_dir("proj-a")) == \
-        str(fixture_registry["homes"]["proj-a"] / "notes" / "epics")
+        str(fixture_registry["homes"]["proj-a"] / "docs" / "epics")  # t261019-12: the store moved
     assert resolve_epics_dir("") == EPICS_DIR          # 空 key 引擎锚回落分支（epic 侧既有语义）
     monkeypatch.setenv("SANDBAR_EPICS_DIR", "/tmp/epics-override")
     assert str(resolve_epics_dir("proj-a")) == "/tmp/epics-override"

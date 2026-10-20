@@ -1524,7 +1524,7 @@ def compose_env(project, services, ports, opts):
     for cand in ([cred_env] if cred_env else []) + [
             os.path.expanduser("~/.sandbar/projects/suyou/credentials.yaml"),
             str(REPO / ".dsh" / ".credentials.yaml"),
-            "/Users/user/Documents/sandbar/.dsh/.credentials.yaml"]:
+            "/Users/xingu/Documents/sandbar/.dsh/.credentials.yaml"]:
         if cand and os.path.isfile(cand):
             cred_src = cand
             break
@@ -1557,7 +1557,7 @@ def compose_env(project, services, ports, opts):
     preset_name = "sandbar-integration"  # naming-compat
     for base in filter(None, [os.path.expanduser("~/.dsh/.agent-presets"),
                               str(REPO / ".dsh" / ".agent-presets"),
-                              "/Users/user/Documents/sandbar/.dsh/.agent-presets"]):
+                              "/Users/xingu/Documents/sandbar/.dsh/.agent-presets"]):
         cand = pathlib.Path(base) / preset_name
         if cand.is_dir():
             dst = presets_dir / preset_name

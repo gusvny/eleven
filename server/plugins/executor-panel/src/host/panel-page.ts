@@ -32,6 +32,9 @@ import {
   splitWaiting, hasOptions, chipLabel, masterOn, localDateTime, newestFirst, wakeRowSentence, themeParamOf,
   // t261008-19: docs tree page count + the mock's two entry rows (single implementation).
   countDocsTree, docEntryRow,
+  // t261019-43: the reply face — collapsed badge + expanded per-reply named lines
+  // (single implementation, embedded via String(fn) below).
+  replyBadge, replyFace,
 } from './page-logic.ts'
 import { LIST_CONTRACTS } from './list-contracts.ts'
 import { renderMarkdown } from './markdown.ts'
@@ -189,6 +192,8 @@ const EMBEDDED = EMBED_CONSTS + [
   String(fmtWaiting), String(fmtAge), String(groupByProject),
   String(splitWaiting), String(hasOptions), String(chipLabel), String(masterOn),
   String(localDateTime), String(newestFirst), String(wakeRowSentence), String(themeParamOf),
+  // t261019-43: reply face cores (badge + named per-reply lines; escaping at the page).
+  String(replyBadge), String(replyFace),
   // t261004-16：markdown 渲染器同样单实现嵌入（UT 与页面同一份函数源码）。
   String(renderMarkdown),
   // t261005-05 (UI-4): badge runtime (closure = the IDENTITY_DATA JSON constant
@@ -334,6 +339,12 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .answer button{border:1px solid var(--line);background:var(--panel2);color:var(--fg);border-radius:7px;padding:6px 12px;font:inherit;cursor:pointer}
 .given{color:var(--green);font-size:12px;padding:0 12px 10px 12px}
 .trace{color:var(--faint);font-size:11px;margin-top:9px}
+/* t261019-43: the reply face — readable lines above the trace, not an 11px trace
+ * fragment; intent/source-class bits take the faint tone, text stays fg. */
+.replies{margin-top:10px;display:grid;gap:6px;font-size:13px;border-left:2px solid var(--line);padding-left:10px}
+.replies .rby{font-weight:600}
+.replies .ri{color:var(--faint);font-size:12px}
+.replies .rtxt{color:var(--fg)}
 .strip{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;color:var(--muted);margin-bottom:14px;flex-wrap:wrap}
 .strip .live{color:var(--green)}
 .strip .ro{color:var(--amber)}
@@ -489,19 +500,12 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 .blk .bbd .act .tk{flex:0 0 88px;overflow:hidden;text-overflow:ellipsis}
 .evfile{font-family:ui-monospace,monospace;font-size:11px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;max-width:22ch;white-space:nowrap}
 /* ---- t261009-44: the Certification tab (mock v15's layout law) ---- */
-/* .linebar: one bar, one boundary; the delivered part is a FIXED-width cap on
-   the left — a running total never grows into the segment scale. */
-.linebar{display:flex;align-items:stretch;height:38px;border-radius:8px;overflow:hidden;border:1px solid var(--line)}
-.linebar .s{display:flex;align-items:center;justify-content:center;gap:6px;font-size:12px;color:var(--fg)}
-.linebar .s.cap{flex:0 0 9px;background:var(--panel2)}
-.linebar .s.cert{background:var(--green-soft)}
-.linebar .s.wait{background:var(--warn-soft)}
-.linebar .s .n{font-weight:700}
+/* t261019-23 (F1/F2): the .linebar segment styles and the .certsw/.certTrack/
+   .certKnob switch styles are gone — the proportional bar became three
+   labelled figures (sharing .lbt below) and the handler-less auto-rounds
+   switch was removed; only the round-state word remains. */
 .lbt{display:flex;align-items:center;gap:14px;margin-top:6px;font-size:12px;color:var(--muted)}
 .flow{display:flex;align-items:center;gap:10px;margin-top:10px}
-.sw{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
-.sw .track{width:30px;height:16px;border-radius:999px;background:var(--line);position:relative}
-.sw .knob{position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--bg);border:1px solid var(--line)}
 #paneCert select{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:5px 9px;font:inherit;font-size:12.5px}
 #paneCert .card{border:1px solid var(--line);border-radius:10px;background:var(--bg);margin-top:12px}
 #paneCert .card .hd{display:flex;align-items:center;gap:10px;padding:11px 14px;flex-wrap:wrap}
@@ -517,6 +521,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 #paneCert .st.g{color:var(--green)}#paneCert .st.r{color:var(--red)}
 /* t261012-03: the rounds faces' state pills + the round dialog (the mock's
    own classes: .dlg/.top/.x/.kv; pill keys green/red/run/none). */
+/* t261016-09 (D1): the round dialog's backdrop used to carry an inline
+   display:flex next to the hidden attribute — an author inline rule outranks
+   the UA [hidden]{display:none}, so the grey overlay was visible (and
+   click-blocking) from page load. The layout lives HERE now; the hidden
+   attribute alone is the open/close state, and the page JS only ever toggles
+   that attribute. */
+#roundDlgWrap{position:fixed;inset:0;background:rgba(0,0,0,.45);align-items:flex-start;justify-content:center;padding:48px 16px;z-index:40;display:none}
+#roundDlgWrap:not([hidden]){display:flex}
 #paneCert .pill[data-k]{font-size:10.5px;font-weight:700;border-radius:999px;padding:2px 9px;border:1px solid var(--line);color:var(--muted);background:var(--bg)}
 #paneCert .pill[data-k=green]{border-color:var(--green);color:var(--green);background:var(--green-soft,transparent)}
 #paneCert .pill[data-k=red]{border-color:var(--red);color:var(--red);background:var(--red-soft,transparent)}
@@ -671,7 +683,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     <div id="certBody"></div>
     <!-- t261012-03: the round dialog (mock §2) — one overlay, filled by the
          embedded buildRoundDialogCore on a run-id click; never pre-rendered. -->
-    <div id="roundDlgWrap" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;padding:48px 16px;z-index:40">
+    <div id="roundDlgWrap" hidden>
       <div class="dlg" id="roundDlg" role="dialog" aria-label="round record"></div>
     </div>
   </section>
@@ -867,7 +879,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 (function(){
   var state = { project:'', status:null, reachable:null, requests:null, actions:null, grants:null, settings:null, session:'',
     // t261005-10 (UI-2): the four read-only tab faces + the Overview limit row.
-    concurrency:null, epics:null, epicsReason:'', epicTickets:{}, epicOpen:'',
+    concurrency:null, epics:null, epicsReason:'', epicTickets:{}, epicOpen:'', epicShowAll:{},
     inspection:null, inspectionError:'', metrics:null, metricsError:'',
     docs:null, docsScope:'docs', docSel:'' };
   // t261006-17 (CL-2): the concurrency face + the knob draft (null = follow the saved limit).
@@ -1048,15 +1060,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     if(r.source_class) t += ' Source: ' + r.source_class + '.';
     t += ' State: ' + (r.state || 'open') + '.';
     t += ' Default action: ' + (r.default_action ? r.default_action : 'none') + '.';
-    // Thread face: replies (the delegated trio by/via/anchor as separate named parts)
-    // and links (a duplicates link without 'from' = a re-file that was linked, never
-    // a dangling id).
-    var replies = r.replies || [];
-    for(var i=0;i<replies.length;i++){
-      var rp = replies[i];
-      t += ' Reply by ' + rp.by + (rp.via ? ' (decided by ' + rp.via + ')' : '')
-        + (rp.anchor ? ' — anchor: "' + rp.anchor + '"' : '') + ': ' + rp.text;
-    }
+    // Thread face: links (a duplicates link without 'from' = a re-file that was
+    // linked, never a dangling id). t261019-43: replies left this trace — they have
+    // their own face now (replyBlock below); the trace keeps the audit fields only.
     var links = r.links || [];
     for(var j=0;j<links.length;j++){
       var l = links[j];
@@ -1080,6 +1086,10 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     if(r.source_ticket) meta += ' · ' + esc(r.source_ticket);
     // t261007-01: a dismissed card names what happened, in one line.
     if(r.status==='dismissed') meta = esc(r.kind) + ' · dismissed';
+    // t261019-43: a collapsed row must not hide replies — the badge rides the head
+    // meta ('1 reply' / 'N replies'; empty string when none).
+    var rbadge = replyBadge(r.replies);
+    if(rbadge) meta += ' · ' + esc(rbadge);
     return '<div class="head" data-id="'+esc(r.id)+'"><span class="dot '+cls+'"></span>'
       + '<span class="txt">'+esc(r.question)+'</span>'
       + '<span class="meta">'+meta+'</span><span class="chev">&#9656;</span></div>';
@@ -1111,6 +1121,29 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
   // t261004-16 Req3：详情体与应答回显走唯一的 renderMarkdown（转义先行，敌意输入
   // 只能落成字面文本）；展开行把完整问题按格式渲染在正文顶部（行头收起态保持单行省略）。
+  // t261019-43: the reply block — every reply as its own readable line above the
+  // trace, naming intent and source class ('fact · project-session — session-…: …').
+  // Text goes through renderMarkdown (escape-first renderer, same as the body);
+  // meta fields go through esc(). Malformed entries are literal placeholders that
+  // replyFace already counted — never silent, never a crash.
+  function replyBlock(r){
+    var f = replyFace(r.replies);
+    if(!f.lines.length) return '';
+    var html = '<div class="replies">';
+    for(var i=0;i<f.lines.length;i++){
+      var p = f.lines[i];
+      var headBits = [];
+      if(p.intent) headBits.push(esc(p.intent));
+      if(p.source_class) headBits.push(esc(p.source_class));
+      var meta = headBits.length ? ' <span class="ri">'+headBits.join(' · ')+'</span>' : '';
+      html += '<div class="rp"><span class="rby">'+esc(p.by)+'</span>'+meta
+        + (p.via ? ' <span class="ri">decided by '+esc(p.via)+'</span>' : '')
+        + (p.anchor ? ' <span class="ri">anchor: "'+esc(p.anchor)+'"</span>' : '')
+        + ': <span class="rtxt">'+renderMarkdown(p.text)+'</span></div>';
+    }
+    if(f.malformed > 0) html += '<div class="ri">'+f.malformed+' malformed reply row(s) shown as placeholders — never dropped.</div>';
+    return html + '</div>';
+  }
   function rowBody(r){
     var qfull = '<div class="qfull">'+renderMarkdown(r.question||'')+'</div>';
     // t261007-01: the dismissed card copy — no decision was made; the default
@@ -1118,7 +1151,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     if(r.status==='dismissed'){
       return '<div class="body">'+qfull+'<div class="detail">'+renderMarkdown(r.detail||'(no detail was given)')+'</div>'
         + '<div class="given">Dismissed by you. Your default action applies.</div>'
-        + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
+        + replyBlock(r) + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
     }
     if(r.status==='answered'){
       // t261006-06: an answered request can be run as ONE high-privilege
@@ -1128,7 +1161,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       return '<div class="body">'+qfull+'<div class="detail">'+renderMarkdown(r.detail||'(no detail was given)')+'</div>'
         + '<div class="given">You answered: '+renderMarkdown(r.answer||'')+'</div>'
         + '<div class="oneshot"><textarea placeholder="Exact privileged action to run" data-shotactionbox="1"></textarea><button data-shotrun="1">Run as one-shot</button></div>'
-        + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
+        + replyBlock(r) + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
     }
     var inlineOpts = hasOptions(r) && !state.revealedIds.has(r.id);
     var controls = '';
@@ -1141,7 +1174,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     }
     return '<div class="body">'+qfull+'<div class="detail">'+renderMarkdown(r.detail||'(no detail was given)')+'</div>'
       + controls
-      + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
+      + replyBlock(r) + '<div class="trace">'+esc(traceLine(r))+'</div></div>';
   }
   // t261009-37 (host order 261009-(3)): updateOpenBtn and the Open session button
   // are gone — the session chip is the state display; no session entry postMessage
@@ -1586,10 +1619,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
 
   // ---- t261005-10 (UI-2): Epics tab (read-only face) ----
-  // Layout = flat: one group per epic (head = code / title / status / ticket count
-  // and waiting-for-you count; the head drills to the SOURCE detail with a Back
-  // walk-back), and the epic's ticket rows directly inside (a row click asks the
-  // host console to open the existing ticket overlay — design §7.8 entrance 1).
+  // ---- t261019-12: Epics tab — the host-approved mock (out/mocks/epics-tab-261019.html).
+  // One list, no separate detail page: a row IS the epic. Collapsed = code + retired
+  // badge + one-line summary + ticket count + last activity. Click expands in place to
+  // the full summary, the started date, three counts (in flight / waiting on you /
+  // landed today), the document link, and the newest five tickets (title on every
+  // row) plus a 'Show N more' fold. The badge and the summary are the ONLY document
+  // fields on the surface (host order: no Chinese in the UI — the summary is English
+  // front-matter by design; status/progress prose is never rendered).
   // Ticket source = the per-epic /epics/<code>/tickets endpoint (the endpoint does
   // the epic filtering; the page never guesses membership).
   function epicCodeOf(e){ return (e && (e.code || e.id)) ? String(e.code || e.id) : ''; }
@@ -1603,7 +1640,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         state.epicTickets={};
         renderEpics();
         if(!state.epics) return;
-        // One fetch per epic (small N = the notes/epics/ entry count); one failed
+        // One fetch per epic (small N = the docs/epics/ entry count); one failed
         // fetch degrades its own group row by name and never takes the face down.
         state.epics.forEach(function(e){
           var code=epicCodeOf(e);
@@ -1639,50 +1676,122 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     rows.sort(byUpdatedDesc);
     return rows;
   }
+  // Newest ticket activity of an epic = the max updated_ts across its rows; an epic
+  // with no readable rows has no activity and sorts last (stable within ties).
+  function epicLastActivity(code){
+    var rows=epicTicketRows(code), m=-1;
+    for(var i=0;i<rows.length;i++){ if(typeof rows[i].updated_ts==='number' && rows[i].updated_ts>m) m=rows[i].updated_ts; }
+    return m;
+  }
+  function relTime(ts, now){
+    if(typeof ts!=='number' || ts<=0) return 'no activity';
+    var s=Math.max(0, Math.floor((now-ts)/1000));
+    if(s<60) return 'just now';
+    var m=Math.floor(s/60); if(m<60) return m+'m ago';
+    var h=Math.floor(m/60); if(h<24) return h+'h ago';
+    return Math.floor(h/24)+'d ago';
+  }
+  function epicCounts(rows, now){
+    var inFlight=0, waiting=0, landedToday=0;
+    for(var i=0;i<rows.length;i++){
+      var t=rows[i];
+      if(t.stage_state==='awaiting-human') waiting++;
+      else if(t.stage_state==='running') inFlight++;
+      if(t.status==='closed' && typeof t.updated_ts==='number' && (now-t.updated_ts)<=24*3600*1000) landedToday++;
+    }
+    return { inFlight:inFlight, waiting:waiting, landedToday:landedToday };
+  }
+  function epicBadge(e){
+    // retired is the ONLY state; a defective registry row (unreadable front-matter)
+    // fails closed as retired too. Draft = retired:false = online.
+    return (e && e.retired===false && !e.defect)
+      ? '<span class="chip" style="border-color:#9ec9a8;color:#1a7f37;background:#f0fff4">online</span>'
+      : '<span class="chip" style="border-color:#eac54f;color:#9a6700;background:#fff8c5">retired</span>';
+  }
+  function epicDocLink(code){
+    return '<a class="btn" style="text-decoration:none" target="_blank" rel="noopener" '
+      +'href="/sandbar-workbench/api/wf/docs/doc?scope=docs&path='+encodeURIComponent('epics/'+code+'.md')
+     +'&project='+encodeURIComponent(state.project)+'">Open docs/epics/'+esc(code)+'.md</a>';
+  }
   function renderEpics(){
     var list=el('epicsList'), det=el('epicDetail');
-    if(!state.project){ list.innerHTML=''; det.innerHTML=''; el('epicsBanner').innerHTML=''; return; }
+    det.innerHTML='';
+    if(!state.project){ list.innerHTML=''; el('epicsBanner').innerHTML=''; return; }
     if(!state.epics){
       el('epicsBanner').innerHTML=bannerHtml(state.epicsReason
         ? 'The epic list could not be read. Reason: '+state.epicsReason
         : 'The epic list could not be reached (the workbench plugin may not be loaded).', true);
-      list.innerHTML=''; det.innerHTML=''; return;
+      list.innerHTML=''; return;
     }
     el('epicsBanner').innerHTML='';
-    if(state.epicOpen){ renderEpicDetail(); list.innerHTML=''; return; }
-    det.innerHTML='';
     if(state.epics.length===0){ list.innerHTML='<div class="empty">'+esc(emptyCopyOf('epics_list'))+'</div>'; return; }
-    var html='';
-    for(var i=0;i<state.epics.length;i++){
-      var e=state.epics[i], code=epicCodeOf(e);
+    var now=Date.now();
+    // Merged list, newest activity first (the mock's "Sort: last activity ↓");
+    // epics without readable ticket activity keep the payload order at the bottom.
+    var order=state.epics.slice().sort(function(a,b){
+      return epicLastActivity(epicCodeOf(b))-epicLastActivity(epicCodeOf(a));
+    });
+    var html='<div class="line" style="border-bottom:0"><span class="meta">'+order.length+' epics · newest activity first</span></div>';
+    for(var i=0;i<order.length;i++){
+      var e=order[i], code=epicCodeOf(e);
       if(!code) continue;
       var f=state.epicTickets[code];
       var rows=epicTicketRows(code);
-      var waiting=rows.filter(function(t){ return t.stage_state==='awaiting-human'; }).length;
-      html+='<div class="sect lead">'+esc(code)+(e.title?' <span class="muted" style="text-transform:none;letter-spacing:0">'+esc(e.title)+'</span>':'')
-        +'<button class="linkbtn" data-epic-head="'+esc(code)+'">Source</button></div>'
-        +'<div class="grp">';
-      if(!f){
-        html+='<div class="line"><span class="say muted">Loading tickets…</span></div>';
-      } else if(f.degraded){
-        html+='<div class="line"><span class="say muted">The ticket source could not be read. Reason: '+esc(f.reason||'?')+'</span></div>';
-      } else if(rows.length===0){
-        html+='<div class="line"><span class="say muted">'+esc(emptyCopyOf('epic_tickets'))+'</span></div>';
-      } else {
-        for(var k=0;k<rows.length;k++){
-          var t=rows[k];
-          html+='<div class="line mrow" data-ticket="'+esc(t.id)+'" data-epic="'+esc(code)+'" role="button" tabindex="0">'
-            +'<div class="lab"><b>'+esc(t.id)+'</b> '+esc(t.title||'')
-            +'<small>'+esc(t.stage||'')+' · '+esc(t.stage_state||'')+(t.status?' · '+esc(t.status):'')+'</small></div>'
-            +'<span class="meta">Open in the console</span></div>';
+      var open = state.epicOpen===code;
+      var counts=epicCounts(rows, now);
+      var last=epicLastActivity(code);
+      html+='<div class="sect" style="display:block;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;'
+        +(open?'box-shadow:0 1px 3px rgba(31,35,40,.06)':'')+'">'
+        +'<div class="eh" data-epic-head="'+esc(code)+'" role="button" tabindex="0" style="display:flex;gap:8px;align-items:center;padding:8px 11px;cursor:pointer">'
+        +'<span class="muted">'+(open?'▾':'▸')+'</span><b>'+esc(code)+'</b> '+epicBadge(e)
+        +'<span style="margin-left:auto;display:flex;gap:8px;align-items:center">'
+        +'<span class="meta">'+rows.length+' ticket(s)</span>'
+        +'<span class="meta">'+esc(relTime(last, now))+'</span></span></div>';
+      // The summary — the only prose from the document that reaches the surface
+      // (English front-matter; one clipped line when collapsed).
+      var sum=typeof e.summary==='string' ? e.summary : (e.defect ? 'Defective registry entry: '+e.defect : '');
+      html+='<div class="sum" style="padding:0 11px 9px 30px;font-size:12px;color:var(--muted);line-height:1.45;'
+        +(open?'':'white-space:nowrap;overflow:hidden;text-overflow:ellipsis')+'">'+esc(sum)+'</div>';
+      if(open){
+        html+='<div style="padding:2px 11px 10px 30px;display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--faint)">'
+          +'<span>started <b>'+esc(e.started||'—')+'</b></span>'
+          +'<span>in flight <b>'+counts.inFlight+'</b></span>'
+          +'<span>waiting on you <b>'+counts.waiting+'</b></span>'
+          +'<span>landed today <b>'+counts.landedToday+'</b></span>'
+          +epicDocLink(code)+'</div>';
+        if(!f){
+          html+='<div class="line"><span class="say muted">Loading tickets…</span></div>';
+        } else if(f.degraded){
+          html+='<div class="line"><span class="say muted">The ticket source could not be read. Reason: '+esc(f.reason||'?')+'</span></div>';
+        } else if(rows.length===0){
+          html+='<div class="line"><span class="say muted">'+esc(emptyCopyOf('epic_tickets'))+'</span></div>';
+        } else {
+          var shown=state.epicShowAll[code] ? rows.length : Math.min(5, rows.length); // LIST-CAP-OK: the mock's newest-five fold, not a data cap — 'Show N more' reveals the rest
+          for(var k=0;k<shown;k++){
+            var t=rows[k];
+            html+='<div class="line mrow" data-ticket="'+esc(t.id)+'" data-epic="'+esc(code)+'" role="button" tabindex="0">'
+              +'<div class="lab"><b>'+esc(t.id)+'</b> '+esc(t.title||'')
+              +'<small>'+esc(t.stage||'')+' · '+esc(t.stage_state||'')+(t.status?' · '+esc(t.status):'')+'</small></div>'
+              +'<span class="meta">Open in the console</span></div>';
+          }
+          if(rows.length>shown){
+            html+='<div class="line" data-epic-more="'+esc(code)+'" role="button" tabindex="0" '
+              +'style="cursor:pointer;color:var(--blue)">Show '+(rows.length-shown)+' more tickets →</div>';
+          }
         }
       }
-      html+='<div class="line" style="border-bottom:0"><span class="meta">'+rows.length+' ticket(s)'
-        +(waiting>0?' · '+waiting+' waiting for you':'')+'</span></div></div>';
+      html+='</div>';
     }
     list.innerHTML=html;
     Array.prototype.forEach.call(list.querySelectorAll('[data-epic-head]'), function(n){
-      n.onclick=function(){ state.epicOpen=n.dataset.epicHead; renderEpics(); };
+      var toggle=function(){ state.epicOpen = state.epicOpen===n.dataset.epicHead ? '' : String(n.dataset.epicHead); renderEpics(); };
+      n.onclick=toggle;
+      n.onkeydown=function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); toggle(); } };
+    });
+    Array.prototype.forEach.call(list.querySelectorAll('[data-epic-more]'), function(n){
+      var expand=function(){ state.epicShowAll[n.dataset.epicMore]=true; renderEpics(); };
+      n.onclick=expand;
+      n.onkeydown=function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); expand(); } };
     });
     Array.prototype.forEach.call(list.querySelectorAll('[data-ticket]'), function(n){
       var open=function(){ openTicketInHost(n.dataset.ticket, n.dataset.epic); };
@@ -1690,39 +1799,10 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       n.onkeydown=function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); open(); } };
     });
   }
-  function renderEpicDetail(){
-    var code=state.epicOpen, det=el('epicDetail');
-    var meta=null;
-    for(var i=0;i<state.epics.length;i++){ if(epicCodeOf(state.epics[i])===code) meta=state.epics[i]; }
-    var rows=epicTicketRows(code);
-    var html='<button class="backbtn" id="epicBackBtn">&#8592; Back to epics</button>'
-      +'<div class="sect">'+esc(code)+' <span class="muted">epic</span></div>'
-      +'<div class="grp"><div class="line"><div class="lab">Source <small>notes/epics/'+esc(code)+'.md'
-      +((meta&&(meta.status||meta.note))?' · '+esc(meta.status||'')+(meta.note?' · '+esc(meta.note):''):'')+'</small></div>'
-      +'<span class="meta">'+rows.length+' ticket(s)</span></div></div>';
-    if(rows.length===0){
-      html+='<div class="empty">'+esc(emptyCopyOf('epic_tickets'))+'</div>';
-    } else {
-      html+='<div class="grp">';
-      for(var k=0;k<rows.length;k++){
-        var t=rows[k];
-        html+='<div class="line mrow" data-ticket="'+esc(t.id)+'" data-epic="'+esc(code)+'" role="button" tabindex="0">'
-          +'<div class="lab"><b>'+esc(t.id)+'</b> '+esc(t.title||'')
-          +'<small>'+esc(t.stage||'')+' · '+esc(t.stage_state||'')+'</small></div>'
-          +'<span class="meta">Open in the console</span></div>';
-      }
-      html+='</div>';
-    }
-    det.innerHTML=html;
-    el('epicBackBtn').onclick=function(){ state.epicOpen=''; renderEpics(); };
-    bindTicketRows(det);
-  }
-  function bindTicketRows(root){
-    Array.prototype.forEach.call(root.querySelectorAll('[data-ticket]'), function(n){
-      var open=function(){ openTicketInHost(n.dataset.ticket, n.dataset.epic); };
-      n.onclick=open;
-      n.onkeydown=function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); open(); } };
-    });
+  function openTicketInHost(id, epicCode){
+    if(!id) return;
+    if(window.parent===window) return;
+    window.parent.postMessage({ type:'sandbar-executor-panel:open-ticket', ticketId:String(id) }, window.location.origin);
   }
   // Ticket row -> the host console opens the existing ticket overlay (UI-3; the
   // overlay machinery lives in the host since t261005-04). Standalone (no parent
@@ -1804,7 +1884,12 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     Array.prototype.forEach.call(bar.querySelectorAll('[data-scope]'), function(b){
       b.onclick=function(){ if(state.docsScope!==b.dataset.scope){ state.docsScope=b.dataset.scope; state.docs=null; state.docSel=''; loadDocs(); } };
     });
-    var d=state.docs;
+    // t261019-04: the workbench endpoint answers the {ok,result} envelope; reading
+    // groups off the envelope made every project look empty ('The library is empty
+    // for this scope.') while the payload actually carried the tree (measured:
+    // /api/wf/docs/tree?scope=docs&project=sandbar -> result.groups x4). Accept
+    // both shapes: the envelope (t261016-07 family) and a bare tree.
+    var d=(state.docs && state.docs.result) ? state.docs.result : state.docs;
     if(!d){ e.innerHTML=bannerHtml('The doc tree could not be reached (the workbench plugin may not be loaded).', true); tree.innerHTML=''; reader.innerHTML=''; return; }
     e.innerHTML='';
     if(d.empty===true){ tree.innerHTML='<div class="empty">'+esc(d.reason||emptyCopyOf('docs_tree'))+'</div>'; reader.innerHTML=''; return; }
@@ -1932,7 +2017,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         + '<div class="sw grant" data-epic="'+esc(e.code)+'" data-on="'+String(e.authorized===true)+'"></div></div>';
     }
     if(face.epics.length===0){
-      html += '<div class="muted" style="font-size:11px">This project has no epic yet (notes/epics/ is empty or absent). Nothing can be authorized.</div>';
+      html += '<div class="muted" style="font-size:11px">This project has no epic yet (docs/epics/ is empty or absent). Nothing can be authorized.</div>';
     }
     el('openEpics').innerHTML = html;
     Array.prototype.forEach.call(el('openEpics').querySelectorAll('.sw.grant'), function(s){
@@ -2358,9 +2443,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     body.innerHTML = buildCertificationCore(CERT.data || {ok:false, reason:'the certification face has not been read yet'});
     var line = el('certLine');
     if(line) line.onchange = function(){ loadCertification(); };
-    var promo = el('certPromote');
+    var promo = el('certPromo');
     if(promo) promo.onclick = function(){
-      var note = el('certPromoteNote');
+      var note = el('certPromoNote');
       if(!note) return;
       note.hidden = false;
       note.textContent = CERT_RUNTIME.COPIES.promoteAbsent;
@@ -2423,6 +2508,15 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     for(var i=0;i<PANES.length;i++){
       el(PANES[i][1]).style.display = (PANES[i][0]===id) ? '' : 'none';
     }
+    // t261019-09: the panel changed its own content, so the console's
+    // ticket-detail overlay must go — it would float over content this page
+    // replaced. Single choke point: showTab runs on tab radios, the show-tab /
+    // show-epic wayfinding branches, and boot alike. Embedded-only: standalone
+    // (no parent) there is no overlay to talk to. Fire-and-forget, no receipt
+    // (closing is visible; closing when nothing is open is the host's no-op).
+    if(window.parent !== window){
+      window.parent.postMessage({ type: CLOSE_OVERLAY_MSG_TYPE }, window.location.origin);
+    }
     var loader = TAB_LOADER[id];
     if(loader && state.project) loader();
   }
@@ -2460,6 +2554,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   // from — an explicit degraded face, never a dead silent button. Repeated clicks
   // are safe: the host treats open-face as idempotent-by-replacement.
   var OPEN_FACE_MSG_TYPE = 'sandbar-executor-panel:open-face';
+  // t261019-09: payload-less close request; declared in face-overlay-model.ts
+  // (CLOSE_OVERLAY_MSG_TYPE) — the copies must stay byte-identical (unit-anchored).
+  var CLOSE_OVERLAY_MSG_TYPE = 'sandbar-executor-panel:close-overlay';
   function bindFaceEntry(btn, face){
     if(!btn) return;
     if(window.parent === window){
@@ -2469,6 +2566,12 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     }
     btn.onclick = function(){
       if(window.parent === window) return;
+      // t261019-09: close BEFORE open. postMessage on one channel is dispatched
+      // FIFO by the host, so the ticket overlay goes down and then the face opens
+      // — the face never mounts under a stale ticket dialog. (The close alone
+      // would also be safe: openTicketWins replaces content, so a queued
+      // close-then-open-ticket still resolves to open.)
+      window.parent.postMessage({ type: CLOSE_OVERLAY_MSG_TYPE }, window.location.origin);
       window.parent.postMessage({ type: OPEN_FACE_MSG_TYPE, face: face, projectKey: state.project }, window.location.origin);
     };
   }
@@ -2527,7 +2630,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     saveMsg=''; grantsSaveMsg=''; el('grantSession').value='';
     // t261005-10 (UI-2): reference-face state resets on a project switch (no
     // cross-project bleed).
-    state.concurrency=null; state.epics=null; state.epicsReason=''; state.epicTickets={}; state.epicOpen='';
+    state.concurrency=null; state.epics=null; state.epicsReason=''; state.epicTickets={}; state.epicOpen=''; state.epicShowAll={};
     state.inspection=null; state.inspectionError=''; state.metrics=null; state.metricsError='';
     state.docs=null; state.docSel='';
     try{ window.__panelBeepCount = Number(localStorage.getItem(beepCountKey())||'0')||0; }catch(e){}

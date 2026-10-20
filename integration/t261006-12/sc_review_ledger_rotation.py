@@ -2,7 +2,7 @@
 """sc_review_ledger_rotation — simplify-face review-ledger rotation contract
 (t261006-12, grey-box L2/L3, offline seconds, zero docker/Temporal/3099).
 
-Design source of truth: notes/discussions/261004-巡检两面重塑-测试面与简化面.md
+Design source of truth: notes/discussions/261004-inspection-two-faces-tests-simplify.md
 §4 (S3 slice + coverage hard requirement), §7 (ledger in the project directory,
 append-style, loss = restart with everything unreviewed, never an error).
 

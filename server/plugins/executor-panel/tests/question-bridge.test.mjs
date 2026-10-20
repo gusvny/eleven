@@ -111,13 +111,13 @@ const REQ = (over = {}) => ({
 
 // ── 项目反查 ─────────────────────────────────────────────────────────────────
 {
-  const dirs = { sandbar: ['/Users/user/Documents/sandbar'], other: ['/somewhere'] }
+  const dirs = { sandbar: ['/Users/xingu/Documents/sandbar'], other: ['/somewhere'] }
   const readDirs = (k) => dirs[k] ?? null
-  assert(projectKeyForCwd(['sandbar', 'other'], readDirs, '/Users/user/Documents/sandbar').project === 'sandbar', 'cwd exactly a declared dir hits')
-  assert(projectKeyForCwd(['sandbar'], readDirs, '/Users/user/Documents/sandbar/.lane/t261001-23').project === 'sandbar', 'cwd under a declared dir hits (prefix)')
-  assert(projectKeyForCwd(['other'], readDirs, '/Users/user/other-repo').ok === false, 'uncovered cwd explicitly refused')
+  assert(projectKeyForCwd(['sandbar', 'other'], readDirs, '/Users/xingu/Documents/sandbar').project === 'sandbar', 'cwd exactly a declared dir hits')
+  assert(projectKeyForCwd(['sandbar'], readDirs, '/Users/xingu/Documents/sandbar/.lane/t261001-23').project === 'sandbar', 'cwd under a declared dir hits (prefix)')
+  assert(projectKeyForCwd(['other'], readDirs, '/Users/xingu/other-repo').ok === false, 'uncovered cwd explicitly refused')
   assert(projectKeyForCwd(['sandbar'], readDirs, '').ok === false, 'missing cwd explicitly refused')
-  assert(projectKeyForCwd(['../evil'], readDirs, '/Users/user/Documents/sandbar').ok === false, 'traversal-shaped project key skipped')
+  assert(projectKeyForCwd(['../evil'], readDirs, '/Users/xingu/Documents/sandbar').ok === false, 'traversal-shaped project key skipped')
   assert(readProjectDirsFromYaml('schema: v1\nproject:\n  - key: k\n    dirs:\n      - /a/b\n      - \'/c d\'\n').join('|') === '/a/b|/c d', 'dirs parser reads quoted and plain entries')
 }
 

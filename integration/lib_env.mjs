@@ -17,6 +17,9 @@ const NARROWING_PREFIXES = [
 const NARROWING_NAMES = [
   'SANDBAR_POOL_CONC', 'SANDBAR_CONC_POOLS', 'SANDBAR_UNDECLARED_POLICY',
   'SANDBAR_STAGE_SWEEP_ORPHANS', 'SANDBAR_STAGE_SWEEP_ORPHAN_PREFIX',
+  // t261017-10（宿主令 261012 实测）：台账复用 kill switch 是轮级行为钉（裸名，
+  // 前缀族剥不掉）；夹具自起执行器时必须自己声明那一档（与 lib_env.py 同序，L14 锁）。
+  'SANDBAR_LEDGER_REUSE',
 ]
 // 261004（执行器请求 -0023，t261004-26）：继承的**调用方身份**与收窄旋钮同族同纪律——
 // ticket.py/client.py 的 spawn 链往下注入这两个；夹具起票入口不剥它们时，继承来的身份

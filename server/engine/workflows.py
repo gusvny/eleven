@@ -23,6 +23,7 @@ with workflow.unsafe.imports_passed_through():
     from activities import (
         ai_review_stub,
         line_round_tick_engine,
+        run_watch_tick_engine,
         machine_qc,
         process_stage,
         publish_dry_run,
@@ -53,6 +54,13 @@ with workflow.unsafe.imports_passed_through():
         TicketScan,
         cross_project_judge,
     )
+    # t261019-32 (quickmanual lane): registered into ALL_WORKFLOWS below so the
+    # worker serves the quickmanual workflow type (registration guard
+    # t261011-17). Ticket CREATION through the quickmanual-lane id stays
+    # fail-closed until the step-0 amendment registers the id on the names +
+    # class faces (workflows_v2 + the generated yaml) - this import only means
+    # "if such a workflow ever exists, a worker can run it".
+    from dev_lane import QuickmanualLaneWorkflow  # noqa: F401
 
 
 # ========================================================================================
@@ -239,6 +247,9 @@ WORKER_RECONCILE_PATCH_ID = "dispatcher-scan-worker-reconcile"
 # event trigger + scheduled backstop; the round owns all records). Separate
 # patch id — old running instances skip the section on replay.
 LINE_ROUND_PATCH_ID = "dispatcher-scan-line-round"
+# t261019-25: the run watch rides the same scan tick (separate patch id — old
+# running instances skip the section on replay).
+RUN_WATCH_PATCH_ID = "dispatcher-scan-run-watch"
 # t261011-21 (host order 261011 defect 1): the tick's activity must outlive a
 # FULL round, not 30 minutes of one. Derivation: CHAIN_LIMIT (4, develop_certify)
 # chained rounds x RUNNER_TIMEOUT_S_DEFAULT (3600 s, develop_certify) = 4 h,
@@ -328,6 +339,24 @@ class DispatcherScanWorkflow(TicketEventLedgerMixin):
                 raise
             except BaseException as e:  # noqa: BLE001 — named, never fatal
                 line_rounds = {"error": "%s: %s" % (type(e).__name__, e)}
+        # t261019-25: the run watch — the executor's run face, one pass per
+        # tick (design executor-operational-envelope-v1 §1; body truth
+        # run_watch.run_watch_tick_engine). Same tolerance contract as the
+        # line-round ask: a broken watch is named, never fatal — the scan
+        # still completes. File-IO bounded (ledger + rounds reads plus at
+        # most one small write per line), so a minutes-scale budget suffices;
+        # a separate patch id keeps old instances replaying without it.
+        run_watch: Dict[str, Any] = {}
+        if workflow.patched(RUN_WATCH_PATCH_ID):
+            try:
+                run_watch = await workflow.execute_activity(
+                    run_watch_tick_engine,
+                    start_to_close_timeout=timedelta(minutes=10),
+                    retry_policy=retry)
+            except asyncio.CancelledError:
+                raise
+            except BaseException as e:  # noqa: BLE001 — named, never fatal
+                run_watch = {"error": "%s: %s" % (type(e).__name__, e)}
         workflow.logger.info(
             "巡检：%s 张工单，待决 %s 张（疑似卡死 %s / 待补 %s / 可签 %s）→ %s",
             report.total_tickets, len(report.items),
@@ -346,6 +375,11 @@ class DispatcherScanWorkflow(TicketEventLedgerMixin):
             self._ledger_note(
                 "scan", "done",
                 str(line_rounds.get("summary", "line_round_tick: n/a")))
+        if run_watch:
+            # t261019-25: the watch's one-line summary rides the same face.
+            self._ledger_note(
+                "scan", "done",
+                str(run_watch.get("summary", "run_watch: n/a")))
         await self._ledger_flush()
         return {
             "total": report.total_tickets,
@@ -356,6 +390,7 @@ class DispatcherScanWorkflow(TicketEventLedgerMixin):
             "report_path": written.get("path"),
             "worker_reconcile": reconcile,
             "line_rounds": line_rounds,
+            "run_watch": run_watch,
             "scanned_at": workflow.now().isoformat(timespec="seconds"),
         }
 
@@ -368,4 +403,13 @@ ALL_WORKFLOWS = [ContentPipelineWorkflow, DispatcherScanWorkflow, InspectionPeri
                  InspectionPeriodicSpawnWorkflow, InspectionTicketCountWatcherWorkflow,
                  InspectionProduceWorkflow,
                  # t261004-27：执行器项目账投递（引擎进程代写）。
-                 ExecutorDeliveryWorkflow]
+                 ExecutorDeliveryWorkflow,
+                 # t261019-32 (quickmanual lane): the worker must serve the
+                 # quickmanual workflow type (registration guard t261011-17).
+                 # Boundary this ticket settled with the host: ticket CREATION
+                 # through the quickmanual-lane id stays fail-closed until the
+                 # step-0 amendment registers the id on the names + class faces
+                 # (workflows_v2 + the generated yaml) — the worker registration
+                 # here only means "if such a workflow ever exists, a worker can
+                 # run it".
+                 QuickmanualLaneWorkflow]

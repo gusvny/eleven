@@ -43,7 +43,8 @@
 // `SUMMARY pass=<n> fail=<n> env_fail=<n> na=<n>`；FAIL>0 或全部子用例 na → exit 1；
 // env_fail>0 → exit 2。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿。
 
-import { ensureStageConsole } from '../lib_stage_console.mjs';
+import { ensureStageConsole } from '../lib_stage_console.mjs'
+import { loadPlaywright as pwLoad, pwMissingDetail } from '../lib_pw_deps.mjs' // t261012-05: single-source probe;
 import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, resolve } from 'node:path'
@@ -200,8 +201,11 @@ async function openDetail(page, fid) {
   // 就绪信号锚详情渲染产物（正文卡标题进 DOM），不锚 .wb-drawer 容器——容器常驻
   // DOM（同 ki048 用 .wb-d2-steps 的道理：锚渲染产物，不锚挂载点）。哪个 fid 由
   // 上一步点击保证；列表行也含 fid，故不能拿 fid 当就绪信号。
+  // t261012-05: drop the dead CJK-text clause — '工单正文（原始需求）' survives
+  // only as a source comment (index.tsx:835 / lib/client.js:13368), never as DOM
+  // text, so the clause could never fire and the pin read as stale (L22). The
+  // live ready signal is the rendered drawer body anchors below.
   const ok = await waitFor(async () => await page.evaluate(() =>
-    (document.body.textContent || '').includes('工单正文（原始需求）') ||
     !!document.querySelector('.wb-d2-spec, .wb-d2-steps, .wb-d2-body')), 8000)
   if (!ok) throw new Error(`detail drawer did not render ${fid}`)
 }
@@ -356,28 +360,14 @@ async function scenarioLaneMapLabels(page) {
 
 // ---------------------------------------------------------------- browser run
 
-function mainRepoRoot() {
-  try {
-    const common = execFileSync('git', ['rev-parse', '--git-common-dir'],
-      { cwd: REPO, encoding: 'utf8', timeout: 5000 }).trim()
-    if (common) return resolve(REPO, common, '..')
-  } catch { /* not a worktree — cwd is the main checkout */ }
-  return REPO
-}
 
-async function loadPlaywright() {
-  const candidates = ['playwright-core']
-  const main = mainRepoRoot()
-  for (const sub of ['server/ui-check/node_modules/playwright-core/index.mjs',
-    'server/plugins/workbench/node_modules/playwright-core/index.mjs']) {
-    const p = join(main, sub)
-    if (existsSync(p)) candidates.push(pathToFileURL(p).href)
-  }
-  for (const c of candidates) {
-    try { return await import(c) } catch { /* next candidate */ }
-  }
-  return null
-}
+// t261012-05: playwright-core resolution converges on integration/lib_pw_deps.mjs
+// (single source: SANDBAR_PLAYWRIGHT_PATH -> legacy SANDBAR_PLAYWRIGHT_MODULE ->
+// bare import -> this-tree ui-check -> main tree via git common-dir). The old
+// inline copy dropped both env overrides, so the documented asset-injection
+// path (KI-036 remedy) was dead here; the fact-naming miss detail now comes
+// from pwMissingDetail() (names every probed candidate, no blame wording).
+async function loadPlaywright() { return pwLoad() }
 
 async function launchBrowser(pw) {
   for (const opts of [{ channel: 'chrome', headless: true }, { headless: true }]) {
@@ -390,7 +380,7 @@ async function run() {
   const ctx = { browser: null, pw: null }
   try { ctx.pw = await loadPlaywright() } catch { /* treated as missing below */ }
   if (!ctx.pw) {
-    record('S0 playwright', 'env_fail', 'playwright-core 不可解析（KI-036 家族：ui-check 依赖缺席，恢复后自动生效）')
+    record('S0 playwright', 'env_fail', pwMissingDetail())
     summarize()
   }
   ctx.browser = await launchBrowser(ctx.pw)

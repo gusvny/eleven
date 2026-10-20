@@ -115,7 +115,9 @@ def test_worker_wiring_tripwire():
     # t261005-03: the shutdown call carries meta_path — the drain entry writes
     # meta state=draining (slot hand-over) before the pollers stop; see
     # worker.mark_meta_draining / guard_single_worker takeover admission.
-    assert "_graceful_shutdown(workers, run_tasks, watch_task, meta_path=meta_path)" in src_run
+    # t261019-24: it also reaps the code-stamp watch task (stale-code self-turnover).
+    assert ("_graceful_shutdown(workers, run_tasks, watch_task, meta_path=meta_path,\n"
+            "                             stamp_task=stamp_task)") in src_run
     src_stop = inspect.getsource(worker._graceful_shutdown)
     assert "_log_shutdown_disposition" in src_stop
     assert "shutdown()" in src_stop

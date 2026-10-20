@@ -31,6 +31,7 @@ KI-220 端到端用户旅程（工单正文 t261008-07 实案的戏剧重演）�
 跑法：PY=server/engine/.venv/bin/python; [ -x "$PY" ] || PY=python3; "$PY" -B integration/t261008-24/tests/sc_zero_run_gate_stop.py
 """
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -104,6 +105,94 @@ def make_t24_fixture(tmp):
     return repo
 
 
+# t261018-05: scenario-local agent stub — a copy of t260917-09's ARB_STUB (fault-mode
+# carry/drop table in the approved plan) with ONE behavioral change: non-arbitrate
+# stages actually write docs/ticket-notes.md in the fixture repo. The shared stub only
+# CLAIMS that file in files_changed without writing it, which is exactly the
+# 0-change/0-commit shape that wedged this ticket's phase 2. The t260917-09 stub stays
+# untouched (its own scenarios depend on its exact face).
+T24_STUB = r"""
+import json, os, re, subprocess, sys, time
+prompt = sys.argv[-1] if len(sys.argv) > 1 else ""
+m = re.search(r"阶段：([a-z_]+)（", prompt)
+stage = m.group(1) if m else "unknown"
+log = os.environ["T09_STUB_LOG"]
+with open(log, "a", encoding="utf-8") as f:
+    f.write(json.dumps({"stage": stage, "ts": time.time(), "prompt": prompt},
+                       ensure_ascii=False) + "\n")
+m = re.search(r"干完把结果写到 (\S+?\.json)", prompt)
+if m:
+    rfile = m.group(1)
+    if stage == "arbitrate":
+        seq = [s.strip() for s in
+               os.environ.get("SANDBAR_T09_ARB_SEQ", "tests-fault").split(",")
+               if s.strip()]
+        n = 0
+        try:
+            with open(log, encoding="utf-8") as f:
+                n = sum(1 for ln in f if '"stage": "arbitrate"' in ln) - 1
+        except OSError:
+            n = 0
+        verdict = seq[n] if 0 <= n < len(seq) else "pass"  # 耗尽=确定性回落 pass
+        body = {"status": "ok",
+                "summary": "verdict=%s（t24 桩：第 %d 次 arbitrate）" % (verdict, n + 1),
+                "report": "[t24-stub] 机械仲裁回执 verdict=%s" % verdict,
+                "deliverables": [], "files_changed": ["docs/ticket-notes.md"],
+                "files_changed_shape": "ok", "evidence": "t24-stub"}
+    else:
+        repo = os.environ.get("T24_REPO", "")
+        # t261019-03: the deliverable must land in the TICKET'S LANE worktree, not in
+        # the fixture repo root the worker was handed: ticket-start creates the lane as
+        # a separate git worktree, and a file written beside it is invisible to the
+        # settle - the lane then really has 0 commits and the whole-ticket zero-commit
+        # gate (correctly) reds the merge gate in phase 2.
+        target = repo
+        if repo:
+            # The lane worktree appears a moment after ticket-start; a stub that races it
+            # writes beside the lane and the lane really has zero commits (the flaky red
+            # measured on the 0ee39333 certification round). Wait for it, bounded: an
+            # absent lane after the wait still falls back to the repo root, never a hang.
+            for _ in range(40):
+                try:
+                    wt = subprocess.run(["git", "-C", repo, "worktree", "list", "--porcelain"],
+                                        capture_output=True, text=True, timeout=30).stdout
+                    # The FIRST entry is the main worktree (git lists it first); the
+                    # ticket's lane is the extra one under /.lane/. Comparing against the
+                    # env path is not enough: T24_REPO is the fixture ROOT while the git
+                    # repo sits one level below it, so an inequality test picks the main
+                    # worktree and the deliverable lands beside the lane.
+                    paths = [ln.split(" ", 1)[1] for ln in wt.splitlines()
+                             if ln.startswith("worktree ")]
+                    lanes = [q for q in paths if "/.lane/" in q] or paths[1:]
+                except Exception:  # noqa: BLE001 - fall back to the repo root, never crash
+                    lanes = []
+                if lanes:
+                    target = lanes[0]
+                    break
+                time.sleep(0.5)
+        note = os.path.join(target, "docs", "ticket-notes.md") if target \
+            else "docs/ticket-notes.md"
+        os.makedirs(os.path.dirname(note) or ".", exist_ok=True)
+        with open(note, "w", encoding="utf-8") as f:
+            f.write("t24 stub deliverable (%s)\n" % stage)
+        body = {"status": "ok", "summary": "[t24-stub] %s 完成" % stage,
+                "report": "[t24-stub] 桩回执", "deliverables": [],
+                "files_changed": ["docs/ticket-notes.md"],
+                "files_changed_shape": "ok", "evidence": "t24-stub"}
+    with open(rfile, "w", encoding="utf-8") as f:
+        json.dump(body, f, ensure_ascii=False)
+"""
+
+
+def write_t24_stub(tmp, tag):
+    """落本场景自有桩（t09.write_stub 同形：tag=每相独立账本），返回 (path, log)。"""
+    stub_path = os.path.join(tmp, "t24_stub-%s.py" % tag)
+    with open(stub_path, "w", encoding="utf-8") as f:
+        f.write(T24_STUB)
+    stub_log = os.path.join(tmp, "stub-%s.jsonl" % tag)
+    return stub_path, stub_log
+
+
 def wait_terminal(py, env, tid, worker, wlog, stub_log, fail, budget):
     """poll 到「blocked（任意封面）」或「推进（仲裁通过 handoff＋stage 到 merge 族挂人审）」。
     返回 ("blocked", snap) | ("advanced", snap) | (None, 末次 snap)。"""
@@ -141,11 +230,18 @@ def main():
     try:
         stage_mod, stage = require_stage(fail, stage_name, TID)
         repo = make_t24_fixture(os.path.join(tmp, "repo"))
-        stub_path, stub_log = t09.write_stub(tmp, KEY)
+        # t261018-05: record the lane fork point like real dispatch does — without it
+        # merge_check's lane-commits check is undecidable (empty base) and used to
+        # wedge phase 2 with "0 commits but tree != base".
+        base_ref = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"],
+                                  capture_output=True, text=True).stdout.strip()
+        check(bool(base_ref), "夹具开票基点已取（base_ref=%s）" % base_ref[:7])
+        stub_path, stub_log = write_t24_stub(tmp, KEY)
         reg_dir = bench.write_registry(os.path.join(tmp, "reg"), KEY, repo)
         env = stage_env(stage, reg_dir, audit_env)
         env["SANDBAR_CALLER_PROJECT"] = KEY
         env["T09_STUB_LOG"] = stub_log
+        env["T24_REPO"] = repo   # 本场景桩写 docs/ticket-notes.md 的落点（夹具仓）
         env = t09.arb_seq_env(env, ["pass"])   # 恢复后一判即过；STOP 面它根本不该被咨询
         env["T24_SUPPLY_OK"] = marker          # 相一：marker 缺席=供给装配失败
         wlog = os.path.join(tmp, "worker.log")
@@ -155,7 +251,7 @@ def main():
         rc, out = run_poc_client(py, "ticket-start", {
             "ticket_id": TID, "template_id": "dev-lane", "project": KEY,
             "title": "t261008-24 e2e: zero-run supply stop then recovery",
-            "write_set": ["docs/"]}, env)
+            "write_set": ["docs/"], "base_ref": base_ref}, env)
         _ok, _why = accepted(out, TID)
         check(rc == 0 and _ok, "ticket-start 受理（%s）" % _why)
 

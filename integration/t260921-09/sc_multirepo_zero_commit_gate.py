@@ -127,8 +127,11 @@ def main():
         check("②-未提交面红=实现未落盘（C3 互指）",
               item3["green"] is False and n3 == 0
               and item3.get("reason_code") == "no_commits"
-              and "实现未落盘" in item3.get("next_action", "")
-              and "收回写集内" in item3.get("next_action", ""),
+              # t261018-05: the copy went English (8-rule STE, host order 260924/260925);
+              # the mutual-pointer semantics are unchanged — "implementation not
+              # persisted" + the clean-workspace cross-reference stay the anchors.
+              and "implementation not persisted" in item3.get("next_action", "")
+              and "clean-workspace item" in item3.get("next_action", ""),
               json.dumps(item3, ensure_ascii=False)[:240])
         # 仅提交面差异（位点异常）用独立干净仓，避免残留脏文件混入未提交面
         init_repo(proj / "r3")
@@ -141,7 +144,8 @@ def main():
               item4["green"] is False and n4 == 0
               and item4.get("reason_code") == "no_commits"
               and "position abnormal" in item4.get("next_action", "")
-              and "树与 base 有差异" in item4.get("detail", ""),
+              # t261018-05: same English-copy move; the divergence fact stays the anchor
+              and "tree diverges from base" in item4.get("detail", ""),
               json.dumps(item4, ensure_ascii=False)[:240])
 
         # ---- ③ 整票零 commit 全局闸 + 豁免 + C1（真聚合层，verify_lane 桩承载） ----

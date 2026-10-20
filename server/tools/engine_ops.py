@@ -251,7 +251,7 @@ def tree_of_pid(pid) -> dict:
 
 def local_host_aliases() -> set:
     """本机主机别名集合（poller identity 里的 host 段是 **worker 自己的**解析结果，
-    与连接地址不必相同：实测 `36741@192.0.2.132` 对 `127.0.0.1:7233`）。"""
+    与连接地址不必相同：实测 `36741@192.168.5.132` 对 `127.0.0.1:7233`）。"""
     import socket
     out = {"127.0.0.1", "localhost", "::1"}
     try:
@@ -324,7 +324,7 @@ def classify_pollers(pollers, aliases, alive_fn) -> tuple:
 
     判据（宿主令 260930）：**按 identity 里的 pid 验活**——server 保留刚退出 worker 的
     poller 历史，直接数长度会把「刚被换下的旧颗」读成第二颗（假红）。host 段只作附注
-    （worker 自报的 host 与我们的连接地址不必相同：实测 `36741@192.0.2.132` 对
+    （worker 自报的 host 与我们的连接地址不必相同：实测 `36741@192.168.5.132` 对
     `127.0.0.1:7233`）；identity 里没有 pid = 无法验活，进 unverifiable（不混进 live）。"""
     live, stale_hist, unver = [], [], []
     for p in pollers or []:
@@ -1192,7 +1192,7 @@ def _kill_and_wait_for_respawn(host, ns, pf, queues, wait_s: float,
     为什么不许自己起（今天实况）：从 agent 会话起的 worker 会**继承该会话的沙箱**
     （workspace-write）——工作区外的写全部 fail-closed，真票 t260930-09 归档时直接
     `PermissionError: [Errno 1] Operation not permitted:
-    '/Users/user/.sandbar/projects/sandbar/data/tickets/t260930-09'` → `merge/blocked`。
+    '/Users/xingu/.sandbar/projects/sandbar/data/tickets/t260930-09'` → `merge/blocked`。
     正确做法=按 pidfile TERM 现有 worker，**由控制台侧 temporal-tools supervisor 的
     keepalive（缺省 5s）自动拉起**（它不受本会话沙箱约束）。
 

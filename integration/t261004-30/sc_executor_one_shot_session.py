@@ -20,7 +20,7 @@ implementation details)
       - retention: 7 days, a one-page summary before deletion, and a session
         still referenced (watchdog config / authorization declaration /
         unanswered request owner) is never deleted.
-    Design source: notes/discussions/261004-执行器短活会话与唤醒-设计稿.md.
+    Design source: notes/discussions/261004-executor-short-session-wake-design.md.
     Intent split vs existing coverage: wake DELIVERY mechanics belong to
     t260929-04 entries (sc_wake_*); the three-state executor ledger counters
     belong to t260904-12; the executor grant-gate matrix belongs to

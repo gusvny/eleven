@@ -179,7 +179,7 @@ project-lifecycle 票③面D 底稿。<b>试：</b>① 组头五枚新图标（�
     <div class="info-grid">
       <span class="k">项目 key</span><span class="mono">suyou</span>
       <span class="k">显示名</span><span>溯游（冻结侧）</span>
-      <span class="k">根目录</span><span class="mono">/Users/user/Documents/suyou</span>
+      <span class="k">根目录</span><span class="mono">/Users/xingu/Documents/suyou</span>
       <span class="k">票计数</span><span>在飞 0 · 完结 50 · 已归档 48 <span style="font-size:11px;color:#57606a">（Temporal；不可达时「—」+提示，不红）</span></span>
       <span class="k">接入体检</span><span>
         <span class="chip chip-ok">verify.yaml ✓</span>
@@ -202,7 +202,7 @@ project-lifecycle 票③面D 底稿。<b>试：</b>① 组头五枚新图标（�
     <p class="sub">注册到 ~/.sandbar/projects/&lt;key&gt;/ · 单根模型：多 repo 项目填父目录（票的空间=根下 .lane/）</p>
     <div class="field"><label>项目 key</label><input class="mono" value="trip-planner"></div>
     <div class="field"><label>显示名</label><input value="旅行规划"></div>
-    <div class="field"><label>根目录</label><input class="mono" value="/Users/user/Documents/trip-planner"></div>
+    <div class="field"><label>根目录</label><input class="mono" value="/Users/xingu/Documents/trip-planner"></div>
     <button class="wb-btn wb-btn-blue" onclick="preAdd()">预检（dry-run，不落盘）</button>
     <button class="wb-btn wb-btn-green" id="btn-add" disabled>确认接入</button>
     <div id="add-pre" style="display:none">
@@ -218,7 +218,7 @@ project-lifecycle 票③面D 底稿。<b>试：</b>① 组头五枚新图标（�
       <ul class="plain">
         <li class="bad">key 形状非法：Trip_Planner（白名单=小写/数字/连字符）</li>
         <li class="bad">key 已注册：sandbar（幂等重跑同拒，不覆盖）</li>
-        <li class="bad">根目录不存在：/Users/user/Documents/no-such-dir</li>
+        <li class="bad">根目录不存在：/Users/xingu/Documents/no-such-dir</li>
         <li class="bad">根目录与 sandbar 互为父子（报两个 key）</li>
         <li class="bad">legacy 模式在位：SUYOU_PROJECTS_YAML 已设——先解除再接入</li>
         <li class="bad">多条根目录=拒收（单根模型，恰写一条）</li>

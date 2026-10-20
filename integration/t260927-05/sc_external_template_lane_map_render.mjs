@@ -196,6 +196,17 @@ async function scenario(page, cases) {
   const errors = []
   page.on('pageerror', (e) => errors.push(String(e)))
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
+  // t261012-05: URL-aware hygiene (precedent: baselines/sc_ticket_session_restore.mjs
+  // S9). The console error text carries no URL; collect the response face so the
+  // hygiene leg can exempt the STAGE ENGINE CHANNEL endpoints by name — the
+  // shared stage registry does not hold every host-registry project, so
+  // /wf/concurrency answers 502 and the host-shell /sessions answers 400 for
+  // them. That is stage provisioning, not this ticket's lane-map face; anything
+  // else >=400 stays red.
+  const badResponses = []
+  page.on('response', (r) => { if (r.status() >= 400) badResponses.push(`${r.status()} ${r.url()}`) })
+  const STAGE_CHANNEL = /\/(api\/wf\/concurrency|sessions)(\?|$)/
+  const stageChannelFace = badResponses.filter((u) => STAGE_CHANNEL.test(u))
 
   // S1：目录 miss + 详情带拓扑 → 泳道图照画（scope④ 主契约）
   await openDetail(page, FID)
@@ -220,13 +231,25 @@ async function scenario(page, cases) {
     probe2.present ? `unexpected .wb-lanemap with no topology source: ${probe2.text.slice(0, 120)}` : '')
 
   const realErrors = errors.filter(e => !/favicon|404|net::ERR_FAILED/i.test(e))
+    .filter(e => !(stageChannelFace.length && /Failed to load resource/.test(e)))
+  // record the named stage-channel face so the exemption is never silent
+  if (stageChannelFace.length && !realErrors.length) {
+    record('stage-channel face', 'env_fail',
+      `${stageChannelFace.length} x 4xx/5xx on engine-channel endpoints (${[...new Set(stageChannelFace.map(u => u.split(' ')[1].split('?')[0]))].join(',')}) — stage registry does not hold every host project; lane-map legs all judged on stubbed data`)
+    // no early exit: remaining legs still run; final summarize() exits 2 (env_fail>0)
+  }
   record('L3 journey zero pageerror/console.error', realErrors.length === 0 ? 'pass' : 'fail',
     realErrors.slice(0, 3).join(' | '))
 
   // S3：目录命中形态（目录面含外置模板行）→ 同一张图（目录回落路径零回归）。
   // 客户端从列表聚合口的顶层 `workflows` 键取目录——改目录=改桩回执后 reload。
   catalog = [...WF_CATALOG_MISS, WF_EXT]
-  await page.reload({ waitUntil: 'networkidle' })
+  // t261012-05: domcontentloaded, not networkidle — the console polls, so
+  // networkidle does not converge under a loaded host and the reload throws a
+  // navigation timeout that lands as a false 'scenario driver' FAIL (same
+  // footgun documented in t260929-22/sc_executor_entry_console.mjs). The stub
+  // route below is registered before the first goto, so a reload re-stubs too.
+  await page.reload({ waitUntil: 'domcontentloaded' })
   await openDetail(page, FID_OLD) // 该详情自身无 topology → 必须从目录行回落取到
   const probe3 = await laneMapProbe(page)
   if (!probe3.present) {
@@ -252,7 +275,14 @@ if (!browser) {
 
 try {
   const page = await browser.newPage()
-  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  // t261012-05: the stub must be registered BEFORE the first navigation —
+  // registering after page.goto let the first list fetch hit the real console
+  // (empty/unstubbed rows), so the fixture row only appeared if a later poll
+  // cycle landed inside the row wait: a load-window race (KI-184 signature).
+  // Also goto waits domcontentloaded, not networkidle — the console polls
+  // continuously, so networkidle does not converge under load (same footgun
+  // documented in t260929-22/sc_executor_entry_console.mjs) and the timeout
+  // surfaced as a false 'scenario driver' FAIL instead of a browser env face.
   await page.route('**/sandbar-workbench/api/wf/tickets**', (route) => {
     const url = new URL(route.request().url())
     const body = (b) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(b) })
@@ -264,6 +294,7 @@ try {
     // 列表聚合口契约：result.tickets 行集 + 顶层 workflows 目录
     return body({ ok: true, result: { tickets: ROWS }, workflows: catalog })
   })
+  await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded' })
 
   await scenario(page, null)
   await browser.close()

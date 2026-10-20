@@ -76,8 +76,13 @@ export type CertFaceRead =
       face: CertificationFace
       raw: CertificationInput
       notes: string[]
+      /** t261016-09 (D3): the Rounds table's source travels on the SUCCESS
+       *  envelope too. It used to ride only the refusal path, so the page saw
+       *  `round_faces === undefined` on every readable receipt and the Rounds
+       *  table rendered its no-section banner over an empty tbody. */
+      round_faces: RoundFacesSection
     }
-  | { ok: false; reason: string }
+  | { ok: false; reason: string; round_faces?: RoundFacesSection }
 
 export type CertReadFace = (
   args: { project: string; line?: string },
@@ -359,5 +364,7 @@ export async function certificationFace(
     face,
     raw: one.input,
     notes: [...read.meta_notes, ...(read.runs_note ? [read.runs_note] : [])],
+    // t261016-09 (D3): the section rides the success envelope (see the type).
+    round_faces: read.round_faces,
   }
 }

@@ -397,7 +397,10 @@ def test_executor_timeout_keeps_partial_output_and_reaps_group(tmp_path, monkeyp
     (lane / "verify.yaml").write_text(
         "schema: v1\nlanes:\n  code:\n    write_allow:\n      - src/\n"
         "integration:\n  cmd: sleep 30\n", "utf-8")
-    src = _inspect.getsource(vl._integ)
+    # t261019-45: _integ became a thin receipt wrapper; the executor body
+    # lives in _integ_impl. Inspect the implementation body (fall back to
+    # _integ on older trees where it is still inline).
+    src = _inspect.getsource(getattr(vl, "_integ_impl", vl._integ))
     assert "subprocess.Popen(" in src, "执行器未走 Popen=超时拿不到部分输出"
     assert "os.killpg(os.getpgid(proc.pid)" in src, "超时未按进程组回收（孙进程会漏）"
     assert "partial" in src and "stdout_tail" in src

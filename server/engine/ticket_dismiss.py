@@ -202,8 +202,8 @@ def _decision(dir_override: Any, *, action: str, ticket_id: str, who: str,
     # (2) existence gate
     known = known_ticket_ids() if callable(known_ticket_ids) else known_ticket_ids
     if known is not None and tid not in known:
-        return _err("unknown ticket: %s is not in the engine ticket population — "
-                    "check the id, never guess" % tid)
+        return _err("unknown ticket: %s is not in the verified ticket population "
+                    "(engine ticket-list + inspection store) — check the id, never guess" % tid)
 
     # (3) state gate — the LAST row decides, so re-dismiss after restore is legal
     rows, _malformed = read_dismiss_journal(dir_override, with_malformed=True)

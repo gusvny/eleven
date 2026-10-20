@@ -77,8 +77,8 @@ dsh 的 `--profile` 只接受 `$DSH_HOME/profiles/` 下的 profile **名**（不
 
 ```sh
 mkdir -p ~/.dsh/profiles
-ln -sfn /Users/user/Documents/sandbar/server/profile          ~/.dsh/profiles/suyou
-ln -sfn /Users/user/Documents/sandbar/server/profile-headless ~/.dsh/profiles/suyou-headless
+ln -sfn /Users/xingu/Documents/sandbar/server/profile          ~/.dsh/profiles/suyou
+ln -sfn /Users/xingu/Documents/sandbar/server/profile-headless ~/.dsh/profiles/suyou-headless
 ```
 
 软链农场（`profile*/node_modules/sandbar-*` 五条＋`sandbar-tools.ts` 一条）**不入 git**

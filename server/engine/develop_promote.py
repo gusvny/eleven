@@ -103,6 +103,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
+from typing import Any, Dict, List
 
 from agent_activities import _git  # noqa: E402  (borrowed, never re-implemented)
 import develop_certify as dc  # noqa: E402
@@ -738,45 +739,84 @@ def promote_buffer(project, line_id, signer, authority=None, on_behalf_of=None,
     # (update-ref would strand the worktree behind the moved ref); otherwise
     # only the ref moves (update-ref works from any worktree) and the stale
     # worktree is named in the record, never forced.
-    sync_notes = []
-    for repo_meta in line.repositories:
-        name = repo_meta.name
-        repo = Path((repo_paths or {}).get(name)
-                    or shared.develop_dir(project) / "wt" / name)
-        crev = cert_repos[name]
-        # 261015: the line is a LINKED worktree of the main repository
-        # (.git/worktrees/<name>), so --absolute-git-dir names the worktree's
-        # private git dir and its parent is NOT a work tree: the fast-forward
-        # died with "main_ff_failed: ... this operation must be run in a work
-        # tree" and the promotion could not complete at all (live catch, the
-        # first promotion attempt of the merged line). The COMMON git dir's
-        # parent is the main checkout on every layout — plain checkout and
-        # linked worktree alike — and is the form this repository already uses
-        # elsewhere (git rev-parse --path-format=absolute --git-common-dir).
-        common = _git(["rev-parse", "--path-format=absolute",
-                       "--git-common-dir"], repo)
-        main_co = Path(common.stdout.strip()).parent if common.returncode == 0 \
-            else None
-        synced_inplace = False
-        if main_co is not None:
-            cur_br = _git(["rev-parse", "--abbrev-ref", "HEAD"], main_co)
-            dirty = _git(["status", "--porcelain"], main_co)
-            if cur_br.returncode == 0 and cur_br.stdout.strip() == "main" \
-                    and not (dirty.stdout or "").strip():
-                m = _git(["merge", "--ff-only", crev], main_co)
-                if m.returncode == 0:
-                    synced_inplace = True
-                else:
-                    raise PromoteError("main_ff_failed:%s:%s"
-                                       % (name, (m.stderr or "")[-200:]))
-        if not synced_inplace:
-            u = _git(["update-ref", "refs/heads/main", crev], repo)
-            if u.returncode != 0:
-                raise PromoteError("main_ref_move_failed:%s:%s"
-                                   % (name, (u.stderr or "")[-200:]))
-            sync_notes.append("%s main checkout not on a clean main — the ref "
-                              "moved; the operator reconciles the worktree"
-                              % name)
+    # t261019-41 (all-or-nothing across repositories): a failure in a LATER
+    # repository must not leave an earlier one promoted — the loop tracks
+    # every moved main and, on any act failure, rolls each one back to its
+    # recorded main_before (ref via update-ref; an in-place-merged checkout
+    # is ALSO reset so its working tree follows the ref back, review
+    # condition 4). A rollback that itself fails is named in the raised
+    # error, never silent. The VALIDATE pass above already refused every
+    # predictable shape (not-fast-forward, unresolvable main) before any
+    # move, so this rollback covers the race/fault window only.
+    sync_notes: List[str] = []
+    moved: List[Dict[str, Any]] = []  # {"name","repo","before","main_co"}
+    try:
+        for repo_meta in line.repositories:
+            name = repo_meta.name
+            repo = Path((repo_paths or {}).get(name)
+                        or shared.develop_dir(project) / "wt" / name)
+            crev = cert_repos[name]
+            # the rollback anchor: THIS repo's main revision as the act finds
+            # it (re-read, never reused from the validation pass — state may
+            # have moved between the two passes)
+            cur_p = _git(["rev-parse", "--verify", "refs/heads/main"], repo)
+            if cur_p.returncode != 0 or not cur_p.stdout.strip():
+                raise PromotionRefused("main_unresolvable:%s" % name)
+            cur = cur_p.stdout.strip()
+            # (.git/worktrees/<name>), so --absolute-git-dir names the worktree's
+            # private git dir and its parent is NOT a work tree: the fast-forward
+            # died with "main_ff_failed: ... this operation must be run in a work
+            # tree" and the promotion could not complete at all (live catch, the
+            # first promotion attempt of the merged line). The COMMON git dir's
+            # parent is the main checkout on every layout — plain checkout and
+            # linked worktree alike — and is the form this repository already uses
+            # elsewhere (git rev-parse --path-format=absolute --git-common-dir).
+            common = _git(["rev-parse", "--path-format=absolute",
+                           "--git-common-dir"], repo)
+            main_co = Path(common.stdout.strip()).parent if common.returncode == 0 \
+                else None
+            synced_inplace = False
+            if main_co is not None:
+                cur_br = _git(["rev-parse", "--abbrev-ref", "HEAD"], main_co)
+                dirty = _git(["status", "--porcelain"], main_co)
+                if cur_br.returncode == 0 and cur_br.stdout.strip() == "main" \
+                        and not (dirty.stdout or "").strip():
+                    m = _git(["merge", "--ff-only", crev], main_co)
+                    if m.returncode == 0:
+                        synced_inplace = True
+                    else:
+                        raise PromoteError("main_ff_failed:%s:%s"
+                                           % (name, (m.stderr or "")[-200:]))
+            if not synced_inplace:
+                u = _git(["update-ref", "refs/heads/main", crev], repo)
+                if u.returncode != 0:
+                    raise PromoteError("main_ref_move_failed:%s:%s"
+                                       % (name, (u.stderr or "")[-200:]))
+                sync_notes.append("%s main checkout not on a clean main — the ref "
+                                  "moved; the operator reconciles the worktree"
+                                  % name)
+            moved.append({"name": name, "repo": repo, "before": cur,
+                          "main_co": main_co if synced_inplace else None})
+    except Exception as act_err:  # noqa: BLE001 — roll every moved main back
+        rollback_failed: List[str] = []
+        for m in reversed(moved):
+            r = _git(["update-ref", "refs/heads/main", m["before"]], m["repo"])
+            if r.returncode == 0 and m["main_co"] is not None:
+                # the in-place-merged checkout follows its ref back, or the
+                # stranded working tree is named (review condition 4)
+                rs = _git(["reset", "--hard", m["before"]], m["main_co"])
+                if rs.returncode != 0:
+                    rollback_failed.append(m["name"])
+            elif r.returncode != 0:
+                rollback_failed.append(m["name"])
+        note = "" if not rollback_failed else (
+            " ROLLBACK INCOMPLETE for %s — main left at the moved tip; "
+            "reconcile by hand" % ",".join(rollback_failed))
+        raise PromoteError(
+            "%s — promotion act failed after moving %s; every already-moved "
+            "main ref rolled back to its main_before%s"
+            % (act_err, [m["name"] for m in moved] or "nothing", note)
+        ) from act_err
     res = record_promotion(row, dc.ledger_path(project))
     if res["written"] != 1:
         raise PromoteError("promotion_append_rejected:%r" % (res["rejected"],))

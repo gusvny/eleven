@@ -124,7 +124,7 @@ in the ticket's last step:
 
 ```
 PermissionError: [Errno 1] Operation not permitted:
-'/Users/user/.sandbar/projects/sandbar/data/tickets/t260930-09'
+'/Users/xingu/.sandbar/projects/sandbar/data/tickets/t260930-09'
 ```
 
 That is the archive step of `merge`, which runs in the serving worker. With two such workers
@@ -202,7 +202,7 @@ Representative output (trimmed):
 ```json
 {"ok": true, "result": {"ticket": "t260930-09", "workflow_type": "LightLaneWorkflow",
  "gate_rounds": [{"round": 5, "at": "2026-09-30T12:21:13",
-                  "activity": "run_integration_tests", "identity": "63268@192.0.2.132"}],
+                  "activity": "run_integration_tests", "identity": "63268@192.168.5.132"}],
  "serving_worker": {"pid": 63268, "alive": true, "tree": "/Users/…/sandbar",
                     "pidfile_state": "live", "registered_for_this_ticket": true,
                     "stamp": {"stale": ["agent_activities"]}}}}
@@ -239,7 +239,7 @@ remember them:
   event history records);
 * `code_stamp` — that process' code fingerprint, including `stale`;
 * the receipt summary ends with one line, for example
-  `Verified by worker 63268@192.0.2.132 (code stamp agent_activities@2026-09-30T16:43:37;
+  `Verified by worker 63268@192.168.5.132 (code stamp agent_activities@2026-09-30T16:43:37;
   started=2026-09-30T16:09:09; stale=agent_activities)`.
 
 When either value cannot be obtained, the face says so explicitly (`unavailable: <reason>`) — an

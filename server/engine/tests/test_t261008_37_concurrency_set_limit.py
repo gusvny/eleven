@@ -31,6 +31,7 @@ into a temp dir via SANDBAR_PROJECTS_DIR.
 """
 import hashlib
 import json
+import time
 import os
 import subprocess
 import sys
@@ -215,7 +216,9 @@ def test_lowering_touches_no_holder_or_queue_byte(proj):
     root, key = proj
     state = {"version": 1, "holders": [{"ticket": "t1", "since": 1.0,
                                         "reason": "running"}],
-             "queue": [{"ticket": "t2", "since": 2.0}]}
+             # 261019: `since` is the waiter's HEARTBEAT, not "queued at"
+             # (concurrency.QUEUE_STALE_S) - seed it as a live poll would.
+             "queue": [{"ticket": "t2", "since": time.time()}]}
     (root / key / cc.STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
     before = (root / key / cc.STATE_FILE).read_bytes()
     r = cc.set_limit({"project": key, "limit": 1, "by": "host"})
@@ -231,7 +234,9 @@ def test_raising_drains_through_existing_release_promotion(proj):
     root, key = proj
     state = {"version": 1, "holders": [{"ticket": "t1", "since": 1.0,
                                         "reason": "running"}],
-             "queue": [{"ticket": "t2", "since": 2.0}]}
+             # 261019: `since` is the waiter's HEARTBEAT, not "queued at"
+             # (concurrency.QUEUE_STALE_S) - seed it as a live poll would.
+             "queue": [{"ticket": "t2", "since": time.time()}]}
     (root / key / cc.STATE_FILE).write_text(json.dumps(state), encoding="utf-8")
     # the write itself promotes nothing - drain rides the EXISTING promotion
     # path (release/reconcile), which re-reads the limit per event

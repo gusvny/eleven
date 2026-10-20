@@ -100,6 +100,22 @@ def _parse(stdout: str) -> Dict[str, Any]:
 # ---------- Step-2 generic engine channel ----------
 
 @activity.defn
+async def line_landing_closeout_verdict_activity(args: Dict[str, Any]) -> str:
+    """t261019-02 / 261019 fix: the close-out guard's decision, evaluated OUTSIDE the
+    workflow sandbox.
+
+    The guard reads the delivery ledger, and reading it touches os.environ /
+    expanduser / the file system - all forbidden inside a workflow (measured:
+    RestrictedWorkflowAccessError, every close-out refused with "delivery ledger
+    unreadable"). The workflow therefore asks this activity; the decision core stays
+    the pure module-level dev_lane.line_landing_closeout_verdict, so the scenario that
+    drives that function keeps testing the same truth table."""
+    import dev_lane
+    return dev_lane.line_landing_closeout_verdict(str((args or {}).get("project") or ""),
+                                                  str((args or {}).get("ticket") or ""))
+
+
+@activity.defn
 async def admin_call(call: EngineCall) -> EngineResult:
     cmd = _admin_cmd(call.tool, call.args)
     activity.logger.info("engine: %s %s（%s）", call.tool, call.args, call.why)
@@ -247,6 +263,44 @@ async def line_round_run_now_engine() -> Dict[str, Any]:
         _develop_certify.abort_inflight_ticks("activity_unwinding")
         _develop_certify.reap_inflight_runners(reason="activity_unwinding")
         raise
+
+
+@activity.defn
+async def run_watch_tick_engine() -> Dict[str, Any]:
+    """t261019-25: the scan tick's run-watch ask — the executor's run face,
+    one pass per line-declaring project (body truth
+    run_watch.run_watch_tick_engine; design authority
+    executor-operational-envelope-v1 section 1). Read-only over the ledger and
+    the rounds directory; the only writes are fix tickets, closure rows through
+    the engine's writer, and requests — never a certification, never a run
+    edit, never a judgement stop.
+
+    Borrowed-shape checklist (plan gen1 R1): the line-round tick's thread
+    wrapper is taken over; its RUNNER REAP is deliberately dropped — the watch
+    spawns no subprocess, its IO is file reads plus in-process appends, so an
+    unwound pass has no process group to reap and an unwound append is either a
+    landed append-only row or nothing (lock-serialized). Per-line named
+    failures (take over), partial-write safety (take over: the existing
+    lock-guarded writers), duplicate-tick bound (take over, lighter: dedupe
+    keys + the state file's fail-toward-re-action direction)."""
+    def _all():
+        import run_watch
+        return run_watch.run_watch_tick_engine()
+    # no abort-row/reap side: the watch holds no in-flight runner registry;
+    # a cancellation unwinds with nothing partial (see the checklist above)
+    return await asyncio.to_thread(_all)
+
+
+@activity.defn
+async def run_watch_run_now_engine() -> Dict[str, Any]:
+    """t261019-25: the FORCED watch pass (the client's run-watch face calls
+    the same body through run_watch.run_watch_now; this activity exists so a
+    workflow-side forced pass reuses the identical body). Same discipline as
+    the tick wrapper above."""
+    def _all():
+        import run_watch
+        return run_watch.run_watch_now()
+    return await asyncio.to_thread(_all)
 
 
 @activity.defn
@@ -1397,6 +1451,7 @@ async def spawn_inspection_period(args: Dict[str, Any]) -> Dict[str, Any]:
 
 ALL_ACTIVITIES = [
     admin_call,
+    line_landing_closeout_verdict_activity,
     script_gate,
     # t261004-27：执行器项目账投递（引擎进程代写账本；None 值面只在无 temporalio
     # 解释器出现，worker 侧恒有 temporalio，恒为真活动）。
@@ -1416,6 +1471,10 @@ ALL_ACTIVITIES = [
     # 261015: the forced round (manual trigger; body truth
     # develop_certify.line_round_run_now).
     line_round_run_now_engine,
+    # t261019-25: the executor's run watch (body truth run_watch;
+    # design executor-operational-envelope-v1 §1) — tick ask + forced pass.
+    run_watch_tick_engine,
+    run_watch_run_now_engine,
     # KI-122①（260926 宿主直修令）：已知红名册只读面（裁决采纳判据的名册归属）
     read_known_red_roster,
     write_scan_report,

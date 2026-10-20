@@ -24,6 +24,11 @@ import client  # noqa: E402
 import shared  # noqa: E402
 
 
+def _epic_doc(code: str) -> str:
+    """A minimal docs/epics front-matter document (t261019-12 contract)."""
+    return "---\ncode: %s\nretired: false\nsummary: fixture entry.\nstarted: 2026-09-07\n---\n\n# %s\n" % (code, code)
+
+
 def _mk_registry(root, key, name, dirs):
     d = Path(root) / key
     d.mkdir(parents=True)
@@ -71,7 +76,7 @@ class ResolveEpicsDirTest(unittest.TestCase):
         self._saved_epics_env = os.environ.get("SANDBAR_EPICS_DIR")
         os.environ.pop("SANDBAR_EPICS_DIR", None)
         self.root = Path(tempfile.mkdtemp(prefix="t260907-07-reg-"))
-        # 两项目夹具：engine 桶 + external 桶，各自主目录下 notes/epics 放
+        # Two-project fixture: an engine bucket and an external bucket; each home's docs/epics holds
         # 同名（gap-b.md）+ 异名（各自独有）立项单——被测的是解析代码路径，
         # 主目录均指临时目录，不碰 worktree 根（方案 C3 夹具卫生）。
         self.engine_root = self.root / "engine-main"
@@ -79,10 +84,10 @@ class ResolveEpicsDirTest(unittest.TestCase):
         _mk_registry(self.root, "engine", "引擎项目", [str(self.engine_root)])
         _mk_registry(self.root, "external", "外部项目", [str(self.external_root)])
         for base, own in ((self.engine_root, "engine-only"), (self.external_root, "external-only")):
-            epics = base / "notes" / "epics"
+            epics = base / "docs" / "epics"
             epics.mkdir(parents=True)
-            (epics / "gap-b.md").write_text("# 立项单：gap-b\n", encoding="utf-8")
-            (epics / (own + ".md")).write_text("# 立项单：%s\n" % own, encoding="utf-8")
+            (epics / "gap-b.md").write_text(_epic_doc("gap-b"), encoding="utf-8")
+            (epics / (own + ".md")).write_text(_epic_doc(own), encoding="utf-8")
 
     def tearDown(self):
         import shutil
@@ -96,9 +101,9 @@ class ResolveEpicsDirTest(unittest.TestCase):
         """两项目同名/异名立项单各取各的（验收①②的解析层）。"""
         with _Env(SANDBAR_PROJECTS_DIR=str(self.root)):
             self.assertEqual(shared.resolve_epics_dir("external"),
-                             self.external_root / "notes" / "epics")
+                             self.external_root / "docs" / "epics")
             self.assertEqual(shared.resolve_epics_dir("engine"),
-                             self.engine_root / "notes" / "epics")
+                             self.engine_root / "docs" / "epics")
             # 同名立项单：external 桶存在、engine 桶也存在——校验各自通过且各读各文件
             self.assertEqual(shared.validate_epic_code(
                 "gap-b", shared.resolve_epics_dir("external")), "gap-b")
@@ -120,7 +125,7 @@ class ResolveEpicsDirTest(unittest.TestCase):
         # env 空串 → 回落项目锚（照搬取舍①）
         with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=""):
             self.assertEqual(shared.resolve_epics_dir("external"),
-                             self.external_root / "notes" / "epics")
+                             self.external_root / "docs" / "epics")
 
     def test_empty_project_engine_anchor_fallback(self):
         """空 project → 引擎锚兜底（生产不可达路径，仅夹具/兼容用——方案 N2 措辞）。"""
@@ -146,9 +151,9 @@ class ValidateEpicCodeProjectAwareTest(unittest.TestCase):
         import tempfile
         self.root = Path(tempfile.mkdtemp(prefix="t260907-07-val-"))
         self.external_root = self.root / "ext"
-        epics = self.external_root / "notes" / "epics"
+        epics = self.external_root / "docs" / "epics"
         epics.mkdir(parents=True)
-        (epics / "gap-b.md").write_text("# 立项单：gap-b\n", encoding="utf-8")
+        (epics / "gap-b.md").write_text(_epic_doc("gap-b"), encoding="utf-8")
         _mk_registry(self.root, "external", "外部项目", [str(self.external_root)])
 
     def tearDown(self):
@@ -156,12 +161,12 @@ class ValidateEpicCodeProjectAwareTest(unittest.TestCase):
         shutil.rmtree(self.root, ignore_errors=True)
 
     def test_error_message_carries_actual_dir(self):
-        """报错文案含实际查询目录=项目主目录 notes/epics（C7 诊断信息断言）。"""
+        """The error message names the directory actually queried = the project home docs/epics (C7 diagnostic assertion)."""
         with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=None):
             with self.assertRaises(ValueError) as cm:
                 shared.validate_epic_code("nope", shared.resolve_epics_dir("external"))
             msg = str(cm.exception)
-            self.assertIn(str(self.external_root / "notes" / "epics"), msg)
+            self.assertIn(str(self.external_root / "docs" / "epics"), msg)
             self.assertNotIn(str(shared.EPICS_DIR), msg)
 
     def test_env_missing_dir_error_bubbles_with_dir(self):
@@ -199,9 +204,9 @@ class CmdTicketStartProjectAwareTest(unittest.TestCase):
         self.external_root = self.root / "external-main"
         _mk_registry(self.root, "engine", "引擎项目", [str(self.engine_root)])
         _mk_registry(self.root, "external", "外部项目", [str(self.external_root)])
-        (self.external_root / "notes" / "epics").mkdir(parents=True)
-        (self.external_root / "notes" / "epics" / "gap-b.md").write_text(
-            "# 立项单：gap-b\n", encoding="utf-8")
+        (self.external_root / "docs" / "epics").mkdir(parents=True)
+        (self.external_root / "docs" / "epics" / "gap-b.md").write_text(
+            _epic_doc("gap-b"), encoding="utf-8")
 
     def tearDown(self):
         import shutil
@@ -273,9 +278,9 @@ class CmdTicketStartProjectAwareTest(unittest.TestCase):
 
     def test_engine_anchor_epic_only_in_engine_still_works(self):
         """验收②：引擎项目行为不变——engine 主目录下的立项单照常关联。"""
-        (self.engine_root / "notes" / "epics").mkdir(parents=True)
-        (self.engine_root / "notes" / "epics" / "engine-only.md").write_text(
-            "# 立项单：engine-only\n", encoding="utf-8")
+        (self.engine_root / "docs" / "epics").mkdir(parents=True)
+        (self.engine_root / "docs" / "epics" / "engine-only.md").write_text(
+            _epic_doc("engine-only"), encoding="utf-8")
         with _Env(SANDBAR_PROJECTS_DIR=str(self.root), SANDBAR_EPICS_DIR=None):
             self.assertEqual(
                 shared.validate_epic_code("engine-only", shared.resolve_epics_dir("engine")),

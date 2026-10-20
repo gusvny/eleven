@@ -16,7 +16,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from t18lib import (ok, finish, import_engine, VerifyLaneCapture, lane_root,
-                    git, make_repo, commit, mkdtemp, rmtree)
+                    git, make_repo, commit, mkdtemp, rmtree,
+                    tree_snapshot, assert_tree_untouched)
 
 # 261012 (KI-01M4PX56PCD7E186EKSJG53FYD): anchor the machine key, not the copy.
 # The red item's wording may change (the copy-language gate even forces it);
@@ -38,6 +39,9 @@ def main() -> int:
     root = lane_root()
 
     # ---- 场景 A：泳道分支不存在（真仓，merge-base 必失败）----
+    # t261016-11 ①: the real tree is the tree under test here — snapshot it
+    # and assert byte-identity after the run (the case must never write it).
+    snap_a = tree_snapshot(root)
     ghost = "lane/it-no-such-%d" % os.getpid()
     args_a = MergeCheckArgs(ticket_id="t260901-18-it-a",
                             worktree=str(root), branch=ghost,
@@ -51,6 +55,7 @@ def main() -> int:
        "A: the detail is precise (the merge-base failure is named, the real git "
        "rc= is carried, the failing ref is named) — never falls back to the old caliber")
     ok(cap_a.payload is None, "A: verify_lane is not called (a bad baseline is never passed down)")
+    assert_tree_untouched(snap_a, tree_snapshot(root), "t04-A")
 
     # ---- 场景 B：main 不存在（隔离假仓，REPO_ROOT 指过去）----
     tmp = mkdtemp()
