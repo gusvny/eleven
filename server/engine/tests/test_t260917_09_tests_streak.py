@@ -415,9 +415,18 @@ def test_g_summary_line_single_and_last(monkeypatch):
              if ln.startswith("REPROBE_SUMMARY ")]
     assert len(marks) == 1
     doc = json.loads(marks[0][len("REPROBE_SUMMARY "):])
-    assert doc == {"ran": 1, "passed": 1, "failed": 0, "env_fail": 0,
-                   "missing": [], "error": "",
-                   "entries": [{"name": "probe-one", "exit": 0, "dur_s": 0.0}]}
+    # dur_s is NOT pinned to 0.0: under full-suite load even `true` can take
+    # >50 ms and the summary rounds to 0.1 (run_scenarios rounds dur to 1
+    # decimal). The contract is "the entry is recorded with a non-negative
+    # duration", so assert the shape field-wise; an exact-0.0 compare was a
+    # load-order flake (full-suite red on t261021-01's merge_check round).
+    assert doc["ran"] == 1 and doc["passed"] == 1 and doc["failed"] == 0
+    assert doc["env_fail"] == 0 and doc["missing"] == [] and doc["error"] == ""
+    assert doc["entries"] and isinstance(doc["entries"], list)
+    e = doc["entries"][0]
+    assert e["name"] == "probe-one" and e["exit"] == 0
+    assert isinstance(e["dur_s"], (int, float)) and e["dur_s"] >= 0
+    assert len(doc["entries"]) == 1
 
 
 # ---------- H. dev_lane 结构面（复位点/判据/登记） ----------

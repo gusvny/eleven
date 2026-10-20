@@ -1615,6 +1615,11 @@
       "anchor": "behaviour",
       "note": "261020 integration L1 (host order: the KI ledger leaves git): the ledger lives in the project store and the repo keeps a pointer - the candidate list puts the store first and keeps the repo pointer as fallback, a reader with no base still resolves the store, the reader parses a ledger file and names an absent one instead of crashing, and the repository file is asserted to be a pointer (fewer than five KI sections) so the 300+ entry ledger cannot creep back in.",
       "sync_path": "server/engine/inspection_inspect.py (ki_ledger_candidates), server/engine/agent_activities.py (the scope-face read), server/tools/ticket.py (_ki_ledger_paths)"
+    },
+    "server/engine/tests/test_t261021_01_inspection_sighting.py": {
+      "anchor": "contract",
+      "note": "t261021-01 L1: the sighting chain contract - verification mapping range is the observation vocabulary for every input (real recheck_evidence end-to-end faces included), first sighting = entity only / re-sighting = one observation pinned to the period revision, fail-closed by name (absent revision refuses the batch; unresolvable identity refused per finding), IO face over real temp ledgers is idempotent per period, sighting_report answers times_seen = 1 + observations with the revision list",
+      "sync_path": "server/engine/inspection_inspect.py"
     }
   },
   "scenarios": {
@@ -5478,6 +5483,11 @@
       "anchor": "behaviour",
       "note": "t261019-41 L3: the two-repo develop-line journey end to end - a proven map covering the declared set lands BOTH repos (one landing row naming both, each repo realises its own declared branch), a map missing a repo refuses by name with nothing moved, the certification names the same repo set, a promotion with one not-fast-forwardable repo refuses with the OTHER main unmoved and no row, then fast-forwards both mains with per-repo main_before/after, and the single-repo line stays byte-identical",
       "sync_path": ""
+    },
+    "integration/t261021-01/sc_t261021_01_finding_sighting.py": {
+      "anchor": "contract",
+      "note": "t261021-01: the sighting grain over real temp ledgers - first sighting = entity only (zero observation rows), a re-seen finding writes exactly one observation row pinning (finding, period, revision) without a second entity or duplicated finding text, sighting_report answers 'seen N times / at which revisions', absent revision refuses the whole batch byte-identical, unresolvable identity refused per finding by name, malformed input never raises, same-period cross-face collapse to one sighting, re-recording a recorded period is named and adds no rows",
+      "sync_path": "server/engine/inspection_inspect.py; server/engine/inspection_review_ledger.py"
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

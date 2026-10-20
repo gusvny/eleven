@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1193,3 +1194,279 @@ def stub_embedded_repo(stub):
         if q != top:
             return q
     return None
+
+
+# ========================================================================================
+# Finding sighting chain (t261021-01): the inspection ledger can say "this fault came
+# back, against this revision". Grain per the ticket of record: a finding FIRST seen in
+# this period is the finding itself — entity row only, NO observation row; a finding
+# SEEN AGAIN (content id already in the previous period's ids or the entity ledger)
+# writes exactly one observation row {finding, period, revision, verification,
+# verification_note, at}. Store faces are borrowed from inspection_review_ledger
+# (findings.jsonl / observations.jsonl); this module owns the inspect-side mapping.
+# ========================================================================================
+
+#: A resolvable finding identity: hex, the minted width family (8 legacy .. 16 current).
+#: Anything else (empty, whitespace, NUL, non-hex, wrong shape) is refused BY NAME —
+#: never recorded as a sighting against "unknown".
+_SIGHTING_ID_RE = re.compile(r"^[0-9a-f]{8,16}$")
+
+#: recheck_evidence names each failed evidence check. A reason containing one of these
+#: tokens says the evidence LOCATION is gone (file missing / line out of range / quote
+#: no longer matches / file unreadable) — that is the doc's `unlocatable` outcome. Any
+#: other unverified reason (e.g. non_english_text) is a `downgraded` sighting. Both are
+#: in the ledger's vocabulary; the append face's out-of-vocab fallback must stay dead
+#: code on this path.
+_SIGHTING_LOCATION_TOKENS = (  # copy-lang-allow:sighting-location-tokens — DATA, not copy: they match the Chinese reason strings recheck_evidence has emitted since before the 261004 language ruling (existing output is never reworded), so the matcher must carry the same bytes
+    "\u4e0d\u5b58\u5728", "\u8d8a\u754c", "\u4e0d\u7b26", "\u4e0d\u53ef\u8bfb")
+
+
+def sighting_verification(finding: Dict[str, Any]) -> Tuple[str, str]:
+    """Map a finalized finding's `verified` state to the observation vocabulary
+    (verified | downgraded | unlocatable). Pure; the range is exactly
+    VERIFICATION_VOCAB for EVERY input, including malformed ones — the mapping
+    never emits a value the append face would have to rewrite (review round 2,
+    fault-mode item d).
+
+    verified / recurring -> verified (the evidence checked out this period).
+    suppressed -> downgraded (a false-positive verdict is a disposition, not a
+    location fact; the note says so).
+    unverified -> unlocatable when EVERY named reason is a location failure
+    (the file changed underneath the quote — that difference IS the fact);
+    otherwise downgraded with the first reason as the note.
+    anything else (absent/odd state) -> downgraded with a named note; never
+    raises, never invents a vocabulary value."""
+    state = finding.get("verified") if isinstance(finding, dict) else None
+    if state in ("verified", "recurring"):
+        return "verified", ""
+    if state == "suppressed":
+        return "downgraded", "false-positive verdict on this finding (suppressed); recorded for the sighting trail"
+    reasons = [r for r in ((finding.get("unverified_reasons") or [])
+                           if isinstance(finding, dict) else [])
+               if isinstance(r, str) and r.strip()]
+    if state == "unverified":
+        if reasons and all(any(tok in r for tok in _SIGHTING_LOCATION_TOKENS)
+                           for r in reasons):
+            return "unlocatable", reasons[0]
+        return "downgraded", (reasons[0] if reasons
+                              else "unverified with no named reason")
+    return "downgraded", "verified state %r is outside the known states" % (state,)
+
+
+def sighting_rows(findings: Any, period: Any, revision: Any,
+                  prev_ids: Any = None, known_obs_keys: Any = None,
+                  known_entity_ids: Any = None, ts: Optional[float] = None
+                  ) -> Dict[str, Any]:
+    """Build the period's sighting rows (PURE — no IO; the UT main face).
+
+    Inputs: finalized findings (post recheck/dedupe chain, ids already minted
+    by `with_ids`), the period, the revision the period pinned, the previous
+    period's finding ids, and optionally the keys/id sets already in the
+    ledgers (idempotency).
+
+    Returns {"error", "entities", "observations", "refused",
+    "entity_duplicates_skipped", "obs_duplicates_skipped"}.
+
+    Fail-closed, by name (required outcome 4):
+    - an absent/empty/NUL revision refuses the WHOLE batch — no row is ever
+      recorded against "unknown";
+    - a finding whose identity does not resolve (not a dict, no id, non-hex or
+      out-of-family id) is refused per finding, named, and never written;
+    - the entity face returning None (review round 2, fault-mode item a) lands
+      in `refused` too — a malformed entity is named, not swallowed."""
+    out: Dict[str, Any] = {"error": "", "entities": [], "observations": [],
+                           "refused": [],
+                           "entity_duplicates_skipped": 0,
+                           "obs_duplicates_skipped": 0}
+    per = period.strip() if isinstance(period, str) else ""
+    rev = revision.strip() if isinstance(revision, str) else ""
+    if not per or "\0" in per:
+        out["error"] = ("sighting batch refused: period is absent or malformed "
+                        "(%r) — no sighting is ever recorded against an unknown "
+                        "period" % (period,))
+        return out
+    if not rev or "\0" in rev:
+        out["error"] = ("sighting batch refused: the period's pinned revision is "
+                        "absent (%r) — no sighting is ever recorded against an "
+                        "unknown revision" % (revision,))
+        return out
+    prev = prev_ids if isinstance(prev_ids, (set, frozenset, list, tuple)) else ()
+    known_obs = known_obs_keys if isinstance(known_obs_keys, (set, frozenset)) else set()
+    known_ent = known_entity_ids if isinstance(known_entity_ids, (set, frozenset)) else set()
+    # A GAP-PERIOD re-sighting (seen in period 1, absent in period 2, seen again
+    # in period 3) must still be recorded: prev_ids only carries the NEAREST
+    # earlier period's ids, so recurrence is decided against the entity ledger
+    # too — an id already minted an entity row is not a first sighting. Same
+    # widening rule as everywhere (acceptance_walkthrough fault 1, t261021-01):
+    # a stored 8-hex entity id matches its 16-hex minted query id by prefix.
+    ent_exact = {e for e in known_ent if isinstance(e, str) and e}
+    ent_prefix8 = {e for e in ent_exact if len(e) == 8}
+    stamp_ms = int(round(float(ts if ts is not None else time.time()) * 1000.0))
+    seen_here: set = set()
+    from inspection_review_ledger import finding_entity_record  # lazy: no import cycle
+    for i, f in enumerate(findings if isinstance(findings, list) else []):
+        if not isinstance(f, dict):
+            out["refused"].append({"index": i, "id": "",
+                                   "reason": "finding is not an object"})
+            continue
+        fid = str(f.get("id") or "").strip().lower()
+        if not fid or "\0" in fid or not _SIGHTING_ID_RE.match(fid):
+            out["refused"].append({
+                "index": i, "id": fid,
+                "reason": ("finding identity does not resolve (%r is not a minted "
+                           "hex id) — refused by name, never recorded against "
+                           "'unknown'" % (f.get("id"),))})
+            continue
+        recurring = id_in_legacy_set(fid, prev) or fid in ent_exact \
+            or any(fid.startswith(p) for p in ent_prefix8)
+        if recurring:
+            ver, note = sighting_verification(f)
+            key = (fid, per)
+            if key in known_obs or key in seen_here:
+                out["obs_duplicates_skipped"] += 1
+            else:
+                seen_here.add(key)
+                out["observations"].append({
+                    "finding": fid, "period": per, "revision": rev,
+                    "verification": ver, "verification_note": note,
+                    "at": stamp_ms})
+            continue
+        # First sighting in this period: the finding itself IS the first
+        # sighting — entity row only, NO observation row (required outcome 3).
+        ent = finding_entity_record(f, ts=ts)
+        if ent is None:
+            out["refused"].append({
+                "index": i, "id": fid,
+                "reason": "entity face refused the finding (malformed) — named, not swallowed"})
+            continue
+        if fid in known_ent or fid in seen_here:
+            out["entity_duplicates_skipped"] += 1
+        else:
+            seen_here.add(fid)
+            out["entities"].append(ent)
+    return out
+
+
+def record_sightings(project_key: Any, findings: Any, period: Any, revision: Any,
+                     prev_ids: Any = None, findings_path: Any = None,
+                     observations_path: Any = None, ts: Optional[float] = None
+                     ) -> Dict[str, Any]:
+    """The IO face: build the sighting rows and append them to the store where
+    the inspection already writes its facts (findings.jsonl /
+    observations.jsonl, same family as reviewed.jsonl). Never raises; every
+    refusal and write failure comes back NAMED in the result.
+
+    Paths: explicit findings_path / observations_path win (the test seam);
+    otherwise derived from project_key via the shared three-priority chain.
+    Neither available = named refusal, nothing written."""
+    from inspection_review_ledger import (  # lazy: no import cycle
+        FINDINGS_LEDGER_NAME, OBSERVATIONS_LEDGER_NAME, append_findings_ex,
+        append_observations, finding_ledger_path, load_jsonl_rows,
+        observation_keys)
+    fp, op = findings_path, observations_path
+    known_ent: set = set()
+    known_obs: set = set()
+    if fp is not None and op is not None:
+        # read BEFORE building, so an id already in the entity ledger is decided
+        # at build time (gap-period re-sighting / named skip), not discovered by
+        # the append face; the same for a (finding, period) pair already recorded
+        known_ent = {str(e.get("id") or "").strip().lower()
+                     for e in load_jsonl_rows(fp, "finding-entity")[0]
+                     if isinstance(e.get("id"), str)}
+        known_obs = observation_keys(load_jsonl_rows(op,
+                                                     "finding-observation")[0])
+    rows = sighting_rows(findings, period, revision, prev_ids=prev_ids,
+                         known_obs_keys=known_obs, known_entity_ids=known_ent,
+                         ts=ts)
+    if rows["error"]:
+        return {"ok": False, "error": rows["error"], "refused": [],
+                "entities": 0, "observations": 0}
+    fr = orr = ""
+    if fp is None or op is None:
+        proj = project_key.strip() if isinstance(project_key, str) else ""
+        if not proj:
+            return {"ok": False, "refused": [], "entities": 0, "observations": 0,
+                    "error": ("sighting write refused: no project key and no explicit "
+                              "ledger paths — the ledger location is underivable")}
+        if fp is None:
+            fp, fr = finding_ledger_path(proj, FINDINGS_LEDGER_NAME)
+        if op is None:
+            op, orr = finding_ledger_path(proj, OBSERVATIONS_LEDGER_NAME)
+    if fp is None or op is None:
+        return {"ok": False, "refused": rows["refused"], "entities": 0,
+                "observations": 0,
+                "error": "finding ledger path underivable (%s; %s)" % (fr, orr)}
+    entities, enotes = load_jsonl_rows(fp, "finding-entity")
+    sightings, onotes = load_jsonl_rows(op, "finding-observation")
+    wnotes_e = append_findings_ex(fp, rows["entities"], existing_ids=known_ent)
+    wnotes_o = append_observations(op, rows["observations"],
+                                  known_keys=observation_keys(sightings))
+    return {"ok": True, "error": "",
+            "entities": len(rows["entities"]),
+            "observations": len(rows["observations"]),
+            "refused": rows["refused"],
+            "entity_duplicates_skipped": rows["entity_duplicates_skipped"],
+            "obs_duplicates_skipped": rows["obs_duplicates_skipped"],
+            "notes": {"entity_ledger": enotes, "observation_ledger": onotes,
+                      "entity_write": wnotes_e, "observation_write": wnotes_o}}
+
+
+def sighting_report(findings_path: Any, observations_path: Any,
+                    finding_ids: Any, first_sighting: Any = None
+                    ) -> List[Dict[str, Any]]:
+    """The read face a period report uses (required outcome 2): for each asked
+    finding id — how many times has it been seen, and at which revisions.
+
+    Count = 1 + observations (the finding itself is the first sighting; a
+    first-period finding therefore reports 1 with an EMPTY observation list —
+    the absence of rows is the absence of re-sightings, never an error). The
+    first sighting's revision is the period's pinned revision: pass it in
+    `first_sighting` as {id: {"period", "revision"}}; it is named in the
+    report, never copied onto a row. Entity ids resolve under the widening
+    rule (an 8-hex stored id matches its 16-hex query id). Missing ledgers or
+    an unknown id = available:false + a named reason; never raises."""
+    from inspection_review_ledger import load_jsonl_rows  # lazy: no import cycle
+    first = first_sighting if isinstance(first_sighting, dict) else {}
+    entities, enotes = load_jsonl_rows(findings_path, "finding-entity")
+    sightings, onotes = load_jsonl_rows(observations_path, "finding-observation")
+    corrupt: Dict[str, Any] = {}
+    for k in ("corrupt_lines", "ledger_note"):
+        for src in (enotes, onotes):
+            if src.get(k):
+                corrupt[k] = src[k]
+    out: List[Dict[str, Any]] = []
+    ids = finding_ids if isinstance(finding_ids, (list, tuple, set, frozenset)) else []
+    for q in ids:
+        fid = str(q or "").strip().lower()
+        row: Dict[str, Any] = {"finding": fid, "available": False, "reason": "",
+                               "times_seen": 0, "first_sighting": None,
+                               "re_sightings": [], "revisions": [],
+                               "notes": dict(corrupt)}
+        if not fid or not _SIGHTING_ID_RE.match(fid):
+            row["reason"] = "query id does not resolve (%r) — refused by name" % (q,)
+            out.append(row)
+            continue
+        has_entity = any(legacy_id_matches(str(e.get("id") or ""), fid)
+                         for e in entities)
+        obs: List[Dict[str, Any]] = []
+        for s in sightings:
+            if not legacy_id_matches(str(s.get("finding") or ""), fid):
+                continue
+            obs.append({"period": str(s.get("period") or ""),
+                        "revision": str(s.get("revision") or ""),
+                        "verification": str(s.get("verification") or ""),
+                        "at": s.get("at")})
+        if not has_entity and not obs:
+            row["reason"] = ("finding %s is in no ledger — nothing has ever "
+                             "recorded it" % fid)
+            out.append(row)
+            continue
+        row["available"] = True
+        row["times_seen"] = (1 if has_entity else 0) + len(obs)
+        if has_entity and fid in first and isinstance(first[fid], dict):
+            row["first_sighting"] = {"period": str(first[fid].get("period") or ""),
+                                     "revision": str(first[fid].get("revision") or "")}
+        row["re_sightings"] = obs
+        row["revisions"] = sorted({o["revision"] for o in obs if o["revision"]})
+        out.append(row)
+    return out
