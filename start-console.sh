@@ -210,20 +210,30 @@ echo "▶ 启动 sandbar 控制台：$DSH_BIN --profile sandbar ${ARGS[*]:-（�
 #   此时线轮会在运维面**具名**报 `runner_missing`（不静默、也不写认证台账）。
 # 声明口径与代价：见 integration/t261009-77/runner-declaration.md
 #   （runner 自带一棵 clone 出来的树，跑的是全量套件，一轮 8–12 分钟 + clone 时间）。
+# 261021 宿主令修正（实测两处错配）：
+#   ① 解释器必须是引擎 venv——系统 python3 没有浏览器/池子依赖，整套 browser 场景
+#      ENV_FAIL（实测一轮 34 条）；venv 缺失才回落 python3，且**具名警告**，不静默。
+#   ② 超时 3600s 装不下全量套件（实测 12:20 起跑、13:20 被 SIGTERM：677 pass / 712 条），
+#      每轮都被杀=永不出认证=线永久冻结；改 7200s。
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 LINE_ROUND_RUNNER="$REPO_DIR/integration/line_round_runner.py"
+LINE_ROUND_PY="$REPO_DIR/server/engine/.venv/bin/python"
 if [ -z "${SANDBAR_LINE_ROUND_RUNNER+x}" ]; then
-  if [ -f "$LINE_ROUND_RUNNER" ]; then
-    export SANDBAR_LINE_ROUND_RUNNER="python3 $LINE_ROUND_RUNNER"
+  if [ ! -f "$LINE_ROUND_RUNNER" ]; then
+    echo "⚠️  未找到 $LINE_ROUND_RUNNER —— 不设 SANDBAR_LINE_ROUND_RUNNER；线轮会在运维面报 runner_missing" >&2
+  elif [ -x "$LINE_ROUND_PY" ]; then
+    export SANDBAR_LINE_ROUND_RUNNER="$LINE_ROUND_PY $LINE_ROUND_RUNNER"
     echo "  line-round runner：已设 ${SANDBAR_LINE_ROUND_RUNNER}"
   else
-    echo "⚠️  未找到 $LINE_ROUND_RUNNER —— 不设 SANDBAR_LINE_ROUND_RUNNER；线轮会在运维面报 runner_missing" >&2
+    export SANDBAR_LINE_ROUND_RUNNER="python3 $LINE_ROUND_RUNNER"
+    echo "⚠️  引擎 venv 缺失（$LINE_ROUND_PY）——回落系统 python3；browser/池子场景会 ENV_FAIL，不是场景坏" >&2
+    echo "  line-round runner：已设 ${SANDBAR_LINE_ROUND_RUNNER}（回落解释器）"
   fi
 else
   echo "  line-round runner：沿用环境里已有的值：${SANDBAR_LINE_ROUND_RUNNER:-（空=关）}"
 fi
 if [ -n "${SANDBAR_LINE_ROUND_RUNNER:-}" ]; then
-  export SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S="${SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S:-3600}"
+  export SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S="${SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S:-7200}"
   echo "  line-round 超时：${SANDBAR_LINE_ROUND_RUNNER_TIMEOUT_S}s"
 fi
 
