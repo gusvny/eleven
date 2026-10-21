@@ -835,7 +835,7 @@ def gate_refusal_note(stage_id: str, violations: Sequence[str], reason_code: str
     rule = STAGE_PATH_RULES.get(str(stage_id or ""))
     desc = _STAGE_FACE_DESC.get(rule.get("kind")) if rule else None
     if rule and rule.get("kind") == "prefixes":
-        desc = "only %s" % "、".join(rule.get("prefixes") or ())
+        desc = "only %s" % ", ".join(rule.get("prefixes") or ())
     return ("Stage path gate refused the write (%sunauthorized_path): stage %s does not "
             "allow changing %s (this stage allows only: %s) — %s"
             % (PATH_GATE_REASON_KEY, stage_id, names,
