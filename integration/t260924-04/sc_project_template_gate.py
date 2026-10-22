@@ -230,16 +230,21 @@ def main():
     empty = parse_probe(run_probe(py, os.path.join(tmp, "emptyA"), full=True)[1])
     # 宿主令 260930：内置面加一格 light-lane（轻道泳道，宿主定案）——「空注册根=恰为
     # 内置面全集、零外置漂移」的语义不变；退役模板复活仍必红。
+    # 261022: quickmanual-lane registered (host order 261022) => builtin face is three.
     fail.check(empty.get("names") == {"dev-lane": "DevLaneWorkflow",
-                                      "light-lane": "LightLaneWorkflow"},
-               "A2 零登记：可用面恰 {dev-lane, light-lane}（实得 %r）"
+                                      "light-lane": "LightLaneWorkflow",
+                                      "quickmanual-lane": "QuickmanualLaneWorkflow"},
+               "A2 零登记：可用面恰 {dev-lane, light-lane, quickmanual-lane}（实得 %r）"
                % (empty.get("names"),))
-    fail.check(sorted(empty.get("display") or []) == ["dev-lane", "light-lane"],
+    fail.check(sorted(empty.get("display") or []) == ["dev-lane", "light-lane", "quickmanual-lane"],
                "A2 零登记：展示名恰 {dev-lane, light-lane}（实得 %r）"
                % (empty.get("display"),))
     fail.check(empty.get("rejections") == [],
                "A2 零登记：拒收清单为空（实得 %r）" % (empty.get("rejections"),))
-    fail.check(sorted(empty.get("classes") or []) == ["dev-lane", "light-lane"]
+    # all_wf keeps the two legacy v2 classes: quickmanual registers on the template
+    # face and the legacy worker list, never twice (two classes of one name break the
+    # replayer's whole-set validation).
+    fail.check(sorted(empty.get("classes") or []) == ["dev-lane", "light-lane", "quickmanual-lane"]
                and sorted(empty.get("all_wf") or [])
                == ["DevLaneWorkflow", "LightLaneWorkflow"],
                "A2 零登记：v2 合并面恰内置两模板（实得 classes=%r all=%r）"
@@ -328,7 +333,7 @@ def main():
     # 宿主令 260930：内置面 = {dev-lane, light-lane}（轻道登记令）——「外置 id 与内置
     # 四表同现」的语义不变，期望里补上新增的内置 id。
     fail.check(sorted(base.get("display") or [])
-               == sorted(["dev-lane", "light-lane", GOOD_ID]),
+               == sorted(["dev-lane", "light-lane", "quickmanual-lane", GOOD_ID]),
                "同门：TEMPLATE_DISPLAY_NAMES 含外置 id（实得 %r）"
                % (base.get("display"),))
     fail.check(GOOD_ID in base.get("classes", []),

@@ -71,9 +71,11 @@ def main():
     _empty = _tmp.mkdtemp(prefix="t260924-04-empty-registry-")
     # 宿主令 260930：内置面加一格 light-lane（轻道泳道，宿主定案 devlane-lite）——
     # 「空注册根=恰为内置面全集、零登记零漂移」语义不变；四退役模板复活仍必红。
+    # 261022：quickmanual-lane 完成原子注册（宿主令 261022），内置面第三条。
     check(shared.project_template_names_merged(root=_empty)
-          == {"dev-lane": "DevLaneWorkflow", "light-lane": "LightLaneWorkflow"},
-          "默认面合并视图（空注册根）恰 {dev-lane, light-lane}（实得 %r）"
+          == {"dev-lane": "DevLaneWorkflow", "light-lane": "LightLaneWorkflow",
+              "quickmanual-lane": "QuickmanualLaneWorkflow"},
+          "默认面合并视图（空注册根）恰 {dev-lane, light-lane, quickmanual-lane}（实得 %r）"
           % (shared.project_template_names_merged(root=_empty),))
     check("light-lane" in shared.TEMPLATE_CLASS_NAMES
           and shared.TEMPLATE_CLASS_NAMES["light-lane"] == "LightLaneWorkflow",
@@ -127,8 +129,8 @@ def main():
                     # 文案列全=「可用：」段恰为内置面全集（不锚前缀措辞，两工具同判）。
                     # 宿主令 260930：内置面 = {dev-lane, light-lane}（轻道登记令）。
                     seg = msg.rsplit("可用：", 1)[-1] if "可用：" in msg else msg
-                    check(seg == "dev-lane、light-lane）",
-                          "create 传 %s 被拒且文案恰列内置面两模板（实得 %r）"
+                    check(seg == "dev-lane、light-lane、quickmanual-lane）",
+                          "create 传 %s 被拒且文案恰列内置面三模板（实得 %r）"
                           % (tid, msg[:90]))
             try:
                 tool.run({"op": "create", "project": "sandbar-it-26090408",
@@ -164,7 +166,7 @@ def main():
                 receipt = lib.parse_out_json(out)
                 msg = str(receipt.get("error") or "")
                 seg = msg.rsplit("可用：", 1)[-1] if "可用：" in msg else msg
-                check(receipt.get("ok") is False and seg == "dev-lane、light-lane）",
+                check(receipt.get("ok") is False and seg == "dev-lane、light-lane、quickmanual-lane）",
                       "ticket-start 传 %s 被拒且文案恰列内置面两模板（实得 %r）"
                       % (tid, msg[:90]))
             # L9-allow: expects-refusal —— 负例：dev-lane **过模板闸**后停在下一道必填
