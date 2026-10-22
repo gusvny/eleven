@@ -140,13 +140,17 @@ try:
     # Members are parsed from the declaration output: lines that carry a
     # fast-catch clause name their member; a member line without the clause is
     # itself the B defect. Every plausible member name token must be in inventory.
-    decl_lines = [ln for ln in out.splitlines() if "fast-catch:" in ln]
+    # A member LINE is the declaration's own shape ("  member <name> pool=… ");
+    # 261022: the old heuristic also matched the runner's named report lines
+    # (FAST_SET_UNMEASURED lists members with no measured cost when the round's
+    # ledger is fresh) and read a lawful report as a member missing its clause —
+    # green on a machine with a warm ledger, red in every round.
+    member_lines = [ln for ln in out.splitlines()
+                    if ln.strip().startswith("member ")]
+    decl_lines = [ln for ln in member_lines if "fast-catch:" in ln]
     check("B every member line carries fast-catch:", len(decl_lines) > 0,
           "no fast-catch clause anywhere — members do not say what they catch")
-    missing_clause = [ln for ln in out.splitlines()
-                      if ("t26" in ln or ln.strip().startswith("-")) and
-                      "fast-catch:" not in ln and re.search(r"[a-z0-9-]{12,}", ln)
-                      and "budget" not in ln and "note" not in ln.lower()]
+    missing_clause = [ln for ln in member_lines if "fast-catch:" not in ln]
     check("B no member-shaped line without a fast-catch clause",
           len(missing_clause) == 0,
           "member lines without clause: %s" % missing_clause[:3])
