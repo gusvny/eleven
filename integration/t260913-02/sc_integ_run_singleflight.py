@@ -80,6 +80,11 @@ def _all_pools():
 def _cli(lock_path, extra_env=None, args=("--exclude-pools",)):
     env = dict(os.environ)
     env["SANDBAR_INTEG_RUN_LOCK_PATH"] = lock_path
+    # 261022: this case tests the lock, so it must own it completely. Inside a full
+    # round the ROUND's own lock is held at the default path; the record above
+    # already pins our private path, and the knob is neutralised so the round's
+    # posture cannot decide our sub-case 1 (an inherited ALLOW_CONCURRENT would
+    # make the lock a no-op and turn sub-case 2 vacuous).
     env.pop("SANDBAR_INTEG_ALLOW_CONCURRENT", None)
     if extra_env:
         env.update(extra_env)
