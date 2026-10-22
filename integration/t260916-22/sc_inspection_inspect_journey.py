@@ -260,6 +260,13 @@ def main() -> int:
     stub = os.path.join(workdir, "stub-message.txt")
 
     tree = lib.evidence_tree("inspect-journey")
+    # 261023: every period needs a diffable base point, otherwise the lane (correctly)
+    # ends it as "Change surface unavailable" and the journey reads a broken chain.
+    # The tree is a git repo with one commit; declare it through the engine's own
+    # bootstrap seam for all three instances.
+    from lib_inspection import seed_surface_bootstrap
+    for _inst in (inst_a, inst_b, inst_t):
+        seed_surface_bootstrap(_inst, tree.base_sha, ledger_dir)
     tree.keep_checksums()
     g2 = tree.line_text(lib.GUARD_REL, 2)
     p2 = tree.line_text(lib.PRODUCER_REL, 2)
