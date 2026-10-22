@@ -26,6 +26,7 @@ fatal=本票病象，畸形路径下缩面纪律必须依然成立）。
 import os
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lib_scope as lib  # noqa: E402
@@ -142,14 +143,31 @@ def main() -> int:
            "④meta.scope.suite_note names the unreadable receipt (260927 English report face)")
 
         # --- ⑤ KI 册缺失：note 点名不炸 ---
+        # 261020 moved the KI ledger out of the repository (it now lives in the project
+        # store, <projects root>/<key>/kb/known-issues.*; the repo file is a pointer).
+        # ki_ledger_candidates() therefore answers from the store when the repo pointer
+        # is absent, so "no file in the fixture repo" is NO LONGER an unreadable
+        # register — the store copy is read and there is no degradation to name. This
+        # sub-case must isolate the store (an empty SANDBAR_PROJECTS_DIR, read fresh on
+        # every call) so that "KI register missing" really means no candidate answers.
         inst5 = "it-scope-kibad"
         drv.seed_prev(inst5, "20260923")
         repo5, _p5, this5 = lib.make_base_repo(drv._tmp, n_changed=1, ki_exists=False)
         args = lib.scope_args(inst5, "20260924", repo5, this5)
-        pay = drv.run(args, stub_findings=[])
+        _iso = tempfile.mkdtemp(prefix="t260924-06-nostore-", dir=drv._tmp)
+        _old_proj = os.environ.get("SANDBAR_PROJECTS_DIR")
+        os.environ["SANDBAR_PROJECTS_DIR"] = _iso
+        try:
+            pay = drv.run(args, stub_findings=[])
+        finally:
+            if _old_proj is None:
+                os.environ.pop("SANDBAR_PROJECTS_DIR", None)
+            else:
+                os.environ["SANDBAR_PROJECTS_DIR"] = _old_proj
         m = drv.meta(pay)
         ok(drv.result_ok(pay) and "unreadable" in str(m.get("scope", {}).get("ki_note")),
-           "⑤KI register missing: activity does not crash and meta.scope.ki_note names it")
+           "⑤KI register missing (repo pointer absent + project store isolated): "
+           "activity does not crash and meta.scope.ki_note names it")
 
         # --- ⑥ 无基点差分：绝不回落全仓 ---
         inst6 = "it-scope-nobase"

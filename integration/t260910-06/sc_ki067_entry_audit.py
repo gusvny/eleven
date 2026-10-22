@@ -315,6 +315,17 @@ try:
         (regdir / "ki067" / "project.yaml").write_text(
             "schema: v1\nproject:\n  - key: ki067\n    name: KI067 入口收口\n"
             "    dirs:\n      - %s\n" % repo, encoding="utf-8")
+        # CL-1 (t261004-32, concurrency.py load_limit): a missing concurrency
+        # declaration is a fail-closed refusal, so a hand-rolled fixture registry
+        # kills the real ticket in concurrency_acquire (worker log: "Concurrency-limit
+        # declaration absent: .../reg/ki067/concurrency-limit.json does not exist").
+        # The workflow then closes on that failed activity, and the C1 second
+        # retry_qc / the C2 sign land on a closed execution ("workflow execution
+        # already completed"). bench.py write_registry and t260913-05 carry the same
+        # declaration for their fixtures; this scene builds its registry by hand, so
+        # it declares it here in the same shape ({"version": 1, "limit": N}).
+        (regdir / "ki067" / "concurrency-limit.json").write_text(
+            json.dumps({"version": 1, "limit": 4}), encoding="utf-8")
 
         stage_env_ = dict(os.environ)
         stage_env_["SANDBAR_TARGET_HOST"] = "127.0.0.1:%d" % fe

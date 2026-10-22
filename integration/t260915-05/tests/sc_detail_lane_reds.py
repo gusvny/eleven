@@ -71,13 +71,14 @@ sys.path.insert(0, os.path.join(REPO, "integration", "t260908-01"))
 sys.path.insert(0, os.path.join(REPO, "integration", "t260915-01"))
 sys.path.insert(0, os.path.join(REPO, "server", "engine"))
 
+from lib_env import clean_narrowing_env  # noqa: E402  (261022: the import went missing
+# in an earlier refactor; the call below kept compiling only until it ran)
 from lib_gate import (Fail, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402
                       require_bench, require_stage, run_poc_client, stage_down)
 from lib_ki061 import (make_fixture_repo, stage_env, spawn_worker, send_signal,  # noqa: E402
                        query_snapshot, poll, wait_worker_alive)
 from lib_detail_journey import (ticket_show_face,  # noqa: E402
-                                wait_blocked, wait_fork_window,
-                                wait_stage_running)
+                                wait_fork_window, wait_stage_running)
 
 TID = "t26091505r1"
 PROJ = "t26091505"
@@ -357,8 +358,45 @@ def journey(fail, bench):
         fail.check(bool(probe_sha), "越写集探针已提交进泳道分支（%s）" % probe_sha[:7])
 
         # ---- ① merge_check 第 1 轮：verify_red → blocked（非冲突红不自动返工）
-        snap_b = wait_blocked(py, env, TID, worker, wlog, fail, 420,
-                              marker="merge_check")
+        # 261022 (integration gate): wait_blocked alone polls blind for the whole
+        # 420s — when the gate decides GREEN the ticket walks on to the merge human
+        # gate and the wait can only expire, so the failure names no check. Stop
+        # the wait the moment the ticket is seen PAST merge_check (merge gate /
+        # terminal) or the last gate round is green, and bail naming that round's
+        # items: the red card this sub-case exists to read never existed, and which
+        # gate item let the probe through must be readable in the failure line.
+        # The assertion itself is unchanged — it still demands blocked+verify_red.
+        def _blocked_or_past():
+            if worker.poll() is not None:
+                wait_worker_alive(fail, worker, wlog)
+            s = query_snapshot(py, env, TID) or {}
+            if s.get("stage_state") == "blocked":
+                return ("blocked", s)
+            _gr = s.get("gate_runs") or []
+            _last = _gr[-1] if _gr else {}
+            if str(s.get("stage") or "") in ("merge", "closed") \
+                    or (str(_last.get("stage") or "") == "merge_check" and _last.get("green")):
+                return ("past", s)
+            return None
+
+        _hit = poll(_blocked_or_past, 420)
+        if _hit is None:
+            _s = query_snapshot(py, env, TID) or {}
+            fail.bail("①merge_check 420s 内既未 blocked 也未走完闸（stage=%s state=%s）"
+                      % (_s.get("stage"), _s.get("stage_state")))
+        _how, snap_b = _hit
+        if _how != "blocked":
+            _gr = snap_b.get("gate_runs") or []
+            _last = _gr[-1] if _gr else {}
+            _items = "；".join(
+                "%s=%s（%s）" % (str(c.get("id") or c.get("item")),
+                                "green" if c.get("green") else "red",
+                                str(c.get("detail"))[:200])
+                for c in (_last.get("checks") or []))
+            fail.bail("①越写集探针 %s 未被判红：merge_check 本轮 green=%r（ticket stage=%s "
+                      "state=%s）——闸轮逐项：[%s]"
+                      % (rel, _last.get("green"), snap_b.get("stage"),
+                         snap_b.get("stage_state"), _items or "无轮次明细"))
         bd = snap_b.get("blocked_detail") or {}
         fail.check(bd.get("check_id") == "verify_lane_code",
                    "①blocked_detail.check_id=verify_lane_code（首红项既有结论结构化，%r）"
