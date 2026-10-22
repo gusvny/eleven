@@ -1623,10 +1623,6 @@
     "server/engine/tests/test_t261022_quickmanual_stage_faces.py": {
       "anchor": "contract",
       "note": "t261022-08: every quickmanual stage (open/work/run_integration_tests/merge_check/merge) has a declared path-gate face; open=result_files, work=write_set; measured defect = settle refused every write with path_gate_reason=unknown_stage."
-    },
-    "server/engine/tests/test_t261022_merge_slot_release.py": {
-      "anchor": "contract",
-      "note": "t261022-06: the merge gate releases its concurrency slot with cause merge-wait and re-acquires FIFO on leaving; every blocked stage and the parked work stage keep holding on purpose (rule 3); patch id dev-lane-merge-slot-release-v1 keeps old histories replaying."
     }
   },
   "scenarios": {
@@ -1761,11 +1757,6 @@
       "sync_path": ""
     },
     "integration/sc_scenarios_guard_drift.py": {
-      "anchor": "behaviour",
-      "note": "",
-      "sync_path": ""
-    },
-    "integration/sc_scenarios_guard_pipeline.py": {
       "anchor": "behaviour",
       "note": "",
       "sync_path": ""
@@ -2496,11 +2487,6 @@
       "sync_path": ""
     },
     "integration/t260910-03/sc_t260910_03_formal_entry_fuses.py": {
-      "anchor": "behaviour",
-      "note": "",
-      "sync_path": ""
-    },
-    "integration/t260910-04/sc_console_paused_list.mjs": {
       "anchor": "behaviour",
       "note": "",
       "sync_path": ""
