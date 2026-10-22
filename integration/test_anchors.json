@@ -1623,6 +1623,14 @@
     "server/engine/tests/test_t261022_quickmanual_stage_faces.py": {
       "anchor": "contract",
       "note": "t261022-08: every quickmanual stage (open/work/run_integration_tests/merge_check/merge) has a declared path-gate face; open=result_files, work=write_set; measured defect = settle refused every write with path_gate_reason=unknown_stage."
+    },
+    "server/engine/tests/test_t261022_foreign_repair_split.py": {
+      "anchor": "behaviour",
+      "note": "t261022-10 (KI-332): foreign_file_repair splits conflict-resolution pollution (repaired) from the ticket's own out-of-write-set write (never repaired, RED naming file+commits); ambiguous authorship is RED. Patch id t261022-foreign-repair-split-v1."
+    },
+    "server/engine/tests/test_t261022_merge_slot_release.py": {
+      "anchor": "contract",
+      "note": "t261022-06: the merge gate releases its slot with cause merge-wait and re-acquires FIFO on leaving; every blocked stage and the parked work stage keep holding (rule 3); patch id dev-lane-merge-slot-release-v1."
     }
   },
   "scenarios": {
