@@ -128,7 +128,10 @@ ADVANCE_S = 120    # the env-red re-route reaching the post-arbitration stage
 WHO = "宿主"
 REASON = "t260917-09 场景：产品面已收口、余红属环境面（连续豁免超限），接受本判决推进验收"
 ACCEPT_MARK = "接受仲裁判决"       # 旧语义（超限封面 authorize 接受）留痕锚：本场景不再断言
-REROUTE_MARK = "环境面/已知红面，不重跑"   # B2（260929）新归宿留痕锚（环境红具名轮直进验收）
+#: The B2 reroute handoff mark. 261022: the engine's ticket-face copy is English
+#: now (host order 260925), so the old Chinese literal stopped matching and this
+#: case read a lawful reroute as a timeout — copy drift, not product.
+REROUTE_MARK = "env/known-red surface, not re-run"
 
 STATS = {"ok": 0, "fail": 0}
 
@@ -397,9 +400,10 @@ def phase_env(py, env, tid, worker, wlog, stub_log, fail, check):
                or adv.get("stage") in ("merge_check", "merge")),
           "环境失败分支 具名环境红 → 直接进验收（stage=%s state=%s；merge 段 blocked="
           "等签字合法终态，不是超限封）" % (adv.get("stage"), adv.get("stage_state")))
-    check("环境面/已知红面，不重跑" in ho,
-          "环境失败分支 handoff 点名环境面归宿（「不重跑」留痕可读）")
-    check("环境红（不拦·具名）" in ho and "env_sc" in ho,
+    check(REROUTE_MARK in ho,
+          "环境失败分支 handoff 点名环境面归宿（「不重跑」留痕可读；mark=%r）"
+          % REROUTE_MARK)
+    check("env-red (not blocking, named)" in ho and "env_sc" in ho,
           "环境失败分支 handoff 逐条点名具名环境红（不拦但不许静默）")
     check("tests-fault" in ho, "环境失败分支 handoff 带判决三态 verdict=tests-fault")
     check(uses_total(adv) == 0,
@@ -434,7 +438,11 @@ def main():
         # Host order 261022: one plain-process Temporal server shared by the three
         # phases instead of a leased docker stage (~0.2 s up, not minutes).
         pstage = bench_stage.up(fail, facts=print)
-        for ph in PHASES:
+        # 261022: a single phase can be re-driven on its own while re-authoring
+        # it (T09_ONLY_PHASE=<phase key>); the full run is unchanged.
+        only = (os.environ.get("T09_ONLY_PHASE") or "").strip()
+        phases = [ph for ph in PHASES if not only or ph["key"] == only] or PHASES
+        for ph in phases:
             print("== %s ==" % ph["tid"], flush=True)
             run_phase(py, bench, fail, check, pstage, audit_env, tmp, ph)
         audit = read_audit_jsonl(audit_log)
