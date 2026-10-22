@@ -67,6 +67,8 @@ def test_default_template_tables_stay_narrow():
     # 宿主令 260930：轻道泳道（light-lane）按宿主令登记为**内置**模板——默认面因此由
     # {dev-lane} 扩为 {dev-lane, light-lane}；本断言仍钉「零登记零漂移」语义（空注册根
     # 下合并视图恰为内置面全集），退役模板复活仍必红。
+    # 261022: quickmanual-lane registered as builtin (the atomic follow-up step).
     assert shared.project_template_names_merged(root=empty_root) == {
-        "dev-lane": "DevLaneWorkflow", "light-lane": "LightLaneWorkflow"}
+        "dev-lane": "DevLaneWorkflow", "light-lane": "LightLaneWorkflow",
+        "quickmanual-lane": "QuickmanualLaneWorkflow"}
     assert dict(shared.TEMPLATE_CLASS_NAMES).get("dev-lane") == "DevLaneWorkflow"

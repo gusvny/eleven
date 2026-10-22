@@ -99,8 +99,10 @@ def test_a2_empty_registry_default_face(empty_root):
     # this face only with its ATOMIC registration step (names + class + yaml);
     # never names-only (arbitrate gen0 item 1). The "empty registry root =
     # exactly the builtin face" semantics is unchanged.
+    # 261022: the atomic registration step landed, so the builtin face is three.
     assert _names(empty_root) == {"dev-lane": "DevLaneWorkflow",
-                                  "light-lane": "LightLaneWorkflow"}
+                                  "light-lane": "LightLaneWorkflow",
+                                  "quickmanual-lane": "QuickmanualLaneWorkflow"}
     assert _rejs(empty_root) == []
     res = shared.project_template_scan(import_classes=False, root=str(empty_root))
     res.merged_names({}, {})
@@ -249,8 +251,10 @@ def test_loader_is_import_neutral(empty_root):
     assert hasattr(mod, "project_template_names_merged")
     # host order 260930: builtin face = {dev-lane, light-lane}. t261019-32 note:
     # quickmanual-lane joins only with its atomic registration step.
+    # 261022: quickmanual-lane 完成注册（t261019-32 的具名后续步），内置面随之扩到三条。
     assert mod.project_template_names_merged(root=str(empty_root)) == {
-        "dev-lane": "DevLaneWorkflow", "light-lane": "LightLaneWorkflow"}
+        "dev-lane": "DevLaneWorkflow", "light-lane": "LightLaneWorkflow",
+        "quickmanual-lane": "QuickmanualLaneWorkflow"}
     # project_templates 模块源码零 shared import 语句（结构锁，防双装载裂表回归；
     # 只锁代码行不锁注释——docstring 里提到 "import shared" 不算）
     pt_src = pathlib.Path(pt.__file__).read_text("utf-8")

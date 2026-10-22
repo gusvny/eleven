@@ -2512,6 +2512,10 @@ def default_gate_for(template_id: str, stage_id: str) -> Optional["GateSpec"]:
         ("light-lane", "run_integration_tests"): GateSpec(
             stage="run_integration_tests", tool="verify_lane", args={"lane": "integ"},
             label="verify_lane integ"),
+        # 261022：quickmanual 道同一条机器闸（与 light-lane 同命令同执行器）。
+        ("quickmanual-lane", "run_integration_tests"): GateSpec(
+            stage="run_integration_tests", tool="verify_lane", args={"lane": "integ"},
+            label="verify_lane integ"),
     }
     return table.get((template_id, stage_id))
 
@@ -6329,6 +6333,9 @@ TEMPLATE_CLASS_NAMES: Dict[str, str] = {
     # 此登记。收窄守卫（sc_template_face_narrowing 等）随之把默认面由 {dev-lane} 更新为
     # {dev-lane, light-lane}——退役模板仍不得复活，守卫语义不变。
     "light-lane": "LightLaneWorkflow",
+    # 261022 宿主令：quickmanual-lane 注册（t261019-32 留的具名后续步）。道面语义见
+    # docs/design/quickmanual-lane-v1.md：一个会话在泳道里干活，不派 agent。
+    "quickmanual-lane": "QuickmanualLaneWorkflow",
     # t261019-32 (quickmanual-lane v1): the third builtin template — one session
     # works the lane, no agent stages. Deliberately NOT registered here yet: a
     # NAMES-ONLY entry would let a ticket be accepted onto a workflow no worker
@@ -6790,6 +6797,7 @@ TEMPLATE_DISPLAY_NAMES: Dict[str, str] = {
     # 宿主令 260930：轻道模板显示名（宿主 260930 明令英文——控制台界面文案一律英文，
     # 既有英文标识为真源；集中映射表见 server/plugins/workbench/src/client/ui-labels.ts）。
     "light-lane": "Light Lane",
+    "quickmanual-lane": "Quickmanual Lane",
 }
 if os.environ.get(FIXTURE_TEMPLATES_ENV) == "1":
     # 与 TEMPLATE_CLASS_NAMES 同门（上段）：收窄断言以默认面为准。

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import os as _os
 
-from dev_lane import DevLaneWorkflow
+from dev_lane import DevLaneWorkflow, QuickmanualLaneWorkflow
 from light_lane import LightLaneWorkflow
 from shared import FIXTURE_TEMPLATES_ENV
 
@@ -27,8 +27,14 @@ from shared import FIXTURE_TEMPLATES_ENV
 TEMPLATE_CLASSES = {
     "dev-lane": DevLaneWorkflow,
     "light-lane": LightLaneWorkflow,
+    "quickmanual-lane": QuickmanualLaneWorkflow,
 }
 
+# 261022：quickmanual-lane 只在 TEMPLATE_CLASSES（建票/模板注册面）登记；**不进**
+# ALL_WORKFLOWS_V2——workflows.ALL_WORKFLOWS 已带 QuickmanualLaneWorkflow（t261019-32
+# 的 worker 注册），两面同放会让回放器拿到两个同名 workflow 而整机校验失败
+# （ValueError: More than one workflow named QuickmanualLaneWorkflow，被 SDK 掩成
+# UnboundLocalError）。单一落点：worker 面=legacy 表，模板面=本表。
 ALL_WORKFLOWS_V2 = [
     DevLaneWorkflow,
     LightLaneWorkflow,

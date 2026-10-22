@@ -1,0 +1,66 @@
+# ⚠️ 真源=代码，勿手改 —— M11 v2 模版即代码（t260822-m11）。
+# 本文件由 server/engine/gen_workflows_doc.py 从 dev_lane.py 的
+# QuickmanualLaneWorkflow.STAGES 生成；改模版=改类定义并重跑生成器（重跑即覆盖手改）。
+id: quickmanual-lane
+name: "Quickmanual Lane"
+lane: worktree
+description: "Quickmanual lane: open (evidence gate) -> work (a session works the lane, no agent; the worker settles the commit) -> run_integration_tests (machine gate, full registry) -> merge_check -> merge (human review; the working session cannot sign its own merge) - red blocks for a human, no automatic re-run or arbitration"
+stages:
+  - id: open
+    role: developer
+    name: "Open (evidence gate)"
+    desc: "Programmatic (no agent): validate the ticket's mandatory evidence declaration - an L1 battery, a scenario, or (document-only) the check that ran. A quick fix without evidence is a defect of the delivery, not a shortcut: the record is what distinguishes this lane from a direct commit. The declaration is creation-time input; a missing or malformed one blocks here with a named remedy."
+    next: work
+    parts:
+      - script
+    acceptance:
+      - "The ticket carries a valid evidence declaration (kind: l1_battery | scenario | check, name filled in)"
+      - "The declaration is recorded on the ticket face as a claim - the merge human reviewer judges whether the delivered work matches it"
+  - id: work
+    role: developer
+    name: "Work (session in the lane)"
+    desc: "The lane is created and held; NO agent is spawned. A session (the host's own, or a project session pointed at the ticket) works in the lane worktree inside the declared write set, does NOT git commit (the worker settles the commit on its behalf), and signals work_done with its session id (mandatory) and role. The ordinary settle/disposal path, write-set gate and settle commit apply."
+    next: run_integration_tests
+    parts:
+      - human
+      - script
+    acceptance:
+      - "Changes stay inside the declared write set (the same path gate as every lane)"
+      - "The working session id and its role are recorded on the ticket face (never a borrowed role name)"
+      - "The work is committed through the ordinary settle path (worker-settled, never a hand-made repo)"
+  - id: run_integration_tests
+    role: integration
+    name: "Run integration tests"
+    desc: "Programmatic (no agent): lane 0-commit precheck -> pre-gate main sync (merge main into the lane once; the verified tree = the merged tree) -> run the project-declared integration command through the same single-writer args as dev-lane, FULL registry every round. Not green = blocked for a human (a digest face: counts + at most 5 named violations + the ways out); no automatic re-run, no arbitration."
+    next: merge_check
+    parts:
+      - script
+    # 脚本门（代码内 Stage.gate，仅注释展示）: verify_lane {"lane": "integ"}
+    # 纯脚本门段（agent=False：无 agent 活动，只跑门）
+    acceptance:
+      - "The project-declared integration command ran over the full registry and produced a receipt"
+      - "Any red is carried in full (counts + the named violations; the full set in the receipt)"
+  - id: merge_check
+    role: integration
+    name: "Merge check"
+    desc: "Programmatic checks (no agent): the lane has commits, the worktree is clean, in-lane verify_lane is green, merge-tree has no conflict; phase entry re-merges main before the check (the same shared helper as dev-lane/light-lane). Any red -> blocked for a human (no automatic conflict-resolution rounds)."
+    next: merge
+    parts:
+      - script
+    # 纯脚本门段（agent=False：无 agent 活动，只跑门）
+    acceptance:
+      - "Lane branch has commits"
+      - "Worktree is clean"
+      - "The in-lane verify_lane check is green"
+      - "merge dry-run has no conflict"
+  - id: merge
+    role: integration
+    name: "Merge (human review)"
+    desc: "After human sign-off, execute the merge: merge main + lane cleanup (tear down the worktree, delete the branch); landing goes through the engine's ordinary landing act - never a direct squash into main. NO SELF-SIGN: the session that did the work does not sign the merge (the executor signs per the own-project rule, or the host signs); a signature from the recorded working session is refused by name."
+    exit: human
+    parts:
+      - human
+      - script
+    acceptance:
+      - "Human sign-off recorded (the working session cannot sign its own merge)"
+      - "Merge booked + lane cleaned up"

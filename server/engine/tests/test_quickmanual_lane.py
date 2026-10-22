@@ -369,15 +369,26 @@ def test_blocked_digest_green_receipt_status():
 # H. Registration face
 # ======================================================================
 
-def test_registration_is_pending_and_half_registration_is_impossible():
-    # arbitrate gen0 item 1: a names-only entry would accept a ticket onto a
-    # workflow no worker runs. Until the atomic step-0 amendment lands (names +
-    # display + default_gate_for + class face + generated yaml), the template is
-    # deliberately absent from every creation face and creation refuses closed.
-    assert "quickmanual-lane" not in shared.TEMPLATE_CLASS_NAMES
-    assert "quickmanual-lane" not in shared.TEMPLATE_DISPLAY_NAMES
-    assert "quickmanual-lane" not in shared.BUILTIN_TEMPLATE_KEYS
-    assert shared.default_gate_for("quickmanual-lane", "run_integration_tests") is None
+def test_registration_landed_atomically_on_every_face():
+    """261022 host order: the step-0 amendment landed, so the atomicity contract is
+    asserted in the other direction. A half registration (names without display /
+    gate / class / yaml, or the reverse) is still the failure this pins: every face
+    must agree, and creation must accept the id."""
+    assert shared.TEMPLATE_CLASS_NAMES.get("quickmanual-lane") == "QuickmanualLaneWorkflow"
+    assert shared.TEMPLATE_DISPLAY_NAMES.get("quickmanual-lane") == "Quickmanual Lane"
+    assert "quickmanual-lane" in shared.BUILTIN_TEMPLATE_KEYS
+    gate = shared.default_gate_for("quickmanual-lane", "run_integration_tests")
+    assert gate is not None and gate.tool == "verify_lane"
+    import workflows_v2
+    assert workflows_v2.TEMPLATE_CLASSES.get("quickmanual-lane") is QMW
+    # the worker face keeps the SINGLE registration (workflows.ALL_WORKFLOWS carries
+    # the class); a second copy in ALL_WORKFLOWS_V2 makes the replayer see two
+    # workflows of one name and fail its whole-set validation.
+    import workflows
+    assert QMW in workflows.ALL_WORKFLOWS
+    assert QMW not in workflows_v2.ALL_WORKFLOWS_V2
+    yaml = (POC.parent / "workflows" / "quickmanual-lane.yaml")
+    assert yaml.is_file(), "generated template yaml missing: %s" % yaml
     # the class itself is implemented and importable (the registration step only
     # wires the faces around it)
     assert QMW.TEMPLATE_ID == "quickmanual-lane"
@@ -397,25 +408,6 @@ def test_fixture_template_surface_stays_fixture_only():
 def os_environ_get(name):
     import os
     return os.environ.get(name)
-
-
-@pytest.mark.xfail(reason=("pending the step-0 host amendment: the registration "
-                           "lands ATOMICALLY - shared names/display faces + "
-                           "default_gate_for + workflows_v2.TEMPLATE_CLASSES / "
-                           "ALL_WORKFLOWS_V2 + the generated "
-                           "server/workflows/quickmanual-lane.yaml + the "
-                           "narrowing-guard widenings, never names-only"),
-                   strict=False)
-def test_full_registration_lands_atomically_after_the_host_amendment():
-    assert shared.TEMPLATE_CLASS_NAMES.get("quickmanual-lane") == \
-        "QuickmanualLaneWorkflow"
-    assert shared.TEMPLATE_DISPLAY_NAMES.get("quickmanual-lane") == "Quickmanual Lane"
-    assert shared.default_gate_for("quickmanual-lane", "run_integration_tests") \
-        is not None
-    import workflows_v2  # noqa: PLC0415
-    assert workflows_v2.TEMPLATE_CLASSES.get("quickmanual-lane") is QMW
-    assert QMW in workflows_v2.ALL_WORKFLOWS_V2
-    assert (REPO / "server" / "workflows" / "quickmanual-lane.yaml").is_file()
 
 
 def test_creation_fails_closed_until_the_registration_lands():

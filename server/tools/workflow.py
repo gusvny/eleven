@@ -96,7 +96,16 @@ def _tokens(text):
 
 
 def _split_kv(s):
-    """返回 (key, value, nested)。nested=True 表示冒号后无值、下面挂块。"""
+    """返回 (key, value, nested)。nested=True 表示冒号后无值、下面挂块。
+
+    261022: a QUOTED scalar is never split. A list item such as
+      - "declaration (kind: l1_battery | scenario)"
+    used to be read as a mapping because of the colon inside the quotes (the
+    generated quickmanual-lane template tripped exactly this), so the quoted
+    form is returned whole and the caller parses it as a scalar."""
+    v = s.strip()
+    if v[:1] in ("'", '"'):
+        return None, None, False
     if s.endswith(':'):
         return s[:-1].strip(), '', True
     m = re.match(r'^([^:]+):\s?(.*)$', s)

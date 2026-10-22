@@ -133,7 +133,7 @@ def test_list_default_face_zero_regression(monkeypatch):
     out = wf.run({'op': 'list'})
     # 宿主令 260930：内置面加一格 light-lane（轻道泳道）——目录面按 yaml 参考目录列行，
     # 「未声明项目不泄漏」的语义不变（无项目行、无 note）。
-    assert [w['id'] for w in out['workflows']] == ['dev-lane', 'light-lane']
+    assert [w['id'] for w in out['workflows']] == ['dev-lane', 'light-lane', 'quickmanual-lane']
     assert 'catalog_note' not in out
 
 
@@ -141,7 +141,7 @@ def test_list_faces_failure_named_not_fatal(monkeypatch):
     _stub_rows(monkeypatch, [], note='project template face unreachable (TimeoutExpired)')
     out = wf.run({'op': 'list'})
     # 通道不炸（宿主令 260930：内置面含 light-lane）
-    assert [w['id'] for w in out['workflows']] == ['dev-lane', 'light-lane']
+    assert [w['id'] for w in out['workflows']] == ['dev-lane', 'light-lane', 'quickmanual-lane']
     assert 'project template face unreachable' in out['catalog_note']  # 缺席点名
 
 
@@ -212,7 +212,7 @@ def test_list_surfaces_rejection_note(monkeypatch):
     out = wf.run({'op': 'list'})
     ids = [w['id'] for w in out['workflows']]
     # 默认面行集不变（宿主令 260930：= 内置面 {dev-lane, light-lane}，无外置行泄漏）
-    assert ids == ['dev-lane', 'light-lane']
+    assert ids == ['dev-lane', 'light-lane', 'quickmanual-lane']
     assert 'p1 declares external template' in out['catalog_note']
 
 
