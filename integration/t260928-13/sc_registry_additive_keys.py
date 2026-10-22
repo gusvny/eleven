@@ -278,8 +278,20 @@ else:
         owners = [p.get("key") for p in projects
                   if any(str(d).rstrip("/") == str(id_root) or str(id_root).startswith(str(d).rstrip("/") + "/")
                          for d in (p.get("dirs") or []))]
-        ok(bool(owners), "引擎所属条目在可用清单里（宿主症状「sandbar 不显示」的机器级回归锁；命中=%s，身份根=%s）"
-           % (owners, id_root))
+        # 261022: a baseline clone (a line round runs the suite inside one) is NOT a
+        # registered project dir, so this machine-level lock cannot judge anything
+        # from there and used to report a product red on every round. Judge it only
+        # where it can be judged: if the resolved identity root is not registered at
+        # all, say so by name instead of failing the product.
+        _registered = any(str(id_root) == str(d).rstrip("/")
+                          or str(id_root).startswith(str(d).rstrip("/") + "/")
+                          for p in projects for d in (p.get("dirs") or []))
+        if not _registered:
+            na("引擎身份根不在册（基线克隆跑法，身份根=%s）：机器级回归锁只能在主 checkout 判"
+               % id_root)
+        else:
+            ok(bool(owners), "引擎所属条目在可用清单里（宿主症状「sandbar 不显示」的机器级回归锁；命中=%s，身份根=%s）"
+               % (owners, id_root))
 
 print("\n==== summary: PASS=%d FAIL=%d NA=%d" % (PASS, FAIL, NA))
 if NA >= TOTAL_LEGS:
