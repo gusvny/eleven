@@ -90,9 +90,18 @@ def find_t_ticket(instance: str, exclude=()):
     return None
 
 
+#: The ledger directory also carries the engine's own declared side files: the
+#: per-period surface doc (`surface-<period>.json`) and the operator-declared
+#: base-point bootstrap (`surface-bootstrap-<instance>.json`, 261023). They are
+#: not ledger rows, so the "exactly one ledger doc" assertion must not count them
+#: (before 261023 a fixture never declared a bootstrap, so the filter was mute).
+_NOT_LEDGER_ROWS = ("surface-", "surface-bootstrap-")
+
+
 def ledger_files(ledger_dir: str):
     d = os.path.join(ledger_dir, "archive")
-    top = sorted(f for f in os.listdir(ledger_dir) if f.endswith(".json")) \
+    top = [f for f in sorted(os.listdir(ledger_dir))
+           if f.endswith(".json") and not f.startswith(_NOT_LEDGER_ROWS)] \
         if os.path.isdir(ledger_dir) else []
     return top, (sorted(os.listdir(d)) if os.path.isdir(d) else [])
 
@@ -108,6 +117,11 @@ def main() -> int:
     os.makedirs(reg_root, exist_ok=True)
     os.makedirs(ledger_dir, exist_ok=True)
     repo.write_scenarios([])              # 空清单=零发现心跳票（journey 干净实例口径）
+    # 261023: same base-point furniture as the other inspection fixtures - a period with
+    # no diffable base is ended as "Change surface unavailable" by the lane.
+    repo.git_init()
+    from lib_inspection import seed_surface_bootstrap
+    seed_surface_bootstrap(INST_A, repo.base_sha, ledger_dir)
     schedule_id = ""
     queue = "sandbar-ticket-lfr-%d" % PID
     try:

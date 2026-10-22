@@ -106,6 +106,11 @@ def main() -> int:
     os.makedirs(ledger_dir, exist_ok=True)
     repo = RepoTree("bur-healthy")    # 扫描根=RepoTree（场景清单在场——fail-closed 实测）
     repo.write_scenarios([])              # 空清单=零发现心跳票
+    # 261023: an inspection period needs a diffable base point (otherwise the lane ends
+    # it as "Change surface unavailable" and the board row reads as a broken close).
+    repo.git_init()
+    from lib_inspection import seed_surface_bootstrap
+    seed_surface_bootstrap(INST_B, repo.base_sha, ledger_dir)
     queue = "sandbar-ticket-bur-%d" % PID
     try:
         lr.write_registry(reg_root, KEY_B, "BoardUnresolved", [repo.root])
