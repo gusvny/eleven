@@ -151,6 +151,14 @@ def env_for(stage, extra=None):
     env["SANDBAR_SCENARIO_LEDGER_DIR"] = os.path.join(G["tmp"], "scenario-ledger")
     env["SANDBAR_EVENT_LEDGER_DIR"] = os.path.join(G["tmp"], "event-ledger")
     env["SANDBAR_LEDGER_REUSE"] = "0"
+    # 261023: the ticket's inner integration gate is a NESTED suite run. When this
+    # case is launched by the executor, the outer run owns SANDBAR_INTEG_RUN_LOCK_PATH,
+    # the nested run inherits it, refuses as "a run is already in progress" and the
+    # gate reports 0 ran / 0 passed / 0 failed / 0 env_fail - which the ticket reads as
+    # a RED gate and never reaches the human merge gate. Reproduced by holding the lock
+    # and running this case directly (same two J5 failures). The fixture gets its OWN
+    # lock so the outer round cannot decide the lane's gate.
+    env["SANDBAR_INTEG_RUN_LOCK_PATH"] = os.path.join(G["tmp"], "gate-run.lock")
     env["QM_STUB_LEDGER"] = G["stub_ledger"]
     if extra:
         env.update(extra)

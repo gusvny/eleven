@@ -254,6 +254,10 @@ def env_for(stage, extra=None):
     # 台账复用（t260930-01）在本场景显式关掉：收口全量跑必须**真跑**（复用会让「收口
     # 跑真的发生过」变成不可判）；复用回执面由引擎 L1 与执行器自身的场景覆盖。
     env["SANDBAR_LEDGER_REUSE"] = "0"
+    # 261023: the ticket's inner integration gate is a NESTED suite run and inherits the
+    # launcher's lock; under the executor that made it refuse as "already in progress"
+    # (0 ran) and the gate read RED. The fixture owns its own lock.
+    env["SANDBAR_INTEG_RUN_LOCK_PATH"] = os.path.join(G["tmp"], "gate-run.lock")
     if extra:
         env.update(extra)
     return env
