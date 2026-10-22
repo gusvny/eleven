@@ -84,11 +84,17 @@ def green_run_face(container):
 def run_merge_check(container, write_set, ticket):
     import asyncio
     import agent_activities  # noqa: E402
+    # 261022 (t261022-10, KI-332): the fixture drives the split face explicitly.
+    # The activity argument defaults to False for replay safety of old payloads;
+    # a real lane sets it from workflow.patched(FOREIGN_REPAIR_SPLIT_PATCH_ID), so
+    # a hand-built call that omits it would silently exercise the legacy repair
+    # and assert the pre-split contract.
     return asyncio.run(agent_activities.merge_check(
         call_with_supported_fields(
             shared.MergeCheckArgs, ticket_id=ticket, worktree=str(container),
             branch="", base_ref="", write_set=list(write_set),
-            last_green_run=green_run_face(container))))
+            last_green_run=green_run_face(container),
+            foreign_repair_split=True)))
 
 
 def run_merge(container, ticket):

@@ -171,7 +171,15 @@ def gate_guard_scan(path):
     Returns (total, guarded)."""
     text = path.read_text(encoding="utf-8")
     total = len(re.findall(r"^\s*await self\._concurrency_gate\(\)", text, re.M))
+    # 261022 (t261022-06): the merge gate now re-acquires through a THIRD shape -
+    # a bare `workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID)` marker. It has to be
+    # bare there: the time arm of _concurrency_gate_active would make every
+    # post-CL-1/pre-t261022 history run a command it never recorded (TMPRL1100),
+    # so for a brand-new patch id the bare marker is the only correct guard. The
+    # contract this scan owns is unchanged: no gate call site escapes a replay
+    # predicate.
     shape = (r"(?:workflow\.patched\([A-Z_]*GATE_PATCH_ID\)"
+             r"|workflow\.patched\(MERGE_SLOT_RELEASE_PATCH_ID\)"
              r"|_concurrency_gate_active\(workflow, [A-Z_]*GATE_PATCH_ID\))"
              r":\s*\n\s*await self\._concurrency_gate\(\)")
     guarded = len(re.findall(shape, text))
