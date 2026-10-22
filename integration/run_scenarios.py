@@ -3200,6 +3200,11 @@ SCENARIOS = [
      "在册红不进每轮路径·黑盒契约（t260930-01，灰盒 L2/L3，真执行器子进程+夹具册子，离线秒级零 docker 零 Temporal 零端口；宿主裁 260930「B 档只摘在册」）：动机是实测——一轮全量的墙钟由一条串行链单独决定（9 条 460s ≈ 整轮 460s），而链上 9 条里 7 条是挂账册在册条目、6 条非绿灯，等于每轮都在等已知的、已记过账的故障慢慢跑。A 开关开（泳道轮注入）：在册红**不进本轮注册面**（expected 相应减一）、不在册的照旧跑，且必须出现三条具名面——INTEG_KNOWN_RED（跳过 N 条 + 名单 + 观察位=每日巡检与合并前全量）、INTEG_KNOWN_RED_NOTE（**未跑 ≠ 判绿**）、汇总 known_red_skipped/known_red_names，且具名面只认本轮注册面（点名轮之外的在册条目不进名单）；B 开关关（巡检/人工跑/合并前全量）：逐字节旧行为，零豁免行、注册面不缩；C fail-closed 三态：册子缺席/坏 JSON/形状不对 → **一条都不豁免**（照跑）且 stderr 具名点名原因；认不得的 verdict 词与畸形条目一律照跑（宁慢勿窄）；D 与台账复用的守恒：真册冒烟下 ran+reused==expected 仍成立。intent 分工：本条锁「已在册的不重跑」（判据=挂账册 verdict 词表），t260930-01-ledger-reuse-round 锁「同代码状态已验过的不重跑」（判据=台账四键），两条都改注册面构成但判据不同源、互不替；名册 schema 卫生归 integration/tests/test_t260923_known_red_baseline.py，闸侧豁免记账归 shared.blockers_known_red_adoption 与其 L1。安全红线：零端口零 docker 不触 3099/7233；真册只读、夹具册子经路径缝投临时目录",
      "python3 integration/t260930-01/sc_known_red_round_exempt.py", "ro", "serial"),
 
+    # ---- 261022 实报：收窄轮的期望账与在册红名单相减会扣两次（线轮内必红）----
+    ("t261022-expected-pool-knownred",
+     "收窄轮的 expected 不再被在册红重复扣（261022 实报，事故回归棒；灰盒 L1，纯 stdlib 零 docker 零 Temporal 零端口零场景开跑，秒级）：线轮注入 SANDBAR_KNOWN_RED_EXCLUDE=1 后，任何嵌套收窄跑都带着名册，而旧式 expected = 全表 − 被排除池 − 在册红 把落在**被排除池里**的在册条目扣了两次——全池排除时 778 − 778 − 49 = −49，负期望撞汇总自检把一次「零条目可跑」的收窄轮判成产品红（现场：t260913-02 子用例1/3 在轮内必红、单跑必绿）。本条锁纯面 expected_entries 的口径——全池排除恒为 0 且永不为负、在排除面里的在册条目不重复扣、不排除时逐字等于旧式、名册里的幽灵名无害；外加一条源码锁：main 走纯面、不留内联相减。intent 分工：t260930-01-known-red-round-exempt 锁「在册红不进每轮路径」的**行为面**（三条具名面与守恒式），本条只锁**期望计数口径**这一处算错——判据不同源；池排除旋钮本体归 t260913-03、单飞锁语义归 t260913-02。安全红线：零端口零 docker 不触 3099/7233；本电池只调纯函数与读一个源文件，从不发车",
+     "python3 -m pytest integration/tests/test_t261022_expected_pool_knownred.py -q", "ro"),
+
     # ---- t261017-10: 用例必须自己拥有它所测的环境旋钮（线轮 env 钉事故回归）----
     ("t261017-10-owned-env-pins",
      "线轮 env 钉不得打败被它验证的用例（t261017-10，灰盒 L3，事故回归棒，离线秒级零 docker 零 Temporal 零端口；宿主令 261012：实测线头只加 SANDBAR_LEDGER_REUSE=0 与 SANDBAR_INTEG_LEDGER_SOURCE=lane:line-round 两个钉即把 t260930-01-ledger-reuse-round 与 t261009-11-run-record-drivers 打红——钉经夹具 env 缝漏进子进程真执行器）。锁验收原话面：A 复用案真子进程、环境=本轮 env+两钉 → 绿（rc=0 且 verdict fail=0 且无 ENV_FAIL）；B 驱动面案同形 → 绿；C 具名认领（spec 2）：钉在场时两案 **stdout** 逐字点名自己拥有/剥掉的旋钮名（只在 stdout 断言——kill-switch 子用例的具名理由按契约走 stderr，不得顶替）；D 畸形继承值（空串/纯空白钉值）不翻判（剥除按名不按值）。intent 分工：复用键与 kill-switch 面归 t260930-01-ledger-reuse-round；store/CLI 契约归 t261009-11-run-record-store；双驱动旅程归 t261009-11-run-record-drivers；线轮 run 记录接力归 t261013-04——本条不重断言上述任何面，只锁「两案在轮钉下判值不动 + 旋钮在场所要点名」。夹具手法（子进程跑在册案）共享，共享步骤不构成 intent 重复。修复前红=预期 TDD 信号，arbitrate/merge 期必须绿；git 或案文件缺席=ENV_FAIL exit 2",
@@ -5612,6 +5617,21 @@ def pool_of(entry):
     return opt if (opt and opt != "serial") else "main"
 
 
+def expected_entries(scenarios, excluded_pools, known_red_skipped):
+    """本轮**可跑**的条目数（纯面，261022）。
+
+    口径：全表 − 属被排除池的条目 − 「既不属被排除池、又在册红名单里」的条目。
+    `known_red_skipped` 是按**点名面**取的名单，不含池排除口径，故必须与池排除取交之后
+    才扣——直接相减会把落在被排除池里的在册条目扣两次（全池排除时 778 − 778 − 49 = −49，
+    负期望让一次零条目收窄轮被判红）。无池排除时与旧式逐字同值；返回值永不为负。"""
+    excluded = set(excluded_pools or ())
+    skipped = set(known_red_skipped or ())
+    runnable = [e for e in scenarios if not (excluded and pool_of(e) in excluded)]
+    if skipped:
+        runnable = [e for e in runnable if e[0] not in skipped]
+    return max(0, len(runnable))
+
+
 # 注册表自有的池词汇表（模块导入期快照，t260913-03）：--print-pool-assets 的未知池
 # 判据用它、而不是调用时的 SCENARIOS——注入式夹具把 mini 注册表插在 __main__ 之前，
 # SCENARIOS 会被换成小表，但池词汇表必须仍代表本仓注册表的池名全集：否则「声明面照旧
@@ -6973,8 +6993,15 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
                   "这不是产品红；未跑 ≠ 判绿，请人裁定（或等合并前全量/每日巡检的观察位）"
                   % (len(known_red_skipped), len(excluded_entries), len(SCENARIOS)),
                   flush=True)
+    # 期望口径与「跳过池」是**两个不同的面**，不能直接相减（261022 实报，t260913-02 在轮内
+    # 必红的真因）：`known_red_skipped` 是「点名面 ∩ 在册」的名单，不含池排除口径；而 expected
+    # 的口径是「全表 − 被排除池 − 豁免」。两者一减，落在被排除池里的在册条目会被**扣两次**
+    # （实测全池排除：778 − 778 − 49 = −49）。负期望从来不是产品红，它是账算错了：一次「零条目
+    # 可跑」的收窄轮被闸判成红，连带把「照跑」类用例（t260913-02 子用例1/3）在轮内判红。
+    # 正确口径：只扣「不属被排除池、又在册」的那部分（纯面 `expected_entries`，无池排除时逐字
+    # 等于旧式）。
     expected = len(registry) if only_names \
-        else (len(SCENARIOS) - len(excluded_entries) - len(known_red_skipped))
+        else expected_entries(SCENARIOS, excluded, known_red_skipped)
     # ---- t260930-01 台账绿行复用（本段只**判定**；跳过发生在池切分处，见下）----
     # 前置检查一次性算出本轮复用名单；复用条目不进 pools/exclusives（既不跑也不计 ran），
     # expected 仍是本轮在册数，故不变式是 ran + reused == expected（汇总/闸两处同口径）。

@@ -5499,5 +5499,10 @@
     "anchor": "behaviour",
     "note": "t261019-02 developer L1: line_landing_closeout_verdict truth tables - vacuous passes (missing lines.json, absent ledger, no landing row), named blocks (landing row with ruling+line+ways-out+retry_qc wording, per-ticket/per-line isolation, malformed declaration, corrupt-ledger bad face, malformed/empty keys), blank ledger lines are not corruption, patch id literal pinned",
     "sync_path": ""
+  },
+  "integration/tests/test_t261022_expected_pool_knownred.py": {
+    "anchor": "behaviour",
+    "note": "261022 regression on the round's expected count: the pure expected_entries face keeps 'full table minus excluded pools minus the known-red entries that survive that exclusion' - all pools excluded is 0 and never negative (the live -49), a roster entry inside an excluded pool is not deducted twice, no exclusion keeps the old number, ghost roster names are harmless; plus a source lock that main() uses the pure face and keeps no inline subtraction",
+    "sync_path": ""
   }
 }
