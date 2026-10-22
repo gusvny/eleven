@@ -139,6 +139,9 @@ def evidence_tree(label="inspect-evidence"):
     t.write_guard()
     t.write_producer()
     t.seed_scenarios()
+    # 261023: an inspection period needs a diffable base point; make the fixture a
+    # repository with one commit like every other inspection tree.
+    t.git_init()
     return t
 
 
