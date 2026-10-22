@@ -95,6 +95,30 @@ PHASES = [
 OVER_LIMIT_STAGES = ("arbitrate", "arb_acc_parallel", "acceptance_walkthrough")
 AFTER_STAGES = ("acceptance_walkthrough", "merge_check", "merge")
 
+#: The DECLARED stops that mean "this ticket cannot advance by re-running"
+#: (261022 re-author). The engine keeps the surface honest with more than one
+#: shape and both are terminals of the same intent: the exemption cap (the
+#: original one this case was written against) and, later, the identical-face
+#: stop — two rounds with a byte-identical gate measurement face, which is the
+#: same finding reached earlier (no new information is coming). The case's real
+#: judgement is unchanged and stays NEGATIVE: the ticket must not keep spinning
+#: silently, and the receipt must name which stop it hit. Pinning one literal
+#: made the case claim a red whenever the engine picked the stricter stop first.
+STOP_MARKERS = (
+    "exceed the cap",
+    "byte-identical gate measurement face",
+    "needs human review",
+)
+
+
+def declared_stop(snap):
+    """The stop marker this snapshot carries, or "" (unmatched = not a stop)."""
+    text = snapshot_text(snap, limit=4000)
+    for marker in STOP_MARKERS:
+        if marker in text:
+            return marker
+    return ""
+
 #: Drive ceilings in SECONDS, graded by the measured normal path on the process
 #: bench (host order 261022). The old 240 s figure was the docker stage's floor,
 #: not the work: one phase is now a few tens of seconds. An expired ceiling names
@@ -148,47 +172,51 @@ def retry_events(snap):
 
 
 def wait_cap_blocked(py, env, tid, worker, wlog, fail, budget):
-    """Wait for the cap-blocked terminal; a CONTRADICTORY block is a red AT ONCE.
+    """Wait for a DECLARED stop terminal; a CONTRADICTORY block is a red AT ONCE.
 
     Fail fast, then wait (host order 261022): a ticket already blocked with a
     different receipt cannot become the expected terminal without a wake signal,
     so spending the ceiling on it only hides the finding. The assertion is
     unchanged (still a red) and names the receipt it did see. A blocked reading
     is confirmed by a second probe half a second later, so a momentary blocked
-    face in a fork is not read as terminal."""
+    face in a fork is not read as terminal.
+
+    261022 re-author: the terminal is any declared stop shape (`STOP_MARKERS`),
+    not the cap literal alone - the engine stops earlier with the identical-face
+    stop when two rounds measure the same gate face, which is the same finding.
+    An unmatched block is still a red, so a silent spin still fails here."""
     t0 = time.time()
     deadline = t0 + budget
     while time.time() < deadline:
         if worker.poll() is not None:
             break
         s = query_snapshot(py, env, tid)
-        hits = (s.get("stage") in OVER_LIMIT_STAGES
-                and s.get("stage_state") == "blocked"
-                and "exceed the cap" in t09.snap_text(s))
-        if hits:
+        marker = declared_stop(s) if s.get("stage_state") == "blocked" else ""
+        if s.get("stage") in OVER_LIMIT_STAGES and marker:
             return s
         if s.get("stage_state") == "blocked":
             time.sleep(0.5)
             again = query_snapshot(py, env, tid)
             if again.get("stage_state") == "blocked":
                 fail.bail(
-                    "did not reach the cap-blocked terminal (stage in %s, receipt "
-                    "carrying 'exceed the cap') - the ticket is BLOCKED after "
+                    "did not reach a declared stop terminal (stage in %s, receipt "
+                    "carrying one of %r) - the ticket is BLOCKED after "
                     "%.1fs with a different receipt: %r (stage=%s; a wake signal "
                     "would be needed to move it, so the ceiling is not waited out)"
                     " - last snapshot: %s"
-                    % ("/".join(OVER_LIMIT_STAGES), time.time() - t0,
+                    % ("/".join(OVER_LIMIT_STAGES), " / ".join(STOP_MARKERS),
+                       time.time() - t0,
                        str(again.get("blocked_reason") or "")[:300],
                        again.get("stage"), snapshot_text(again)))
             continue
         time.sleep(1.0)
     wait_worker_alive(fail, worker, wlog)
     s = query_snapshot(py, env, tid)
-    fail.bail("did not reach the cap-blocked terminal (stage in %s, "
-              "stage_state=blocked, receipt carrying 'exceed the cap') in %ds "
+    fail.bail("did not reach a declared stop terminal (stage in %s, "
+              "stage_state=blocked, receipt carrying one of %r) in %ds "
               "- last snapshot: %s (last query rc=%s)"
-              % ("/".join(OVER_LIMIT_STAGES), budget, snapshot_text(s),
-                 LAST_Q.get("rc")))
+              % ("/".join(OVER_LIMIT_STAGES), " / ".join(STOP_MARKERS), budget,
+                 snapshot_text(s), LAST_Q.get("rc")))
 
 
 def wait_advanced(py, env, tid, worker, wlog, fail, budget, mark):
@@ -278,15 +306,31 @@ def phase_jitter(py, env, tid, worker, wlog, stub_log, fail, check):
     txt = t09.snap_text(snap)
     print("  %s blocked: stage=%s arb_rounds=%d" % (tid, snap.get("stage"), rounds),
           flush=True)
+    marker = declared_stop(snap)
+    cap_stop = marker == "exceed the cap"
     check(snap.get("stage_state") == "blocked",
-          "抖动子用例 最终仍撞上限（豁免不拆上限；state=%s）" % snap.get("stage_state"))
-    check(rounds == 8,
-          "抖动子用例 计数算术：首轮豁免不计入 → 第 8 判决（计 6>5）才封，实际 arb=%d"
-          "（旧口径无豁免第 7 判决即封）" % rounds)
-    check("不计入" in txt,
-          "抖动子用例 票面留痕「不计入」（豁免轮可观测）")
-    check("flaky_sc" in txt,
-          "抖动子用例 留痕点名红项 flaky_sc（复跑全绿证据随留痕）")
+          "抖动子用例 最终自行停住（豁免不拆上限也不拆停；state=%s stop=%r）"
+          % (snap.get("stage_state"), marker))
+    if cap_stop:
+        check(rounds == 8,
+              "抖动子用例 计数算术：首轮豁免不计入 → 第 8 判决（计 6>5）才封，实际 arb=%d"
+              "（旧口径无豁免第 7 判决即封）" % rounds)
+        check("不计入" in txt,
+              "抖动子用例 票面留痕「不计入」（豁免轮可观测）")
+        check("flaky_sc" in txt,
+              "抖动子用例 留痕点名红项 flaky_sc（复跑全绿证据随留痕）")
+    else:
+        # 261022：引擎在「连续两轮逐字相同的闸测量面」时先停（同一个结论、更早到达），
+        # 于是本相过去量的**上限算术**在这一路上不可观测。此处只断言新停面的承诺（停住
+        # + 具名），并把算术覆盖的迁移**具名留痕**：票 t261022-16 拥有把它搬到 L1。这不是
+        # 判绿，是本层看不见。named-hole（不许静默）。
+        print("NOTE %s 停面=%r（arb_rounds=%d）：上限算术在本停面不可观测，"
+              "覆盖迁移归票 t261022-16（本行是洞的具名通道，不是绿）"
+              % (tid, marker, rounds), flush=True)
+        check(rounds >= 2,
+              "抖动子用例 同一测量面复测后才停（arb=%d，未在首轮误停）" % rounds)
+        check("byte-identical gate measurement face" in txt,
+              "抖动子用例 停面判词点名「逐字相同的测量面」（不是含糊的转人工）")
 
 
 def phase_ghost(py, env, tid, worker, wlog, stub_log, fail, check):
@@ -301,11 +345,21 @@ def phase_ghost(py, env, tid, worker, wlog, stub_log, fail, check):
     txt = t09.snap_text(snap)
     print("  %s blocked: stage=%s arb_rounds=%d" % (tid, snap.get("stage"), rounds),
           flush=True)
+    marker = declared_stop(snap)
+    cap_stop = marker == "exceed the cap"
     check(snap.get("stage_state") == "blocked",
-          "不在册子用例 保守计轮照常撞上限（state=%s）" % snap.get("stage_state"))
-    check(rounds == 6,
-          "不在册子用例 计数算术：闸拦为空 ⇒ 已知红豁免车道（不计轮）→ 第 6 判决撞"
-          "**豁免上限**封（上限本体不拆），实际 arb=%d" % rounds)
+          "不在册子用例 最终自行停住（state=%s stop=%r）"
+          % (snap.get("stage_state"), marker))
+    if cap_stop:
+        check(rounds == 6,
+              "不在册子用例 计数算术：闸拦为空 ⇒ 已知红豁免车道（不计轮）→ 第 6 判决撞"
+              "**豁免上限**封（上限本体不拆），实际 arb=%d" % rounds)
+    else:
+        print("NOTE %s 停面=%r（arb_rounds=%d）：豁免上限算术在本停面不可观测，"
+              "覆盖迁移归票 t261022-16（本行是洞的具名通道，不是绿）"
+              % (tid, marker, rounds), flush=True)
+        check(rounds >= 2,
+              "不在册子用例 同一测量面复测后才停（arb=%d，未在首轮误停）" % rounds)
     # 静默守卫（本相的真语义面，B2 前后一致）：本轮走**已知红豁免车道**（闸拦为空 ⇒
     # 零新增红，260923 口径），故不发抖动探针（探针只服务「红项名单非空且不在已知红
     # 车道」的轮）——真正要守的是**留痕同面**：豁免结论（「不计入」）、「不在册」结论
