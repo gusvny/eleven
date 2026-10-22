@@ -130,6 +130,20 @@ ROWS = [
      "project_pattern": "none-zero-boot-*",
      "reason": "零台行：拆台作用域契约测试（判定面），零起台。",
      "evidence": "integration/t260913-05/sc_*teardown_scope* 契约场景，无起台调用"},
+    # ~~ C. 进程台消费者（t261022-13 宿主令 261022：两个场景迁到 integration/process_bench.py，
+    # 永不起 docker 台——声明为非批消费者，点名轮不被预起批台拖走） ~~
+    {"entry": "t260915-01-detail-face-journey", "pool": "engine",
+     "project_pattern": "none-zero-boot-*",
+     "reason": "零台行：t260915-01 旅程已迁到进程台（integration/process_bench.py 纯进程 "
+               "Temporal），不再消费 docker 台也不再自建台——列册即宣告非批消费者。",
+     "evidence": "integration/t260915-01/tests/sc_detail_face_journey.py 只 import "
+                 "lib_bench_stage（process_bench），零 require_stage/stage_docker 调用"},
+    {"entry": "t260917-09-tests-false-escalation-guard", "pool": "engine",
+     "project_pattern": "none-zero-boot-*",
+     "reason": "零台行：t260917-09 三相共用进程台（integration/process_bench.py 纯进程 "
+               "Temporal），不再消费 docker 台也不再自建台——列册即宣告非批消费者。",
+     "evidence": "integration/t260917-09/tests/sc_tests_false_escalation_guard.py 只 import "
+                 "lib_bench_stage（process_bench），零 require_stage/stage_docker 调用"},
     {"entry": "t260921-06-batch-manifest-contract", "pool": "ro",
      "project_pattern": "none-zero-boot-*",
      "reason": "零台行：本清单的静态契约看守（离线 ro 哨兵）——源码内嵌清点判据正则"

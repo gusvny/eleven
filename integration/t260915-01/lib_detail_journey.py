@@ -18,6 +18,7 @@
 import json
 import os
 import sys
+import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(_HERE, "..", ".."))
@@ -98,12 +99,66 @@ def write_probe(ws_root, rel):
     return p
 
 
+def delete_tracked(ws_root, rel):
+    """Delete a TRACKED lane file: the violation shape the settle still refuses.
+
+    The engine's settle auto-remediates two shapes (t260916-19 ②, matrix revised
+    by t261016-19 Face 2a): an untracked new file is quarantined, and an
+    out-of-write-set unstaged `M` is diff-archived and restored from HEAD. A
+    DELETION (`D`) is deliberately never auto-disposed - "delete intent is not
+    machine-judgeable" - so a deletion of a tracked file outside the write set is
+    the shape that still produces the real path-gate refusal (blocked ticket +
+    gate receipt) this leg asserts. Returns the relative path for restore_tracked.
+    """
+    os.unlink(os.path.join(ws_root, rel))
+    return rel
+
+
+def restore_tracked(ws_root, rel):
+    """Put a deleted tracked lane file back from HEAD (the wake-up precondition)."""
+    import subprocess
+    subprocess.run(["git", "-C", ws_root, "checkout", "--", rel], check=True,
+                   capture_output=True, text=True)
+
+
+#: Last snapshot each wait helper observed. An expired ceiling must carry the
+#: state actually reached, never only the number of seconds (host order 261022,
+#: grading rule 3): "did not reach <state> in N s" + this text.
+LAST = {"snap": {}}
+
+
+def last_snapshot_text(limit=600):
+    """A compact rendering of the last observed snapshot (expiry evidence)."""
+    snap = LAST.get("snap") or {}
+    if not snap:
+        return "<no snapshot observed>"
+    try:
+        text = json.dumps(snap, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        text = repr(snap)
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _observe(snap):
+    """Record what a poll iteration saw (expiry evidence), return it back."""
+    LAST["snap"] = snap or {}
+    return snap
+
+
+def _worker_word(worker):
+    if worker is None:
+        return "no worker handle"
+    if worker.poll() is None:
+        return "worker alive"
+    return "worker exited rc=%s" % worker.returncode
+
+
 def wait_stage_running(py, env, tid, worker, wlog, fail, stage, timeout_s):
     """轮询到指定段 running（且 workspace 已知）→ 返回 snapshot；超时 bail。"""
     def _hit():
         if worker.poll() is not None:
             wait_worker_alive(fail, worker, wlog)
-        s = query_snapshot(py, env, tid)
+        s = _observe(query_snapshot(py, env, tid))
         if (s or {}).get("stage") == stage \
                 and (s or {}).get("stage_state") == "running" \
                 and (s or {}).get("workspace"):
@@ -111,27 +166,62 @@ def wait_stage_running(py, env, tid, worker, wlog, fail, stage, timeout_s):
         return None
     snap = poll(_hit, timeout_s)
     if snap is None:
-        fail.bail("%ds 内未到 %s/running（worker %s）"
-                  % (timeout_s, stage, "存活" if worker.poll() is None else "已退"))
+        fail.bail("did not reach stage=%s state=running (with a workspace) in "
+                  "%ds - last snapshot: %s (%s)"
+                  % (stage, timeout_s, last_snapshot_text(), _worker_word(worker)))
     return snap
 
 
 def wait_blocked(py, env, tid, worker, wlog, fail, timeout_s, marker=""):
-    """轮询到 stage_state=blocked（可附加 marker 语义锚）→ 返回 snapshot。"""
+    """轮询到 stage_state=blocked（可附加 marker 语义锚）→ 返回 snapshot。
+
+    Fail fast, then wait (host order 261022): when a MARKER is asked for and the
+    ticket is already blocked without it, the wanted state cannot arrive from
+    that block (it needs a wake signal), so the red lands at once and names the
+    receipt actually seen instead of burning the ceiling.
+    """
+    t0 = time.time()
+
     def _hit():
         if worker.poll() is not None:
             wait_worker_alive(fail, worker, wlog)
-        s = query_snapshot(py, env, tid)
+        s = _observe(query_snapshot(py, env, tid))
         if (s or {}).get("stage_state") == "blocked" \
                 and (marker in json.dumps(s, ensure_ascii=False) if marker else True):
             return s
         return None
-    snap = poll(_hit, timeout_s)
-    if snap is None:
+
+    def _contradiction():
+        if not marker:
+            return None
         s = query_snapshot(py, env, tid)
-        fail.bail("%ds 内未到 blocked（现 stage=%s state=%s marker=%r）"
-                  % (timeout_s, s.get("stage"), s.get("stage_state"), marker))
-    return snap
+        if (s or {}).get("stage_state") != "blocked":
+            return None
+        if marker in json.dumps(s, ensure_ascii=False):
+            return None
+        return s
+
+    deadline = t0 + timeout_s
+    snap = None
+    while time.time() < deadline:
+        snap = _hit()
+        if snap is not None:
+            return snap
+        bad = _contradiction()
+        if bad is not None:
+            fail.bail("did not reach stage_state=blocked carrying marker %r - the "
+                      "ticket is BLOCKED after %.1fs with a different receipt: %r "
+                      "(stage=%s; a wake signal would be needed to move it, so the "
+                      "ceiling is not waited out) - last snapshot: %s (%s)"
+                      % (marker, time.time() - t0,
+                         str(bad.get("blocked_reason") or "")[:300],
+                         bad.get("stage"), last_snapshot_text(),
+                         _worker_word(worker)))
+        time.sleep(1.0)
+    fail.bail("did not reach stage_state=blocked%s in %ds - last snapshot: "
+              "%s (%s)"
+              % ((" carrying marker %r" % marker) if marker else "",
+                 timeout_s, last_snapshot_text(), _worker_word(worker)))
 
 
 def wait_unblocked(py, env, tid, worker, wlog, fail, timeout_s):
@@ -139,22 +229,27 @@ def wait_unblocked(py, env, tid, worker, wlog, fail, timeout_s):
     def _hit():
         if worker.poll() is not None:
             wait_worker_alive(fail, worker, wlog)
-        s = query_snapshot(py, env, tid)
+        s = _observe(query_snapshot(py, env, tid))
         if (s or {}).get("stage_state") != "blocked":
             return s
         return None
     snap = poll(_hit, timeout_s)
     if snap is None:
-        fail.bail("%ds 内 blocked 未唤醒" % timeout_s)
+        fail.bail("did not reach a non-blocked stage_state (the blocked wake-up) "
+                  "in %ds - last snapshot: %s (%s)"
+                  % (timeout_s, last_snapshot_text(), _worker_word(worker)))
     return snap
 
 
 def wait_fork_window(py, env, tid, worker, wlog, fail, timeout_s):
-    """轮询到并行分叉窗（meta.parallel_stages 非空）→ 返回 snapshot。"""
+    """轮询到并行分叉窗（meta.parallel_stages 非空）→ 返回 snapshot。
+
+    Expiry returns None: the caller owns the assertion and its message (it
+    names the state and appends last_snapshot_text())."""
     def _hit():
         if worker.poll() is not None:
             wait_worker_alive(fail, worker, wlog)
-        s = query_snapshot(py, env, tid)
+        s = _observe(query_snapshot(py, env, tid))
         if (s or {}).get("meta", {}).get("parallel_stages"):
             return s
         return None
@@ -163,11 +258,13 @@ def wait_fork_window(py, env, tid, worker, wlog, fail, timeout_s):
 
 
 def wait_fork_left(py, env, tid, worker, wlog, fail, timeout_s):
-    """轮询到离开并行分叉窗（meta.parallel_stages 空/缺）→ 返回 snapshot。"""
+    """轮询到离开并行分叉窗（meta.parallel_stages 空/缺）→ 返回 snapshot。
+
+    Expiry returns None: the caller owns the assertion and its message."""
     def _hit():
         if worker.poll() is not None:
             wait_worker_alive(fail, worker, wlog)
-        s = query_snapshot(py, env, tid)
+        s = _observe(query_snapshot(py, env, tid))
         if not (s or {}).get("meta", {}).get("parallel_stages"):
             return s
         return None

@@ -29,6 +29,18 @@ Intent（用户可感知面，验收 1/2/3 的一张真票旅程）：
 ENV_FAIL（旅程子用例不跑，锁已跑）；被测行为破面=exit 1。pool=engine（真起台+真 workflow）。
 红线：一切 git/票写入只发生在 tempfile 夹具与一次性隔离台；对仓库工作区零写入；
 被测子进程 Temporal 地址只指一次性舞台；审计钩子自证零生产面接触（7233/8233/3099）。
+
+Bench migration (host order 261022): the journey no longer buys a docker stage. It
+runs on integration/process_bench.py's plain-process Temporal dev server (up in
+~0.2 s, kernel-picked free port, private SQLite file, reaped by process group) and
+pins SANDBAR_TARGET_HOST/SANDBAR_NAMESPACE at that endpoint; every other env key the
+case sets is unchanged. The preconditions are probed FIRST (the endpoint answers a
+real gRPC round trip, the worker process is alive, the ticket read face answers), so
+a missing precondition is a NAMED red in seconds instead of a three-minute silence.
+The state ceilings are graded (CASE_S / the per-state constants below) and an
+expired ceiling names the state, the seconds and the last snapshot. Teardown judges
+the residue from the outside: the port refuses, no pid survives, the group is empty,
+the private temp dir is gone.
 """
 from __future__ import annotations
 
@@ -48,17 +60,32 @@ sys.path.insert(0, os.path.join(REPO, "integration", "t260908-01"))
 sys.path.insert(0, os.path.join(REPO, "server", "engine"))
 
 from lib_gate import (Fail, accepted, poc_python, read_audit_jsonl, require_bench,  # noqa: E402
-                      require_stage, run_poc_client, stage_down)
+                      run_poc_client)
+import lib_bench_stage as bench_stage                                  # noqa: E402
 from lib_ki061 import (make_fixture_repo, stage_env, spawn_worker, send_signal,  # noqa: E402
                        query_snapshot, poll, wait_worker_alive)
 from lib_detail_journey import (DETAIL_STUB, blocked_timeline_entries,  # noqa: E402
-                                judge_violation_probe, ticket_show_face,
-                                wait_blocked, wait_fork_left, wait_fork_window,
-                                wait_stage_running, wait_unblocked, write_probe)
+                                delete_tracked, judge_violation_set,
+                                last_snapshot_text, restore_tracked,
+                                ticket_show_face, wait_blocked, wait_fork_left,
+                                wait_fork_window, wait_stage_running,
+                                wait_unblocked)
 
 TID = "t26091501j1"
 PROJ = "t26091501j"
 WRITE_SET = ["docs/"]
+
+#: Per-state ceilings in SECONDS, graded by the measured normal path on the
+#: process bench (host order 261022). The docker stage's own boot plus the host
+#: contention it bought is what used to force 240-300 s ceilings; with the bench
+#: the whole journey is a few tens of seconds, so these ceilings catch a stuck
+#: state in under a minute and name it with its last snapshot.
+STAGE_S = 60        # create_plan running, with a known workspace
+BLOCK_S = 60        # blocked carrying the path-gate receipt
+WAKE_S = 60         # the wake-up leaving blocked after retry_qc
+FORK_S = 90         # the impl||design fork window (the stub holds it 6 s)
+LEAVE_S = 60        # leaving that fork window
+ARB_S = 60          # the arbitrate fork (live meta, or the post-hoc timeline)
 
 
 # ---------------- stdlib 契约锁（docker 台外可守的面，恒跑） ----------------
@@ -118,7 +145,18 @@ def stdlib_locks(fail):
                "契约锁：ticket.py 投影白名单带 gens（引擎→台面跨组件缝）")
 
 
-# ---------------- docker 旅程子用例（真台真票真 worker） ----------------
+# ---------------- 旅程子用例（真进程台 + 真票 + 真 worker） ----------------
+
+def _stop_worker(worker):
+    """Terminate the ticket's worker (TERM first, KILL as the bounded fallback)."""
+    if worker is None or worker.poll() is not None:
+        return
+    worker.terminate()
+    try:
+        worker.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        worker.kill()
+
 
 def journey(fail, bench):
     py = poc_python(bench)
@@ -126,15 +164,16 @@ def journey(fail, bench):
     audit_dir = os.path.join(tmp, "audit")
     os.makedirs(audit_dir, exist_ok=True)
     audit_env, audit_log = bench.audit_hook_env(audit_dir)
-    stage_mod = None
+    pstage = None
     worker = None
     probes = []
     try:
-        stage_mod, stage = require_stage(fail, "%s-%d" % (PROJ, os.getpid()),
-                                         "t26091501j")
+        # Host order 261022: no docker stage. The Temporal server is this
+        # process's own child, up in ~0.2 s on a kernel-picked free port.
+        pstage = bench_stage.up(fail, facts=print)
         repo = make_fixture_repo(tmp)
         reg_dir = bench.write_registry(os.path.join(tmp, "registry"), PROJ, repo)
-        env = stage_env(stage, reg_dir, audit_env)
+        env = stage_env(pstage.state(), reg_dir, audit_env)
         stub_path = os.path.join(tmp, "detail_stub.py")
         with open(stub_path, "w", encoding="utf-8") as f:
             f.write(DETAIL_STUB)
@@ -152,21 +191,35 @@ def journey(fail, bench):
         _ok, _why = accepted(out, TID)
         fail.check(rc == 0 and _ok, "ticket-start 受理（%s）" % _why)
 
+        # ---- preconditions first (seconds), then the state waits below
+        bench_stage.preflight(fail, pstage, worker=worker, wlog=wlog,
+                              probe=lambda: query_snapshot(py, env, TID),
+                              what="create_plan/running")
+
         # ---- 造真实闸拒绝：create_plan 运行中往泳道写越权探针 → settle 拒绝 → blocked
         snap0 = wait_stage_running(py, env, TID, worker, wlog, fail,
-                                   "create_plan", 240)
+                                   "create_plan", STAGE_S)
         fail.check((snap0.get("meta") or {}).get("path_gate") is True,
                    "本票 path_gate 开（dev-lane 模板默认）——闸子用例前提")
-        rel, reason, _v = judge_violation_probe("create_plan", WRITE_SET, ticket_id=TID)
-        fail.check(bool(rel), "真判定器给出必拒探针（reason=%s）" % reason)
-        if not rel:
+        # The probe is a DELETION of the lane's tracked README.md, a path outside
+        # the write set. Why a deletion: the settle auto-disposes an untracked new
+        # file (quarantine) and an out-of-write-set unstaged M (archive + restore),
+        # so those shapes never reach a refusal; a deletion is left for a human by
+        # design (t260916-19 ② / t261016-19 matrix) and so still refuses by name.
+        # The oracle stays the real judge, never a copy of its rule table.
+        rel = "README.md"
+        violations, reason = judge_violation_set("create_plan", WRITE_SET,
+                                                 [rel], ticket_id=TID)
+        fail.check(bool(violations), "真判定器给出必拒探针（reason=%s violations=%r）"
+                   % (reason, violations))
+        if not violations:
             fail.bail("无必拒探针可造，闸子用例无法成立")
         # M4 workspace 字段={type,path} dict——探针落点=path（原实现直传 dict=TypeError）
         ws0 = snap0.get("workspace")
         ws_root = ws0.get("path") if isinstance(ws0, dict) else ws0
-        probes.append(write_probe(ws_root, rel))
+        probes.append(delete_tracked(ws_root, rel))
 
-        snap_b = wait_blocked(py, env, TID, worker, wlog, fail, 240,
+        snap_b = wait_blocked(py, env, TID, worker, wlog, fail, BLOCK_S,
                               marker="path_gate_reason=")
         br = snap_b.get("blocked_reason") or ""
         bd = snap_b.get("blocked_detail") or {}
@@ -194,12 +247,14 @@ def journey(fail, bench):
                    % (rc2, (raw or "")[-200:]))
 
         # ---- retry_qc 唤醒：当前态字段清空、留痕仍在
-        for p in probes:
-            if os.path.isfile(p):
-                os.unlink(p)
-        rc3, _o = send_signal(py, stage, TID, "retry_qc", "t260915-01 集成场景")
+        # The refused violation must be gone before the wake-up, otherwise the
+        # rework re-refuses on the same deletion (probes = tracked paths to restore).
+        for rel_probe in probes:
+            restore_tracked(ws_root, rel_probe)
+        rc3, _o = send_signal(py, pstage.state(), TID, "retry_qc",
+                              "t260915-01 集成场景")
         fail.check(rc3 == 0, "retry_qc 发信受理（rc=%s）" % rc3)
-        snap_a = wait_unblocked(py, env, TID, worker, wlog, fail, 240)
+        snap_a = wait_unblocked(py, env, TID, worker, wlog, fail, WAKE_S)
         fail.check((snap_a.get("blocked_reason") or "") == "",
                    "①唤醒后票面 blocked_reason 清空（与 stage_state 自洽）：%r"
                    % (snap_a.get("blocked_reason") or "")[:120])
@@ -215,9 +270,11 @@ def journey(fail, bench):
                    "①唤醒留痕 retry-requested 在 timeline")
 
         # ---- ③轮次与分支维度：两个分叉点各采样一次
-        snap_f = wait_fork_window(py, env, TID, worker, wlog, fail, 300)
+        snap_f = wait_fork_window(py, env, TID, worker, wlog, fail, FORK_S)
         if snap_f is None:
-            fail.check(False, "③并行分叉窗未采样到（stub 已拉宽窗口，仍错过=红）")
+            fail.check(False, "③ did not reach the impl||design fork window "
+                       "(meta.parallel_stages non-empty) in %ds — last snapshot: %s"
+                       % (FORK_S, last_snapshot_text()))
         else:
             meta = snap_f.get("meta") or {}
             fail.check(meta.get("parallel_phase") == "parallel_impl_design",
@@ -240,12 +297,14 @@ def journey(fail, bench):
             hand = snap_f.get("handoffs") or []
             fail.check(bool(hand) and all("gen" in h for h in hand),
                        "③handoff 条目带 gen（%d 条）" % len(hand))
-        snap_l = wait_fork_left(py, env, TID, worker, wlog, fail, 240)
+        snap_l = wait_fork_left(py, env, TID, worker, wlog, fail, LEAVE_S)
         if snap_l is not None:
             fail.check("parallel_phase" not in (snap_l.get("meta") or {}),
                        "③离场相位键同删（不残留钉死已完工分叉）")
         else:
-            fail.check(False, "③分叉离场窗未采样到")
+            fail.check(False, "③ did not reach the fork's exit window "
+                       "(meta.parallel_stages empty) in %ds — last snapshot: %s"
+                       % (LEAVE_S, last_snapshot_text()))
         # ---- ③arb 分叉点相位：活采样优先，事后 timeline 证据兜底（仲裁回执不可解析的
         # 桩票会 blocked 在分叉内——相位证据常驻 timeline 的 running 条目，不依赖活采样）
         arb_trace = []
@@ -262,7 +321,7 @@ def journey(fail, bench):
                    for e in tl):
                 return {"__posthoc__": True, "timeline": tl}
             return None
-        snap_f2 = poll(_arb_probe, 240)
+        snap_f2 = poll(_arb_probe, ARB_S)
         if snap_f2 is not None and snap_f2.get("__posthoc__"):
             arb_entries = [e for e in snap_f2["timeline"]
                            if e.get("stage") == "arbitrate"
@@ -278,21 +337,30 @@ def journey(fail, bench):
                        % (snap_f2.get("meta") or {}).get("parallel_phase"))
         else:
             fail.check(False,
-                       "③arb 分叉点相位零证据（活采样与 timeline 皆无；采样轨迹尾=%r）"
-                       % arb_trace[-5:])
+                       "③ did not reach the arbitrate fork (meta.parallel_stages "
+                       "carrying arbitrate, or an arbitrate running timeline "
+                       "entry) in %ds — sampling trace tail=%r; last snapshot: %s"
+                       % (ARB_S, arb_trace[-5:], last_snapshot_text()))
+
+        # ---- teardown: the worker first, then the bench; residue judged from
+        # outside (the port refuses, no pid, empty group, temp dir reclaimed).
+        _stop_worker(worker)
+        worker = None
+        bench_stage.down(pstage, fail, tag="journey bench")
+        pstage = None
 
         audit = read_audit_jsonl(audit_log)
         fail.check(not audit, "审计账本为空（未触碰生产 7233/8233/3099）：%d 条"
                    % len(audit))
     finally:
-        if worker is not None and worker.poll() is None:
-            worker.terminate()
+        _stop_worker(worker)
+        if pstage is not None:
+            # Best effort on every failing path: the process group is reaped and
+            # the private temp dir removed; process_bench's atexit is the backstop.
             try:
-                worker.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                worker.kill()
-        if stage_mod is not None:
-            stage_down(stage_mod, "%s-%d" % (PROJ, os.getpid()))
+                pstage.down()
+            except Exception:                                       # noqa: BLE001
+                pass
         if os.environ.get("T26091501_KEEP_TMP") == "1":
             print("TMP preserved（T26091501_KEEP_TMP=1）: %s" % tmp)
         else:
@@ -308,7 +376,7 @@ def main():
     except SystemExit as e:
         code = e.code if isinstance(e.code, int) else 1
         if code in (2, 3):
-            print("ENV_FAIL 隔离台/镜像/台库缺供（exit %s）——旅程子用例不跑，stdlib 契约锁已跑"
+            print("ENV_FAIL 进程台/台库缺供（exit %s）——旅程子用例不跑，stdlib 契约锁已跑"
                   % code, flush=True)
         raise
     fail.finish()

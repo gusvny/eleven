@@ -47,8 +47,20 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
 驱动形态：lib_ki061 台架同形 + 本票自有常量桩（判决恒 tests-fault）；夹具
   迷你执行器=真注册表形状（SCENARIOS 三元组 + /bin/sh -c），verify.yaml 声明
   integration.cmd，机械链走真 verify_lane integ 道（规范行+INTEG_SUMMARY 契约）。
-三态：PASS exit 0 / FAIL exit 1 / ENV_FAIL exit 2（docker/镜像/舞台缺件=环境红
-  点名，不写 SKIP）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
+三态：PASS exit 0 / FAIL exit 1 / ENV_FAIL exit 2（进程台缺供=环境红点名，不写
+  SKIP）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
+
+Bench migration (host order 261022): the three phases share ONE
+integration/process_bench.py Temporal dev server instead of a leased docker stage -
+a plain process on a kernel-picked free port with a private SQLite file, up in
+~0.2 s, reaped by process group. SANDBAR_TARGET_HOST/SANDBAR_NAMESPACE point at that
+endpoint and every other env key the case sets is unchanged; the per-phase ticket
+id, registry, stub ledger and worker are untouched, so the phases stay isolated.
+Preconditions are probed FIRST per phase (endpoint answers a real gRPC round trip,
+worker alive, the ticket read face answers): a missing precondition is a NAMED red
+in seconds. The drive ceilings are graded (CAP_S / ADVANCE_S) and an expired
+ceiling names the state, the seconds and the last snapshot. Teardown judges the
+residue from outside (port refuses, no pid, empty group, temp dir reclaimed).
 """
 import json
 import os
@@ -66,7 +78,8 @@ for _p in (os.path.join(REPO, "integration"),
         sys.path.insert(0, _p)
 
 from lib_gate import (Fail, accepted, parse_out_json, poc_python, read_audit_jsonl,  # noqa: E402
-                      require_bench, require_stage, run_poc_client, stage_down)
+                      require_bench, run_poc_client)
+import lib_bench_stage as bench_stage                                # noqa: E402
 from lib_ki061 import (LAST_Q, poll, query_snapshot, spawn_worker,  # noqa: E402
                        stage_env, wait_worker_alive)
 import lib_t26091709 as t09
@@ -81,13 +94,28 @@ PHASES = [
 ]
 OVER_LIMIT_STAGES = ("arbitrate", "arb_acc_parallel", "acceptance_walkthrough")
 AFTER_STAGES = ("acceptance_walkthrough", "merge_check", "merge")
-POLL_DRIVE = 240
+
+#: Drive ceilings in SECONDS, graded by the measured normal path on the process
+#: bench (host order 261022). The old 240 s figure was the docker stage's floor,
+#: not the work: one phase is now a few tens of seconds. An expired ceiling names
+#: the state it waited for and appends the last snapshot.
+CAP_S = 120        # the cap-blocked terminal (8 arb rounds, each with its suite)
+ADVANCE_S = 120    # the env-red re-route reaching the post-arbitration stage
 WHO = "宿主"
 REASON = "t260917-09 场景：产品面已收口、余红属环境面（连续豁免超限），接受本判决推进验收"
 ACCEPT_MARK = "接受仲裁判决"       # 旧语义（超限封面 authorize 接受）留痕锚：本场景不再断言
 REROUTE_MARK = "环境面/已知红面，不重跑"   # B2（260929）新归宿留痕锚（环境红具名轮直进验收）
 
 STATS = {"ok": 0, "fail": 0}
+
+
+def snapshot_text(snap, limit=600):
+    """The last snapshot as one compact line (expiry evidence, host order 261022)."""
+    try:
+        text = json.dumps(snap or {}, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        text = repr(snap)
+    return text if len(text) <= limit else text[:limit] + "…"
 
 
 def check_fn(fail):
@@ -120,21 +148,47 @@ def retry_events(snap):
 
 
 def wait_cap_blocked(py, env, tid, worker, wlog, fail, budget):
-    def _probe():
+    """Wait for the cap-blocked terminal; a CONTRADICTORY block is a red AT ONCE.
+
+    Fail fast, then wait (host order 261022): a ticket already blocked with a
+    different receipt cannot become the expected terminal without a wake signal,
+    so spending the ceiling on it only hides the finding. The assertion is
+    unchanged (still a red) and names the receipt it did see. A blocked reading
+    is confirmed by a second probe half a second later, so a momentary blocked
+    face in a fork is not read as terminal."""
+    t0 = time.time()
+    deadline = t0 + budget
+    while time.time() < deadline:
         if worker.poll() is not None:
-            return None
+            break
         s = query_snapshot(py, env, tid)
-        if (s.get("stage") in OVER_LIMIT_STAGES
-                and s.get("stage_state") == "blocked" and "exceed the cap" in t09.snap_text(s)):
+        hits = (s.get("stage") in OVER_LIMIT_STAGES
+                and s.get("stage_state") == "blocked"
+                and "exceed the cap" in t09.snap_text(s))
+        if hits:
             return s
-        return None
-    snap = poll(_probe, budget)
-    if snap is None:
-        wait_worker_alive(fail, worker, wlog)
-        s = query_snapshot(py, env, tid)
-        fail.bail("未在 %ds 内到达 blocked（stage=%s state=%s；末次 query rc=%s）"
-                  % (budget, s.get("stage"), s.get("stage_state"), LAST_Q.get("rc")))
-    return snap
+        if s.get("stage_state") == "blocked":
+            time.sleep(0.5)
+            again = query_snapshot(py, env, tid)
+            if again.get("stage_state") == "blocked":
+                fail.bail(
+                    "did not reach the cap-blocked terminal (stage in %s, receipt "
+                    "carrying 'exceed the cap') - the ticket is BLOCKED after "
+                    "%.1fs with a different receipt: %r (stage=%s; a wake signal "
+                    "would be needed to move it, so the ceiling is not waited out)"
+                    " - last snapshot: %s"
+                    % ("/".join(OVER_LIMIT_STAGES), time.time() - t0,
+                       str(again.get("blocked_reason") or "")[:300],
+                       again.get("stage"), snapshot_text(again)))
+            continue
+        time.sleep(1.0)
+    wait_worker_alive(fail, worker, wlog)
+    s = query_snapshot(py, env, tid)
+    fail.bail("did not reach the cap-blocked terminal (stage in %s, "
+              "stage_state=blocked, receipt carrying 'exceed the cap') in %ds "
+              "- last snapshot: %s (last query rc=%s)"
+              % ("/".join(OVER_LIMIT_STAGES), budget, snapshot_text(s),
+                 LAST_Q.get("rc")))
 
 
 def wait_advanced(py, env, tid, worker, wlog, fail, budget, mark):
@@ -154,10 +208,26 @@ def wait_advanced(py, env, tid, worker, wlog, fail, budget, mark):
     if snap is None:
         wait_worker_alive(fail, worker, wlog)
         snap = query_snapshot(py, env, tid)
+        # Fail fast, then wait (host order 261022): a ticket parked BLOCKED outside
+        # the legal merge stages cannot reach the advance terminal without a wake
+        # signal, so the red lands now, naming the receipt it actually saw.
+        if (snap.get("stage_state") == "blocked"
+                and snap.get("stage") not in ("merge_check", "merge")):
+            fail.bail("did not reach the post-arbitration stage (stage in %s "
+                      "carrying the handoff mark %r) - the ticket is BLOCKED with "
+                      "a different receipt: %r (stage=%s) - last snapshot: %s"
+                      % ("/".join(AFTER_STAGES), mark,
+                         str(snap.get("blocked_reason") or "")[:300],
+                         snap.get("stage"), snapshot_text(snap)))
+        fail.bail("did not reach the post-arbitration stage (stage in %s carrying "
+                  "the handoff mark %r, not blocked unless merge_check/merge) in "
+                  "%ds - last snapshot: %s (last query rc=%s)"
+                  % ("/".join(AFTER_STAGES), mark, budget, snapshot_text(snap),
+                     LAST_Q.get("rc")))
     return snap
 
 
-def run_phase(py, bench, fail, check, stage, audit_env, tmp, ph):
+def run_phase(py, bench, fail, check, pstage, audit_env, tmp, ph):
     tid, key, mode = ph["tid"], ph["key"], ph["mode"]
     # 每相独立桩账本（桩判决序号=账本行数，跨相共享会串相——同 streak_reset 修法）；
     # 恒 tests-fault 用长序列表达（单元素序列第 2 判决即耗尽回落 pass）。
@@ -165,7 +235,7 @@ def run_phase(py, bench, fail, check, stage, audit_env, tmp, ph):
     wlog = os.path.join(tmp, "%s-worker.log" % tid)
     repo = t09.make_fixture_repo(tmp, name="repo-%s" % key, with_integration=True)
     reg_dir = bench.write_registry(os.path.join(tmp, "reg-%s" % key), key, repo)
-    env = stage_env(stage, reg_dir, audit_env)
+    env = stage_env(pstage.state(), reg_dir, audit_env)
     # 260927（KI-142）：本 env 后面还有 gated 写（authorize / retry_qc），且 key 每相不同
     # （PHASES[i].key）——env 级 + 变量值声明调用方身份。
     env["SANDBAR_CALLER_PROJECT"] = key
@@ -186,6 +256,11 @@ def run_phase(py, bench, fail, check, stage, audit_env, tmp, ph):
         "title": ph["title"], "write_set": ["docs/"]}, env)
     _ok, _why = accepted(out, tid)              # 260927（KI-142）：受理只认 ok=true
     check(rc == 0 and _ok, "%s ticket-start 受理（%s）" % (tid, _why))
+    # Fail fast (host order 261022): the preconditions in seconds, before any
+    # ceiling is spent waiting for the state under test.
+    bench_stage.preflight(fail, pstage, worker=worker, wlog=wlog,
+                          probe=lambda: query_snapshot(py, env, tid),
+                          what="the cap-blocked / advance terminal")
     try:
         if mode == "JITTER":
             return phase_jitter(py, env, tid, worker, wlog, stub_log, fail, check)
@@ -198,7 +273,7 @@ def run_phase(py, bench, fail, check, stage, audit_env, tmp, ph):
 
 def phase_jitter(py, env, tid, worker, wlog, stub_log, fail, check):
     """首轮红项复跑全绿不计入；其后绿照计 → 第 8 判决封（计数算术强断言）。"""
-    snap = wait_cap_blocked(py, env, tid, worker, wlog, fail, POLL_DRIVE)
+    snap = wait_cap_blocked(py, env, tid, worker, wlog, fail, CAP_S)
     rounds = t09.arb_rounds(stub_log)
     txt = t09.snap_text(snap)
     print("  %s blocked: stage=%s arb_rounds=%d" % (tid, snap.get("stage"), rounds),
@@ -221,7 +296,7 @@ def phase_ghost(py, env, tid, worker, wlog, stub_log, fail, check):
     （上限与转人工触发**不因 B2 而拆除**）。本夹具轮的闸拦为空，故归宿是**已知红豁免
     车道**（260923 语义：blockers 空=零新增红，不计轮）而非保守计轮；探针与留痕同面
     是这一相真正的守护面（见本函数末两条断言）。"""
-    snap = wait_cap_blocked(py, env, tid, worker, wlog, fail, POLL_DRIVE)
+    snap = wait_cap_blocked(py, env, tid, worker, wlog, fail, CAP_S)
     rounds = t09.arb_rounds(stub_log)
     txt = t09.snap_text(snap)
     print("  %s blocked: stage=%s arb_rounds=%d" % (tid, snap.get("stage"), rounds),
@@ -255,7 +330,7 @@ def phase_env(py, env, tid, worker, wlog, stub_log, fail, check):
     """B2（260929）新期望：环境红**具名** ⇒ 不重跑整轮、直接进验收；不撞豁免上限、
     不消费 authorize。守护面=「只有本票新增产品红才计轮/重跑」。"""
     # 等推进（不设「等 blocked」预算——新语义下本子用例**不该**走到超限封面）
-    adv = wait_advanced(py, env, tid, worker, wlog, fail, POLL_DRIVE, REROUTE_MARK)
+    adv = wait_advanced(py, env, tid, worker, wlog, fail, ADVANCE_S, REROUTE_MARK)
     rounds = t09.arb_rounds(stub_log)
     ho = t09.handoff_text(adv)
     print("  %s 推进后: stage=%s state=%s arb_rounds=%d"
@@ -300,26 +375,28 @@ def main():
     audit_dir = os.path.join(tmp, "audit")
     os.makedirs(audit_dir, exist_ok=True)
     audit_env, audit_log = bench.audit_hook_env(audit_dir)
-    stage_mod = None
-    stage_name = "t26091709d-%d" % os.getpid()
-    stage_downed = False
+    pstage = None
     try:
-        stage_mod, stage = require_stage(fail, stage_name, PHASES[0]["tid"])
+        # Host order 261022: one plain-process Temporal server shared by the three
+        # phases instead of a leased docker stage (~0.2 s up, not minutes).
+        pstage = bench_stage.up(fail, facts=print)
         for ph in PHASES:
             print("== %s ==" % ph["tid"], flush=True)
-            run_phase(py, bench, fail, check, stage, audit_env, tmp, ph)
+            run_phase(py, bench, fail, check, pstage, audit_env, tmp, ph)
         audit = read_audit_jsonl(audit_log)
         check(not audit, "审计账本为空（未触碰生产 7233/8233/3099）：%d 条"
               % len(audit))
-        down = stage_down(stage_mod, stage_name)
-        stage_downed = True
-        resid = (down or {}).get("residue") if isinstance(down, dict) else down
-        check(not resid, "拆台零残留（residue=%s）" % (resid,))
+        # Residue, judged from the outside: the port refuses, no pid survives,
+        # the process group is empty, the private temp dir is reclaimed.
+        bench_stage.down(pstage, fail, tag="t260917-09 bench")
+        pstage = None
     finally:
-        if stage_mod is not None and not stage_downed:
+        if pstage is not None:
+            # Best effort on every failing path (process_bench's atexit backstop
+            # would otherwise only reap at interpreter exit).
             try:
-                stage_down(stage_mod, stage_name)
-            except Exception:
+                pstage.down()
+            except Exception:                                       # noqa: BLE001
                 pass
         if os.environ.get("T09_KEEP_TMP") == "1":
             print("TMP preserved（T09_KEEP_TMP=1）: %s" % tmp, flush=True)

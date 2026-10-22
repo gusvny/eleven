@@ -22,7 +22,11 @@ Conventions:
 - One-shot delivery acceptance snapshots do not enter (their job ends once the
   delivery lands, t260902).
 - cmd runs with the repo root as cwd via /bin/sh -c, 900s per entry; stdlib
-  only.
+  only. An entry may declare a SHORTER budget in its intent text beside the
+  `tier:` / `cost:` tokens: `budget: <N>s` (host order 261022). Over that
+  budget the entry fails BY NAME with the declared budget and the elapsed wall
+  time and its process group is SIGKILLed; a declaration can never raise the
+  900s ceiling, and an entry without one behaves exactly as before.
 - Pool exclusion (t260913-03, host order: pull the slow pools out of the
   per-ticket segment): SANDBAR_SCENARIO_EXCLUDE_POOLS="engine,exclusive" (or
   --exclude-pools) drops entries whose registry-declared pool is in the set.
@@ -2329,7 +2333,7 @@ SCENARIOS = [
      "闸拒绝结构化明细回执缝端到端（t260915-01 ②，灰盒 L2，真 git 夹具+直调 settle 单点，零 docker 零 Temporal）：路径闸拒绝落盘时**活动回执**除人读 note 外带结构化明细 gate_refusal——三缝各守一段：L0 兼容子用例=三处 refusal 形参缺省 None+StageResult/SettleLaneResult.gate_refusal 缺省 None（既有直调场景逐字不变、老回执重放不破）；L1 正例=acceptance_walkthrough 注入 5 个产品代码越权探针（>cap）→拒绝回执与判定/note 一致（reason_code 与 note 内嵌码一致、files 与闸判定清单全量相等且 5 探针一个不丢——_fmt_files cap 只许作用人读 note 文本，结构化面不得丢文件、evidence 与 note 逐字相同、check_id 点名段、red+next_action 在场、0 新 commit）；L2 反用例=写集内正常落盘→零明细收集不误挂；L3 受保护路径子用例=改已存在真源 verify.yaml→protected_path+人话名「受保护路径闸」；L4 接线子用例=真回执+真 refusal 喂 _apply_settle_note→挂载逐字不走样（非自造 dict）；L5 消费子用例=workflow 侧 _pin_agent_refusal 消费真回执→blocked_detail 结构键齐（check_id/item/red/reason_code/files/next_action/evidence）。从真实 settle 判定点驱动=接线断裂（dict 建了没传/传了没挂）必红（KI-046/049 反面）。与同票 journey 条分工：本条锁回执缝与清单保真（单段级），彼锁全链旅程与轮次/分支维度（票级）；与 t260911-03 系（闸执法终态 note 文本/0 落盘）intent 不同面；developer L1 纯函数矩阵不同层。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；git/temporalio 缺席=ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260915-01/tests/sc_detail_red_refusal_receipt.py", "ro"),
     ("t260915-01-detail-face-journey",
-     "详情数据面全链旅程（t260915-01 ①②③验收的用户旅程面，灰盒 L3，真 docker 台+夹具仓桩脑链+工单专属 worker）：真票造真实闸拒绝（create_plan 运行中写越权探针，真判定器选必拒路径）→ blocked → 票面受阻原因=闸拒绝回执（不是与 stage_state 矛盾的「活动故障」脏文案）＋blocked_detail 结构化明细（reason_code 与真判定一致/全量 files 点名探针/next_action/red/check_id/evidence=回执原文）＋正规入口 ticket.py show 投影面同可达（跨组件缝）→ retry_qc 唤醒 → blocked_reason 清空+blocked_detail 清空（陈旧态清零、与 stage_state 自洽）而 timeline 原 blocked 条目仍在（机械断言，留痕不丢）+retry-requested 留痕 → 轮次与分支维度：timeline 条目带 gen、分叉期条目带 phase、meta.parallel_phase 两个分叉点各采样一次（parallel_impl_design/arb_acc_parallel，stub 拉宽窗口）、离场相位键同删、snapshot.gens 读 段→第几轮（重跑后 create_plan=第 2 轮）、handoff 条目带 gen；审计钩子自证零生产面接触。前置步（stdlib 恒跑的契约锁，docker 台外快速点名防三分钟白跑：门判定只在 _init 求值一次、snapshot 函数体零 workflow.patched、_blocked wake 清两字段且 _mark blocked 留痕写点仍在、_enter 清 detail、snapshot 透传面不回归+gens 段、set_parallel_stages 相位键、ticket.py 投影白名单带 gens——同一批源码锁的完整矩阵归 developer L1，本条只作旅程前置卫兵）。门对新部署新建票恒 True——blocked→唤醒清态断言只在新建票上成立（C8 前提）。与同票 end2end 条分工：彼锁回执缝与清单保真（单段级），本条锁全链旅程与轮次/分支维度（票级）；与 t260908-01 三条（超限复活/重放兼容/pause 旅程）intent 不同面；t260911-05 不碰 merge 面；t260911-03 只当判定器 oracle 造真实拒绝。docker/镜像/舞台/台库缺供=ENV_FAIL exit 2（前置契约锁仍恒跑）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
+     "详情数据面全链旅程（t260915-01 ①②③验收的用户旅程面，灰盒 L3，真 docker 台+夹具仓桩脑链+工单专属 worker）：真票造真实闸拒绝（create_plan 运行中写越权探针，真判定器选必拒路径）→ blocked → 票面受阻原因=闸拒绝回执（不是与 stage_state 矛盾的「活动故障」脏文案）＋blocked_detail 结构化明细（reason_code 与真判定一致/全量 files 点名探针/next_action/red/check_id/evidence=回执原文）＋正规入口 ticket.py show 投影面同可达（跨组件缝）→ retry_qc 唤醒 → blocked_reason 清空+blocked_detail 清空（陈旧态清零、与 stage_state 自洽）而 timeline 原 blocked 条目仍在（机械断言，留痕不丢）+retry-requested 留痕 → 轮次与分支维度：timeline 条目带 gen、分叉期条目带 phase、meta.parallel_phase 两个分叉点各采样一次（parallel_impl_design/arb_acc_parallel，stub 拉宽窗口）、离场相位键同删、snapshot.gens 读 段→第几轮（重跑后 create_plan=第 2 轮）、handoff 条目带 gen；审计钩子自证零生产面接触。前置步（stdlib 恒跑的契约锁，docker 台外快速点名防三分钟白跑：门判定只在 _init 求值一次、snapshot 函数体零 workflow.patched、_blocked wake 清两字段且 _mark blocked 留痕写点仍在、_enter 清 detail、snapshot 透传面不回归+gens 段、set_parallel_stages 相位键、ticket.py 投影白名单带 gens——同一批源码锁的完整矩阵归 developer L1，本条只作旅程前置卫兵）。门对新部署新建票恒 True——blocked→唤醒清态断言只在新建票上成立（C8 前提）。与同票 end2end 条分工：彼锁回执缝与清单保真（单段级），本条锁全链旅程与轮次/分支维度（票级）；与 t260908-01 三条（超限复活/重放兼容/pause 旅程）intent 不同面；t260911-05 不碰 merge 面；t260911-03 只当判定器 oracle 造真实拒绝。docker/镜像/舞台/台库缺供=ENV_FAIL exit 2（前置契约锁仍恒跑）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。 Bench migration (host order 261022): the journey no docker stage any more - it runs on integration/process_bench.py's plain-process Temporal server (bench up in ~0.2 s on a free port with a private db, SANDBAR_TARGET_HOST/SANDBAR_NAMESPACE pinned at that endpoint, every other env key unchanged, bench down with residue assertions: port refuses, no pid, empty group, temp dir reclaimed). Preconditions are probed FIRST per run (endpoint answers a real gRPC round trip, worker alive, ticket read face answers), so a missing precondition is a NAMED red in seconds; the state ceilings are graded (STAGE_S/BLOCK_S/WAKE_S 60 s, FORK_S 90 s, LEAVE_S/ARB_S 60 s) and an expired ceiling prints the state, the seconds and the last snapshot; a ticket already blocked with a different receipt fails at once instead of waiting the ceiling out. The probe a stage refuses is a DELETION of a tracked file: the settle auto-disposes an untracked new file and an out-of-write-set unstaged M (t260916-19 ②/t261016-19 matrix) but never a deletion, so the refusal leg asserted here stays reachable (measured green in 57 s against the process bench). tier: the ticket-level detail-face journey over a real Temporal workflow (blocked->wake state clearing, structured red detail on the ticket face, gen/phase timeline dimensions) - no single-component contract can express it; cost: minutes; budget: 120s (enforced by integration/run_scenarios.py's per-entry budget: over it the entry fails BY NAME with its declared budget and elapsed seconds and its process group is SIGKILLed)",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260915-01/tests/sc_detail_face_journey.py", "engine"),
 
     # ---- t260914-05: 收口迁表裁决（删仓内旧路由表+缺表不静默+引用点退场）----
@@ -2700,7 +2704,7 @@ SCENARIOS = [
      "tests-fault 上限连续语义端到端（t260917-09 要求①②/验收①④，灰盒 L3，真 docker 台+桩脑序列桩+工单专属 worker）：shared.py:287 注释口径「连续 tests-fault 轮」兑现为行为——任何非 tests-fault 边后计数清零，长票不再被陈年轮次假封（260917 三票 t260916-19/-21、t260917-04 共性机制），上限本体不拆。相一 code-fault 复位边：桩判决序列 tf,tf,code-fault,tf×5+耗尽回落 pass（耗尽回落=主子用例确定性终态，防第 N+1 判决撞上限致场景自身假红）→ 打回 implement 后计数清零，后续 5 轮计 1..5 恒迭代、第 9 判决回落 pass 进 acceptance 全程不 blocked，handoff「测试集迭代（第 1 轮）」≥2 次（复位签名）+code-fault 打回边在场；旧累计语义第 8 判决必 blocked（语义反转强断言）。相二对照子用例：恒 tests-fault 第 7 判决 blocked，回执含「超限」且 authorize/rework/ruling/pause 出路关键词全在（要求④出路可执行，不许只写「转人工判读」）。相三 rework 重入复位边：tf×5 邻界（预增判定恒不封）→人 op=rework 打回 implement→重进测试段清零→再 2 轮 tf 计 1..2+回落 pass 推进不 blocked，「第 1 轮」≥2+implement 段重入证据在桩账本；旧语义重入不清零第 7 判决必 blocked——「被外部打断的长票必然累积到上限」的直击面。验收①矩阵 [tf,tf,pass,tf×4] 在 L1 纯函数层（developer 交付）：pass 判决直接路由 acceptance，复位只在重入时可观测，故 L3 钉 code-fault/rework 复位边（与 pass/authz 复位共用单点收口）。分工：t260908-01 sc_ki061_* 锁超限唤醒复活（KI-061）；t260912-03 sc_authz_* 锁 cap 面 authorize 通道；同票 sc_tests_false_escalation_guard 锁豁免面——不同面不互替。序列桩为本票自有（lib_ki061 桩是常量 verdict）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/镜像/舞台缺件=ENV_FAIL exit 2 点名",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260917-09/tests/sc_tests_streak_reset.py", "engine"),
     ("t260917-09-tests-false-escalation-guard",
-     "假封防护面（t260917-09 要求③④/验收②③，灰盒 L3，真 docker 台+真 verify_lane integ 道+夹具迷你执行器+工单专属 worker）：tests-fault 但红属「负载抖动」（红项当轮串行复跑全绿，KI-072 同族：并发假红单跑绿=t260916-21「6 闸拦复跑 6/6 全绿」形态）或「环境面红」（env_fail>0 且产品红=0 且闸拦=0，=t260916-19/-04 形态）时该轮不计入上限。抖动子用例：夹具案首跑造记并红、复跑绿（marker 确定性形）→首轮不计入（票面留痕「不计入」+点名红项），其后红项已绿照计→第 8 判决才封（计 6>5；无豁免第 7 判决即封=计数算术强断言）。不在册子用例：陈旧红项名（刻意不在注册表，基线改名/闸拦面遗留形态）→探针 fail-closed 保守计轮并票面点名「不在册」→第 7 判决封（计数与旧语义同形=回归稳定面；点名=新行为钉子，封死死源静默当全绿）。环境失败分支：确定性环境红（not-checked+external 经真闸归属 record 不拦）→每轮豁免→第 6 轮连续豁免撞独立上限 blocked（出路文案在）→人 op=authorize 接受本判决+retry_qc 唤醒→复位计数推进 acceptance（uses≥1+handoff 点名接受与豁免面）——authorize 在豁免超限封面必须真消费（C2 新消费点；t260912-03 锁的是 cap 面通道，本条锁豁免面消费，不同面）。夹具链=真闸契约（规范行+INTEG_SUMMARY 五键+红面 rc≠0），mini 执行器为场景自有资产随夹具仓落库；闸拦面红项（真回归基线拦）的并集半边由 developer L1 钉（L3 强造基线竞态会引入不定性，诚实不造）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/镜像/舞台缺件=ENV_FAIL exit 2 点名",
+     "假封防护面（t260917-09 要求③④/验收②③，灰盒 L3，真 docker 台+真 verify_lane integ 道+夹具迷你执行器+工单专属 worker）：tests-fault 但红属「负载抖动」（红项当轮串行复跑全绿，KI-072 同族：并发假红单跑绿=t260916-21「6 闸拦复跑 6/6 全绿」形态）或「环境面红」（env_fail>0 且产品红=0 且闸拦=0，=t260916-19/-04 形态）时该轮不计入上限。抖动子用例：夹具案首跑造记并红、复跑绿（marker 确定性形）→首轮不计入（票面留痕「不计入」+点名红项），其后红项已绿照计→第 8 判决才封（计 6>5；无豁免第 7 判决即封=计数算术强断言）。不在册子用例：陈旧红项名（刻意不在注册表，基线改名/闸拦面遗留形态）→探针 fail-closed 保守计轮并票面点名「不在册」→第 7 判决封（计数与旧语义同形=回归稳定面；点名=新行为钉子，封死死源静默当全绿）。环境失败分支：确定性环境红（not-checked+external 经真闸归属 record 不拦）→每轮豁免→第 6 轮连续豁免撞独立上限 blocked（出路文案在）→人 op=authorize 接受本判决+retry_qc 唤醒→复位计数推进 acceptance（uses≥1+handoff 点名接受与豁免面）——authorize 在豁免超限封面必须真消费（C2 新消费点；t260912-03 锁的是 cap 面通道，本条锁豁免面消费，不同面）。夹具链=真闸契约（规范行+INTEG_SUMMARY 五键+红面 rc≠0），mini 执行器为场景自有资产随夹具仓落库；闸拦面红项（真回归基线拦）的并集半边由 developer L1 钉（L3 强造基线竞态会引入不定性，诚实不造）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；docker/镜像/舞台缺件=ENV_FAIL exit 2 点名。 Bench migration (host order 261022): the three phases share ONE integration/process_bench.py Temporal dev server instead of a leased docker stage (plain process, kernel-picked free port, private SQLite file, up in ~0.2 s, reaped by process group; SANDBAR_TARGET_HOST/SANDBAR_NAMESPACE pinned at that endpoint, every other env key unchanged, per-phase ticket id/registry/stub ledger/worker untouched, teardown asserts the residue from outside). Preconditions are probed FIRST per phase (endpoint gRPC round trip, worker alive, ticket read face), so a missing precondition is a NAMED red in seconds; the drive ceilings are graded (CAP_S 180 s for the cap-blocked terminal, ADVANCE_S 90 s for the env-red re-route) and an expired ceiling prints the state, the seconds and the last snapshot; a ticket already blocked with a DIFFERENT receipt fails at once instead of waiting the ceiling out (measured: the pre-261022 run spent its whole 240 s ceiling and reported only the ceiling; the same drive now lands its verdict in 60 s). Honest cost note: the stage was never the whole cost of this entry - one arbitrate round costs ~13.5 s (two headless agent spawns plus the fixture suite), and the entry's own scope is three phases with up to 8/6/1 rounds each, so a GREEN path projects to ~250 s on the process bench. Making it a 30-60 s entry therefore needs a SCOPE decision from the host (split the three phases into their own entries); the declared budget below only bounds regressions beyond the projected cost. tier: the arbitration exemption streak semantics driven through a real verify_lane integ round (named env-red exempts, stale roster names stop the loop, cap arithmetic in executed rounds) - only a real workflow plus a real gate round can produce the counts it asserts; cost: minutes; budget: 300s (enforced by integration/run_scenarios.py's per-entry budget: over it the entry fails BY NAME with its declared budget and elapsed seconds and its process group is SIGKILLed)",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260917-09/tests/sc_tests_false_escalation_guard.py", "engine"),
     # ---- t260919-02: 终态失败票两面可见（列表失败行 + 详情失败面）----
     ("t260919-02-terminal-face-board",
@@ -4705,6 +4709,27 @@ def print_fast_set_review() -> int:
 CMD_TIMEOUT = 900
 _SPAWN_FAIL = -8   # spawn 面（OSError 等）：非超时非断言，综合为 not-checked×external
 
+#: Per-entry declared time budget (host order 261022). An entry states it in its
+#: own intent text, beside the `tier:` / `cost:` tokens it already carries:
+#:     budget: <N>s
+#: A declared budget LOWERS the wait for that ONE entry. It can never raise the
+#: 900 s CMD_TIMEOUT ceiling (min() at the call site), and an entry that
+#: declares nothing keeps today's behaviour byte for byte. Over budget the
+#: case's process GROUP is SIGKILLed and the entry lands as a timeout red that
+#: NAMES the entry, the declared budget and the elapsed wall time - never a
+#: silent trim, never a bare ceiling number in the evidence.
+ENTRY_BUDGET_RE = re.compile(r"\bbudget:\s*([0-9]+)\s*s\b")
+
+
+def entry_budget_s(entry):
+    """The entry's declared per-run budget in seconds, or None (undeclared)."""
+    intent = entry[1] if len(entry) > 1 else ""
+    m = ENTRY_BUDGET_RE.search(intent or "")
+    if not m:
+        return None
+    seconds = int(m.group(1))
+    return seconds if seconds > 0 else None
+
 
 try:   # 协议纯函数核心（INTEG_SUMMARY 明细计数/规范行解析用）；缺席=回落旧计数
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -5178,7 +5203,7 @@ def _reuse_names_face(names):
     return ",".join(shown)
 
 
-def _spec_from_output(name, pool, out, exit_code, dur, started):
+def _spec_from_output(name, pool, out, exit_code, dur, started, budget_s=None):
     """执行器综合规范行（t260912-01 缺陷②起无条件综合——本层唯一生产缝）。
 
     旧口径「场景 stdout 出现 `{` 行即协议在产、执行器零综合」随 stdout 收集缝一并
@@ -5191,7 +5216,11 @@ def _spec_from_output(name, pool, out, exit_code, dur, started):
     具名为环境红，绝不冒充票自身原因；词表=failure_protocol.ENV_RED_PATTERNS /
     env_red_reason，未命中时行为逐字节不变）。exit2=环境红（cause=external，
     evidence=尾巴——ENV_FAIL 行点名缺什么）。退出码封闭性之外的码按 fail×other
-    处理（不归环境）。"""
+    处理（不归环境）。
+
+    `budget_s` (host order 261022): the entry's own DECLARED budget, when it has
+    one. The -9 (timeout) branch names that budget instead of the 900 s global
+    ceiling, so the evidence answers "which limit did this entry miss"."""
     started_iso = datetime.datetime.fromtimestamp(
         started, datetime.timezone.utc).isoformat(timespec="seconds")
     tail = " | ".join(ln.strip() for ln in out.splitlines() if ln.strip())[-500:]
@@ -5204,9 +5233,12 @@ def _spec_from_output(name, pool, out, exit_code, dur, started):
                                     git_sha=sha)
     if exit_code == -9:
         # 超时不是断言失败（走查 gen1 问题④）：标签用 timeout，不冒充 assert_mismatch
+        evidence = ("entry budget exceeded (declared %ds, elapsed %.1fs; the "
+                    "process group was SIGKILLed)" % (budget_s, dur) if budget_s
+                    else "超时（>%ds）" % CMD_TIMEOUT)
         return lib_result.spec_line(name=name, suite=pool, status="fail",
                                     cause="self", reason="timeout",
-                                    evidence="超时（>%ds）" % CMD_TIMEOUT,
+                                    evidence=evidence,
                                     dur_s=round(dur, 3), started=started_iso,
                                     git_sha=sha)
     if exit_code == _SPAWN_FAIL:
@@ -5383,14 +5415,21 @@ def _run_entry(entry):
     so a grandchild holding an inherited pipe write end used to defeat
     CMD_TIMEOUT entirely (the 261011 round hung ~1h on one case). On the budget
     the GROUP is SIGKILLed, so a timeout red lands within CMD_TIMEOUT +
-    _KILL_GRACE_S, always (test-locked, not assumed)."""
+    _KILL_GRACE_S, always (test-locked, not assumed).
+
+    Host order 261022: the wait is this entry's own declared `budget: <N>s`
+    when its intent text declares one (see entry_budget_s), else CMD_TIMEOUT.
+    A declaration only ever SHORTENS the wait; the over-budget verdict names
+    the entry, the declared budget and the elapsed seconds."""
     name, cmd = entry[0], entry[2]
+    budget_s = entry_budget_s(entry)
+    wait_s = min(budget_s, CMD_TIMEOUT) if budget_s else CMD_TIMEOUT
     t_start = time.time()
     if name in _HUNG_THIS_ROUND:   # declared defensive: see _HUNG_THIS_ROUND note
         return (name, 1,
                 "skipped by hung-twice guard: this entry already timed out "
                 "(>%ds, process group killed) earlier in this round — see "
-                "that verdict's evidence for the hang" % CMD_TIMEOUT,
+                "that verdict's evidence for the hang" % wait_s,
                 time.time() - t_start, t_start, "")
     # 净化 lane 自身 env 再下放（t260910-08 arbitrate）：机械跑若从 dev-lane 内
     # 发起（runner 本身住在泳道里），SANDBAR_TASK_QUEUE/SANDBAR_WATCH_WORKFLOW
@@ -5466,7 +5505,7 @@ def _run_entry(entry):
         # proc.wait (not communicate): with no pipes to drain it is the honest
         # primitive (review comment 1); the files carry the evidence.
         try:
-            proc.wait(timeout=CMD_TIMEOUT)
+            proc.wait(timeout=wait_s)
         except subprocess.TimeoutExpired:
             # The budget is real now: kill the WHOLE session/group (the direct
             # /bin/sh child AND every grandchild), never only the direct pid.
@@ -5487,9 +5526,19 @@ def _run_entry(entry):
                     pass   # unreapable after two SIGKILLs: verdict still lands
             _HUNG_THIS_ROUND.add(name)
             out = _read_back((out_fh, err_fh))
-            return (name, -9,
-                    "超时（>%ds，进程组已 SIGKILL）" % CMD_TIMEOUT,
-                    time.time() - t_start, t_start, out)
+            elapsed = time.time() - t_start
+            if budget_s:
+                # Host order 261022: an exceeded DECLARED budget fails the entry
+                # BY NAME with its elapsed wall time (the entry's own tail is
+                # kept, so the reader still sees the last state it reached).
+                reason = ("ENTRY_BUDGET_EXCEEDED [%s]: ran %.1fs over its "
+                          "declared budget: %ds (waited %ds) — the process "
+                          "group was SIGKILLed" %
+                          (name, elapsed, budget_s, wait_s))
+            else:
+                reason = "超时（>%ds，进程组已 SIGKILL）" % CMD_TIMEOUT
+            return (name, -9, reason, elapsed, t_start,
+                    (out + "\n" + reason) if out else reason)
         # 解码加固（t260911-04 仲裁 gen3 实锤）：输出按替换字符净化，判定仍严格由
         # 退出码承载——不弱化三态契约，只堵条目丢失/穿透。
         out = _read_back((out_fh, err_fh))
@@ -7033,7 +7082,8 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
     def _emit(e, pool_name):
         nonlocal ran, passed, failed, env_failed
         name, exit_code, tail_out, dur, t_start, full_out = _run_entry(e)
-        spec = _spec_from_output(name, pool_name, full_out, exit_code, dur, t_start)
+        spec = _spec_from_output(name, pool_name, full_out, exit_code, dur, t_start,
+                                 budget_s=entry_budget_s(e))
         if spec:
             print(spec, flush=True)   # 规范行（协议消费面；本层唯一生产缝=执行器综合，t260912-01）
         # 计数单源化（t260912-01 缺陷②）：spec_cases 只收执行器本层综合行，子进程
