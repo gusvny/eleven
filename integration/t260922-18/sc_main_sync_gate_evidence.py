@@ -115,6 +115,11 @@ async def main() -> int:
                             IntegrationRunResult, StageResult, TicketInput,
                             UiEvidenceDeclResult, UiEvidenceResult)
         import agent_activities as aa
+        # 261022: the engine's activity wrapper records every call through
+        # event_ledger.append_event_ledger, so a fixture worker that mirrors the
+        # real chain has to register it too - otherwise Temporal answers
+        # NotFoundError on that name and the gate probe is never scheduled.
+        import event_ledger as _ev
     except Exception as e:
         print("ENV_FAIL: temporalio/引擎模块不可用：%r（exit 2）" % (e,))
         return 2
@@ -253,7 +258,8 @@ async def main() -> int:
               named(stub_concurrency_acquire, "concurrency_acquire"),
               named(stub_concurrency_renew, "concurrency_renew"),
               named(stub_concurrency_release, "concurrency_release"),
-              named(stub_bundle_out_ws, "bundle_out_ws_prefixes")]
+              named(stub_bundle_out_ws, "bundle_out_ws_prefixes"),
+              _ev.append_event_ledger]
              + [make_agent_stub(s) for s in ("create_plan", "review_plan",
                                              "design_integration_tests", "implement",
                                              "arbitrate", "acceptance_walkthrough")]

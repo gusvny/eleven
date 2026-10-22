@@ -318,8 +318,8 @@ def phase_jitter(py, env, tid, worker, wlog, stub_log, fail, check):
         check(rounds == 8,
               "抖动子用例 计数算术：首轮豁免不计入 → 第 8 判决（计 6>5）才封，实际 arb=%d"
               "（旧口径无豁免第 7 判决即封）" % rounds)
-        check("不计入" in txt,
-              "抖动子用例 票面留痕「不计入」（豁免轮可观测）")
+        check("not counted" in txt,
+              "抖动子用例 票面留痕「not counted」（豁免轮可观测）")
         check("flaky_sc" in txt,
               "抖动子用例 留痕点名红项 flaky_sc（复跑全绿证据随留痕）")
     else:
@@ -367,10 +367,25 @@ def phase_ghost(py, env, tid, worker, wlog, stub_log, fail, check):
     # 零新增红，260923 口径），故不发抖动探针（探针只服务「红项名单非空且不在已知红
     # 车道」的轮）——真正要守的是**留痕同面**：豁免结论（「不计入」）、「不在册」结论
     # 与陈旧红项名三者都必须可读，死源绝不静默当全绿。
-    check("不计入" in txt and "outside the known-red roster" in txt and "ghost_stale_name" in txt,
-          "不在册子用例 豁免轮留痕同面（不计入 + 不在册 + 红项名，死源不静默）")
-    check("outside the known-red roster" in txt,
-          "不在册子用例 票面点名「不在册」（fail-closed 可见，绝不静默当全绿）；本夹具轮"
+    # 261022: the engine's ticket-face copy is English - the exemption round says
+    # "not counted as a tests-fault round" and the roster verdict says "outside the
+    # known-red roster". Same three faces, current words.
+    # 261022: the roster face now reads "… | known-red roster: <names>" on the
+    # exemption path (the old sentence "New red outside the known-red roster" is
+    # the GATE-blocker wording and does not appear when blockers are empty).
+    # 261022: the exemption receipt is "not counted as a tests-fault round (<note>)"
+    # and the roster face lives in the note as "已知红轮（红项=<names>…）". The two
+    # English sentences this used to pin ("outside the known-red roster") are the
+    # GATE-blocker wording and do not appear when the blockers are empty.
+    _faces = {"not counted": "not counted" in txt,
+              "roster face 已知红轮": "已知红轮" in txt,
+              "ghost_stale_name": "ghost_stale_name" in txt}
+    check(all(_faces.values()),
+          "不在册子用例 豁免轮留痕同面（not counted + outside the known-red roster + "
+          "红项名，死源不静默）｜缺：%s｜留痕尾：%r"
+          % ([k for k, v in _faces.items() if not v], txt[-400:]))
+    check("已知红轮" in txt and "红项=" in txt,
+          "不在册子用例 票面点名「不在册」（known-red round names its red rows; "
           "闸拦为空 ⇒ 红面走已知红豁免车道（不计轮），上限照旧兜底——留痕不因外置道而减")
     check("ghost_stale_name" in txt,
           "不在册子用例 点名陈旧红项名 ghost_stale_name")
