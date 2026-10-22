@@ -248,6 +248,12 @@ def main() -> int:
         f.write(TWO_INSTANCE_DECL)
     drift = lib.ki051_high_tree("journey-drift")
     clean = lib.clean_tree("journey-clean")
+    # 261023: both periods need a diffable base point, or the lane (correctly) reports
+    # "Change surface unavailable" and finishes the period without reviewing anything.
+    # The trees are git repos with one commit (RepoTree.git_init); declare that commit
+    # as each instance's previous-period base through the engine's bootstrap seam.
+    lib.seed_surface_bootstrap("integration-tests-%05d" % _STAMP, drift.base_sha)
+    lib.seed_surface_bootstrap("docs-sync-%05d" % _STAMP, clean.base_sha)
     # t260916-22：inspect 段发现注入=桩消息文件（内容在每子用例触发前重写——inspect 活动
     # 在 spawn 时刻读取）；证据锚=夹具树内真实文件行（复核才有真过/真不过两子用例）。
     stub_path = inspect_lib.write_stub_file(workdir, "stub-message.txt",
