@@ -4,7 +4,8 @@
 
 intent（守护的用户可感知行为/合同）：
 - 多仓票走到 merge→归档→拆道收口，**成员仓清不掉**时：workflow 照常收口（残留=可回收
-  垃圾的既有取舍），但公开读面（ticket show 的 log 行「泳道拆除告警」）必须**逐仓点名**
+  垃圾的既有取舍），但公开读面（ticket show 的 log 行「lane teardown warning」；
+  t261004-36 前的旧票/重放历史仍是旧中文「泳道拆除告警」，两代都认）必须**逐仓点名**
   那个仓 —— 不再笼统一条、不得静默成功；被点名的仓在磁盘/git 上有**真残留**可核对；
 - 逐仓粒度：一个仓清不掉**不拖停**其它仓（另一仓与泳道容器照清）；
 - 同源判定（验收 D 的组合证据）：merge 逐仓落账的仓集合与拆道逐仓点名的仓集合一致
@@ -242,15 +243,27 @@ def main_count(repo):
     return int(git("rev-list", "--count", "main", cwd=repo).strip())
 
 
+# The teardown-warning row marker: the product row text (dev_lane.py) was translated
+# to English by t261004-36; rows recorded before that (and replayed histories) still
+# carry the old Chinese wording. Match both generations — the assertion binds to
+# "a teardown warning row exists", not to one generation's wording (same precedent as
+# t261012-02's timeout marker: "timeout"/"超时").
+TEARDOWN_WARN_MARKERS = ("lane teardown warning", "泳道拆除告警")
+
+
 def teardown_warn_row(meta):
-    """公开读面的「泳道拆除告警」行原文（meta.log 优先；缺则从整体读面抓取）。"""
+    """The public read surface's teardown-warning row verbatim (meta.log first;
+    fall back to the whole read surface)."""
     for row in (meta.get("log") or []):
         txt = str(row.get("note") if isinstance(row, dict) else row)
-        if "泳道拆除告警" in txt:
+        if any(m in txt for m in TEARDOWN_WARN_MARKERS):
             return txt
     sj = show_json(meta)
-    i = sj.find("泳道拆除告警")
-    return sj[i:i + 500] if i >= 0 else ""
+    for m in TEARDOWN_WARN_MARKERS:
+        i = sj.find(m)
+        if i >= 0:
+            return sj[i:i + 500]
+    return ""
 
 
 def run_leg(py, tk):
@@ -325,7 +338,8 @@ def run_leg(py, tk):
         if not closed:
             return
         row = teardown_warn_row(m) if isinstance(m, dict) else ""
-        check("T6 残留可见（验收 C：不得静默成功）：公开读面有「泳道拆除告警」行",
+        check("T6 残留可见（验收 C：不得静默成功）：公开读面有拆除告警行"
+              "（lane teardown warning / 泳道拆除告警）",
               bool(row), "show=%s" % show_json(m)[:500])
         check("T7 该行逐仓点名失败仓 repo_a（不再笼统一条）",
               names_repo(row, "repo_a"), "row=%r" % row[:300])

@@ -145,8 +145,14 @@ async def _leg_a(tag, root):
         check(False, "子用例A1 超时路：编排入口抛 %s：%s" % (type(e).__name__, e))
         return
     flat1 = " ".join(_flat_strings(r1))
-    check(isinstance(r1, dict) and r1.get("ok") is False and "超时" in flat1,
-          "子用例A1 超时路：回执 ok=False 且点名「超时」（fail-visible 不静默）｜%s"
+    # The receipt's timeout wording: ui_capture_stage was translated to English by
+    # t261004-36 ("capture timed out"), rows recorded/asserted before that generation
+    # said "capture 超时". Both generations name the same failure — bind to "the receipt
+    # names the timeout", not to one generation's wording (same precedent as
+    # t261012-02: "timeout"/"超时").
+    timeout_named = any(m in flat1 for m in ("timed out", "超时"))
+    check(isinstance(r1, dict) and r1.get("ok") is False and timeout_named,
+          "子用例A1 超时路：回执 ok=False 且点名超时（timed out/超时，fail-visible 不静默）｜%s"
           % flat1[:200])
     check(wait_until(lambda: len(compose_containers(proj1)) == 0, LEG_A_WINDOW_S),
           "子用例A1 超时路：容器数紧窗口（≤%ds）回落到零——超时被砍后台被回收"

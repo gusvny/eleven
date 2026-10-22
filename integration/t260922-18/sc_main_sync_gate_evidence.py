@@ -111,9 +111,9 @@ async def main() -> int:
         from temporalio.testing import WorkflowEnvironment
         from temporalio.worker import Worker
         import dev_lane
-        from shared import (ChangedFilesResult, HumanGateContext, IntegrationRunResult,
-                            StageResult, TicketInput, UiEvidenceDeclResult,
-                            UiEvidenceResult)
+        from shared import (BundleOutWsResult, ChangedFilesResult, HumanGateContext,
+                            IntegrationRunResult, StageResult, TicketInput,
+                            UiEvidenceDeclResult, UiEvidenceResult)
         import agent_activities as aa
     except Exception as e:
         print("ENV_FAIL: temporalio/引擎模块不可用：%r（exit 2）" % (e,))
@@ -207,6 +207,28 @@ async def main() -> int:
     async def stub_human_gate(args) -> HumanGateContext:
         return HumanGateContext(ok=True, context_text="stub", note="stub")
 
+    # ---- slot gate (t261004-32) and build-chain widening (261019): not the subject ----
+    # A dev-lane run now opens with the project-level concurrency gate and one
+    # bundle-out widening query. Neither is the behaviour under test here, and both
+    # are project/disk scoped: a real acquire reads the project's declared limit
+    # (an absent declaration is a named fail-closed refusal that fails the workflow
+    # before any main-sync step runs), and an absent build-chain declaration merely
+    # widens nothing. Grant the slot and widen nothing, saying so — same stance as
+    # the changed_files stub above.
+    async def stub_concurrency_acquire(args):
+        return {"granted": True, "position": None, "limit": None, "holders": [],
+                "waiting": 0, "dropped_stale": [], "reason": ""}
+
+    async def stub_concurrency_renew(args):
+        return {"holding": True, "reason": "running"}
+
+    async def stub_concurrency_release(args):
+        return {"released": True, "waiting": 0, "promoted": None}
+
+    async def stub_bundle_out_ws(args) -> BundleOutWsResult:
+        return BundleOutWsResult(prefixes=[],
+                                 note="场景桩：无 build-chain 产物声明，不扩写集")
+
     from temporalio import activity as _act
 
     def named(fn, name):
@@ -227,7 +249,11 @@ async def main() -> int:
               named(stub_ui_decl, "ui_evidence_decl"),
               named(stub_ui_evidence, "prepare_ui_evidence"),
               named(stub_ui_changed, "ui_changed_paths"),
-              named(stub_human_gate, "prepare_human_gate")]
+              named(stub_human_gate, "prepare_human_gate"),
+              named(stub_concurrency_acquire, "concurrency_acquire"),
+              named(stub_concurrency_renew, "concurrency_renew"),
+              named(stub_concurrency_release, "concurrency_release"),
+              named(stub_bundle_out_ws, "bundle_out_ws_prefixes")]
              + [make_agent_stub(s) for s in ("create_plan", "review_plan",
                                              "design_integration_tests", "implement",
                                              "arbitrate", "acceptance_walkthrough")]
@@ -248,8 +274,22 @@ async def main() -> int:
             if snap and cond_fn(snap):
                 return True
             await asyncio.sleep(0.05)
-        print("TIMEOUT %s；末次 snapshot stage=%s state=%s" %
-              (label, (snap or {}).get("stage"), (snap or {}).get("stage_state")),
+        # 报错必须精确 (fail-named): a bare stage/state cannot say WHY the journey
+        # stopped. The public snapshot already carries the blocked face and the
+        # timeline, so name both in the timeout line instead of a second 180 s run.
+        why = ""
+        if snap:
+            _br = str(snap.get("blocked_reason") or "")
+            _bd = snap.get("blocked_detail")
+            if _br or _bd:
+                why = "；blocked_reason=%s；blocked_detail=%s" % (
+                    _br[:400], str(_bd)[:400])
+            _tl = [str(r.get("note") if isinstance(r, dict) else r)
+                   for r in (snap.get("timeline") or [])]
+            if _tl:
+                why += "；timeline 尾=%s" % " | ".join(x[-180:] for x in _tl[-6:])
+        print("TIMEOUT %s；末次 snapshot stage=%s state=%s%s" %
+              (label, (snap or {}).get("stage"), (snap or {}).get("stage_state"), why),
               file=sys.stderr)
         return False
 
@@ -263,7 +303,20 @@ async def main() -> int:
         Q = "t260922-18-gate-q"
         inp = TicketInput(
             ticket_id=TID, template_id="dev-lane", title="验证前主同步",
-            lane="dir", workspace={"type": "dir", "path": str(lane)},
+            # Project key (t261004-32 rule 9): the project-level slot gate judges the
+            # limit per project and refuses an empty key by name — a hand-built input
+            # without it is never a legal production shape (the real entry always sets
+            # it), so the fixture declares one and the gate's three activities are
+            # stubbed (granted / holding / released).
+            project=TID,
+            # lane vocabulary (t261008-26 / KI-226): the accepted values are main|worktree,
+            # and this was written as "dir" (a *workspace* type slipped into the lane
+            # field). Pre-KI-226 that value silently degraded to the non-worktree branch —
+            # which is exactly the shape this fixture wants (explicit dir workspace +
+            # fixture-built lane worktree, so prepare_workspace only ensures the
+            # directory; the lib builds the worktree itself and the worktree-create act is
+            # not the subject). "main" is the vocabulary value with that same semantics.
+            lane="main", workspace={"type": "dir", "path": str(lane)},
             worktree=str(lane), branch="lane/" + TID,
             base_ref=git("rev-parse", "main", cwd=repo).stdout.strip(),
             write_set=[FEATURE], no_file_changes=False,
@@ -326,7 +379,8 @@ async def main() -> int:
         CURRENT["tid"] = TID2
         inp2 = TicketInput(
             ticket_id=TID2, template_id="dev-lane", title="main 不可达",
-            lane="dir", workspace={"type": "dir", "path": str(lane2)},
+            project=TID2,   # slot gate: per-project key (see ticket 1's note)
+            lane="main", workspace={"type": "dir", "path": str(lane2)},
             worktree=str(lane2), branch="lane/" + TID2, base_ref="",
             write_set=[FEATURE], no_file_changes=False,
             user_request="main ref 不存在的票", body="t260922-18")
@@ -345,7 +399,12 @@ async def main() -> int:
                 snap2 = await handle2.query(dev_lane.DevLaneWorkflow.snapshot)
                 why = str(snap2.get("blocked_reason") or "") + \
                     str(snap2.get("blocked_detail") or "")
-                ok("主同步" in why, "D2 blocked 面点名主同步", why[:200])
+                # The blocked face must NAME the main-sync step so a steward knows which
+                # check failed. Its wording was translated to English ("main sync
+                # failed", t261004-36 generation); histories/reports recorded before that
+                # read "主同步". Bind to "the step is named", both generations.
+                ok(("main sync" in why) or ("主同步" in why),
+                   "D2 blocked 面点名主同步（main sync/主同步）", why[:200])
                 ok("不存在" in why, "D2b blocked 面含错误原文特征（响亮可诊断）", why[:200])
             ok(len(c2["gate"]) == 0, "D3 跑闸零调用（同步失败拦在跑闸之前）",
                str(len(c2["gate"])))
