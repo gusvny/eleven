@@ -77,6 +77,17 @@ def _all_pools():
     return sorted({pool(e) for e in rs.SCENARIOS})
 
 
+def _why(p, n=6):
+    """The child's own last lines, so a failed `照跑` check names its cause.
+
+    261022: the two `照跑` checks only reported the exit code, and inside a full
+    round both went red (rc=1) with nothing to read, so the diagnosis had to
+    guess. The tail is data, not a contract: the checks keep judging the exit code.
+    """
+    out = ((p.stdout or "") + (p.stderr or "")).strip().splitlines()
+    return "｜尾：%s" % " / ".join(line.strip() for line in out[-n:] if line.strip())
+
+
 def _cli(lock_path, extra_env=None, args=("--exclude-pools",)):
     env = dict(os.environ)
     env["SANDBAR_INTEG_RUN_LOCK_PATH"] = lock_path
@@ -102,8 +113,7 @@ def main():
         print("== 子用例1 无锁发车 → 照跑（零条目全轮收成 rc=0，不误伤正常发车）")
         p = _cli(lock_path, args=["--exclude-pools", zero])
         r.check(p.returncode == 0,
-                "无锁时 CLI 正常收口（rc=%s｜尾：%s）"
-                % (p.returncode, (p.stdout or p.stderr).strip().splitlines()[-1:]))
+                "无锁时 CLI 正常收口（rc=%s%s）" % (p.returncode, _why(p)))
 
         print("== 子用例2 有锁发车 → 环境红收口且点名持有者（零场景开跑）")
         # 持锁方=本进程（走同一条 _acquire_run_lock——锁档格式与生产同源）
@@ -132,7 +142,8 @@ def main():
         p = _cli(lock_path, args=["--exclude-pools", zero],
                  extra_env={"SANDBAR_INTEG_ALLOW_CONCURRENT": "1"})
         out = (p.stdout or "") + (p.stderr or "")
-        r.check(p.returncode == 0, "knob 置位后照跑（rc=%s）" % p.returncode)
+        r.check(p.returncode == 0,
+                "knob 置位后照跑（rc=%s%s）" % (p.returncode, _why(p)))
         r.check("已显式关闭" in out, "放行留痕在文（显式关闭行）")
         r.check("已在进行中" not in out, "放行面不再报并发拒收")
 
