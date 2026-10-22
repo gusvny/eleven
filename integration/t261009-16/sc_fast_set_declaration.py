@@ -66,6 +66,12 @@ def run_runner(args, extra_env=None):
     itself a named FAIL (never an unbounded gate hang)."""
     import subprocess as _sp
     env = dict(os.environ)
+    # 261022: `--print-fast-set` is a READ-ONLY declaration face. Inside a full
+    # round the runner's own run lock is held, so the face answered with the
+    # concurrency refusal and this case went red at 0.3 s in every round while it
+    # was green standalone. A read-only read must not be judged by the lock of the
+    # round it runs in; the documented knob is what the runner itself points at.
+    env["SANDBAR_INTEG_ALLOW_CONCURRENT"] = "1"
     if extra_env:
         env.update(extra_env)
     try:
