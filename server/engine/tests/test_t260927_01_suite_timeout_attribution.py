@@ -503,11 +503,18 @@ def test_budget_env_visibility_is_additive(tmp_path, monkeypatch):
     # 真实执行器跑一轮，读回 INTEG_SUMMARY 的 budget_env
     import subprocess as _sp
     repo_root = os.path.dirname(os.path.abspath(RUNNER_DIR))     # <repo>（integration/ 的父目录）
+    # 261022: the case OWNS the env it judges (t261017-10 discipline). It asserts
+    # budget_env=absent, so an inherited budget knob - the lane's verify_lane run
+    # carries one - turned it red in the gate while it passed standalone. Strip the
+    # budget keys and set only the concurrency bypass this case needs.
+    _env = {k: v for k, v in os.environ.items()
+            if not k.startswith("SANDBAR_INTEG_RUN_BUDGET")}
+    _env["SANDBAR_INTEG_ALLOW_CONCURRENT"] = "1"
     out = _sp.run([_sys.executable, "-B", "integration/run_scenarios.py",
                    "--only", "t260924-05-inspection-suite-ran-parity"],
                   cwd=repo_root,
                   capture_output=True, text=True, timeout=300,
-                  env=dict(os.environ, SANDBAR_INTEG_ALLOW_CONCURRENT="1")).stdout
+                  env=_env).stdout
     summ = [ln for ln in out.splitlines() if ln.startswith("INTEG_SUMMARY ")]
     assert summ, out[-800:]
     assert json.loads(summ[0][len("INTEG_SUMMARY "):])["budget_env"] == "absent"
