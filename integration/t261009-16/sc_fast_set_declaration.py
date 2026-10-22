@@ -219,4 +219,8 @@ finally:
         shutil.rmtree(_TMP, ignore_errors=True)
 
 print("SUMMARY checks=%d fail=%d" % (CHECKS[0], len(FAILURES)))
+# 261022: the runner keeps only the tail of a case's stdout, so a red used to
+# arrive with its failing check truncated away. This line always survives.
+if FAILURES:
+    print("FAILED_CHECKS %r" % (FAILURES,))
 sys.exit(1 if FAILURES else 0)

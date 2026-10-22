@@ -3203,7 +3203,7 @@ SCENARIOS = [
     # ---- 261022 实报：收窄轮的期望账与在册红名单相减会扣两次（线轮内必红）----
     ("t261022-expected-pool-knownred",
      "收窄轮的 expected 不再被在册红重复扣（261022 实报，事故回归棒；灰盒 L1，纯 stdlib 零 docker 零 Temporal 零端口零场景开跑，秒级）：线轮注入 SANDBAR_KNOWN_RED_EXCLUDE=1 后，任何嵌套收窄跑都带着名册，而旧式 expected = 全表 − 被排除池 − 在册红 把落在**被排除池里**的在册条目扣了两次——全池排除时 778 − 778 − 49 = −49，负期望撞汇总自检把一次「零条目可跑」的收窄轮判成产品红（现场：t260913-02 子用例1/3 在轮内必红、单跑必绿）。本条锁纯面 expected_entries 的口径——全池排除恒为 0 且永不为负、在排除面里的在册条目不重复扣、不排除时逐字等于旧式、名册里的幽灵名无害；外加一条源码锁：main 走纯面、不留内联相减。intent 分工：t260930-01-known-red-round-exempt 锁「在册红不进每轮路径」的**行为面**（三条具名面与守恒式），本条只锁**期望计数口径**这一处算错——判据不同源；池排除旋钮本体归 t260913-03、单飞锁语义归 t260913-02。安全红线：零端口零 docker 不触 3099/7233；本电池只调纯函数与读一个源文件，从不发车",
-     "python3 -m pytest integration/tests/test_t261022_expected_pool_knownred.py -q", "ro"),
+     "python3 integration/tests/test_t261022_expected_pool_knownred.py", "ro"),
 
     # ---- t261017-10: 用例必须自己拥有它所测的环境旋钮（线轮 env 钉事故回归）----
     ("t261017-10-owned-env-pins",
