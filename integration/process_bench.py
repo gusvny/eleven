@@ -365,7 +365,7 @@ def wait_ready(bin_path, port, boot_s=None, proc=None, log_path=None):
     return False, "bench not ready within %.1fs: %s" % (boot_s, last)
 
 
-def start(bin_path=None, boot_s=None, root=None):
+def start(bin_path=None, boot_s=None, root=None, port=None):
     """Start one bench; return the contract dict {ok, port, pid, start_s, db}.
 
     A refusal returns {"ok": False, "reason": <named>} and leaves NOTHING
@@ -393,7 +393,12 @@ def start(bin_path=None, boot_s=None, root=None):
     db_file = db_dir / "temporal.db"
     log_path = db_dir / "server.log"
 
-    port = free_port()
+    if port is None:
+        port = free_port()
+    else:
+        port = int(port)
+        if not port_refuses(port):
+            return {"ok": False, "reason": "requested port %d is already in use" % port}
     ui_port = free_port()
     argv = [bin_path, "server", "start-dev",
             "--ip", "127.0.0.1",
@@ -499,9 +504,11 @@ def main(argv):
     cmd = argv[0] if argv else "up"
     if cmd in ("up", "start"):
         boot_raw = _opt(argv, "--boot-s")
+        port_raw = _opt(argv, "--port")
         res = start(bin_path=_opt(argv, "--bin"),
                     boot_s=float(boot_raw) if boot_raw else None,
-                    root=_opt(argv, "--root"))
+                    root=_opt(argv, "--root"),
+                    port=int(port_raw) if port_raw else None)
         print(json.dumps(res), flush=True)
         if not res.get("ok"):
             print("ENV_FAIL: %s" % res.get("reason"), file=sys.stderr,
