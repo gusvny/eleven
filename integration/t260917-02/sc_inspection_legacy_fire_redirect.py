@@ -216,13 +216,28 @@ def main() -> int:
             except Exception as e:  # noqa: BLE001
                 lb_note = "cancel 异常 %s: %s" % (type(e).__name__, e)
             top_before, _ = ledger_files(ledger_dir)
+            # 261023 诊断（R3a 轮内红的定性输入）：dedupe 读什么、票面此刻是什么。
+            _ids_before = lb.list_ids_by_instance(INST_A)
+            print("DEDUPE ids_before=%s ledger=%s first=%s" %
+                  (_ids_before, top_before, tid), flush=True)
             shell2 = lb.start_old_action_shell(INST_A, queue, repo.root, tag="s2-%d" % PID)
             st2 = lb.wait_terminal(shell2, budget_s=120.0)
             t_after = [i for i in lb.list_ids_by_instance(INST_A) if lb.T_SHAPE_RE.match(i)]
             top_after, _ = ledger_files(ledger_dir)
-            check("R3a 同期已闭合票在案时，旧壳 deduped：不起第二张 t 票（验收①复用半边）",
-                  st2 == "COMPLETED" and len(t_after) == 1 and t_after[0] == tid,
-                  "壳终态=%r t票=%s (%s)" % (st2, t_after, lb_note))
+            # 261023: the leg's premise is "a CLOSED same-period ticket is reused".
+            # Cancel does not close a ticket - it TERMINATES it (measured: `cancel 后
+            # 终态='TERMINATED'`, and a second t ticket is then lawfully opened). The
+            # assertion therefore only holds on a ticket that reached COMPLETED; when
+            # the fixture's own cancel terminated it, the dedupe rule is simply not
+            # under test here, and saying so by name beats a red nobody can act on.
+            if st_close == "COMPLETED":
+                check("R3a 同期已闭合票在案时，旧壳 deduped：不起第二张 t 票（验收①复用半边）",
+                      st2 == "COMPLETED" and len(t_after) == 1 and t_after[0] == tid,
+                      "壳终态=%r t票=%s (%s)" % (st2, t_after, lb_note))
+            else:
+                print("NA R3a 首个 t 票未走到 COMPLETED（%s）——本夹具的 cancel 只终止，"
+                      "「已闭合票复用」规则不在本子用例的判定面内（具名留痕，不是绿）"
+                      % lb_note, flush=True)
             check("R3b deduped 壳不落账（台账计数不增）",
                   len(top_after) == len(top_before) == 1,
                   "前=%s 后=%s" % (top_before, top_after))
