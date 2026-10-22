@@ -278,15 +278,12 @@ export async function openProjectSettings(page, groupText) {
   if (!(await head.count())) {
     return `project group row containing "${groupText}" is not rendered (registry fixture not consumed?)`;
   }
-<<<<<<< ours
-  const entry = page.locator('[data-wb-executor-entry]').first();
-  if (!(await entry.count())) {
-    return 'project row carries no executor entry anchor ([data-wb-executor-entry], t260929-22 face)';
-=======
+  // 261022 (host order 261022, rail repair): scope the click to the NAMED group's
+  // own row. The page-wide first entry opened the wrong project's panel on a
+  // two-project rail (the rail scenario drives 真台甲 + 真台乙).
   const entry = head.locator('[data-wb-executor-entry]').first();
   if (!(await entry.count())) {
     return `project row for "${groupText}" carries no executor entry anchor ([data-wb-executor-entry], t260929-22 face)`;
->>>>>>> theirs
   }
   await entry.click({ force: true, timeout: 8000 });
   const iframeSrc = () => page.evaluate(() => {

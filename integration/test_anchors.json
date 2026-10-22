@@ -5484,6 +5484,10 @@
       "anchor": "behaviour",
       "note": "t261019-41 L3: the two-repo develop-line journey end to end - a proven map covering the declared set lands BOTH repos (one landing row naming both, each repo realises its own declared branch), a map missing a repo refuses by name with nothing moved, the certification names the same repo set, a promotion with one not-fast-forwardable repo refuses with the OTHER main unmoved and no row, then fast-forwards both mains with per-repo main_before/after, and the single-repo line stays byte-identical",
       "sync_path": ""
+    },
+    "integration/t261022-10/sc_process_bench_docker_free.py": {
+      "anchor": "behaviour",
+      "note": "t261022-10: docker-free process bench - start a native temporal stage as plain processes, hand its endpoint to a scenario, reap the process group and assert zero residue (port refuses, group empty) re-read from a fresh process."
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {
