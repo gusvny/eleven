@@ -302,6 +302,13 @@ def test_payload_carries_exec_wall_cutoff_and_progress(tmp_path, monkeypatch):
     `integ_timeout_sec` 载荷、把**跑者收口点**与**进度件路径**放进 env；每票集测段
     逐字回落旧值（payload=BATCH_TIMEOUT_SEC、无预算/进度 env）。"""
     import asyncio
+    # 261022: own the env this case judges (t261017-10 discipline). `flow` and the
+    # cutoff helpers read the SANDBAR_INTEG_*/SANDBAR_SUPPLY_* knobs, so an inherited
+    # value (a lane's verify_lane run carries them) made this red in the gate while
+    # it passed standalone.
+    for _k in [k for k in os.environ
+               if k.startswith(("SANDBAR_INTEG", "SANDBAR_SUPPLY"))]:
+        monkeypatch.delenv(_k, raising=False)
     lane = tmp_path / "lane"
     (lane / "server").mkdir(parents=True)
     seen = {}
