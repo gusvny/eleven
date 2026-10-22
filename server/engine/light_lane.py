@@ -102,6 +102,13 @@ with workflow.unsafe.imports_passed_through():
         FLOW_BRIEF,
         DevLaneWorkflow,
         MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID,
+        # t261022 (KI-332): same split marker as dev-lane (one id, one rule) —
+        # the light lane places the same argument at the same activity call so
+        # both lanes judge the two populations the same way.
+        FOREIGN_REPAIR_SPLIT_PATCH_ID,
+        # t261022 (host order 261022): patch id + merge-wait cause of the merge
+        # gate's slot hand-back (the release/gate helpers live in the parent).
+        MERGE_SLOT_RELEASE_PATCH_ID,
         # t261005-15: replay predicate for the concurrency family (window-(b)
         # time arm); judged against THIS module's workflow facade at the two
         # gate sites below, the shared dev-lane id at the inherited helpers.
@@ -112,7 +119,7 @@ with workflow.unsafe.imports_passed_through():
     import shared  # 纯函数面（exception_chain_note 等，零 IO）
     # t261004-32: rule-point constants of the concurrency slot gate (the gate
     # helpers themselves live in the parent DevLaneWorkflow).
-    from concurrency import CAUSE_HUMAN_GATE, CAUSE_TERMINATED  # noqa: F401
+    from concurrency import CAUSE_HUMAN_GATE, CAUSE_MERGE_WAIT, CAUSE_TERMINATED  # noqa: F401
     import failure_protocol  # 纯函数面（归属前复验 KI-182，t261002-02）
     from agent_activities import (
         archive_ticket,
@@ -1214,6 +1221,12 @@ class LightLaneWorkflow(DevLaneWorkflow):
                   % (mode or "-", self.meta["surface_plan_trace"]["reason"] or "-"))
         return []
 
+    # t261022 (KI-332): the merge_check argument `foreign_repair_split` is the
+    # foreign-repair population split (the ticket's own out-of-write-set commit is
+    # red, never repaired). It is gated by workflow.patched() below: an un-patched
+    # history keeps the legacy argument (False) and the pre-split face verbatim.
+    # The comment lives out here so the call site stays one line (the source-window
+    # lock in test_light_lane_lane measures the 2000 chars after the def).
     async def _light_merge_check(self) -> MergeCheckResult:
         """merge_check 活动（与 dev-lane 同一活动、同一入参族）。"""
         raw = await workflow.execute_activity(
@@ -1232,7 +1245,8 @@ class LightLaneWorkflow(DevLaneWorkflow):
                            # => the new merge_check item reads red zero-run
                            # (never green-by-default).
                            last_green_run=dict(
-                               self.meta.get("last_green_run") or {})),
+                               self.meta.get("last_green_run") or {}),
+                           foreign_repair_split=workflow.patched(FOREIGN_REPAIR_SPLIT_PATCH_ID)),
             start_to_close_timeout=MERGE_CHECK_TO, retry_policy=RETRY)
         mc = raw if isinstance(raw, MergeCheckResult) else MergeCheckResult(
             green=bool(raw.get("green")), checks=list(raw.get("checks") or []),
@@ -1633,10 +1647,15 @@ class LightLaneWorkflow(DevLaneWorkflow):
                 self.human_context["merge"] = {"context_text": ctx_text}
                 self.meta["stage_state"] = "awaiting-human"
                 self._touch()
-                # t261004-32 (rule 3): the human gate eats the slot on purpose - the ledger
-                # atomically flips to human-hold; post-signature continuation never
-                # re-queues (no window).
-                await self._concurrency_renew(CAUSE_HUMAN_GATE)
+                # t261004-32 (rule 3) + t261022 (host order 261022): the MERGE gate
+                # is the one gate that hands its slot back while it waits for the
+                # signature, with its own merge-wait cause (a waiting ticket must
+                # not starve the queue). The old renew branch stays reachable so a
+                # history recorded before the marker replays unchanged.
+                if workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
+                    await self._concurrency_release(CAUSE_MERGE_WAIT)
+                else:
+                    await self._concurrency_renew(CAUSE_HUMAN_GATE)
                 self._log("merge gate parked: waiting for the human sign signal "
                           "(merge_check is green)")
                 self._mark("merge", "awaiting-human",
@@ -1657,6 +1676,10 @@ class LightLaneWorkflow(DevLaneWorkflow):
                               % (sig.note, sig.who))),
                         "human-gate reject at merge")
                     continue
+                # t261022: take the slot again through the ordinary gate before any
+                # merge work - the ticket queues behind the existing waiters.
+                if workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
+                    await self._concurrency_gate()
                 self.meta["stage_state"] = "running"
                 self._mark("merge", "running", "human signed off (%s) — merging" % sig.who)
                 # merge 只落账（defer_teardown）→ 归档（fail-closed）→ 拆道：与 dev-lane

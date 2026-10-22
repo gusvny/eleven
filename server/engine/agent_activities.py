@@ -5728,6 +5728,38 @@ FOREIGN_REPAIR_RULE_TAG = ("KI-01M4PAVBP6EZFGYC2VVQ0Z90J7: engine returns "
 _FOREIGN_COMMIT_NAME = "sandbar-engine"
 _FOREIGN_COMMIT_EMAIL = "sandbar-engine@localhost"
 
+# ---- t261022 (KI-332): the population split -----------------------------------
+# The repair face was built for ONE population: another lane's unlanded work
+# absorbed into this lane by a conflict resolution. It also ate a second one —
+# the ticket's OWN committed write outside its write set: that file belongs to
+# no live lane either, so it was deleted, an engine repair commit landed, and
+# the later write-set item then diffed a clean branch and reported green
+# (measured on t261022-04: server/zz_t26091505_probe.py, write set docs/,
+# reached stage=merge awaiting-human with a green merge_check).
+# The split is judged from commit authorship (see _foreign_population) and it
+# fails CLOSED: anything the evidence cannot name is red for a human, never a
+# repair. The workflow decides whether this face is on, through
+# workflow.patched(FOREIGN_REPAIR_SPLIT_PATCH_ID) — the activity only receives
+# the resulting flag (MergeCheckArgs.foreign_repair_split, defaulted False, so
+# a pre-patch history replays the pre-split path verbatim).
+FOREIGN_POPULATION_POLLUTION = "conflict_resolution_pollution"
+FOREIGN_POPULATION_OWN = "ticket_own_commit"
+FOREIGN_POPULATION_AMBIGUOUS = "ambiguous"
+#: The workflow-side marker of the split (t261022). The lanes evaluate it with
+#: workflow.patched() at the merge_check call site and hand the verdict down as
+#: MergeCheckArgs.foreign_repair_split; the engine never calls patched() itself
+#: (this is an activity, and an activity has no workflow context).
+FOREIGN_REPAIR_SPLIT_PATCH_ID = "t261022-foreign-repair-split-v1"
+FOREIGN_REPAIR_SPLIT_RULE = (
+    "population rule (t261022): a foreign path is repaired only when EVERY commit "
+    "that authored its current content inside base..HEAD is a merge commit with two "
+    "or more parents whose blob differs from all of them — that is the "
+    "conflict-resolution absorption population. A path authored by single-parent "
+    "lane commits is this ticket's own committed write: it is never repaired, it "
+    "stays in place, and the out-of-write-set verdict belongs to the write-set "
+    "judge. No authoring commit, a mixed set, an engine repair commit, or any "
+    "attribution fault is ambiguous: red for a human, never a repair")
+
 
 def _blob_hash(tree: Path, ref: str, path: str) -> Optional[str]:
     """The blob hash of `ref:path`, or None when the path is absent at the ref.
@@ -5829,7 +5861,9 @@ def _lane_effective_write_set(wt: Path) -> List[str]:
 def _repair_foreign_files(tree: Path, foreign: List[str],
                           candidate_refs: List[Dict[str, str]],
                           write_set: Any,
-                          allow_commit: bool) -> Dict[str, Any]:
+                          allow_commit: bool,
+                          populations: Optional[Dict[str, str]] = None
+                          ) -> Dict[str, Any]:
     """One bounded engine pass: restore each classified foreign file to the
     main-side version (MERGE_HEAD when a merge is in progress, else main);
     absent there → remove it (main never had it — e.g. the sibling's new test
@@ -5838,9 +5872,16 @@ def _repair_foreign_files(tree: Path, foreign: List[str],
     and one engine commit lands the repair only when `allow_commit` (the
     merge_check face); the conflict face stages only (the resolution commit
     carries the restored versions). Per-file failures are named, never
-    fail-open; the caller re-runs the diff to judge success."""
+    fail-open; the caller re-runs the diff to judge success.
+
+    `populations` (t261022) carries the classification verdict per path into the
+    repair COMMIT MESSAGE, so the landed commit says which population it
+    decided (the reader of `git log` must not have to infer it). It never widens
+    or narrows the scope: the caller hands in only the paths it decided to
+    repair."""
     out: Dict[str, Any] = {"restored": [], "removed": [], "failed": [],
-                           "ownership": {}, "skipped": "", "committed": ""}
+                           "ownership": {}, "skipped": "", "committed": "",
+                           "populations": dict(populations or {})}
     ok, why = foreign_write.repair_admissible(write_set)
     if not ok:
         out["skipped"] = why
@@ -5901,6 +5942,10 @@ def _repair_foreign_files(tree: Path, foreign: List[str],
                  "main-side version (%s)" % src, "", FOREIGN_REPAIR_RULE_TAG, ""]
         lines += ["%s: %s" % (f, out["ownership"].get(f, "belongs to no live lane"))
                   for f in done]
+        _pops = {f: out["populations"].get(f) for f in done if out["populations"].get(f)}
+        if _pops:  # t261022: the landed commit carries the population it decided
+            lines += ["", FOREIGN_REPAIR_SPLIT_RULE]
+            lines += ["population %s: %s" % (f, _pops[f]) for f in done if f in _pops]
         p = _git(["-c", "user.name=" + _FOREIGN_COMMIT_NAME,
                   "-c", "user.email=" + _FOREIGN_COMMIT_EMAIL,
                   "commit", "-m", "\n".join(lines), "--"] + done, tree)
@@ -5913,43 +5958,108 @@ def _repair_foreign_files(tree: Path, foreign: List[str],
     return out
 
 
-def _foreign_repair_check_item(tree: Path, branch: str, write_set: Any,
-                               ticket_id: str,
-                               in_flight_ids: Any = None) -> Optional[Dict[str, Any]]:
-    """merge_check face: classify, NAME the owners first (the receipt item is
-    written before any repair is attempted), repair with one commit, re-run the
-    diff. Green only when nothing foreign remains; remaining foreign = red with
-    the ownership lines attached (spec 2 holds on the failure path). Returns
-    None when the diff shows nothing foreign (no item, nothing to say)."""
-    base, base_err = _merge_base_ref(str(branch), tree)
-    if base_err:
-        return {"item": "out-of-write-set foreign files (engine returns main's version)", "green": False,
-                "detail": "diff baseline unresolved, foreign files unjudgeable (fail-closed): %s" % base_err,
-                "id": FOREIGN_REPAIR_ID, "reason_code": "foreign_file_unjudgeable"}
-    p = _git(["-c", "core.quotepath=false", "diff", "--name-status", "-z",
-              "%s...HEAD" % base], tree)
+def _foreign_authoring_commits(tree: Path, base: str,
+                               path: str) -> Tuple[List[Dict[str, Any]], str]:
+    """Which commits inside `base..HEAD` AUTHOR the current content of `path`.
+
+    `--full-history` is mandatory: history simplification prunes merge commits,
+    and the commit that absorbed another lane's file during a conflict
+    resolution IS a merge commit. A merge only counts as an author when the
+    path's blob differs from EVERY parent — a merge that merely carries one
+    side's bytes wrote nothing (checked through _blob_hash, the same
+    hash-equality primitive every ownership verdict uses; a faulted lookup
+    reads as "absent there" exactly as it does there).
+
+    Returns (commits, error): a git fault or a malformed record answers
+    ([], reason) and the caller fails CLOSED to red — never to a repair.
+    """
+    p = _git(["-c", "core.quotepath=false", "log", "--full-history",
+              "--format=%H%x09%P%x09%an%x09%s", "%s..HEAD" % base, "--", path], tree)
     if p.returncode != 0:
-        return {"item": "out-of-write-set foreign files (engine returns main's version)", "green": False,
-                "detail": "git diff failed: %s" % ((p.stderr or "").strip())[-200:],
-                "id": FOREIGN_REPAIR_ID, "reason_code": "foreign_file_unjudgeable"}
-    changed = [f for _st, f in foreign_write.parse_name_status_z(p.stdout)]
-    line_refs = _line_candidate_refs(tree)
-    head_own = _git(["rev-parse", "--verify", "--quiet", "HEAD"], tree)
-    head_sha = (head_own.stdout or "").strip() if head_own.returncode == 0 else ""
+        return [], (((p.stderr or p.stdout or "").strip()[-200:]) or "git log failed")
+    out: List[Dict[str, Any]] = []
+    for ln in (p.stdout or "").splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        cols = ln.split("\t")
+        if len(cols) < 4 or not cols[0].strip():
+            return [], "malformed git log record: %r" % ln[:120]
+        parents = [x for x in cols[1].split() if x]
+        rec = {"sha": cols[0].strip(), "parents": len(parents),
+               "author": cols[2].strip(), "subject": cols[3].strip()[:120]}
+        if len(parents) >= 2:
+            own = _blob_hash(tree, rec["sha"], path)
+            if own is not None and any(_blob_hash(tree, par, path) == own
+                                       for par in parents):
+                continue  # the merge carries one side's bytes; it authored nothing
+        out.append(rec)
+    return out, ""
 
-    def _line_face(pp: str) -> bool:
-        return foreign_write.line_owned(
-            pp, _blob_hash(tree, head_sha, pp) or "",
-            lambda q, r: _blob_hash(tree, r, q), line_refs)
 
-    foreign = foreign_write.foreign_files(
-        changed, write_set, str(ticket_id or ""),
-        test_face=lambda f: path_gates.is_ticket_test_face(f, str(ticket_id or "")),
-        protected_paths=path_gates.PROTECTED_PATHS,
-        line_owned=_line_face)
-    if not foreign:
-        return None
-    cands = _live_lane_candidates(tree, in_flight_ids, exclude_ref=str(branch or ""))
+def _foreign_population(tree: Path, base: str, path: str) -> Dict[str, Any]:
+    """The explicit classification of ONE foreign path, with the evidence used.
+
+    Two populations, one rule (FOREIGN_REPAIR_SPLIT_RULE): the commit(s) that
+    authored the path inside `base..HEAD` decide it. Merge commits only = the
+    conflict-resolution absorption population (repairable); single-parent lane
+    commits only = the ticket's own committed write (never repaired). Everything
+    else — no authoring commit, a mixed set, an engine repair commit, a parentless
+    commit, an attribution fault — is ambiguous, and ambiguous fails CLOSED to
+    red. The verdict is a named string, never a boolean: the record reaches the
+    merge receipt, and a reader must be able to grep it.
+    """
+    commits, err = _foreign_authoring_commits(tree, base, path)
+    rec: Dict[str, Any] = {"path": path, "commits": commits, "evidence": ""}
+    if err:
+        rec["population"] = FOREIGN_POPULATION_AMBIGUOUS
+        rec["evidence"] = "commit attribution fault: %s" % err
+        return rec
+    if not commits:
+        rec["population"] = FOREIGN_POPULATION_AMBIGUOUS
+        rec["evidence"] = ("no commit inside base..HEAD authors this path — the "
+                           "engine cannot tell whose write it is")
+        return rec
+    engine_commits = [c for c in commits if c.get("author") == _FOREIGN_COMMIT_NAME]
+    if engine_commits:
+        rec["population"] = FOREIGN_POPULATION_AMBIGUOUS
+        rec["evidence"] = ("an engine repair commit (%s) authored this path — never "
+                           "repaired twice, never called the ticket's write"
+                           % engine_commits[0]["sha"][:7])
+        return rec
+    merges = [c for c in commits if c["parents"] >= 2]
+    plains = [c for c in commits if c["parents"] == 1]
+    parentless = [c for c in commits if c["parents"] == 0]
+    if parentless:
+        rec["population"] = FOREIGN_POPULATION_AMBIGUOUS
+        rec["evidence"] = ("authoring commit %s has no parent inside the measured "
+                           "range" % parentless[0]["sha"][:7])
+        return rec
+    if merges and plains:
+        rec["population"] = FOREIGN_POPULATION_AMBIGUOUS
+        rec["evidence"] = ("mixed authorship: merge %s and lane commit %s both "
+                           "authored this path"
+                           % (merges[0]["sha"][:7], plains[0]["sha"][:7]))
+        return rec
+    if merges:
+        rec["population"] = FOREIGN_POPULATION_POLLUTION
+        rec["evidence"] = ("authored only by conflict-resolution/merge commits: %s"
+                           % ", ".join("%s (%s)" % (c["sha"][:7], c["subject"][:60])
+                                       for c in merges[:4]))
+        return rec
+    rec["population"] = FOREIGN_POPULATION_OWN
+    rec["evidence"] = ("authored by this ticket's own lane commit(s): %s"
+                       % ", ".join("%s (%s)" % (c["sha"][:7], c["subject"][:60])
+                                   for c in plains[:4]))
+    return rec
+
+
+def _foreign_repair_legacy_item(tree: Path, foreign: List[str],
+                               cands: List[Dict[str, str]], write_set: Any,
+                               foreign_again) -> Dict[str, Any]:
+    """The PRE-SPLIT face, verbatim (t261012-09): every classified foreign path
+    is repaired, no population question asked. Kept as its own function so the
+    replay promise is structural — `split=False` runs exactly this body."""
     rep = _repair_foreign_files(tree, foreign, cands, write_set, allow_commit=True)
     if rep.get("refused_importers"):
         return {"item": "out-of-write-set foreign files (engine returns main's version)",
@@ -5967,14 +6077,7 @@ def _foreign_repair_check_item(tree: Path, branch: str, write_set: Any,
                               for f in foreign[:6])),
                 "id": FOREIGN_REPAIR_ID, "reason_code": "foreign_file_remaining",
                 "files": list(foreign)}
-    re_p = _git(["-c", "core.quotepath=false", "diff", "--name-only", "-z",
-                 "%s...HEAD" % base], tree)
-    still = [ln for ln in (re_p.stdout or "").split("\0") if ln.strip()]
-    remaining = foreign_write.foreign_files(
-        still, write_set, str(ticket_id or ""),
-        test_face=lambda f: path_gates.is_ticket_test_face(f, str(ticket_id or "")),
-        protected_paths=path_gates.PROTECTED_PATHS,
-        line_owned=_line_face)
+    remaining = foreign_again()
     parts = []
     if rep["restored"]:
         parts.append("restored to main's version: %s" % ", ".join(rep["restored"]))
@@ -5995,6 +6098,235 @@ def _foreign_repair_check_item(tree: Path, branch: str, write_set: Any,
                 "reason_code": "foreign_file_remaining", "files": list(remaining)}
     return {"item": "out-of-write-set foreign files (engine returns main's version)", "green": True,
             "detail": detail, "id": FOREIGN_REPAIR_ID, "files": list(foreign)}
+
+
+def _foreign_repair_split_face(tree: Path, base: str, write_set: Any,
+                               ticket_id: str, foreign: List[str],
+                               cands: List[Dict[str, str]],
+                               foreign_again) -> Dict[str, Any]:
+    """t261022 (KI-332): classify FIRST, then repair ONLY the pollution population.
+
+    The two populations are split by authorship evidence (`_foreign_population`),
+    and the record of what was decided — population, evidence, the commits that
+    authored each path, the engine repair commit id — rides on the receipt items
+    as the `foreign_repair` key, so a reader of gate_runs / the ticket face sees
+    the decision without a log hunt.
+
+    The engine NEVER repairs the ticket's own out-of-write-set write and never
+    deletes the file: the write-set judge owns that verdict, and a repair would
+    hide the write from it (the measured t261022-04 defect). The red items of the
+    refused populations are returned in `own_items` for the CALLER to place after
+    the write-set judge item; when nothing repairable is left there is no repair
+    item at all (nothing to say about the pollution face).
+    """
+    record: Dict[str, Any] = {
+        "patch_id": FOREIGN_REPAIR_SPLIT_PATCH_ID,
+        "rule": FOREIGN_REPAIR_SPLIT_RULE,
+        "files": {},
+        "repaired": [],
+        "left_in_place": [],
+        "repair_commit": "",
+        "repair_commit_paths": [],
+    }
+    # A write set the repair face cannot use makes ANY population verdict
+    # meaningless (with no usable set every changed path reads foreign):
+    # fail closed with the named reason and repair nothing, exactly as the
+    # pre-split face does. Checked FIRST, before any classification.
+    ok, why = foreign_write.repair_admissible(write_set)
+    if not ok:
+        record["skipped"] = why
+        return {"item": {"item": "out-of-write-set foreign files (engine returns main's version)",
+                         "green": False,
+                         "detail": "%s | foreign files: %s" % (why, ", ".join(foreign[:6])),
+                         "id": FOREIGN_REPAIR_ID,
+                         "reason_code": "foreign_file_remaining",
+                         "files": list(foreign),
+                         "foreign_repair": record},
+                "own_items": [], "record": record}
+    per: Dict[str, Dict[str, Any]] = {}
+    for f in foreign:
+        per[f] = _foreign_population(tree, base, f)
+        record["files"][f] = {
+            "population": per[f]["population"],
+            "evidence": per[f]["evidence"],
+            "commits": [{"sha": c["sha"], "parents": c["parents"],
+                         "subject": c["subject"][:80]} for c in per[f]["commits"][:6]],
+        }
+    polluted = [f for f in foreign
+                if per[f]["population"] == FOREIGN_POPULATION_POLLUTION]
+    own = [f for f in foreign if per[f]["population"] == FOREIGN_POPULATION_OWN]
+    ambiguous = [f for f in foreign
+                 if per[f]["population"] == FOREIGN_POPULATION_AMBIGUOUS]
+    record["left_in_place"] = list(own) + list(ambiguous)
+
+    def _refusal_item(paths: List[str], population: str, reason_code: str,
+                      next_action: str) -> Dict[str, Any]:
+        return {
+            "item": "out-of-write-set foreign files in place (engine refuses to repair)",
+            "green": False,
+            "detail": ("population=%s — not repaired: %s | evidence: %s | the "
+                       "out-of-write-set verdict belongs to the write-set item"
+                       % (population, ", ".join(paths[:6]),
+                          "; ".join("%s: %s" % (f, per[f]["evidence"])
+                                    for f in paths[:6]))),
+            "id": FOREIGN_REPAIR_ID,
+            "reason_code": reason_code,
+            "files": list(paths),
+            "next_action": next_action,
+            "foreign_repair": record,
+        }
+
+    own_items: List[Dict[str, Any]] = []
+    if own:
+        own_items.append(_refusal_item(
+            own, FOREIGN_POPULATION_OWN, "foreign_ticket_own_out_of_set",
+            "remove the file from the lane branch, or widen the ticket write set "
+            "through the write-set record, then retry_qc — the engine will not "
+            "delete this ticket's own commit"))
+    if ambiguous:
+        own_items.append(_refusal_item(
+            ambiguous, FOREIGN_POPULATION_AMBIGUOUS,
+            "foreign_classification_ambiguous",
+            "a human decides: the commit evidence cannot name the population (see "
+            "the evidence named here); the engine neither repairs nor deletes the "
+            "file"))
+    if not polluted:
+        return {"item": None, "own_items": own_items, "record": record}
+
+    rep = _repair_foreign_files(tree, polluted, cands, write_set, allow_commit=True,
+                                populations={f: per[f]["population"] for f in polluted})
+    record["repaired"] = list(rep["restored"]) + list(rep["removed"])
+    record["repair_commit"] = str(rep.get("committed") or "")
+    record["repair_commit_paths"] = list(record["repaired"])
+    if rep.get("refused_importers"):
+        return {"item": {"item": "out-of-write-set foreign files (engine returns main's version)",
+                         "green": False,
+                         "detail": "%s | refused: %s" % (
+                             rep["skipped"],
+                             "; ".join(rep["refused_importers"][:6])),
+                         "id": FOREIGN_REPAIR_ID,
+                         "reason_code": "foreign_repair_refused_importers",
+                         "files": list(polluted),
+                         "foreign_repair": record},
+                "own_items": own_items, "record": record}
+    if rep["skipped"]:
+        return {"item": {"item": "out-of-write-set foreign files (engine returns main's version)",
+                         "green": False,
+                         "detail": "%s | foreign files: %s | ownership: %s" % (
+                             rep["skipped"], ", ".join(polluted[:6]),
+                             "; ".join("%s %s" % (
+                                 f, rep["ownership"].get(f, "belongs to no live lane"))
+                                 for f in polluted[:6])),
+                         "id": FOREIGN_REPAIR_ID,
+                         "reason_code": "foreign_file_remaining",
+                         "files": list(polluted),
+                         "foreign_repair": record},
+                "own_items": own_items, "record": record}
+    remaining = [f for f in polluted if f in set(foreign_again())]
+    parts: List[str] = []
+    if rep["restored"]:
+        parts.append("restored to main's version: %s" % ", ".join(rep["restored"]))
+    if rep["removed"]:
+        parts.append("removed (main never had it): %s" % ", ".join(rep["removed"]))
+    if rep["failed"]:
+        parts.append("repair failed: %s" % "; ".join(
+            "%s (%s) %s" % (x["path"], x["op"], x["err"]) for x in rep["failed"]))
+    if rep["committed"]:
+        parts.append("engine repair commit: %s" % rep["committed"])
+    parts.append("population: %s" % "; ".join(
+        "%s %s (%s)" % (f, per[f]["population"], per[f]["evidence"])
+        for f in polluted[:6]))
+    detail = " | ".join(parts)
+    if remaining:
+        detail = "still foreign after repair: %s | %s" % (", ".join(remaining[:6]),
+                                                          detail)
+        return {"item": {"item": "out-of-write-set foreign files (engine returns main's version)",
+                         "green": False,
+                         "detail": detail,
+                         "id": FOREIGN_REPAIR_ID,
+                         "reason_code": "foreign_file_remaining",
+                         "files": list(remaining),
+                         "foreign_repair": record},
+                "own_items": own_items, "record": record}
+    return {"item": {"item": "out-of-write-set foreign files (engine returns main's version)",
+                     "green": True,
+                     "detail": detail,
+                     "id": FOREIGN_REPAIR_ID,
+                     "files": list(polluted),
+                     "foreign_repair": record},
+            "own_items": own_items, "record": record}
+
+
+def _foreign_repair_check_item(tree: Path, branch: str, write_set: Any,
+                               ticket_id: str,
+                               in_flight_ids: Any = None,
+                               *, split: bool = False) -> Dict[str, Any]:
+    """merge_check face: classify, NAME the owners first (the receipt item is
+    written before any repair is attempted), repair with one commit, re-run the
+    diff. Green only when nothing foreign remains; remaining foreign = red with
+    the ownership lines attached (spec 2 holds on the failure path).
+
+    Returns {"item", "own_items", "record"}:
+      item       the repair face's own check item, or None when the diff shows
+                 nothing foreign (no item, nothing to say);
+      own_items  red items of the populations the engine refuses to repair; the
+                 CALLER places them (after the write-set judge item — see the
+                 merge_check wiring), never this function;
+      record     the classification record, or None (nothing was classified).
+
+    `split=False` is the pre-split face verbatim (every foreign path repaired):
+    an in-flight pre-patch history evaluates workflow.patched()=False, its
+    activity argument keeps its default, and the old behaviour stays exact.
+    """
+    base, base_err = _merge_base_ref(str(branch), tree)
+    if base_err:
+        return {"item": {"item": "out-of-write-set foreign files (engine returns main's version)",
+                         "green": False,
+                         "detail": "diff baseline unresolved, foreign files unjudgeable (fail-closed): %s" % base_err,
+                         "id": FOREIGN_REPAIR_ID, "reason_code": "foreign_file_unjudgeable"},
+                "own_items": [], "record": None}
+    p = _git(["-c", "core.quotepath=false", "diff", "--name-status", "-z",
+              "%s...HEAD" % base], tree)
+    if p.returncode != 0:
+        return {"item": {"item": "out-of-write-set foreign files (engine returns main's version)",
+                         "green": False,
+                         "detail": "git diff failed: %s" % ((p.stderr or "").strip())[-200:],
+                         "id": FOREIGN_REPAIR_ID, "reason_code": "foreign_file_unjudgeable"},
+                "own_items": [], "record": None}
+    changed = [f for _st, f in foreign_write.parse_name_status_z(p.stdout)]
+    line_refs = _line_candidate_refs(tree)
+    head_own = _git(["rev-parse", "--verify", "--quiet", "HEAD"], tree)
+    head_sha = (head_own.stdout or "").strip() if head_own.returncode == 0 else ""
+
+    def _line_face(pp: str) -> bool:
+        return foreign_write.line_owned(
+            pp, _blob_hash(tree, head_sha, pp) or "",
+            lambda q, r: _blob_hash(tree, r, q), line_refs)
+
+    def _foreign_of(paths: List[str]) -> List[str]:
+        return foreign_write.foreign_files(
+            paths, write_set, str(ticket_id or ""),
+            test_face=lambda f: path_gates.is_ticket_test_face(f, str(ticket_id or "")),
+            protected_paths=path_gates.PROTECTED_PATHS,
+            line_owned=_line_face)
+
+    def _foreign_again() -> List[str]:
+        """The foreign set of the CURRENT branch state (re-read after a repair)."""
+        q = _git(["-c", "core.quotepath=false", "diff", "--name-only", "-z",
+                  "%s...HEAD" % base], tree)
+        still = [ln for ln in (q.stdout or "").split("\0") if ln.strip()]
+        return _foreign_of(still)
+
+    foreign = _foreign_of(changed)
+    if not foreign:
+        return {"item": None, "own_items": [], "record": None}
+    cands = _live_lane_candidates(tree, in_flight_ids, exclude_ref=str(branch or ""))
+    if split:
+        return _foreign_repair_split_face(tree, base, write_set, ticket_id,
+                                         foreign, cands, _foreign_again)
+    return {"item": _foreign_repair_legacy_item(tree, foreign, cands, write_set,
+                                               _foreign_again),
+            "own_items": [], "record": None}
 
 
 
@@ -6091,12 +6423,23 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     # MERGE_HEAD... defensively the repair re-reads MERGE_HEAD itself and
     # stages-only in that case). Placed before item 1 so every later item
     # reads the REPAIRED branch state. Nothing foreign = no item.
+    # t261022 (KI-332) population split: with the split on, ONLY the
+    # conflict-resolution absorption population is repaired here; the ticket's
+    # own out-of-write-set commits are left in place and their red items are
+    # returned separately (`foreign_own_items`) so the activity can place them
+    # AFTER the write-set judge item — the judge owns that verdict, and the file
+    # must still be there for it to judge.
+    foreign_own_items: List[Dict[str, Any]] = []
+    foreign_record: Optional[Dict[str, Any]] = None
     try:
-        _fr_item = _foreign_repair_check_item(
+        _fr = _foreign_repair_check_item(
             sc["tree"], str(sc.get("branch") or ""), sc.get("write_set"),
-            str(getattr(args, "ticket_id", "") or ""))
-        if _fr_item is not None:
-            checks.append(_fr_item)
+            str(getattr(args, "ticket_id", "") or ""),
+            split=bool(getattr(args, "foreign_repair_split", False)))
+        if _fr.get("item") is not None:
+            checks.append(_fr["item"])
+        foreign_own_items = list(_fr.get("own_items") or [])
+        foreign_record = _fr.get("record")
     except Exception as e:  # the pre-check never blocks the chain (same stance as item 0)
         checks.append({"item": "out-of-write-set foreign files (engine returns main's version)", "green": False,
                        "detail": "foreign-file repair pre-check fault (red, not raised): %s: %s"
@@ -6626,7 +6969,13 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             "merge_tree_excerpt": merge_tree_excerpt,
             # t260921-09：本仓 lane commit 计数（查询失败=-1 哨兵）——聚合层整票零
             # commit 全局闸消费；桩形态缺该键时聚合侧按「不可判」跳过全局闸（不误判全零）
-            "lane_commits": lane_commits_n}
+            "lane_commits": lane_commits_n,
+            # t261022 (KI-332): the populations the repair face refused to touch —
+            # the activity places them after the write-set judge item (see the
+            # merge_check wiring); the classification record rides along for the
+            # merge receipt.
+            "foreign_own_items": foreign_own_items,
+            "foreign_record": foreign_record}
 
 
 def _scope_dirs(dirs: List[str], sc: Dict[str, Any]) -> List[str]:
@@ -7356,6 +7705,8 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     conflict_files: List[str] = []
     merge_tree_excerpt = ""
     scope_commit_counts: Dict[str, int] = {}  # t260921-09：逐仓 commit 计数（-1=查询失败）
+    foreign_own_reds: List[Dict[str, Any]] = []   # t261022: per-scope refusal items
+    foreign_records: List[Dict[str, Any]] = []     # t261022: the classification records
     for sc in scopes:
         core = await _merge_check_one_scope(args, sc, wt, multi)
         sc_checks = core["checks"]
@@ -7363,6 +7714,12 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
             for c in sc_checks:
                 c["item"] = "[%s] %s" % (sc["name"], c["item"])
         checks.extend(sc_checks)
+        for _own in (core.get("foreign_own_items") or []):
+            if multi:  # same tree prefix as every other item of this scope
+                _own = dict(_own, item="[%s] %s" % (sc["name"], _own.get("item") or ""))
+            foreign_own_reds.append(_own)
+        if isinstance(core.get("foreign_record"), dict):
+            foreign_records.append(core["foreign_record"])
         lc = core.get("lane_commits")
         if isinstance(lc, int) and not isinstance(lc, bool):
             # t261019-03: name the repo from the scope's real fields - a bare "?" in
@@ -7376,6 +7733,26 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         conflict_files.extend(core["conflict_files"])
         if core["merge_tree_excerpt"]:
             merge_tree_excerpt = (merge_tree_excerpt + "\n" + core["merge_tree_excerpt"]).strip()
+    # t261022 (KI-332): the refusal items of the split repair face. Placement is
+    # the ownership contract, both halves of it:
+    #   a) AFTER the per-scope items (which include the in-lane verify_lane
+    #      write-set judge), so the write-set judge keeps the PRIMARY
+    #      blocked_detail red — its verify_red names the out-of-write-set file,
+    #      and the engine's refusal rides along in blocked_detail.reds;
+    #   b) BEFORE the rehearsal item — checks[-1] must stay the merge rehearsal
+    #      (the conflict-classification contract reads checks[:-1] as "not a
+    #      conflict"), so these reds stay human-classified, never auto-resolved.
+    for _own in foreign_own_reds:
+        checks.insert(max(len(checks) - 1, 0), _own)
+    if foreign_records:
+        activity.logger.info(
+            "[%s] merge_check foreign repair classification (t261022): %s",
+            args.ticket_id,
+            " ; ".join("%s: %s" % (
+                rec.get("patch_id") or "pre-split",
+                "; ".join("%s=%s" % (p, (v or {}).get("population"))
+                          for p, v in (rec.get("files") or {}).items()))
+                for rec in foreign_records)[:2000])
     # 保险丝B（t260910-03）：多仓写集必须逐仓物化落成，任一成员仓缺失 → 红灯。
     # 插入位置钉死在 rehearsal 项**之前**（rehearsal 必须保持 checks[-1]，冲突分类
     # 把 checks[:-1] 当非冲突类——保险丝红恒为非冲突类，绝不进自动消解回路，

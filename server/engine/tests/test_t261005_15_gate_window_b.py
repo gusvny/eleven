@@ -269,14 +269,24 @@ def test_w9_static_lock_predicate_and_anchor():
     assert 'CONCURRENCY_GATE_PATCH_ID = "dev-lane-concurrency-gate-v1"' in dl
     assert ('LIGHT_CONCURRENCY_GATE_PATCH_ID = '
             '"light-lane-concurrency-gate-v1"' in ll)
-    # Every gate call site reads the predicate (4 dev + 2 light sites).
+    # Every gate call site reads a replay predicate (6 dev + 3 light sites as of
+    # t261022). The CL-1 family's predicate is _concurrency_gate_active (marker
+    # arm + window-(b) time arm). The t261022 merge-gate re-acquire is guarded by
+    # the bare NEW marker MERGE_SLOT_RELEASE_PATCH_ID instead, and that is
+    # deliberate: the time arm of _concurrency_gate_active would evaluate True
+    # for every history started after CL-1 but before t261022 - those histories
+    # do not carry the new acquire, so running it is exactly the TMPRL1100
+    # divergence this family of tests exists to prevent. Judgement: a bare
+    # patched() marker is a replay predicate too, and for a brand-new patch id it
+    # is the ONLY correct one.
     for src in (dl, ll):
         lines = src.splitlines()
         for i, line in enumerate(lines):
             if "await self._concurrency_gate()" in line:
                 window = "\n".join(lines[max(0, i - 4):i + 1])
-                assert "_concurrency_gate_active(" in window, (
-                    "gate call not behind the replay predicate at line %d"
+                assert ("_concurrency_gate_active(" in window
+                        or "workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID)" in window), (
+                    "gate call not behind a replay predicate at line %d"
                     % (i + 1,))
     # Both emitting helpers gate on the predicate, not on bare patched().
     for helper in ("async def _concurrency_release(",

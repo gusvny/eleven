@@ -4867,6 +4867,12 @@ class MergeCheckArgs:
     # no record / old ticket). Cross-process readers take absolute paths only
     # (boundary rule); merge_check uses it for the review face's history lines.
     write_set_record_path: str = ""
+    # t261022 (KI-332): the foreign-repair population split. The workflows evaluate
+    # workflow.patched(FOREIGN_REPAIR_SPLIT_PATCH_ID) at the call site and hand the
+    # verdict down here (an activity has no workflow context, so patched() cannot be
+    # called inside merge_check). Defaulted False = the PRE-SPLIT face, so a history
+    # that recorded the old command sequence replays it unchanged.
+    foreign_repair_split: bool = False
 
 
 # ---- Ticket t260828-09: the UI acceptance machinery (the screenshot channel + look-at-the-image review + merge_check's evidence gate) ----

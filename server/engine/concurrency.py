@@ -30,14 +30,19 @@ plan-review checklist:
 
 Slot accounting (decided, tested — see tests/test_t261004_32_concurrency.py):
 the slot unit is the ticket's lane run. Lifetime = acquired before the first
-stage starts, released for real at two points: the ticket is paused, and the
-ticket terminates. The other two rule points (stage end, human-gate
-transition) are ATOMIC RENEWALS: the holder record's reason is rewritten in the
-same locked step (running <-> human-hold). There is deliberately no
+stage starts, released for real at three points: the ticket is paused, the
+ticket terminates, and the ticket enters the MERGE human gate (t261022, host
+order 261022 — a ticket waiting for the merge signature would otherwise starve
+the queue: seven merge-waiting tickets held all ten slots for hours). The
+remaining rule points (stage end, the human-gate transition of every blocked
+stage) are ATOMIC RENEWALS: the holder record's reason is rewritten in the same
+locked step (running <-> human-hold). There is deliberately no
 between-stages window: a continuing ticket never loses its slot to a queued
 ticket, so no mid-lane demotion race exists; acquire() on an already-holding
-ticket is immediate. A human-gate ticket keeps its slot on purpose (rule 3);
-after the signature it continues without re-queueing. The 60 s re-poll backstop
+ticket is immediate. A ticket blocked at a stage keeps its slot on purpose
+(rule 3, unchanged by t261022); only the merge gate hands the slot back, and a
+ticket leaving that gate re-acquires through the ordinary FIFO queue (it never
+jumps). The 60 s re-poll backstop
 in the workflow gate protects WAITERS (a missed promotion resolves within one
 poll); it is NOT leak protection — a holder whose workflow died mid-stage is
 cleared by `ticket.py {"op":"concurrency","reconcile":true}` (named output).
@@ -77,11 +82,20 @@ STATE_VERSION = 1
 MIN_LIMIT = 1
 MAX_LIMIT = 10
 UNLIMITED = "unlimited"
-# release/renew cause vocabulary — the four rule points, exactly.
+# release/renew cause vocabulary — the rule points, exactly.
 CAUSE_STAGE_END = "stage-end"
 CAUSE_TERMINATED = "terminated"
 CAUSE_HUMAN_GATE = "human-gate"
 CAUSE_PAUSED = "paused"
+#: t261022 (host order 261022): the MERGE human gate is the one gate that hands
+#: the slot back while it waits for the signature — a merge-waiting ticket is
+#: not doing work, so holding the slot starves the queue (measured: 7 waiting
+#: tickets held all 10 slots for hours while the delivery line was frozen).
+#: Its own cause word (never `paused`, never `human-gate`) so the ledger, the
+#: panel face and the ticket log can tell a merge-wait release from a zombie
+#: holder. Every other human gate / blocked stage keeps CAUSE_HUMAN_GATE and
+#: keeps holding (rule 3, unchanged).
+CAUSE_MERGE_WAIT = "merge-wait"
 REASON_RUNNING = "running"
 REASON_HUMAN_HOLD = "human-hold"
 
@@ -376,7 +390,14 @@ def _face(doc: Dict[str, Any], now: float) -> Dict[str, Any]:
               "since": e.get("since"),
               "waited_s": round(now - float(e.get("since") or now), 3)}
              for i, e in enumerate(doc.get("queue", []))]
-    return {"holders": holders, "queue": queue}
+    # t261022: tickets waiting at the MERGE gate with no slot. Named on the face
+    # so the panel can tell "released on purpose, waiting for a signature" from
+    # a holder that leaked — this list is never a holder list.
+    merge_wait = [{"ticket": e.get("ticket"), "since": e.get("since"),
+                   "waiting_s": round(now - float(e.get("since") or now), 3)}
+                  for e in doc.get("merge_wait", [])
+                  if isinstance(e, dict)]
+    return {"holders": holders, "queue": queue, "merge_wait": merge_wait}
 
 
 def _locked(root: str):
@@ -432,6 +453,13 @@ def acquire(project_key: str, ticket: str, priority: bool = False) -> Dict[str, 
         doc = g.doc
         holders = doc["holders"]
         queue = doc["queue"]
+        # t261022: taking the gate again (or queueing for it) means the ticket
+        # has LEFT the merge gate — its merge-wait face entry is dropped here so
+        # the panel never sees a stale "waiting for a signature" record.
+        if any(isinstance(e, dict) and e.get("ticket") == t
+               for e in doc.get("merge_wait", [])):
+            doc["merge_wait"] = [e for e in doc.get("merge_wait", [])
+                                 if not (isinstance(e, dict) and e.get("ticket") == t)]
         held = next((h for h in holders if h.get("ticket") == t), None)
         if held is not None:
             # t261019-31: the already-holding early return is also the holder
@@ -624,22 +652,31 @@ def _promote_live_head(doc: Dict[str, Any], now: float) -> Dict[str, Any]:
 
 
 def release(project_key: str, ticket: str, cause: str) -> Dict[str, Any]:
-    """Release the slot at a real release point (paused / terminated) and
-    promote the queue head if the freed slot covers it. Idempotent: releasing
+    """Release the slot at a real release point (paused / terminated / merge-wait)
+    and promote the queue head if the freed slot covers it. Idempotent: releasing
     a ticket that holds nothing is a no-op receipt, not an error.
 
-    `human-gate` is deliberately NOT a freeing cause (rule 3: the human gate
-    HOLDS its slot — design defect finding #1 of the t261004-32 test-design
-    stage): that rule point is an atomic renew (see renew/CAUSE_HUMAN_GATE),
-    never a release. Refused here by name so a mis-wired call site is loud."""
+    `human-gate` is deliberately NOT a freeing cause for a blocked stage (rule 3:
+    a blocked stage HOLDS its slot — design defect finding #1 of the t261004-32
+    test-design stage): that rule point is an atomic renew (see
+    renew/CAUSE_HUMAN_GATE), never a release. Refused here by name so a mis-wired
+    call site is loud.
+
+    t261022 (host order 261022): the MERGE human gate is the exception and frees
+    the slot with its OWN cause word (`merge-wait`), so a ticket waiting for a
+    merge signature no longer starves the queue. The freed ticket is recorded on
+    the ledger's `merge_wait` face (not as a holder) and leaves that face when it
+    takes a slot again — the panel can therefore tell a merge-wait release from a
+    zombie holder."""
     k = _check_key(project_key)
     t = str(ticket or "").strip()
-    if cause not in (CAUSE_TERMINATED, CAUSE_PAUSED):
+    if cause not in (CAUSE_TERMINATED, CAUSE_PAUSED, CAUSE_MERGE_WAIT):
         raise ValueError(
             "Concurrency slot release refused: cause %r is not in the real-"
-            "release vocabulary (terminated|paused) - human-gate is an atomic "
-            "renew (the human gate eats the slot on purpose), never a release "
-            "point" % cause)
+            "release vocabulary (terminated|paused|merge-wait) - a blocked or "
+            "human-gate stage is an atomic renew (it holds the slot on purpose; "
+            "only the MERGE gate releases, with the merge-wait cause), never a "
+            "release point" % cause)
     root = os.path.join(str(shared.perkey_projects_root()), k)
     now = time.time()
     with _locked(root) as g:
@@ -647,7 +684,13 @@ def release(project_key: str, ticket: str, cause: str) -> Dict[str, Any]:
         before = len(doc["holders"])
         doc["holders"] = [h for h in doc["holders"] if h.get("ticket") != t]
         doc["queue"] = [e for e in doc["queue"] if e.get("ticket") != t]
+        # Any real release clears the ticket's merge-wait face too (a cancelled or
+        # paused gate waiter must not linger as "waiting for a signature").
+        doc["merge_wait"] = [e for e in doc.get("merge_wait", [])
+                             if not (isinstance(e, dict) and e.get("ticket") == t)]
         released = len(doc["holders"]) < before
+        if released and cause == CAUSE_MERGE_WAIT:
+            doc["merge_wait"].append({"ticket": t, "since": now})
         promoted = None
         dropped_stale: List[str] = []
         limit = load_limit(k)
@@ -720,7 +763,8 @@ def reconcile(project_key: str, alive_tickets: Iterable[str],
     only `dead` is a zombie, and fail-closed means "do not drop on unknown".
     Callers omitting the arguments keep today's behavior. Promotion follows
     in the same locked step. Named output: exactly which stale holders were
-    dropped, and which holders are draining."""
+    dropped, and which holders are draining. The `merge_wait` face (t261022) is
+    pruned by the same rule: a gate waiter nobody could prove alive leaves it."""
     k = _check_key(project_key)
     alive = {str(t) for t in (alive_tickets or ())}
     draining = {str(t) for t in (draining_tickets or ())} - alive
@@ -737,6 +781,13 @@ def reconcile(project_key: str, alive_tickets: Iterable[str],
                    and h.get("ticket") not in draining
                    and h.get("ticket") not in unknown]
         doc["holders"] = keep
+        # t261022: the merge-wait face is not a second zombie channel — a gate
+        # waiter the caller could not prove alive leaves the face exactly like a
+        # dead holder leaves the holder list (unknown/draining keep it, same
+        # fail-closed stance as above).
+        doc["merge_wait"] = [e for e in doc.get("merge_wait", [])
+                             if isinstance(e, dict)
+                             and e.get("ticket") in alive | draining | unknown]
         promoted = None
         dropped_stale: List[str] = []
         limit = load_limit(k)

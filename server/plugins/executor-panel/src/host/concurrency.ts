@@ -85,6 +85,16 @@ export interface ConcurrencyHolder {
   held_s: number | null
 }
 
+/** t261022: a ticket that RELEASED its slot on purpose to wait for the merge
+ *  signature (engine cause `merge-wait`). It is not a holder and not a queue
+ *  entry — a separate face, so a deliberate release is never read as a leaked
+ *  (zombie) holder and never as somebody working. */
+export interface ConcurrencyMergeWaitEntry {
+  ticket: string
+  since: number | null
+  waiting_s: number | null
+}
+
 export interface ConcurrencyQueueEntry {
   ticket: string
   position: number
@@ -100,6 +110,10 @@ export interface ConcurrencyFace {
   decl: string
   holders: ConcurrencyHolder[]
   queue: ConcurrencyQueueEntry[]
+  /** t261022 face field: merge-waiting tickets that hold no slot. An engine
+   *  built before that ticket does not publish the key — absence parses as an
+   *  empty list, never as a refusal (the ledger is still fully readable). */
+  merge_wait: ConcurrencyMergeWaitEntry[]
 }
 
 export type ConcurrencyRead = ConcurrencyFace | { ok: false; reason: string }
@@ -231,11 +245,29 @@ export function parseConcurrencyRead(stdout: string): ConcurrencyRead {
       waited_s: typeof ee.waited_s === 'number' ? ee.waited_s : null,
     })
   }
+  // t261022: merge-waiting tickets (released the slot on purpose, waiting for
+  // the signature). Absent key = an engine built before t261022: an empty list,
+  // never a refusal (the rest of the ledger is still a complete snapshot).
+  const merge_wait: ConcurrencyMergeWaitEntry[] = []
+  if (face.merge_wait !== undefined && face.merge_wait !== null) {
+    if (!Array.isArray(face.merge_wait)) return bad('merge_wait must be an array when present')
+    for (const e of face.merge_wait) {
+      if (typeof e !== 'object' || e === null || typeof (e as Record<string, unknown>).ticket !== 'string') {
+        return bad('every merge_wait entry needs a ticket string')
+      }
+      const ee = e as Record<string, unknown>
+      merge_wait.push({
+        ticket: ee.ticket as string,
+        since: typeof ee.since === 'number' ? ee.since : null,
+        waiting_s: typeof ee.waiting_s === 'number' ? ee.waiting_s : null,
+      })
+    }
+  }
   return {
     ok: true, project: face.project,
     limit: face.limit as number | null,
     unlimited: face.unlimited as boolean,
-    decl: face.decl, holders, queue,
+    decl: face.decl, holders, queue, merge_wait,
   }
 }
 

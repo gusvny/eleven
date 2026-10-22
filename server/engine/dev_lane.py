@@ -68,11 +68,14 @@ with workflow.unsafe.imports_passed_through():
     # t261004-32 (CL-1 engine half): project-level concurrency cap. The semantic
     # source of truth (fail-closed declaration loading, lock-guarded ledger)
     # lives in concurrency.py - this file only wires it: judge the slot before a
-    # stage, account at the four points (stage boundary / human gate = atomic
-    # renew, pause / terminal = real release), queue visibility.
+    # stage, account at the rule points (stage boundary / blocked stage = atomic
+    # renew, pause / terminal = real release; t261022 adds the merge gate = real
+    # release with its own merge-wait cause, then an ordinary FIFO re-acquire),
+    # queue visibility.
     from concurrency import (
         AcquireArgs,
         CAUSE_HUMAN_GATE,
+        CAUSE_MERGE_WAIT,
         CAUSE_PAUSED,
         CAUSE_TERMINATED,
         ReleaseArgs,
@@ -107,6 +110,18 @@ with workflow.unsafe.imports_passed_through():
         CertWaitResult,
         merge,
         merge_check,
+        # t261022 (KI-332): the foreign-repair population split. merge_check's
+        # pre-check (foreign_file_repair) was built for another lane's unlanded
+        # work absorbed by a conflict resolution; it also deleted the ticket's OWN
+        # out-of-write-set commit, and the write-set judge then diffed a clean
+        # branch and reported green (measured on t261022-04). The split is decided
+        # inside the activity, but switching the face is a behaviour change, so the
+        # call site gates it with workflow.patched() on this id: an in-flight
+        # pre-patch history evaluates False, the activity argument keeps its default
+        # (False) and the pre-split face runs verbatim (KI-061 replay discipline).
+        # The id lives next to the rule text so the marker cannot drift from it;
+        # light-lane imports this one id from here.
+        FOREIGN_REPAIR_SPLIT_PATCH_ID,
         # t261009-58: the ONE effective write set — record persistence + holder scan
         persist_write_set_record,
         annex_holder_scan,
@@ -859,6 +874,23 @@ KI220_ZERO_RUN_PATCH_ID = "t261008-24-zero-run-supply-stop-v1"
 #: One shared id for both lanes: patched markers are judged against each
 #: workflow instance's own history, so there is no cross-lane collision face.
 CONCURRENCY_GATE_PATCH_ID = "dev-lane-concurrency-gate-v1"
+
+#: Patch guard MERGE_SLOT_RELEASE_PATCH_ID (t261022, host order 261022): a ticket
+#: parked at the MERGE human gate stops holding its concurrency slot. Before this
+#: marker the gate did an atomic renew (reason -> human-hold) and kept the slot
+#: for the whole signature wait; measured cost: seven merge-waiting tickets held
+#: all ten slots for hours while the delivery line froze. New rule, both gate
+#: sites (dev-lane, quickmanual lane; the light lane carries the same block):
+#: entering the merge gate = real release with the named `merge-wait` cause, and
+#: leaving the gate (signature, rework, refusal) = ordinary FIFO re-acquire
+#: through _concurrency_gate() before any further work - the ticket queues behind
+#: whoever is already waiting, it never jumps.
+#: Rule 3 is unchanged elsewhere: every other blocked stage / human gate keeps
+#: holding its slot (CAUSE_HUMAN_GATE renew). Replay discipline: the release sits
+#: behind this marker and the OLD renew call stays reachable as the else branch,
+#: so a history recorded before it schedules the same command sequence it always
+#: did (TMPRL1100 would otherwise hit every ticket parked at merge today).
+MERGE_SLOT_RELEASE_PATCH_ID = "dev-lane-merge-slot-release-v1"
 
 #: Replay anchor for the CL-1 gate family (t261005-15): the instant CL-1
 #: (775bdb1) landed, 2026-10-05 07:20:14 +0800. A workflow's
@@ -2210,8 +2242,9 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             self._touch()
 
     async def _concurrency_release(self, cause: str) -> None:
-        """Real release (paused / terminated) + queue-head promotion. Local
-        no-op without a project key (nothing was ever acquired)."""
+        """Real release (paused / terminated / merge-wait) + queue-head
+        promotion. Local no-op without a project key (nothing was ever
+        acquired)."""
         # t261005-14: pre-CL-1 replay never emitted this command - skip it
         # entirely (one guard here covers every caller: stage-boundary pause
         # accounting, terminal release; both lanes share this helper).
@@ -2233,6 +2266,15 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             self._log("Terminal accounting: slot released%s" % (
                 "; queue head %s promoted" % r.get("promoted")
                 if r.get("promoted") else ""))
+        elif cause == CAUSE_MERGE_WAIT:
+            # t261022 (host order 261022): the ticket face says the slot was handed
+            # back for the signature wait - never a silent disappearance from the
+            # holder list (the panel face carries the same fact, see the ledger's
+            # merge_wait entry).
+            self._log("Merge-wait accounting: slot released for the merge signature "
+                      "wait%s (the ticket re-queues when it leaves the gate)" % (
+                          "; queue head %s promoted" % r.get("promoted")
+                          if r.get("promoted") else ""))
 
     async def _concurrency_release_if_paused(self) -> None:
         """Rule 4: a paused ticket does not hold a slot. Called at the stage
@@ -6210,7 +6252,14 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                    # write-set record's history (who widened, why) —
                                    # absolute path (boundary rule), empty = old ticket
                                    write_set_record_path=str(
-                                       self.meta.get("write_set_record_path") or "")),
+                                       self.meta.get("write_set_record_path") or ""),
+                                   # t261022 (KI-332): the repair face splits the
+                                   # absorbed-pollution population from the ticket's
+                                   # own out-of-write-set commits. Un-patched (an
+                                   # in-flight pre-patch history) keeps the legacy
+                                   # argument and the pre-split behaviour verbatim.
+                                   foreign_repair_split=workflow.patched(
+                                       FOREIGN_REPAIR_SPLIT_PATCH_ID)),
                     start_to_close_timeout=MERGE_CHECK_TO, retry_policy=RETRY)
                 mc = raw if isinstance(raw, MergeCheckResult) else MergeCheckResult(
                     green=bool(raw.get("green")), checks=list(raw.get("checks") or []),
@@ -6577,9 +6626,17 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 self.human_context["merge"] = {"context_text": ctx_text}
                 self.meta["stage_state"] = "awaiting-human"
                 self._touch()
-                # t261004-32 (rule 3): the human gate eats the slot on purpose - the
+                # t261004-32 (rule 3): a blocked stage eats the slot on purpose - the
                 # ledger atomically flips to human-hold (no window, nothing handed to
-                await self._concurrency_renew(CAUSE_HUMAN_GATE)
+                # a queued ticket). t261022 (host order 261022): the MERGE gate is the
+                # one exception - it hands the slot back with its own merge-wait cause
+                # so a ticket waiting for the signature cannot starve the queue. The
+                # old renew branch stays reachable so histories recorded before the
+                # marker replay their exact command sequence.
+                if workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
+                    await self._concurrency_release(CAUSE_MERGE_WAIT)
+                else:
+                    await self._concurrency_renew(CAUSE_HUMAN_GATE)
                 self._log("merge 人审挂起，等 sign signal（merge_check 已全绿）")
                 self._mark("merge", "awaiting-human", "waiting for signature: sign(gate=merge)")
                 # t260928-13：人门是无限期等待，先冲账再挂起（事件账本 flush 点）
@@ -6624,6 +6681,11 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                         "implement")
                     continue
                 # Approved signature → real merge
+                # t261022: leaving the merge gate takes the slot again through the
+                # ordinary gate - the ticket queues behind whoever is already
+                # waiting, so it never jumps the queue on the way out.
+                if workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
+                    await self._concurrency_gate()
                 self.meta["stage_state"] = "running"
                 self._mark("merge", "running", "human sign-off (%s), executing merge" % sig.who)
                 # t260910-14: the pre-run-next-ticket step retired — merge proceeds straight to
@@ -7708,7 +7770,11 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                            path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
                            authorizations=self._protected_authz_records(),
                            no_file_changes=bool(self.meta.get("no_file_changes")),
-                           last_green_run=dict(self.meta.get("last_green_run") or {})),
+                           last_green_run=dict(self.meta.get("last_green_run") or {}),
+                           # t261022 (KI-332): the foreign-repair population split
+                           # (same marker as dev-lane; un-patched histories keep the
+                           # legacy argument and the pre-split face verbatim).
+                           foreign_repair_split=workflow.patched(FOREIGN_REPAIR_SPLIT_PATCH_ID)),
             start_to_close_timeout=MERGE_CHECK_TO, retry_policy=RETRY)
         mc = raw if isinstance(raw, MergeCheckResult) else MergeCheckResult(
             green=bool(raw.get("green")), checks=list(raw.get("checks") or []),
@@ -8112,7 +8178,14 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                 self.human_context["merge"] = {"context_text": ctx_text}
                 self.meta["stage_state"] = "awaiting-human"
                 self._touch()
-                await self._concurrency_renew(CAUSE_HUMAN_GATE)
+                # t261022 (host order 261022): the merge gate hands the slot back
+                # while it waits for the signature (a waiting gate would otherwise
+                # starve the queue). Same rule, same cause word, same replay guard
+                # as the dev-lane site; the old renew branch stays reachable.
+                if workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
+                    await self._concurrency_release(CAUSE_MERGE_WAIT)
+                else:
+                    await self._concurrency_renew(CAUSE_HUMAN_GATE)
                 wb = dict(self.meta.get("worked_by") or {})
                 self._log("merge gate parked: waiting for the human sign signal "
                           "(merge_check is green); the working session (%s) cannot "
@@ -8135,6 +8208,10 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                         % (sig.note, sig.who),
                         "work")
                     continue
+                # t261022: take the slot again through the ordinary gate before
+                # any merge work - the ticket queues, it never jumps.
+                if workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
+                    await self._concurrency_gate()
                 self.meta["stage_state"] = "running"
                 self._mark("merge", "running", "human signed off (%s) - merging"
                            % sig.who)
