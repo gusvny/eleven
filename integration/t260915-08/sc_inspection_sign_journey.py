@@ -35,6 +35,7 @@ inspection_trigger.py sign 同义通道承诺。
 
 跑法：python3 -B integration/t260915-08/sc_inspection_sign_journey.py
 """
+import json
 import os
 import shutil
 import sys
@@ -128,6 +129,11 @@ def main() -> int:
     with open(decl, "w", encoding="utf-8") as f:
         f.write(DECL)
     clean = lib.clean_tree("sign-journey")   # 零发现根：票面 findings=[] heartbeat=true
+    # 261023: the inspection lane refuses a period with no diff base ("no usable
+    # previous-period base point"). The fixture tree is now a git repo with one
+    # commit; declare that commit as the previous-period base through the engine's
+    # own bootstrap seam so the period can actually review a surface.
+    lib.seed_surface_bootstrap(INSTANCE, clean.base_sha)
     tid = None
     try:
         with lib.StageWorker(private_queue):
@@ -157,9 +163,13 @@ def main() -> int:
                 ok_gate, snap = poll(at_gate, POLL_OPEN, 2)
                 if not ok_gate:
                     _r, s = ticket_state(tid)
+                    print("SNAP %s" % json.dumps(s or {}, ensure_ascii=False)[:1500],
+                          flush=True)
                     failures.append("票 %s 在 %ds 内未到 close/awaiting-human（stage=%r state=%r）"
-                                    "——人门段断链" % (tid, POLL_OPEN,
-                                                      s and s.get("stage"), s and s.get("stage_state")))
+                                    "——人门段断链；blocked_reason=%r" %
+                                    (tid, POLL_OPEN, s and s.get("stage"),
+                                     s and s.get("stage_state"),
+                                     str((s or {}).get("blocked_reason"))[:400]))
                 else:
                     face = snap.get("face") or {}
                     if "human_gate" in face:
@@ -293,7 +303,12 @@ def main() -> int:
                                         % (flt,))
     finally:
         clean.cleanup()
-        shutil.rmtree(workdir, ignore_errors=True)
+        # 261023: keep the fixture tree on demand (S08_KEEP_TMP=1) so a red can be
+        # diagnosed from the ticket's own records instead of from a one-line summary.
+        if os.environ.get("S08_KEEP_TMP") == "1":
+            print("TMP preserved: %s" % workdir, flush=True)
+        else:
+            shutil.rmtree(workdir, ignore_errors=True)
         try:
             lib.cleanup_tickets()
         except Exception:  # noqa: BLE001——清理失败不掩盖判定面（票在隔离台，随 retention 收敛）

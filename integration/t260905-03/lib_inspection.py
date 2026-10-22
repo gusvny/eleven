@@ -419,6 +419,28 @@ class RepoTree:
         self.root = tempfile.mkdtemp(prefix="sandbar-insp-%s-" % label)
         self._before = None
 
+    def git_init(self) -> str:
+        """261023: the inspection lane resolves a BASE POINT with `git rev-parse`
+        in the repo root, so a fixture tree has to be a repository with at least
+        one commit. Measured red (t260915-08): `rc=128 fatal: not a git
+        repository` — the lane refused the whole period, which is correct product
+        behaviour and a fixture gap on our side."""
+        env = dict(os.environ)
+        env.setdefault("GIT_AUTHOR_NAME", "sandbar-fixture")
+        env.setdefault("GIT_AUTHOR_EMAIL", "fixture@sandbar.local")
+        env.setdefault("GIT_COMMITTER_NAME", "sandbar-fixture")
+        env.setdefault("GIT_COMMITTER_EMAIL", "fixture@sandbar.local")
+        subprocess.run(["git", "init", "-q"], cwd=self.root, env=env,
+                       check=False, capture_output=True)
+        subprocess.run(["git", "add", "-A"], cwd=self.root, env=env,
+                       check=False, capture_output=True)
+        subprocess.run(["git", "commit", "-q", "-m", "fixture base"],
+                       cwd=self.root, env=env, check=False, capture_output=True)
+        rev = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.root, env=env,
+                             check=False, capture_output=True, text=True)
+        self.base_sha = (rev.stdout or "").strip()
+        return self.root
+
     def write(self, rel: str, text: str) -> str:
         path = os.path.join(self.root, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -475,6 +497,28 @@ def _ui_guard_mjs(anchor: str, producer_rel: str = PRODUCER_REL) -> str:
     )
 
 
+def seed_surface_bootstrap(instance_id: str, sha: str,
+                           ledger_dir: str = None) -> str:
+    """Declare the previous-period base point for one fixture instance (261023).
+
+    The inspection lane resolves its diff base by walking the previous period's
+    ledger row and, when that chain is dead, accepts an OPERATOR-DECLARED
+    bootstrap file (`surface-bootstrap-<instance>.json`, full 40-hex sha of a
+    real commit). A fixture tree has no earlier period at all, so without this
+    file the lane refuses the period by name ("no usable previous-period base
+    point") — correct product behaviour, missing fixture furniture. The path is
+    the engine's own declared seam, not a bypass."""
+    # Same single source the reader uses: the env override, else the engine's own
+    # <repo>/server/engine/out/inspection (TP_DIR's parent chain).
+    d = (ledger_dir or os.environ.get("SANDBAR_INSPECTION_DIR")
+         or os.path.join(TP_DIR, "out", "inspection"))
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, "surface-bootstrap-%s.json" % instance_id)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"schema": 1, "base_ref": sha}, f)
+    return path
+
+
 def ki051_high_tree(label: str = "ki051-high") -> RepoTree:
     """纯重写漂移（③ high 支路）：生产方在位、锚字面与核心片段（隔离台/新建会话）全缺。"""
     t = RepoTree(label)
@@ -485,6 +529,7 @@ def ki051_high_tree(label: str = "ki051-high") -> RepoTree:
             'const section = "项目行";\n'
             'const label = section + "『+ 钮』";\n'
             "export function buttonLabel() { return label; }\n")
+    t.git_init()
     return t
 
 
@@ -497,6 +542,7 @@ def ki051_med_tree(label: str = "ki051-med") -> RepoTree:
             'const section = "隔离台项目行";\n'
             'const label = section + "『+ " + "钮』";\n'
             "export function buttonLabel() { return label; }\n")
+    t.git_init()
     return t
 
 
@@ -508,6 +554,7 @@ def ki051_healthy_tree(label: str = "ki051-healthy") -> RepoTree:
     t.write(PRODUCER_REL,
             'const label = "%s";\n'
             "export function buttonLabel() { return label; }\n" % KI051_OLD_ANCHOR)
+    t.git_init()
     return t
 
 
@@ -517,6 +564,7 @@ def ki051_orphan_tree(label: str = "ki051-orphan") -> RepoTree:
     t.write_scenarios([("t-fix-guard", "隔离台新建会话锚守卫夹具", "true")])
     t.write("integration/sc_guard_orphan.mjs",
             _ui_guard_mjs(KI051_OLD_ANCHOR, "server/plugins/workbench/src/client/definitely_absent.mjs"))
+    t.git_init()
     return t
 
 
@@ -531,6 +579,7 @@ def duplicate_tree(label: str = "dup") -> RepoTree:
         ("t-fix-alpha-copy", intent_a + "（副本）", "node baselines/a.mjs"),
         ("t-fix-gamma", "度量面板陈旧缓存自愈：TTL 过期重算、双视图收敛、自愈不自锁", "node baselines/b.mjs"),
     ])
+    t.git_init()
     return t
 
 
@@ -542,6 +591,7 @@ def stale_tree(label: str = "stale") -> RepoTree:
             'cmd_target = "node integration/baselines/definitely_missing_asset.mjs"  # 小写赋值：真仓路径断言形态\n'
             'check_line("server/capture.mjs", 999)  # L999 越界：目标不足 999 行\n')
     t.write("server/capture.mjs", "export const ok = true;\n")
+    t.git_init()
     return t
 
 
@@ -558,6 +608,7 @@ def clean_tree(label: str = "clean") -> RepoTree:
             'PRODUCER = "server/capture.mjs"\n'
             'assert "面板标题口径" in body, "锚缺失"\n')
     t.write("server/capture.mjs", 'export const label = "面板标题口径";\n')
+    t.git_init()
     return t
 
 
@@ -566,6 +617,7 @@ def malformed_guard_tree(label: str = "malformed") -> RepoTree:
     t = RepoTree(label)
     t.write_scenarios([("t-fix-malformed", "畸形输入夹具", "true")])
     t.write_bytes("integration/sc_garbage.py", b"\x00\x01\xff binary garbage \xfe")
+    t.git_init()
     return t
 
 
@@ -577,4 +629,5 @@ def malformed_manifest_tree(label: str = "bad-manifest") -> RepoTree:
             '    ("t-fix-ok", "正常条目意图", "true"),\n'
             '    ("bad",),\n'
             ']\n')
+    t.git_init()
     return t
