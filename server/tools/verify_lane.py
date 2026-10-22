@@ -40,6 +40,12 @@ lane=code（代码道，泳道）——**全配置驱动（t260901-08，契约�
       files of main; the intersection is exactly this ticket's 5 files. The
       intersection still judges conflict-resolution smuggle (content present on
       neither side) as red (KI-01M4PAVBP6E).
+      t261022-08 (fail-open fix): a basis that cannot be USED is fail-closed red
+      with a named reason_code, and nothing is judged under it —
+      `baseline_diff_failed` (the second diff failed) and `baseline_diff_empty`
+      (the second diff is empty while the judged diff is not, so no file can be
+      attributed to this ticket). A per-file skip under a usable basis is a named
+      green note, never silence.
       判据优先级=调用方 write_set
      （工单精判，空列表=零写集，任何改动即红）> verify.yaml write_allow（粗判据）；
      协调目录（.sandbar/ 老 .suyou/）与 .dsh/ 引擎运行时目录一律不判（与 merge_check SETTLE_PATHSPEC 同口径）。  # naming-compat
@@ -107,7 +113,9 @@ TOOL = {
                                           '(files that differ from both sides). A develop-buffer ticket passes the line side; a legacy '
                                           'ticket passes main or nothing (same value as base = the old caliber, byte for byte). '
                                           'Absent/empty = old caliber. A failing second diff is fail-closed red '
-                                          '(reason_code=baseline_diff_failed): nothing is judged.'},
+                                          '(reason_code=baseline_diff_failed); a second diff yielding no file while the judged '
+                                          'diff is not empty is fail-closed red too (reason_code=baseline_diff_empty, t261022-08). '
+                                          'Neither judges anything.'},
             'write_set': {'type': 'array', 'items': {'type': 'string'},
                           'description': 'code 道：当前工单声明写集（文件或目录前缀）；提供时优先于 verify.yaml write_allow，空列表=零写集。integ 道：票面写集——宿主 260914 口径下**不再**参与排除例外分支判定，仅用于旧口径命中面留痕（回执 pool_exclude.former_force_assets）'},
             'apply_skip_pools': {'type': 'boolean',
@@ -521,15 +529,21 @@ def _code(a):
         # base_other absent or equal to base = the old caliber, byte for byte
         # (legacy tickets, and the main fallback when the line is unresolvable).
         base_other = str(a.get('base_other') or '').strip()
-        keep = None
+        keep = None            # None = the old one-sided caliber (no second baseline)
+        basis_err = ''         # named reason why the intersection basis is unusable
         if base_other and base_other != base:
             rc2, out2 = _sh(['git', '-c', 'core.quotepath=false', 'diff',
                              '--name-only', base_other + '...HEAD'], root, crop=None)
             if rc2 != 0:
-                items.append({'detail': 'git diff failed (other baseline %s): %s'
+                # t261022-08: an unusable basis is a NAMED red, and it judges
+                # nothing (no partial judgement, no silent per-file skip). Until
+                # this fix the code dropped to `keep = set()`, which skipped every
+                # file and relied on this one item alone to keep the check red.
+                basis_err = 'baseline_diff_failed'
+                items.append({'detail': '写集白名单无法判定（第二基线 diff 失败 %s...HEAD）: %s — '
+                                        '无法算出「本票自己的写」，fail-closed，本次不判任何文件'
                                         % (base_other, out2[-200:]),
                               'reason_code': 'baseline_diff_failed'})
-                keep = set()   # fail-closed: no intersection ⇒ judge nothing (never fall back to the one-sided caliber)
             else:
                 keep = {ln.strip() for ln in out2.splitlines() if ln.strip()}
         # name-status（非 name-only）：增/改/删分开判——删除敏感路径=正确清退
@@ -537,26 +551,51 @@ def _code(a):
         # 新增/修改敏感路径才是泄漏。
         rc, out = _sh(['git', '-c', 'core.quotepath=false', 'diff',
                        '--name-status', base + '...HEAD'], root, crop=None)
+        entries = []           # [(status, path)] of the judged diff
+        side_skipped = []      # files the intersection attributed to the other side
         if rc != 0:
             items.append({'detail': 'git diff 失败: %s' % out[-200:]})
         else:
-            if has_ws:
-                judge, judge_src = ws, '工单 write_set'
-            else:
-                judge, judge_src = allow, 'verify.yaml write_allow（粗判据）'
             for ln in out.splitlines():
                 ln = ln.strip()
                 if not ln:
                     continue
                 st = ln.split('	')[0][:1]
                 f = ln.split('	')[-1].strip()
-                if not f:
-                    continue
+                if f:
+                    entries.append((st, f))
+        # t261022-08 (fail-open fix, measured on the t260915-05 repair): an EMPTY
+        # intersection is not a filter, it is the absence of a basis. `keep` empty
+        # while the judged diff carries files means every file is "the other side's
+        # work" — i.e. this ticket owns nothing in a diff that is demonstrably not
+        # empty (the shape when base_other already contains HEAD). Skipping them one
+        # by one produced a silent GREEN over an out-of-write-set lane commit. The
+        # whitelist cannot judge here, so it says so and refuses (named, fail-closed);
+        # the offending names are carried in the detail so the merge receipt stays
+        # findable by filename.
+        if not basis_err and keep is not None and not keep and entries:
+            basis_err = 'baseline_diff_empty'
+            items.append({'detail': '写集白名单无法判定（交集为空）：base=%s 与 base_other=%s 的三点差集'
+                                    '交集里没有任何文件，「本票自己的写」无从归属；本应被判而未判的文件 %s — '
+                                    'fail-closed，不放行'
+                                    % (base, base_other, ', '.join(f for _st, f in entries[:6])),
+                          'reason_code': 'baseline_diff_empty'})
+        if basis_err:          # unusable basis: judge nothing (never a partial pass)
+            entries = []
+        if entries:
+            if has_ws:
+                judge, judge_src = ws, '工单 write_set'
+            else:
+                judge, judge_src = allow, 'verify.yaml write_allow（粗判据）'
+            for st, f in entries:
                 if keep is not None and f not in keep:
                     # Equal to the other side ⇒ not this ticket's write (the
-                    # other side's merged-in work). Skip the whole line. The
+                    # other side's merged-in work). Skip the whole line, and NAME
+                    # the skip on the record (t261022-08: a silent skip is how an
+                    # empty basis used to look exactly like a clean lane). The
                     # notes/ gate below needs the same "whose write is this"
                     # answer, so the filter sits before it.
+                    side_skipped.append(f)
                     continue
                 # 宿主令 260904 机械闸：dev-lane 工单禁写 notes/（票据/知识库账本归
                 # main 侧直管）。独立于写集判定——声明了 notes/ 也拦（防自授权）；
@@ -583,9 +622,18 @@ def _code(a):
                     # silent pass).
                     carved.append(f)
         ws_check = {**_check('写集白名单', items), 'id': WS_CHECK_ID}
+        notes = []
         if carved:
-            ws_check['note'] = '%s: %s' % (path_gates.TICKET_TEST_FACE_NOTE,
-                                           ', '.join(carved))
+            notes.append('%s: %s' % (path_gates.TICKET_TEST_FACE_NOTE, ', '.join(carved)))
+        if side_skipped:
+            notes.append('t261022-08: %d file(s) read as the other baseline\'s own work and not judged: %s'
+                         % (len(side_skipped), ', '.join(side_skipped[:6])))
+        if not items and rc == 0 and not entries:
+            # Nothing to judge at all (an out-of-set write on this branch would also
+            # land outside the diff): visible, never a silent empty green.
+            notes.append('t261022-08: %s...HEAD lists no file — nothing to judge on this call' % base)
+        if notes:
+            ws_check['note'] = '; '.join(notes)
         checks.append(ws_check)
     else:
         # 手动/脚本调用未传 base：跳过是中性事实不是失败，但必须可见（260821 口径收窄：

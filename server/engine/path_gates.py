@@ -96,6 +96,13 @@ PROTECTED_PATHS: Tuple[str, ...] = (
 #                  语义=替本票未落盘的写集内改动兜底，admission 已由调用方
 #                  _dirty_within_write_set 前置把关；merge_check 段自身不产生代码改动）
 STAGE_PATH_RULES = {
+    # 261022 (t261022-08): the quickmanual lane's own stage ids. Declared here as well
+    # as on the template class, because the class table is PINNED into the ticket at
+    # creation: tickets created before the class declared its faces carry an empty
+    # pin and resolve here. Both are the same meaning - open is the zero-code-change
+    # evidence gate, work is the session's work inside the declared write set.
+    "open": {"kind": "result_files"},
+    "work": {"kind": "write_set"},
     "create_plan": {"kind": "result_files"},
     "review_plan": {"kind": "result_files"},
     "implement": {"kind": "write_set"},

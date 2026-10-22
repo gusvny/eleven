@@ -7345,6 +7345,19 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
     # KI-124: the stage path gate switch travels with the template class
     # (client.py ticket-start reads the class attribute).
     PATH_GATE = True
+    # 261022: the lane's own stage ids need their own allowed faces. Without this the
+    # settle path gate refused every quickmanual write with path_gate_reason=
+    # unknown_stage ("stage work has no configured allowed face"), i.e. the lane could
+    # open but never settle a change. Faces: open is a zero-code-change gate stage
+    # (result files only); work is the session's work inside the declared write set;
+    # the three machine/gate stages reuse the builtin meanings.
+    PATH_GATE_RULES = {
+        "open": {"kind": "result_files"},
+        "work": {"kind": "write_set"},
+        "run_integration_tests": {"kind": "ticket_receipts"},
+        "merge_check": {"kind": "self_heal"},
+        "merge": {"kind": "result_files"},
+    }
     TEMPLATE_LANE = "worktree"
     TEMPLATE_WORKSPACE_DIR = False
     TEMPLATE_DESC = ("Quickmanual lane: open (evidence gate) -> work (a session works "
