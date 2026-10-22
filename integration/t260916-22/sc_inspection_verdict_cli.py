@@ -121,12 +121,22 @@ def main() -> int:
     workdir = tempfile.mkdtemp(prefix="sandbar-verdict-work-")
     ledger_dir = tempfile.mkdtemp(prefix="sandbar-verdict-ledger-")
     os.environ["SANDBAR_INSPECTION_DIR"] = ledger_dir
+    # 261023: the period needs a diffable base point or the lane (correctly) ends
+    # the period without reviewing anything ("Change surface unavailable"). The tree
+    # is a git repo with one commit; declare that commit as this instance's base
+    # through the engine's own bootstrap seam.
     DECL = os.path.join(workdir, "v.yaml")
     with open(DECL, "w", encoding="utf-8") as f:
         f.write(decl_text(INST))
     stub = os.path.join(workdir, "stub-message.txt")
 
     tree = lib.evidence_tree("verdict-cli")
+    # 261023: the period needs a diffable base point or the lane (correctly) ends the
+    # period without reviewing anything ("Change surface unavailable"). The tree is a
+    # git repo with one commit; declare that commit as this instance's base through
+    # the engine's own bootstrap seam.
+    from lib_inspection import seed_surface_bootstrap
+    seed_surface_bootstrap(INST, tree.base_sha, ledger_dir)
     anchor = tree.line_text(lib.GUARD_REL, 3)
     # 260928 修：叙述字段（subject）原为中文 ⇒ 报告面语言闸（463a8f7）把它判 unverified 并**追加一条
     # 聚合发现**（`N agent finding(s) are not written in English`，severity=high）⇒ P2 的 summary 被这条
@@ -153,6 +163,9 @@ def main() -> int:
     def face_findings(tid):
         r = ticket_query(tid)
         if not (r and isinstance(r.get("snapshot"), dict)):
+            # 261023: name the raw answer once, so "findings never landed" is not
+            # confused with "the ticket was never queryable".
+            print("PROBE tid=%s query=%r" % (tid, str(r)[:300]), flush=True)
             return None
         f = (r.get("snapshot") or {}).get("face")
         if isinstance(f, dict) and isinstance(f.get("findings"), list) and f.get("findings"):
@@ -173,7 +186,9 @@ def main() -> int:
                 return 1
             got, r = poll(lambda: face_findings(tid1), POLL_OPEN, 3)
             if not got:
-                failures.append("P1 票 %ds 发现未落（status=%r）" % (POLL_OPEN, (r or {}).get("status")))
+                failures.append("P1 票 %ds 发现未落（status=%r，face=%r）"
+                                % (POLL_OPEN, (r or {}).get("status"),
+                                   str((r or {}).get("face"))[:400]))
                 _finish(failures, tree, workdir, ledger_dir)
                 return 1
             face = face_findings(tid1) or {}
