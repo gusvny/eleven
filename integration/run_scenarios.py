@@ -3169,7 +3169,7 @@ SCENARIOS = [
      "python3 integration/t260929-08/sc_watchdog_real_engine_probe.py", "ro", "serial"),
     # ---- t260929-07: 看板读取器真形锁（t260928-28 实报缺陷的回归沉淀）----
     ("t260929-07-board-reader-real-shape",
-     "看板读取器真形锁（t260929-07，灰盒 L2/L3，离线秒级零 docker 零 3099 接触，KI-148/150 自证夹具族的回归沉淀）：t260928-28 五条场景的看板全经 harness 桩注入已解析行——桩形状由实现自身假设塑形，不可能与实现分歧，故套件全绿而真机上 makeBoardReader 只认 {result:{ok,tickets}} 信封、真实入口 client.py ticket-list 打印信封但内层无 ok 键 {ok:true,result:{count,tickets}}（t260929-07 实现期实证修正）⇒ reconcile 生产恒 degraded。本条锁「实现机器读真入口的实际 stdout，而非假设的形状」：A 真跑一次 client.py ticket-list {}（只读）拿逐字节原样 stdout，引擎不可达=ENV_FAIL exit 2（工单铁律：Temporal 不可达⇒ENV_FAIL，never a silent pass）；B 原样 stdout 喂进实现导出的共享解析路径 parseTicketListDoc（读器与锁同一条出货代码路径，杜绝测试侧重抄实现假设）→ ok=true、tickets>0、每行带 id，且形状契约半——真入口实证为信封形但内层 result 无 ok 键（{ok:true,result:{count,tickets}}，旧代码 res.ok!==true 因此永不通过；内层补出 ok 键翻契约时有意识翻红）；C makeBoardReader 端到端 ok=true/rows>0（A 已证引擎可达，此刻 ok=false=产品红）；D 畸形矩阵（非 JSON/空 stdout/缺 tickets/tickets 非数组/信封 ok:false/result:null）全结构化 ok:false 带原因、绝不抛裸异常、绝不把解析失败误报成引擎不可达（review 意见①②落法）；E 信封正形仍被接受（双形状不丢旧契约）。intent 分工：t260928-28-watchdog-reconcile-board-truth 守对账语义（看板经桩注入），本条只守「读器能机器读真入口实际形状」这一条缝，互不顶替。反证：B/C 打在 pre-fix 代码上必红（TDD 期红属预期，arbitrate/merge 期必须绿，实现交接报告须记录反证跑）",
+     "看板读取器真形锁（t260929-07，灰盒 L2/L3，离线秒级零 docker 零 3099 接触零写入（leg A 只读读一次部署真引擎的看板；套件自己钉的 TEST target 由本条自行剥除并点名，t261017-10 纪律——部署自钉的值原样保留），KI-148/150 自证夹具族的回归沉淀）：t260928-28 五条场景的看板全经 harness 桩注入已解析行——桩形状由实现自身假设塑形，不可能与实现分歧，故套件全绿而真机上 makeBoardReader 只认 {result:{ok,tickets}} 信封、真实入口 client.py ticket-list 打印信封但内层无 ok 键 {ok:true,result:{count,tickets}}（t260929-07 实现期实证修正）⇒ reconcile 生产恒 degraded。本条锁「实现机器读真入口的实际 stdout，而非假设的形状」：A 真跑一次 client.py ticket-list {}（只读）拿逐字节原样 stdout，引擎不可达=ENV_FAIL exit 2（工单铁律：Temporal 不可达⇒ENV_FAIL，never a silent pass）；B 原样 stdout 喂进实现导出的共享解析路径 parseTicketListDoc（读器与锁同一条出货代码路径，杜绝测试侧重抄实现假设）→ ok=true、tickets>0、每行带 id，且形状契约半——真入口实证为信封形但内层 result 无 ok 键（{ok:true,result:{count,tickets}}，旧代码 res.ok!==true 因此永不通过；内层补出 ok 键翻契约时有意识翻红）；C makeBoardReader 端到端 ok=true/rows>0（A 已证引擎可达，此刻 ok=false=产品红）；D 畸形矩阵（非 JSON/空 stdout/缺 tickets/tickets 非数组/信封 ok:false/result:null）全结构化 ok:false 带原因、绝不抛裸异常、绝不把解析失败误报成引擎不可达（review 意见①②落法）；E 信封正形仍被接受（双形状不丢旧契约）。intent 分工：t260928-28-watchdog-reconcile-board-truth 守对账语义（看板经桩注入），本条只守「读器能机器读真入口实际形状」这一条缝，互不顶替。反证：B/C 打在 pre-fix 代码上必红（TDD 期红属预期，arbitrate/merge 期必须绿，实现交接报告须记录反证跑）",
      "python3 integration/t260929-07/sc_watchdog_board_reader_real_shape.py", "ro", "serial"),
 
     # ---- t260929-09: L10 launch-gate mechanism（260929 弹窗事故回归：变量二进制+.sh 面逃逸字面量闸）
@@ -5410,6 +5410,13 @@ def _run_entry(entry):
     # that already states a target keeps it verbatim).
     if not str(child_env.get(TEST_TARGET_ENV) or "").strip():
         child_env[TEST_TARGET_ENV] = TEST_TARGET_DEFAULT
+        # Provenance (261022): the statement above is the SUITE's convenience value,
+        # not the deployment's. A case whose tested face IS the target (the real-entry
+        # board probes read the engine the deployment runs) must be able to tell the
+        # two apart; it strips the suite's statement and names it (t261017-10
+        # discipline) instead of silently inheriting a test address. A deployment that
+        # states its own target never gets this marker.
+        child_env[TEST_TARGET_SOURCE_ENV] = TEST_TARGET_DEFAULT
         _note_test_target_once()
     # 261016 executive finding (req-1792107950368-0001): a scenario that runs the
     # inspection period inside its own fixture wrote engine EVENT rows into the
@@ -6353,6 +6360,11 @@ def _note_event_ledger_pin_once() -> None:
 
 TEST_TARGET_ENV = "SANDBAR_TARGET_HOST"
 TEST_TARGET_DEFAULT = "127.0.0.1:17233"
+#: Provenance of the value injected above: set only when the SUITE stated the target
+#: (a deployment's own statement is kept verbatim and carries no marker). A case whose
+#: tested face is the target itself uses this to strip the suite's convenience value
+#: and name what it stripped, instead of judging the product against a test address.
+TEST_TARGET_SOURCE_ENV = "SANDBAR_SUITE_STATED_TARGET"
 _TEST_TARGET_NOTED = {"done": False}
 
 

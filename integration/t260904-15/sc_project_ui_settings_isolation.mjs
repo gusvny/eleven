@@ -25,7 +25,8 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import {
   tmpRoot, makeFixtures, writeProjectEntry, writeQuarantinedDir,
-  bootConsole, teardownOnExit, clientBuildStalenessReason, api, dismissNotice, loadPlaywright, makeResults, dismissShellNotice } from './lib_fix15.mjs';
+  bootConsole, teardownOnExit, clientBuildStalenessReason, api, dismissNotice, loadPlaywright, makeResults, dismissShellNotice,
+  openProjectSettings } from './lib_fix15.mjs';
 
 const { record, summarize } = makeResults();
 
@@ -90,9 +91,13 @@ const sbA = sidebarOf(pa);
 
 // T1 设置弹层
 {
-  const setIcon = sbA.locator('[title="Project Settings"], [aria-label="Project Settings"]').first();
-  await forceClick(setIcon);
-  await pa.waitForTimeout(600);
+  // Door: t261008-36 (host order 261008) retired the whole group-header icon
+  // family — Project Settings now opens from the executor panel's Settings tab,
+  // which mounts the SAME modal inside a face overlay. The door moved; the
+  // assertions below (t260904-15 验收11 面) did not.
+  const navErr = await openProjectSettings(pa, '夹具甲');
+  record('settings/entry-reachable', navErr === null,
+    navErr ?? 'project row → executor panel → Settings → Project settings');
   const dlg = dialogOf(pa);
   const txt = await dlg.innerText().catch(() => '');
   record('settings/readonly-info', txt.includes('fixa') && txt.includes('夹具甲'),
@@ -106,12 +111,20 @@ const sbA = sidebarOf(pa);
   record('settings/counts-degraded-not-red', degraded && noRed, `片段=${txt.slice(0, 200)}`);
 
   // 体检区标签真源=project-modals.tsx「Onboarding health」（宿主令 260925 英文化）
-  const healthNeutral = txt.length === 0
-    || (!/无黄牌|全部正常|一切正常|all (green|clear)/i.test(txt) && /Onboarding health|体检/.test(txt));
+  // An unreachable dialog carries no text; "no false all-clear" must not be satisfied
+  // by an empty read (that was a vacuous pass — the read itself must have content).
+  const healthNeutral = txt.length > 0
+    && !/无黄牌|全部正常|一切正常|all (green|clear)/i.test(txt) && /Onboarding health|体检/.test(txt);
   record('settings/health-neutral', healthNeutral, '体检区中性提示，不谎报无黄牌（R2b 降档口径）');
 
   record('settings/danger-entry', /Remove project|摘除项目/i.test(txt), '底部 danger 区摘除入口在位');
   await pa.keyboard.press('Escape');
+  // The face overlay lives inside the middle column; leave no stale layer between
+  // the sidebar isolation row and T2 (Back returns to the panel's Settings tab).
+  if (await pa.locator('[data-wb-face-overlay]').count()) {
+    await forceClick(pa.locator('[data-wb-face-overlay] [data-wb-face-back]').first());
+    await pa.waitForTimeout(400);
+  }
 }
 
 // T2 隔离详情

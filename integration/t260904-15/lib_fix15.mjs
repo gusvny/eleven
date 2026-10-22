@@ -241,6 +241,69 @@ export function makeResults() {
   };
 }
 
+/** Poll a predicate until it is true or the deadline passes. */
+export async function waitFor(pred, timeoutMs = 8000, stepMs = 200) {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    try { if (await pred()) return true; } catch { /* keep polling */ }
+    if (Date.now() >= end) return false;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+}
+
+/**
+ * Entrance to the Project Settings dialog (shared precondition, no assertions here).
+ *
+ * t261008-36 (host order 261008) retired the whole group-header icon family: the
+ * entry moved to the executor panel's Settings tab. The console mounts the SAME
+ * ProjectSettingsModal inside a face overlay, so the dialog's own anchors
+ * (data-wb-pmod-overlay and friends) are unchanged — only the door moved.
+ *
+ * Steps: click the project row's executor entry ([data-wb-executor-entry],
+ * t260929-22 face), then the panel's Settings tab ([data-tab="settings"]), then
+ * the face row ([data-wb-panel-face="project-settings"]).
+ *
+ * Returns null when the dialog is on screen, else a plain-words reason (a door
+ * that cannot be found is a red, never a silent skip).
+ */
+export async function openProjectSettings(page, groupText) {
+  const head = page.locator('.wb-group-head', { hasText: groupText }).first();
+  if (!(await head.count())) {
+    return `project group row containing "${groupText}" is not rendered (registry fixture not consumed?)`;
+  }
+  const entry = page.locator('[data-wb-executor-entry]').first();
+  if (!(await entry.count())) {
+    return 'project row carries no executor entry anchor ([data-wb-executor-entry], t260929-22 face)';
+  }
+  await entry.click({ force: true, timeout: 8000 });
+  const iframeSrc = () => page.evaluate(() => {
+    const f = [...document.querySelectorAll('iframe')].find((x) => /sandbar-executor-panel/.test(x.src || ''));
+    return f ? f.src : '';
+  });
+  if (!(await waitFor(async () => /sandbar-executor-panel/.test(await iframeSrc()), 20000))) {
+    return 'executor panel iframe did not mount after clicking the project row entry';
+  }
+  const frame = page.frameLocator('iframe[src*="sandbar-executor-panel"]');
+  try {
+    await frame.locator('[data-tab="settings"]').first().click({ timeout: 20000 });
+  } catch {
+    return 'panel page has no Settings tab anchor ([data-tab="settings"])';
+  }
+  if (!(await waitFor(async () => (await frame.locator('[data-wb-panel-face]').count()) >= 2, 10000))) {
+    return 'panel Settings pane does not list both face entries ([data-wb-panel-face] count < 2)';
+  }
+  try {
+    await frame.locator('[data-wb-panel-face="project-settings"]').first().click({ timeout: 10000 });
+  } catch {
+    return 'panel Settings pane has no "project-settings" face row';
+  }
+  const mounted = await waitFor(async () =>
+    (await page.locator('[data-wb-face-overlay][data-face="project-settings"]').count()) === 1
+    && (await page.locator('[data-wb-pmod-overlay]').count()) >= 1, 10000);
+  if (!mounted) return 'clicking the project-settings face row mounted no settings dialog (face overlay or data-wb-pmod-overlay absent)';
+  return null;
+}
+
 /** 出厂「Internal Testing Notice」关闭（capture.mjs dismissNotice 同款先例）：全新
  * DSH_HOME 首开即弹并劫持焦点/指针（fill 打不进受控输入——t260904-15 验收走查实锤），
  * 点 Continue 关闭（只读导航语义，不提交任何表单），超时未出现则继续。 */

@@ -33,8 +33,13 @@ intent（工单验收口径，用户可感知行为）：
 实现交接报告须记录该反证跑）。
 intent 分工：t260928-28-watchdog-reconcile-board-truth 守对账语义（看板为真源/
 缺行留痕/降级显式，看板经桩注入）；本条只守「读器能机器读真入口的实际形状」这一
-条缝——对账逻辑零涉及，互不顶替。离线秒级、零 docker、零 3099/7233 接触（只读
-spawn 引擎 client.py，不改任何状态）。
+条缝——对账逻辑零涉及，互不顶替。
+
+Environment: offline and seconds long, zero docker, zero 3099 contact, zero writes.
+The case performs exactly one read-only board read through the real entry, against
+the Temporal target the deployment runs (a suite-stated TEST target — 261016
+provisioning — is stripped and named on stdout, see leg A). Engine unreachable in
+that read = ENV_FAIL exit 2, per the three-state contract below.
 Run directly: python3 integration/t260929-07/sc_watchdog_board_reader_real_shape.py（cwd=仓根）。
 """
 from __future__ import annotations
@@ -42,6 +47,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -51,6 +57,18 @@ HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 ENGINE = ROOT / "server" / "engine"
 NODE_TS = ROOT / "server" / "plugins" / "watchdog" / "node.ts"
+
+#: Provenance marker the suite sets when IT stated the child's SANDBAR_TARGET_HOST
+#: (see integration/run_scenarios.py TEST_TARGET_SOURCE_ENV). Present only when the
+#: deployment itself stated nothing, so this case can tell a suite convenience value
+#: from the deployment's own target.
+SUITE_TARGET_MARKER = "SANDBAR_SUITE_STATED_TARGET"
+
+#: Engine-unreachable signature inside the real entry's error envelope. Narrow on
+#: purpose: only a connection failure is an ENVIRONMENT red; anything else that makes
+#: the board unreadable stays a product red in the legs below.
+UNREACHABLE_RE = re.compile(
+    r"Transient\w*Error|连接 temporal server 失败|Failed client connect", re.I)
 
 PASS = 0
 FAIL = 0
@@ -102,24 +120,46 @@ def main():
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
     from lib_env import clean_narrowing_env
     probe_env = clean_narrowing_env(base=dict(os.environ))
+    # Env ownership (t261017-10 discipline). This case's tested face IS the target: it
+    # reads the real entry's stdout from the board the deployment runs. The suite
+    # states a TEST target for children that state none (261016 provisioning) and
+    # names its own statement in SUITE_TARGET_MARKER. A suite statement is not the
+    # deployment's truth, so this case strips exactly that one and NAMES what it
+    # stripped; a deployment's own SANDBAR_TARGET_HOST is kept verbatim.
+    suite_stated = (os.environ.get(SUITE_TARGET_MARKER) or "").strip()
+    if suite_stated and probe_env.get("SANDBAR_TARGET_HOST") == suite_stated:
+        print("INTEG_ENV_OWNED: scrubbed suite-stated SANDBAR_TARGET_HOST=%s — this "
+              "case reads the engine the deployment runs" % suite_stated, flush=True)
+        probe_env.pop("SANDBAR_TARGET_HOST", None)
+    target = probe_env.get("SANDBAR_TARGET_HOST") or "127.0.0.1:7233 (engine default)"
     try:
         proc = subprocess.run(
             [py, "client.py", "ticket-list", json.dumps({})],
             cwd=str(ENGINE), env=probe_env, capture_output=True, text=True, timeout=90,
         )
     except subprocess.TimeoutExpired:
-        env_fail("client.py ticket-list 超时 90s（引擎/Temporal 不可达）")
+        env_fail("A 真入口探针：client.py ticket-list 超时 90s（target=%s，引擎/Temporal 不可达）" % target)
     except OSError as e:
-        env_fail("client.py 无法 spawn：%s" % e)
+        env_fail("A 真入口探针：client.py 无法 spawn（target=%s）：%s" % (target, e))
     if proc.returncode != 0:
-        env_fail("client.py ticket-list 退出码 %d（引擎/Temporal 不可达）：%s"
-                 % (proc.returncode, (proc.stderr or proc.stdout or "")[:300]))
+        env_fail("A 真入口探针：client.py ticket-list 退出码 %d（target=%s，引擎/Temporal 不可达）：%s"
+                 % (proc.returncode, target, (proc.stderr or proc.stdout or "")[:300]))
     raw = proc.stdout
     try:
         live_doc = json.loads(raw)
     except ValueError:
-        env_fail("client.py ticket-list stdout 不是合法 JSON（引擎/Temporal 不可达形态）：%r"
-                 % raw[:200])
+        env_fail("A 真入口探针：client.py ticket-list stdout 不是合法 JSON（target=%s，引擎/Temporal 不可达形态）：%r"
+                 % (target, raw[:200]))
+    # The real entry exits 0 and prints an error envelope when Temporal cannot be
+    # reached ({"ok":false,"error":"TransientConnectError: …"}). The case's own
+    # three-state contract says engine-unreachable is an ENVIRONMENT red: never a
+    # silent pass, and never a product red. The signature stays narrow so a genuine
+    # reader/parse defect still lands as FAIL below.
+    if isinstance(live_doc, dict) and live_doc.get("ok") is False:
+        err = str(live_doc.get("error") or "")
+        if UNREACHABLE_RE.search(err):
+            env_fail("A 真入口探针：引擎不可达（target=%s；client.py 以 exit 0 回连接失败信封）：%s"
+                     % (target, err[:300]))
     ok(isinstance(live_doc, dict), "A 真入口 stdout 是 JSON 对象", type(live_doc))
 
     # ---------- B/C/D/E 经 node 装载出货 node.ts 一次跑齐 ----------
@@ -146,7 +186,10 @@ console.log(JSON.stringify(out));
         tf.write(raw)
         raw_path = tf.name
     try:
-        env_vars = dict(os.environ, NODE_TS=str(NODE_TS), RAW_FILE=raw_path,
+        # Same env the probe owned (leg A): the reader end-to-end leg must read the
+        # SAME engine the probe just proved reachable — inheriting the suite's stated
+        # TEST target here would judge the reader against an address leg A stripped.
+        env_vars = dict(probe_env, NODE_TS=str(NODE_TS), RAW_FILE=raw_path,
                         REPO=str(ROOT))
         nproc = subprocess.run(
             [node, "--input-type=module", "-e", node_script],

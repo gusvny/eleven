@@ -58,6 +58,24 @@ def read(p: pathlib.Path) -> str:
     return p.read_text("utf-8")
 
 
+def assigned_literals(src: str, names) -> dict:
+    """Literal values of module-level assignments `NAME = <literal>` (missing = absent)."""
+    out = {}
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return out
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name) and tgt.id in names:
+                    try:
+                        out[tgt.id] = ast.literal_eval(node.value)
+                    except ValueError:
+                        out[tgt.id] = None
+    return out
+
+
 def main():
     charter_p = REPO / "server/session_charter.md"
     shared_p = REPO / "server/engine/shared.py"
@@ -85,8 +103,26 @@ def main():
     win = charter[i_925:i_925 + 600] if i_925 >= 0 else ""
     ok("英文" in win and ("中文" in win),
        "A3 英文条目自身写清双口径（报告英文 + 聊天仍中文，范围不靠推断）")
-    ok(("developer" in win and "integration" in win) or ("developer/integration" in win),
-       "A4 英文条目点名适用角色（developer/integration，不含其他角色）")
+    # 261022: the charter consolidated its three language statements into one entry
+    # (host order 261016, commit 33192b18) and that entry now scopes the rule as
+    # "lane-role products" instead of enumerating the two roles. The role scope is
+    # still declared — in the single source that ENFORCES it: the clause text plus
+    # ROLE_REPORT_ENGLISH_ROLES in shared.py. A4 therefore pins the scope where the
+    # product implements it (exactly the pair, no other role) and keeps the doc-side
+    # half honest by requiring the entry to state a scope at all.
+    # Old anchor: the "developer"/"integration" literals inside the charter entry —
+    # prose that later host orders may rewrite; it was rot, not a contract.
+    shared_facts = assigned_literals(shared_src, (CONST, "ROLE_REPORT_ENGLISH_ROLES"))
+    raw_roles = shared_facts.get("ROLE_REPORT_ENGLISH_ROLES")
+    # Malformed (absent / not a literal tuple) is a named red, never a crash.
+    roles = tuple(raw_roles) if isinstance(raw_roles, (tuple, list)) else None
+    clause_text = shared_facts.get(CONST) or ""
+    charter_scoped = bool(re.search(r"泳道角色|lane role", win))
+    ok(roles == ("developer", "integration")
+       and "developer" in clause_text and "integration" in clause_text
+       and charter_scoped,
+       "A4 英文规则点名适用角色（enforced 角色集恰为 developer/integration、常量正文点名两角色、charter 条目自带适用范围；roles=%r）"
+       % (raw_roles,))
 
     # ---- B. 常量单源 + FLOW_BRIEF 六段消费 ----
     section("B. shared.py 常量单源 + dev_lane FLOW_BRIEF 同源消费")
