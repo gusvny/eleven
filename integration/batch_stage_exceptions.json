@@ -14,13 +14,6 @@
     "evidence": "integration/t260904-19/sc_stage_docker_parallel_zero_residue.py 多工程并发起台『t26090419-par-probe*』（grep 实证）"
   },
   {
-    "entry": "t260910-04-console-paused-list",
-    "pool": "exclusive",
-    "project_pattern": "t26091004-*",
-    "reason": "被测对象=console 面真引擎 pause 列表（独占台+瞬态重试）；重试路径会把 工程名改『-r1』后缀自管私台（前缀通配覆盖）。",
-    "evidence": "integration/t260910-04/sc_console_paused_list.mjs:195,208-211 STAGE_PROJECT='t26091004-sc-'+pid，重试改 '-r1'"
-  },
-  {
     "entry": "t260910-12-cwd-independence",
     "pool": "engine",
     "project_pattern": "t26091012-*",
