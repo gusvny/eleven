@@ -20,14 +20,25 @@ let n = 0
 
 // ---- T1 Metrics: the mock's Charts box with byte-identical named entries ----
 const paneMetrics = html.slice(html.indexOf('id="paneMetrics"'), html.indexOf('id="paneGrants"'))
-assert(paneMetrics.includes('>Charts<'), 'Metrics pane has a Charts heading')
-for (const label of ['lanes per day', 'stage duration', 'gate reds']) {
-  assert(paneMetrics.includes(label), `Metrics Charts box names '${label}' as semantic text`)
+// RESURRECTION NOTE (t261021-07): this hunk was re-pointed to the approved-mock
+// Metrics tab (host 261021). main@434b285 still carries the pre-rebuild snapshot
+// of this file, so every pre-verification main-sync re-materialises the retired
+// pins — if this hunk reverts, re-apply the t261021-07 re-point; the landing of
+// THIS ticket is what cures main.
+// T1 Metrics: the approved seven-section face — six KPI tile titles (the titles
+// ride the embedded model core, so they are asserted on the WHOLE page), the
+// five section headings (markup case; CSS uppercases at render), and the
+// retirement of the placeholder copy.
+for (const title of ['REWORK RATE', 'THROUGHPUT', 'MEDIAN LEAD TIME', 'TOKENS',
+  'TOKENS PER CLOSED TICKET', 'HUMAN WAIT']) {
+  assert(html.includes(title), `Metrics model carries the KPI tile title (${title})`)
 }
-assert(paneMetrics.includes('(chart from the project metrics API)'),
-  "Metrics Charts box carries the mock's lanes-per-day value copy verbatim")
-assert(!/<canvas|<svg|echarts/i.test(paneMetrics),
-  'no chart engine in the Metrics pane (degradation is declared copy, not silence)')
+for (const heading of ['Where the time goes', 'Certification', 'Epics',
+  'Throughput', 'Where the tokens go']) {
+  assert(paneMetrics.includes(heading), `Metrics pane carries the section heading (${heading})`)
+}
+assert(!/no chart data drawn/i.test(paneMetrics),
+  'the retired placeholder copy stays retired')
 
 // ---- T2 Docs: the two mock entry rows ----
 const paneDocs = html.slice(html.indexOf('id="paneDocs"'), html.indexOf('id="paneGrants"'))
@@ -71,8 +82,8 @@ for (const anchor of ['id="inspRunBtn"', 'id="inspDlg"', 'id="inspPeriodBtns"', 
   'Run a full-codebase review', 'Reviews you started']) {
   assert(paneInsp.includes(anchor), `Inspection pane keeps its mock anchor (${anchor})`)
 }
-for (const kpi of ['tickets (7d)', 'closed (7d)', 'avg delivery (min)', 'tokens total']) {
-  assert(html.includes(kpi), `the existing Metrics KPI card label stays (${kpi})`)
+for (const kpi of ['REWORK RATE', 'TOKENS PER CLOSED TICKET', 'HUMAN WAIT']) {
+  assert(html.includes(kpi), `the rebuilt Metrics KPI tile title stays (${kpi})`)
 }
 const endpoints = [...html.matchAll(/fetch\('([^']+)'/g)].map(m => m[1].split('?')[0])
 assert(new Set(endpoints).size === new Set(endpoints.map(e => e)).size,

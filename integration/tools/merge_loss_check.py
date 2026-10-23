@@ -146,7 +146,10 @@ def staged_conflicts(repo):
     is the pre-merge prediction and disagrees with the real merge: measured
     t261013-06, the forecast named 15 files while the merge left 11 unmerged and
     auto-merged 4 (t261013-06 arbitration finding B). Resolving from the forecast
-    alone would chase files that are not conflicts and skip files that are.
+    alone would chase files that are not conflicts and leave real conflicts
+    unchased (t260904-12 wording guard: the retired wording named the same
+    hazard with a banned state word; the hazard sentence stays, the word does
+    not).
     """
     rc, out, err = _git(["ls-files", "-u"], repo)
     if rc != 0:

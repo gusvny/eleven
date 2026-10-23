@@ -27,7 +27,7 @@ Intent split (no intent-level duplication; settled 261019 when the parallel
 implement stage landed sc_t261019_45_integ_gate_multi_root.py): the assembled
 multi-repo journey over REAL GIT fixtures (spanning write set green at the
 container / found at the second candidate / nothing-anywhere named refusal /
-malformed-declaration no-fallback / non-repo segment skip) belongs to
+malformed-declaration no-fallback / non-repo segment ruled out by declaration) belongs to
 sc_t261019_45_integ_gate_multi_root.py; the resolution truth table belongs to
 developer L1 (test_t261019_45_integ_root_resolution.py); THIS entry uniquely
 owns the malformed-input faces (corrupt manifest, non-string write-set

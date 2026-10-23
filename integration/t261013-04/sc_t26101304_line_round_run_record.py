@@ -14,7 +14,7 @@ record contract in docs/reference/ledger-record-models-v1.md section A):
      (`line_round_runner.read_header`) must ACCEPT that summary. This is the chain
      that died as `could-not-run:run_id_missing_from_summary` on every full round.
   B. THE DIAGNOSTIC CONTROL. The same round with `--only` writes no record and the
-     summary carries no run id. A narrowed round stays a non-proof, and the skip is
+     summary carries no run id. A narrowed round stays a non-proof, and the deferral is
      named on stderr.
   C. THE SCOPE CONTROL. The same exclusion from another source (a ticket) writes no
      record. The caliber exception belongs to the line round, never to an exclusion

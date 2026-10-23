@@ -47,8 +47,8 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
 驱动形态：lib_ki061 台架同形 + 本票自有常量桩（判决恒 tests-fault）；夹具
   迷你执行器=真注册表形状（SCENARIOS 三元组 + /bin/sh -c），verify.yaml 声明
   integration.cmd，机械链走真 verify_lane integ 道（规范行+INTEG_SUMMARY 契约）。
-三态：PASS exit 0 / FAIL exit 1 / ENV_FAIL exit 2（进程台缺供=环境红点名，不写
-  SKIP）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
+三态：PASS exit 0 / FAIL exit 1 / ENV_FAIL exit 2（进程台缺供=环境红点名；本守卫
+  声明没有第四态）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。
 
 Bench migration (host order 261022): the three phases share ONE
 integration/process_bench.py Temporal dev server instead of a leased docker stage -

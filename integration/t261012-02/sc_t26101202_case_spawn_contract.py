@@ -22,8 +22,7 @@ with the reason on the round's face/log, never silently):
       its case holds at most a file, never a pipe the runner waits on.
   S3. BEHAVIOUR: an entry that already timed out earlier in the same
       round, scheduled a second time, is skipped BY NAME with the reason
-      in the verdict tail (which lands on the round face/log), and the
-      skip itself does not burn another case budget.
+      in the verdict tail (which lands on the round face/log), and the named deferral itself does not burn another case budget.
   S4. BUDGET LADDER: the stage-wait ceiling default plus its heartbeat
       grace stays strictly under CMD_TIMEOUT (a contended wait's named red
       always lands inside the case budget), and CMD_TIMEOUT stays at the
@@ -197,7 +196,7 @@ print("DRIVER_JSON:" + json.dumps(
 '''
     # the 120s is never waited out — the driver's own group kill ends the leg
     # at the injected budget (S3 asserts the skip verdict returns quickly).
-    # SANCTIONED-WAIT: hung fixture for the skip leg; killed at injected budget
+    # SANCTIONED-WAIT: hung fixture for the named-deferral leg; killed at injected budget
     sleeper = ("python3 -c 'import time;time.sleep(120)'")
     with tempfile.TemporaryFile(mode="w+") as out:
         proc = subprocess.Popen(

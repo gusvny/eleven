@@ -12,13 +12,11 @@
  * illustrative and must never be fabricated onto the real faces (reject rule).
  *
  * Faces under test (mock truth quoted in the ticket):
- *   M1 the Metrics tab keeps its real KPI facts (stub-fed values visible) and
- *      never renders the mock's illustrative numbers (38 / 2h10m / 64 / 7);
- *   M2 a Charts face exists carrying the mock's three named entries as
- *      semantic text anchors: "lanes per day", "stage duration", "gate reds";
- *   M3 the Charts entries are honest about their data state (label text from
- *      the mock; value side states the real data availability — no invented
- *      chart figures);
+ *   M1 the Metrics tab never renders the mock's illustrative numbers
+ *      (38 / 2h10m / 64 / 7) and never regresses to the retired placeholder
+ *      copy — [t261021-07] the mock-anchored CONTENT legs (four KPI cells,
+ *      three chart label anchors) moved to the t261021-07 anchor scenario
+ *      when the tab was rebuilt to the approved seven-section layout;
  *   D1 the Docs tab shows the mock's two entry rows: "docs/" + "the library",
  *      "notes/" + "the ledger", each with an "Open" action;
  *   D2 the entry-row page counts are REAL: docs/ shows the count derived from
@@ -109,13 +107,12 @@ const OUT_DIR = join(REPO, 'integration', 't261008-19', 'out')
 // strip change, declared in that ticket; the pin follows the served page, and the
 // Certification tab's own face rules stay owned by its own scenarios).
 const TAB_ORDER = ['Overview', 'Epics', 'Inspection', 'Certification', 'Metrics', 'Docs', 'Grants', 'Settings']
-const CHART_ENTRIES = ['lanes per day', 'stage duration', 'gate reds']
 const MOCK_ILLUSTRATIVE = ['38', '2h10m', '25 pages', '60 pages']
 
 // ---- stub data in the SERVED contract shapes (KI-051: the page consumes
 // j.kpis / j.groups[].files[].rel — the real routes' shapes, not invented ones) ----
 const METRICS = {
-  kpis: { tickets: 3, closed: 2, avg_delivery_min: 42, tokens_total: 1234 },
+  kpis: { tickets: 3, closed: 2, avg_delivery_min: 42, tokens_total: 1234e6 },
   generated_at: '2026-10-08T00:00:00Z',
   cache: { status: 'live' },
 }
@@ -208,30 +205,27 @@ async function main() {
         'tabs=' + tabs.join('|'))
 
       // ---- Metrics tab ----
+      // t261021-07 (host mock 261021, DECLARED content change): the Metrics
+      // tab was rebuilt to the approved seven-section layout — the old four
+      // KPI cells and the three placeholder chart labels are retired. The
+      // mock-anchored CONTENT journey moved to
+      // integration/t261021-07/sc_t261021_07_metrics_tab_mock_anchors.mjs;
+      // this scenario keeps only its still-valid NEGATIVES.
       await page.locator('label[for="t-metrics"]').first().click()
-      await waitText(page, '#paneMetrics', 'charts')
+      // settle the metrics fetch before leaving the tab (stub tokens_total=1234e6
+      // renders as '1,234.0M' on the t261021-07 six-tile row; the '1234' wait
+      // still settles the same fetch — t261021-07 reconcile) — an
+      // early tab switch races the in-flight render (measured: null-element
+      // pageerror under gate load)
+      await waitText(page, '#paneMetrics', '1234', 8000)
+      await page.locator('#paneMetrics').waitFor({ state: 'visible', timeout: 8000 }).catch(() => {})
       const mText = await page.locator('#paneMetrics').innerText().catch(() => '')
-      C.case(T('M1-kpi-facts-real'),
-        mText.includes('tickets (7d)') && mText.includes('42') && mText.includes('1234'),
-        'metrics=' + mText.slice(0, 140).replace(/\n/g, ' '))
       C.case(T('M1-no-mock-numbers'),
         !MOCK_ILLUSTRATIVE.some((n) => mText.includes(n)),
         MOCK_ILLUSTRATIVE.join(',') + ' must never render (mock numbers are illustrative)')
-      // M2/M3: the Charts face with the mock's three named entries as semantic
-      // text anchors; honest data state, no invented figures. Matching is
-      // case-insensitive: the section heading carries text-transform:uppercase
-      // (presentation), so innerText reads "CHARTS" while the served content
-      // is "Charts" — case is not part of the contract.
-      const mLower = mText.toLowerCase()
-      C.case(T('M2-charts-face-present'), mLower.includes('charts'), 'no Charts face in the Metrics tab')
-      const chartsText = mLower.includes('charts') ? mLower.slice(mLower.indexOf('charts')) : ''
-      for (const entry of CHART_ENTRIES) {
-        C.case(T('M2-entry-' + entry.replace(/\s+/g, '-')), chartsText.includes(entry),
-          'missing semantic anchor «' + entry + '»')
-      }
-      C.case(T('M3-charts-honest'),
-        chartsText.length > 0 && !MOCK_ILLUSTRATIVE.some((n) => chartsText.includes(n)) && !/\b\d{3,}\b\s*(tickets|lanes)/.test(chartsText),
-        'charts=' + chartsText.slice(0, 140).replace(/\n/g, ' '))
+      C.case(T('M4-placeholder-retired'),
+        !mText.toLowerCase().includes('no chart data drawn'),
+        'the retired placeholder copy must not come back')
       await page.screenshot({ path: join(OUT_DIR, 'metrics-tab-' + theme + '.png'), fullPage: true }).catch(() => {})
 
       // ---- Docs tab ----
@@ -279,7 +273,7 @@ async function main() {
   // D3 endpoint discipline: only the declared pre-existing API faces were hit
   // (no invented endpoint, no changed contract).
   const invented = [...endpointsHit].filter((p) =>
-    !/\/api\/(wf\/metrics|wf\/docs\/tree|wf\/docs\/doc|requests|settings|actions|grants|status|concurrency|bridge\/status)/.test(p)
+    !/\/api\/(wf\/metrics|wf\/docs\/tree|wf\/docs\/doc|requests|settings|actions|grants|status|concurrency|bridge\/status|certification)/.test(p)
     && !p.includes('inspection-archive') && !p.includes('trigger-records') && !p.includes('/api/wf/inspection'))
   C.case('E1-no-invented-endpoint', invented.length === 0, 'unexpected=' + invented.join(','))
 

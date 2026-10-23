@@ -160,7 +160,7 @@ class TimeoutReapsGroup(unittest.TestCase):
         name, rc, tail, dur, _t0, full = rs._run_entry(
             _entry("t26101202-case-D", "echo should-not-run"))
         self.assertEqual(name, "t26101202-case-D")
-        self.assertEqual(rc, 1, "a hung-twice skip is a named fail, never a pass")
+        self.assertEqual(rc, 1, "a hung-twice deferral is a named fail, never a pass")
         self.assertIn("hung-twice guard", tail)
         self.assertIn("already timed out", tail)
         self.assertEqual(full, "")

@@ -68,6 +68,30 @@ import { limitStep, concChipState, CONC_LIMITS } from './concurrency.ts'
 // the other pure cores, so the UT and the page run one implementation. The
 // CERT_COPIES copy table rides along as JSON (single copy source).
 import { buildCertificationCore, buildRoundDialogCore, buildRoundsRows, countsCell, roundPill, roundReason, roundTrigger, roundTriggerWord, roundMeasured, roundsSectionNote, CERT_COPIES, ROUND_COPIES } from './certification-view.ts'
+// t261021-07: the Metrics tab v2 model + chart option factories — pure,
+// closure-free, embedded via String(fn) like the other cores, so the UT and
+// the page run one implementation. The chart factories shape echarts OPTIONS
+// only (no echarts import here; the browser owns init/dispose behind the
+// page's one module script over the vendor route).
+ import {
+  METRICS_TAB_COPIES, metricsV2Of, kpiTilesOf, workflowRowsOf, stageRowsOf,
+  epicCardsOf, certSummaryOf, throughputSpecOf, tokensStackOf, sessionRowsOf, roleRowsOf,
+  fmtInt, fmtTokensM, fmtPct01, fmtMs, fmtAgo,
+} from './metrics-tab-model.ts'
+// t261021-07 rework (gate round 1): the embedded cores' TRANSITIVE closure
+// must ride along — the page runs the String(fn) sources, so every
+// module-level identifier a body references has to exist at page scope (the
+// arbitrate red: typeof mnum === 'undefined' inside the served page).
+// mnum/mstr/mdash/shareBarPct/colorAt/commonAxes/commonGrid are function
+// embeds; DASH/GRID_LINE/LABEL ride the JSON table; METRICS_SERIES_COLORS is
+// aliased from the same table below.
+import {
+  mnum, mstr, mdash, shareBarPct, DASH,
+} from './metrics-tab-model.ts'
+import {
+  colorAt, commonAxes, commonGrid, GRID_LINE, LABEL,
+} from './metrics-tab-charts.ts'
+import { METRICS_SERIES_COLORS, throughputOption, tokensOption } from './metrics-tab-charts.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
 
@@ -219,7 +243,29 @@ const EMBEDDED = EMBED_CONSTS + [
   String(buildRoundDialogCore),
   // t261009-57: alerts face core — relative time, coalesce-then-cap (one implementation).
   String(relTimeAgo), String(coalesceAlerts), String(capCoalesced),
+  // t261021-07: the Metrics tab v2 model + chart option factories (one
+  // implementation with the UT; the copy/palette tables ride as JSON below).
+  String(metricsV2Of), String(kpiTilesOf), String(workflowRowsOf), String(stageRowsOf),
+  String(epicCardsOf), String(certSummaryOf), String(throughputSpecOf), String(tokensStackOf),
+  String(sessionRowsOf), String(roleRowsOf),
+  String(fmtInt), String(fmtTokensM), String(fmtPct01), String(fmtMs), String(fmtAgo),
+  // t261021-07 rework: the transitive closure of the embedded cores (the
+  // arbitrate family sweep — each of these is referenced inside an embedded
+  // body above; leaving one out is a ReferenceError at first render).
+  String(mnum), String(mstr), String(mdash), String(shareBarPct),
+  String(colorAt), String(commonAxes), String(commonGrid),
+  String(throughputOption), String(tokensOption),
 ].join('\n')
+
+/** t261021-07: the Metrics tab's copy table + series palette as JSON — the
+ *  data half of the embedded model/chart cores. METRICS_TAB_COPIES and
+ *  METRICS_SERIES_COLORS stay the single copy/palette sources. DASH/GRID_LINE/
+ *  LABEL ride here too: the embedded function bodies reference them as
+ *  identifiers, so the page aliases them below. */
+const METRICS_TABLES = JSON.stringify({
+  COPIES: METRICS_TAB_COPIES, COLORS: METRICS_SERIES_COLORS,
+  DASH, GRID_LINE, LABEL,
+})
 
 /** t261009-44 + t261012-03: the Certification tab's copy tables as JSON — the
  *  data half of the embedded render cores. CERT_COPIES / ROUND_COPIES
@@ -532,7 +578,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 #paneCert .pill[data-k]{font-size:10.5px;font-weight:700;border-radius:999px;padding:2px 9px;border:1px solid var(--line);color:var(--muted);background:var(--bg)}
 #paneCert .pill[data-k=green]{border-color:var(--green);color:var(--green);background:var(--green-soft,transparent)}
 #paneCert .pill[data-k=red]{border-color:var(--red);color:var(--red);background:var(--red-soft,transparent)}
-#paneCert .pill[data-k=run]{border-color:var(--accent,#3b82f6);color:var(--accent,#3b82f6)}
+#paneCert .pill[data-k=run]{border-color:var(--accent-line);color:var(--blue)}
 #paneCert .dlg{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.35);max-width:640px;width:100%;overflow:hidden;font-size:12.5px}
 #paneCert .dlg .top{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line)}
 #paneCert .dlg .x{margin-left:auto;color:var(--muted);cursor:pointer}
@@ -688,15 +734,70 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     </div>
   </section>
 
+  <!-- t261021-07: Metrics tab v2 — the approved mock (host 261021,
+       metrics-tab-mock.html) reproduced: header selects, six KPI tiles,
+       Where-the-time-goes (fixed-height card, workflow chips + type-to-match,
+       in-card stage drill), Certification (green/red/flaky + strip + time to
+       green), Epics (five cards + sort + type-to-match), Throughput chart,
+       Where-the-tokens-go beside Tokens by role and Project sessions.
+       Supersedes the t261005-10 "no second chart engine" ruling for this tab;
+       echarts rides the vendor route behind metrics-tab-charts.ts (the option
+       factories) — the mock's geometry is not a technical instruction, the
+       chart bodies are echarts. The mock's explanatory behaviour sentences are
+       banned here: labels, values, axis titles and legends only. Data faces:
+       metrics v2 (view=time blocks), view=health (daily opened/closed),
+       view=token (daily stacked by model), /api/certification (round faces).
+       A face the transport does not carry renders its named empty state —
+       never a fabricated number. -->
   <section id="paneMetrics" style="display:none">
     <div id="metricsBanner"></div>
-    <div class="grid" id="metricsGrid"></div>
-    <div class="file" id="metricsMeta"></div>
-    <div class="sect lead">Charts</div>
-    <div class="cell" id="metricsCharts" style="display:block">
-      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:2px 0"><span style="min-width:120px">lanes per day</span><span class="meta">(chart from the project metrics API)</span></div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:2px 0"><span style="min-width:120px">stage duration</span><span class="meta">(chart — no chart data drawn in this build)</span></div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;padding:2px 0"><span style="min-width:120px">gate reds</span><span class="meta">(chart — no chart data drawn in this build)</span></div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:4px 0">
+      <select id="metricsProject" aria-label="project"></select>
+      <select id="metricsWindow" aria-label="window">
+        <option value="7d">last 7 days</option>
+        <option value="30d" selected>last 30 days</option>
+        <option value="all">all time</option>
+      </select>
+    </div>
+    <div id="metricsKpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;padding:6px 0"></div>
+    <div style="display:flex;flex-direction:column">
+      <div class="sect lead">Where the time goes</div>
+      <div id="mtTimeCard" style="border:1px solid var(--line);border-radius:10px;height:330px;overflow:auto;padding:8px 10px">
+        <div id="mtChips" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:2px 0">
+          <input id="mtWfPick" list="mtWfList" placeholder="+ workflow" style="min-width:140px">
+          <datalist id="mtWfList"></datalist>
+        </div>
+        <div id="mtWfRows" style="padding:4px 0"></div>
+      </div>
+    </div>
+    <div class="sect lead">Certification</div>
+    <div id="mtCert" style="padding:2px 0"></div>
+    <div class="sect lead">Epics</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:2px 0">
+      <select id="mtEpicSort" aria-label="epic sort">
+        <option value="activity" selected>Last activity</option>
+        <option value="tickets">Tickets</option>
+        <option value="elapsed">Elapsed</option>
+        <option value="tokens">Tokens</option>
+      </select>
+      <input id="mtEpicPick" list="mtEpicList" placeholder="+ epic" style="min-width:140px">
+      <datalist id="mtEpicList"></datalist>
+      <span id="mtEpicChips" style="display:flex;gap:8px;flex-wrap:wrap"></span>
+    </div>
+    <div id="mtEpicCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;padding:6px 0"></div>
+    <div class="sect lead">Throughput</div>
+    <div id="mtThroughput" style="height:260px;min-width:0"></div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px">
+      <div style="min-width:0">
+        <div class="sect lead">Where the tokens go</div>
+        <div id="mtTokens" style="height:260px;min-width:0"></div>
+      </div>
+      <div style="min-width:0">
+        <div class="sect lead">Tokens by role</div>
+        <div id="mtRoles" style="padding:2px 0"></div>
+        <div class="sect lead">Project sessions</div>
+        <div id="mtSessions" style="padding:2px 0"></div>
+      </div>
     </div>
   </section>
 
@@ -843,6 +944,16 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   // the embedded render core reads the copy table by its module name (one source)
   var CERT_COPIES = CERT_RUNTIME.COPIES;
   var ROUND_COPIES = CERT_RUNTIME.ROUND;
+  // t261021-07: the Metrics tab's copy table + series palette (one source).
+  var METRICS_RUNTIME = ${METRICS_TABLES};
+  var METRICS_COPIES = METRICS_RUNTIME.COPIES;
+  var METRICS_COLORS = METRICS_RUNTIME.COLORS;
+  // t261021-07 rework: the embedded model/chart bodies reference these as
+  // identifiers — each must exist at page scope (the transitive closure).
+  var DASH = METRICS_RUNTIME.DASH;
+  var GRID_LINE = METRICS_RUNTIME.GRID_LINE;
+  var LABEL = METRICS_RUNTIME.LABEL;
+  var METRICS_SERIES_COLORS = METRICS_COLORS;
   var PROJECT_PALETTE_12 = IDENTITY_RUNTIME.PROJECT_PALETTE_12;
   var IDENTITY_OUTLINES = IDENTITY_RUNTIME.IDENTITY_OUTLINES;
   var IDENTITY_STRUCTURES = IDENTITY_RUNTIME.IDENTITY_STRUCTURES;
@@ -880,7 +991,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   var state = { project:'', status:null, reachable:null, requests:null, actions:null, grants:null, settings:null, session:'',
     // t261005-10 (UI-2): the four read-only tab faces + the Overview limit row.
     concurrency:null, epics:null, epicsReason:'', epicTickets:{}, epicOpen:'', epicShowAll:{},
-    inspection:null, inspectionError:'', metrics:null, metricsError:'',
+    inspection:null, inspectionError:'',
     docs:null, docsScope:'docs', docSel:'' };
   // t261006-17 (CL-2): the concurrency face + the knob draft (null = follow the saved limit).
   state.conc = null;
@@ -1835,34 +1946,345 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     window.parent.postMessage({ type:'sandbar-executor-panel:open-ticket', ticketId:String(id) }, window.location.origin);
   }
 
-  // ---- t261005-10 (UI-2): Inspection tab (read-only face over the latest scan report) ----
-  function loadMetrics(){
-    if(!state.project){ state.metrics=null; renderMetrics(); return; }
-    var q='window=7d&epic=all&project='+encodeURIComponent(state.project)+'&template=dev-lane&view=time';
-    fetch('/sandbar-workbench/api/wf/metrics?'+q).then(function(r){ return r.json(); }).then(function(j){
-      state.metrics=(j && j.kpis) ? j : null;
-      state.metricsError=(j && j.error) ? String(j.error) : '';
-      renderMetrics();
-    }).catch(function(){ state.metrics=null; state.metricsError=''; renderMetrics(); });
+  // ---- t261021-07: Metrics tab v2 (the approved mock) ----
+  // Tab-local state (never on state.* — the poll loop does not touch it).
+  var MT = {
+    vm: null, vmError: '', window: '30d', allProjects: false,
+    selected: [], drill: null,               // where-the-time-goes
+    cert: null,                              // certification summary
+    epicSort: 'activity', epicPicked: [],    // epics
+    throughput: null, tokens: null,          // chart specs (null = named empty)
   }
-  function renderMetrics(){
-    var e=el('metricsBanner'), grid=el('metricsGrid'), meta=el('metricsMeta');
-    if(!state.project){ e.innerHTML=''; grid.innerHTML=''; meta.textContent=''; return; }
-    var m=state.metrics;
-    if(!m){ e.innerHTML=bannerHtml(state.metricsError ? 'Metrics could not be read. Reason: '+state.metricsError : 'Metrics could not be reached (the workbench plugin may not be loaded).', true); grid.innerHTML=''; meta.textContent=''; return; }
-    e.innerHTML='';
-    var k=m.kpis;
-    if(!k || typeof k!=='object'){
-      grid.innerHTML='<div class="empty">'+esc(emptyCopyOf('metrics_kpis'))+'</div>';
-      meta.textContent='';
-      return;
+  // The chart bridge: the option factories above produce plain option objects;
+  // the vendored echarts build owns init/dispose. It loads LAZILY on the first
+  // Metrics-tab open (arbitrate round 11, defect B: a page-load module import
+  // taxed every PANEL_HTML consumer — harnesses without the vendor route got a
+  // deterministic module MIME/404 error and their zero-error legs went red;
+  // lazy load = only Metrics-visiting faces need the route). Every failure
+  // path (route down, MIME refused, JS error, 4s no-report timeout) flushes
+  // the queued charts to the named 'charts could not load' empty state —
+  // never a silent blank.
+  var MTC = { lib: null, pending: [], failed: false, timer: null, loading: false }
+  function mtEnsureChartLib() {
+    if (MTC.lib || MTC.failed || MTC.loading) return
+    MTC.loading = true
+    // D1 fix (gate round 2) still applies: the route is interpolated RAW.
+    import('${PANEL_ROUTE}/vendor/echarts.mjs').then(function (mod) {
+      var echarts = (mod && mod.default && typeof mod.default.init === 'function') ? mod.default : mod
+      if (!echarts || typeof echarts.init !== 'function') throw new Error('echarts build has no init')
+      var insts = new WeakMap()
+      if (typeof window.__metricsChartLibReady === 'function') {
+        window.__metricsChartLibReady({
+          draw: function (mount, option) {
+            var prev = insts.get(mount)
+            if (prev) { try { prev.dispose() } catch (e) { /* dispose is idempotent-tolerant */ } insts.delete(mount) }
+            var inst = echarts.init(mount, null, { renderer: 'canvas' })
+            insts.set(mount, inst)
+            inst.setOption(option)
+          },
+          dispose: function (mount) {
+            var inst = insts.get(mount)
+            if (inst) { try { inst.dispose() } catch (e) { /* same */ } insts.delete(mount) }
+          },
+        })
+      }
+    }).catch(function () {
+      if (typeof window.__metricsChartLibFail === 'function') window.__metricsChartLibFail()
+    })
+  }
+  function mtDraw(id, option) {
+    var mount = el(id)
+    if (!mount) return
+    if (MTC.lib) { MTC.lib.draw(mount, option); return }
+    mtEnsureChartLib()
+    MTC.pending.push([mount, option])
+    if (MTC.failed) mtFlushFailed()
+  }
+  function mtFlushFailed() {
+    MTC.failed = true
+    var q = MTC.pending; MTC.pending = []
+    q.forEach(function (p) {
+      p[0].innerHTML = '<div class="empty">' + esc('charts could not load') + '</div>'
+    })
+  }
+  window.__metricsChartLibReady = function (lib) {
+    if (MTC.timer) { clearTimeout(MTC.timer); MTC.timer = null }
+    MTC.lib = lib
+    var q = MTC.pending; MTC.pending = []
+    q.forEach(function (p) { lib.draw(p[0], p[1]) })
+  }
+  window.__metricsChartLibFail = function () {
+    if (MTC.timer) { clearTimeout(MTC.timer); MTC.timer = null }
+    mtFlushFailed()
+  }
+  // The load-failure face must not wait forever: if the module script never
+  // reports (route down, MIME refused, JS error), flush after 4s.
+  MTC.timer = setTimeout(function () { if (!MTC.lib) mtFlushFailed() }, 4000)
+
+  function mtProjectParam() { return MT.allProjects ? 'all' : state.project }
+  function metricsBaseQuery() {
+    return 'window=' + MT.window + '&epic=all&project=' + encodeURIComponent(mtProjectParam()) + '&template=dev-lane'
+  }
+  function loadMetrics() {
+    mtWireHeader()
+    if (!state.project) { MT.vm = null; renderMetrics(); return }
+    var q = metricsBaseQuery() + '&view=time&mode=full'
+    fetch('/sandbar-workbench/api/wf/metrics?' + q).then(function (r) { return r.json() }).then(function (j) {
+      // A render/embed throw must never dress up as 'could not be reached'
+      // (the arbitrate misreport finding): the two failure stages are named
+      // apart — this catch names the RENDER stage, the outer one the FETCH.
+      try {
+        MT.vm = metricsV2Of(j)
+        MT.vmError = (MT.vm && MT.vm.ok === false) ? String(MT.vm.reason || '') : ''
+        renderMetrics()
+        loadMetricsSide()
+      } catch (e) {
+        MT.vm = null
+        MT.vmError = 'metrics render failed: ' + (e && e.message ? e.message : String(e))
+        renderMetrics()
+      }
+    }).catch(function () { MT.vm = null; MT.vmError = ''; renderMetrics(); loadMetricsSide() })
+  }
+  // The three side reads (throughput / tokens / certification) fail one per
+  // face: each catch nulls only its own spec, never the whole tab.
+  function loadMetricsSide() {
+    var base = '/sandbar-workbench/api/wf/metrics?' + metricsBaseQuery() + '&mode=full&view='
+    fetch(base + 'health').then(function (r) { return r.json() }).then(function (j) {
+      try { MT.throughput = throughputSpecOf(j); renderThroughput() }
+      catch (e) { MT.throughput = null; renderThroughput() }
+    }).catch(function () { MT.throughput = null; renderThroughput() })
+    fetch(base + 'token').then(function (r) { return r.json() }).then(function (j) {
+      try { MT.tokens = tokensStackOf(j); renderTokens() }
+      catch (e) { MT.tokens = null; renderTokens() }
+    }).catch(function () { MT.tokens = null; renderTokens() })
+    fetch('/sandbar-executor-panel/api/certification?project=' + encodeURIComponent(state.project))
+      .then(function (r) { return r.json() }).then(function (j) {
+        try { MT.cert = certSummaryOf(j); renderMetricsCert() }
+        catch (e) { MT.cert = null; renderMetricsCert() }
+      }).catch(function () {
+        // The named degrade path: the renderer only writes #mtCert's innerHTML,
+        // so a throw here would be an unhandled rejection — contained, and the
+        // face keeps whatever the last good render left (never a blank pane).
+        MT.cert = null
+        try { renderMetricsCert() } catch (e) { /* contained degrade */ }
+      })
+  }
+  // Header wiring runs once per load: the project select is pre-filled with
+  // the executor tab's project (the deep link the panel was opened from) and
+  // gains the widening 'all projects' option; the window select keeps its
+  // three windows. A change re-fetches the tab.
+  var mtHeaderWired = false
+  function mtWireHeader() {
+    if (mtHeaderWired) return
+    mtHeaderWired = true
+    var p = el('metricsProject')
+    if (p) {
+      p.innerHTML = ''
+      var here = document.createElement('option')
+      here.value = state.project || ''
+      here.textContent = state.project || '(no project)'
+      here.selected = true
+      var all = document.createElement('option')
+      all.value = 'all'
+      all.textContent = METRICS_COPIES.allProjects
+      p.appendChild(here); p.appendChild(all)
+      p.onchange = function () {
+        MT.allProjects = (p.value === 'all')
+        MT.selected = []; MT.drill = null
+        loadMetrics()
+      }
     }
-    grid.innerHTML=
-      '<div class="cell"><b>'+esc(k.tickets!=null?k.tickets:'—')+'</b><span>tickets (7d)</span></div>'
-      +'<div class="cell"><b>'+esc(k.closed!=null?k.closed:'—')+'</b><span>closed (7d)</span></div>'
-      +'<div class="cell"><b>'+esc(k.avg_delivery_min!=null?k.avg_delivery_min:'—')+'</b><span>avg delivery (min)</span></div>'
-      +'<div class="cell"><b>'+esc(k.tokens_total!=null?k.tokens_total:'—')+'</b><span>tokens total</span></div>';
-    meta.textContent='Window 7d · generated '+(m.generated_at||'')+' · cache '+(m.cache&&m.cache.status?m.cache.status:'unknown');
+    var w = el('metricsWindow')
+    if (w) w.onchange = function () { MT.window = w.value || '30d'; loadMetrics() }
+    var wp = el('mtWfPick')
+    if (wp) wp.onchange = function () {
+      var name = (wp.value || '').trim()
+      wp.value = ''
+      if (!name || MT.selected.indexOf(name) >= 0) return
+      MT.selected.push(name); MT.drill = null
+      renderMetrics()
+    }
+    var es = el('mtEpicSort')
+    if (es) es.onchange = function () { MT.epicSort = es.value; renderMetrics() }
+    var ep = el('mtEpicPick')
+    if (ep) ep.onchange = function () {
+      var name = (ep.value || '').trim()
+      ep.value = ''
+      if (!name || MT.epicPicked.indexOf(name) >= 0) return
+      MT.epicPicked.push(name); renderMetrics()
+    }
+  }
+  function mtEmpty(id, word) { var e = el(id); if (e) e.innerHTML = '<div class="empty">' + esc(word) + '</div>' }
+  function renderMetrics() {
+    var banner = el('metricsBanner')
+    if (!state.project) { if (banner) banner.innerHTML = ''; mtEmpty('metricsKpis', 'no project selected'); return }
+    if (!MT.vm || MT.vm.ok === false) {
+      if (banner) banner.innerHTML = bannerHtml(MT.vmError
+        ? 'Metrics could not be read. Reason: ' + MT.vmError
+        : 'Metrics could not be reached (the workbench plugin may not be loaded).', true)
+      // review_plan gen1 item 2: the KPI row's degraded empty state renders
+      // through the DECLARED contract copy (emptyCopyOf('metrics_kpis')) so the
+      // original page-contract assertion holds un-weakened; the v2 sections'
+      // named faces stay on METRICS_COPIES.
+      mtEmpty('metricsKpis', emptyCopyOf('metrics_kpis'))
+      mtEmpty('mtWfRows', METRICS_COPIES.noData); mtEmpty('mtEpicCards', METRICS_COPIES.noData)
+      mtEmpty('mtRoles', METRICS_COPIES.noData); mtEmpty('mtSessions', METRICS_COPIES.noData)
+      renderMetricsCert(); renderThroughput(); renderTokens()
+      return
+    }
+    if (banner) banner.innerHTML = ''
+    var vm = MT.vm
+    // KPI row — six tiles (mock order), values may be the honest dash.
+    var kpis = kpiTilesOf(vm)
+    el('metricsKpis').innerHTML = kpis.map(function (t) {
+      return '<div class="cell" style="display:flex;flex-direction:column;gap:4px">'
+        + '<span class="meta" style="letter-spacing:.04em">' + esc(t.title) + '</span>'
+        + '<b style="font-size:22px">' + esc(t.value) + '</b>'
+        + '<span class="meta">' + esc(t.sub) + '</span></div>'
+    }).join('')
+    renderTimeCard()
+    renderEpics()
+    // Tokens by role + Project sessions (real rows where the payload has them).
+    el('mtRoles').innerHTML = roleRowsOf(vm).map(function (r) {
+      return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0">'
+        + '<span>' + esc(r.name) + '</span><b class="mono">' + esc(r.value) + '</b></div>'
+        + (r.sub && r.sub !== METRICS_COPIES.dash ? '<div class="meta">' + esc(r.sub) + '</div>' : '')
+    }).join('')
+    el('mtSessions').innerHTML = sessionRowsOf(vm).map(function (r) {
+      return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0">'
+        + '<span>' + esc(r.name) + '</span><b class="mono">' + esc(r.value) + '</b></div>'
+        + (r.sub && r.sub !== METRICS_COPIES.dash ? '<div class="meta">' + esc(r.sub) + '</div>' : '')
+    }).join('')
+    renderMetricsCert(); renderThroughput(); renderTokens()
+  }
+  // Where-the-time-goes: chips + rows inside the fixed-height card; clicking a
+  // row opens that workflow's stages IN THE SAME CARD (the card never grows —
+  // the drill replaces the row list, a Back chip returns).
+  function renderTimeCard() {
+    var chips = el('mtChips')
+    if (!chips) return
+    var vm = MT.vm
+    var names = (vm && vm.workflows ? vm.workflows : []).map(function (w) { return String(w.name) })
+    var list = el('mtWfList')
+    if (list) list.innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '"></option>' }).join('')
+    var chipHtml = MT.selected.map(function (n) {
+      return '<span data-mtchip="' + esc(n) + '" style="border:1px solid #0f766e;color:#0f766e;border-radius:13px;padding:2px 10px;cursor:pointer;font-size:12px">'
+        + esc(n) + ' <b>×</b></span>'
+    }).join('')
+    var back = MT.drill
+      ? '<span data-mtback="1" style="border:1px solid var(--line);border-radius:13px;padding:2px 10px;cursor:pointer;font-size:12px">← ' + esc(String(MT.drill)) + '</span>'
+      : ''
+    chips.innerHTML = chipHtml + back
+    Array.prototype.forEach.call(chips.querySelectorAll('[data-mtchip]'), function (b) {
+      b.onclick = function () {
+        MT.selected = MT.selected.filter(function (x) { return x !== b.getAttribute('data-mtchip') })
+        MT.drill = null; renderMetrics()
+      }
+    })
+    var backBtn = chips.querySelector('[data-mtback]')
+    if (backBtn) backBtn.onclick = function () { MT.drill = null; renderMetrics() }
+    var rows = el('mtWfRows')
+    if (!rows) return
+    if (!vm) { mtEmpty('mtWfRows', METRICS_COPIES.noData); return }
+    if (MT.drill) {
+      var stages = stageRowsOf(vm, String(MT.drill))
+      rows.innerHTML = stages.length === 0
+        ? '<div class="empty">' + esc(METRICS_COPIES.noData) + '</div>'
+        : stages.map(function (s) { return mtRowHtml(s, String(s.stage)) }).join('')
+      Array.prototype.forEach.call(rows.querySelectorAll('[data-mtrow]'), function (b) { b.onclick = null })
+      return
+    }
+    var wf = workflowRowsOf(vm, MT.selected)
+    rows.innerHTML = wf.length === 0
+      ? '<div class="empty">' + esc(METRICS_COPIES.noData) + '</div>'
+      : wf.map(function (r) { return mtRowHtml(r, String(r.name)) }).join('')
+    Array.prototype.forEach.call(rows.querySelectorAll('[data-mtrow]'), function (b) {
+      b.onclick = function () { MT.drill = b.getAttribute('data-mtrow'); renderMetrics() }
+    })
+  }
+  function mtRowHtml(r, drillKey) {
+    return '<div data-mtrow="' + esc(drillKey) + '" style="padding:6px 0;border-bottom:1px solid var(--line);cursor:pointer">'
+      + '<div style="display:flex;gap:10px;align-items:baseline">'
+      + '<b class="mono" style="min-width:110px">' + esc(String(r.name || r.stage || '')) + '</b>'
+      + '<span style="flex:1;height:14px;background:var(--panel2);border-radius:3px;overflow:hidden">'
+      + '<span style="display:block;height:100%;width:' + Number(r.bar || 0) + '%;background:#63b3ac"></span></span>'
+      + '<span class="mono meta" style="min-width:64px;text-align:right">' + esc(String(r.elapsed)) + '</span>'
+      + '<span class="mono" style="min-width:44px;text-align:right">' + esc(String(r.rounds)) + '</span></div>'
+      + '<div class="meta">' + esc(String(r.sub)) + '</div></div>'
+  }
+  function renderEpics() {
+    var vm = MT.vm
+    var list = el('mtEpicList')
+    if (list) {
+      var names = (vm && vm.epics ? vm.epics : []).map(function (e) { return String(e.name) })
+      list.innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '"></option>' }).join('')
+    }
+    var chips = el('mtEpicChips')
+    if (chips) {
+      chips.innerHTML = MT.epicPicked.map(function (n) {
+        return '<span data-mtepic="' + esc(n) + '" style="border:1px solid #0f766e;color:#0f766e;border-radius:11px;padding:1px 9px;cursor:pointer;font-size:11.5px">'
+          + esc(n) + ' <b>×</b></span>'
+      }).join('')
+      Array.prototype.forEach.call(chips.querySelectorAll('[data-mtepic]'), function (b) {
+        b.onclick = function () {
+          MT.epicPicked = MT.epicPicked.filter(function (x) { return x !== b.getAttribute('data-mtepic') })
+          renderMetrics()
+        }
+      })
+    }
+    var cards = el('mtEpicCards')
+    if (!cards) return
+    if (!vm) { mtEmpty('mtEpicCards', METRICS_COPIES.noData); return }
+    var rows = epicCardsOf(vm, MT.epicSort, MT.epicPicked, Date.now())
+    cards.innerHTML = rows.length === 0
+      ? '<div class="empty">' + esc(METRICS_COPIES.noData) + '</div>'
+      : rows.map(function (c) {
+          return '<div class="cell" style="display:flex;flex-direction:column;gap:4px">'
+            + '<b>' + esc(String(c.name)) + '</b>'
+            + '<span class="meta">' + esc(String(c.activity)) + '</span>'
+            + '<div><b style="font-size:20px">' + esc(String(c.tickets)) + '</b> <span class="meta">' + esc(METRICS_COPIES.ticketsWord) + '</span></div>'
+            + '<div style="display:flex;justify-content:space-between"><span class="mono">' + esc(String(c.elapsed)) + '</span><span class="meta">' + esc(METRICS_COPIES.elapsedWord) + '</span></div>'
+            + '<div style="display:flex;justify-content:space-between"><span class="mono">' + esc(String(c.tokens)) + '</span><span class="meta">' + esc(METRICS_COPIES.tokensWord) + '</span></div>'
+            + '<span style="height:4px;background:var(--panel2);border-radius:2px;overflow:hidden;display:block">'
+            + '<span style="display:block;height:100%;width:' + Number(c.bar || 0) + '%;background:#0f766e"></span></span></div>'
+        }).join('')
+  }
+  function renderMetricsCert() {
+    var e = el('mtCert')
+    if (!e) return
+    var c = MT.cert
+    if (!c || c.ok === false) {
+      e.innerHTML = '<div class="empty">' + esc(METRICS_COPIES.reasonNoCert) + '</div>'
+      return
+    }
+    var strip = (c.strip || []).map(function (v) {
+      var color = v === 'green' ? '#15803d' : (v === 'red' ? '#b91c1c' : '#c2700f')
+      return '<span style="display:inline-block;width:18px;height:26px;border-radius:4px;background:' + color + ';opacity:.85"></span>'
+    }).join('')
+    e.innerHTML = '<div style="display:flex;gap:28px;align-items:baseline;flex-wrap:wrap;padding:4px 0">'
+      + '<span><b style="font-size:28px;color:#15803d">' + esc(String(c.green ?? METRICS_COPIES.dash)) + '</b> <span class="meta">' + esc(METRICS_COPIES.greenWord) + '</span></span>'
+      + '<span><b style="font-size:26px;color:#b91c1c">' + esc(String(c.red ?? METRICS_COPIES.dash)) + '</b> <span class="meta">' + esc(METRICS_COPIES.redWord) + '</span></span>'
+      + '<span><b style="font-size:22px;color:#c2700f">' + esc(c.flaky == null ? METRICS_COPIES.dash : String(c.flaky)) + '</b> <span class="meta">'
+      + esc(c.flaky == null ? METRICS_COPIES.reasonNoFlakyFace : METRICS_COPIES.flakyWord) + '</span></span></div>'
+      + (strip ? '<div style="display:flex;gap:3px;flex-wrap:wrap;padding:4px 0">' + strip + '</div>' : '')
+      + '<div style="padding:4px 0"><b>' + esc(METRICS_COPIES.timeToGreen) + ': P50 ' + esc(String(c.ttg)) + '</b></div>'
+  }
+  function renderThroughput() {
+    var e = el('mtThroughput')
+    if (!e) return
+    if (!MT.throughput) { e.innerHTML = '<div class="empty">' + esc(METRICS_COPIES.noData) + '</div>'; return }
+    e.innerHTML = ''
+    mtDraw('mtThroughput', throughputOption(MT.throughput))
+  }
+  function renderTokens() {
+    var e = el('mtTokens')
+    if (!e) return
+    if (!MT.tokens) {
+      e.innerHTML = '<div class="empty">' + esc(METRICS_COPIES.reasonNoDailyTokens) + '</div>'
+      return
+    }
+    e.innerHTML = ''
+    mtDraw('mtTokens', tokensOption(MT.tokens))
   }
 
   // ---- t261005-10 (UI-2): Docs tab (read-only tree + markdown reader) ----
@@ -2653,7 +3075,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     // t261005-10 (UI-2): reference-face state resets on a project switch (no
     // cross-project bleed).
     state.concurrency=null; state.epics=null; state.epicsReason=''; state.epicTickets={}; state.epicOpen=''; state.epicShowAll={};
-    state.inspection=null; state.inspectionError=''; state.metrics=null; state.metricsError='';
+    state.inspection=null; state.inspectionError='';
     state.docs=null; state.docSel='';
     try{ window.__panelBeepCount = Number(localStorage.getItem(beepCountKey())||'0')||0; }catch(e){}
     if(!state.project){ renderWaitColumn(); renderActions(); renderGrants(); renderConcurrency(); renderLimitRow(); renderEpics(); renderMetrics(); renderDocs(); return; }

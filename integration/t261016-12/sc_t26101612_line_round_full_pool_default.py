@@ -30,7 +30,7 @@ tree under test; for each env form call exclude_pools_value(env) and
 suite_argv(env) with stderr captured; compare argv lists byte-for-byte where
 identity is the contract. Intent split (no intent-level duplication): the
 narrowed-round-writes-no-record chain belongs to t261013-04-line-round-run-record
-(its leg B owns the skip-reason face); the exclusion-switch consumption matrix
+(its leg B owns the exclusion-reason face); the exclusion-switch consumption matrix
 on the verify_lane gate belongs to t260913-03-pool-exclude-switch-forms; the
 value/argv truth table at unit level belongs to the developer's L1 battery —
 this entry uniquely owns the operator-visible default journey (which round is

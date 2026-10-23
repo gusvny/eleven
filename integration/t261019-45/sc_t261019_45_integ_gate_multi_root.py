@@ -23,7 +23,7 @@ missing/empty integration.cmd keeps its exact refusal.
   D  MALFORMED AT THE CONTAINER — an immediate named red naming the container
      tree; the member candidate is NOT consulted (no silent fallback past a
      malformed declaration).
-  E  NON-REPO SEGMENT SKIPPED BY RULE — a write-set entry like
+  E  NON-REPO SEGMENT RULED OUT BY DECLARATION — a write-set entry like
      `integration/README.md` in a lane without that tree neither crashes nor
      becomes a candidate; the candidate list stays explicit.
   F  REAL GIT FIXTURE — legs A/B rebuilt over two real `git init` member

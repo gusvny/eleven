@@ -159,7 +159,7 @@ class MergeLossCheckTest(unittest.TestCase):
 
         On the carrier the forecast named 15 files while the real merge left 11
         unmerged and auto-merged 4, so resolving from the forecast alone would
-        chase files that are not conflicts and skip files that are.
+        chase files that are not conflicts and leave real conflicts unchased.
         """
         repo = Path(self._tmp.name) / "live"
         repo.mkdir(exist_ok=True)

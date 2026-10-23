@@ -42,7 +42,7 @@ on expiry the driver's whole group is SIGKILLed and the leg FAILS by name
 under repair.
 
 intent split: the runner's spawn-site source lock (start_new_session, no
-PIPE) and the hang-twice skip-by-name face belong to
+PIPE) and the hang-twice named-deferral face belong to
 t261012-02-case-spawn-contract (sibling entry); the engine activity
 reaper/shutdown roll-call belongs to t261006-08; the stage-lease named-red
 convergence stays with stage_docker's own entries.

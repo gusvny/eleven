@@ -25,6 +25,10 @@ import { createQuestionBridge, makeRegistryProjectResolver, createBridgeStatus }
 import { fsLedgerIo } from './src/host/requests.ts'
 import { readFileSync } from 'node:fs'
 
+/** t261021-07: the vendored echarts blob's home (cross-plugin READ — the workbench
+ *  client vendor stays the single copy; this plugin serves it verbatim). */
+const VENDOR_ECHARTS_PATH = new URL('../workbench/src/client/vendor/echarts.esm.min.js', import.meta.url).pathname
+
 export const name = 'sandbar-executor-panel'
 // webServer 只在 web profile 存在；headless 下待机（无面板面可挂）。
 export const inject: string[] = []
@@ -124,6 +128,23 @@ export function apply(ctx: Context, config: ExecutorPanelPluginConfig = {}): voi
             },
           }),
         ),
+        // t261021-07：vendored echarts 的只读分发（Metrics tab v2 的图表引擎）。
+        // 跨插件 READ：文件真源=workbench client vendor（本仓唯一 echarts blob），
+        // 这里不复制副本；content-type 必须是 text/javascript——module import 对
+        // MIME 严格，回错类型=脚本加载失败=页面走 named empty state（不静默）。
+        ws.register({
+          kind: 'prefix', path: PANEL_ROUTE + '/vendor',
+          handler: async (_req, res) => {
+            try {
+              const js = readFileSync(VENDOR_ECHARTS_PATH)
+              res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' })
+              res.end(js)
+            } catch (e) {
+              res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+              res.end('vendor echarts not readable: ' + (e instanceof Error ? e.message : String(e)))
+            }
+          },
+        }),
       ]
       return () => { for (const d of disposers) d() }
     }, 'sandbar-executor-panel: panel routes')

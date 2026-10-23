@@ -674,16 +674,17 @@ def main():
         if not good:
             fail.bail("建票未受理，后续子用例无从进行：%s" % why, 1)
 
-        # 261031 host order (261023): SKIP the UI leg for now.
-        # Why: the UI ticket parks at implement/queued waiting for a concurrency
-        # slot (fixture project limit) and its acquire path was closing the whole
-        # workflow FAILED (KI-339). Until that is settled the journey proves the
-        # light-lane chain itself; the ui_evidence conditional stage is NOT
-        # covered by this case meanwhile - named here, not silently dropped.
-        SKIP_UI_LEG = True
-        if SKIP_UI_LEG:
-            print("SKIP L2c UI 票段（host order 261023：并发队列未收口前跳过；"
-                  "ui_evidence 条件段本用例暂不覆盖）", flush=True)
+        # 261031 host order (261023): the UI leg is DEFERRED until the
+        # concurrency queue is closed (KI-339: the UI ticket parked at
+        # implement/queued and its slot acquire closed the whole workflow
+        # FAILED). t261021-07 gate round 12: the three-state contract has no
+        # deferred/silent exit — a leg the journey cannot prove is a NAMED
+        # environmental face, so the honest face is ENV_FAIL + exit 2 (the
+        # unreachable else-branch keeps the real leg for the un-defer moment).
+        if True:
+            print("ENV_FAIL: L2c UI 票段由宿主令 261023 暂缓（并发队列未收口，KI-339）——"
+                  "ui_evidence 条件段本用例本轮未验到（具名环境红，非静默跳过）", flush=True)
+            sys.exit(2)
         else:
             # ---------- L2c UI 票：ui_evidence 条件段「出现且真跑，且在机器闸之前」 ----------
             # 独立 worker（一票一队列）：该票的桩额外写 UI 路径文件，使改动面命中夹具

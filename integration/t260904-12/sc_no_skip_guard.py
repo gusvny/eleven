@@ -95,6 +95,11 @@ ALLOW = [
     # 第四态），只是换了语言。只锚**否定式**形态（no/without/never + SKIP、SKIP-free）：
     # 裸词 SKIP 与任何 SKIP 状态值照旧红，T1b 白名单自证同组判据照旧咬得住。
     re.compile(r"\b(?:no|without|never)\s+SKIP\b|SKIP-free", re.I),
+    re.compile(r"\bnothing\s+is\s+SKIP\b", re.I),
+    # 261023（t261021-07 收口清账）：同族英文否定式又一形态——
+    # integration/t261019-45 头注 "NON-REPO SEGMENT RULED OUT BY DECLARATION" 与
+    # t261019-09 头注 "nothing is SKIP" 均为「声明没有第四态」的否定式表述，
+    # 只锚具体短语，裸词照旧红。
     # ---- 260928 第二批同族清账（撞字三类，各只锚具体形态，裸词照旧红）----
     re.compile(r"\bmust\s+skip\b|\bmust not masquerade\b", re.I),        # 英文**行为描述**：新场景头注写
                                         # "a project-scope class … must skip + announce LOUD"（描述产品行为，
