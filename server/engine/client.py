@@ -1544,6 +1544,19 @@ async def cmd_ticket(args: Dict[str, Any]) -> Dict[str, Any]:
         if state2 == "refused":
             return _gate_receipt(_ok({**face_keys, "landing": "refused",
                                       "refused_why": payload}), gate, op)
+        # 261024 (KI-344): an authorize refused BY IDENTITY (an agent role name must not
+        # self-authorize) was reported as a delivery timeout, so the operator looked at
+        # workers and transports instead of at the identity they sent. Surface the
+        # refusal verbatim - it is a refusal, not an unconfirmed delivery.
+        for it in _refused_entries(last_snap):
+            why = str(it.get("why") or "")
+            if str(it.get("want") or "").startswith("sign(authorize)") \
+                    and ("self-authorize" in why or "self-sign" in why
+                         or "agent role name" in why):
+                return _err("authorize refused by identity: %s — send a human "
+                            "identity (an agent role name is refused as "
+                            "self-authorization, never a delivery problem)" % why,
+                            KIND_AUTHZ_LANDING_UNCONFIRMED)
         plain = ""
         for it in _refused_entries(last_snap):
             if str(it.get("want") or "") != "sign(authorize)":

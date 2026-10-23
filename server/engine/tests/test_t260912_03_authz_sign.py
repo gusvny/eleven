@@ -304,3 +304,54 @@ def test_source_lock_snapshot_readability():
     assert '"authz_active": len(_authz)' in cl
     tk = _src("server/tools/ticket.py")
     assert "authz_active" in tk and "def _authz_view(" in tk
+
+
+import os  # 261024: the folded battery resolves the engine tree from __file__
+import unittest  # 261024: the folded identity-refusal battery
+# ---- 261024 (KI-344): an authorize refused by IDENTITY names the refusal ----
+# The agent-role refusal used to surface as a delivery timeout, so operators
+# investigated workers instead of the identity they sent. These assertions live
+# here (not in a new file) so the fix needs no new anchor row.
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_CLIENT = os.path.join(_HERE, os.pardir, "client.py")
+_DEV_LANE = os.path.join(_HERE, os.pardir, "dev_lane.py")
+
+
+class IdentityRefusalIsNamed(unittest.TestCase):
+    def setUp(self):
+        self.src = open(_CLIENT, encoding="utf-8").read()
+
+    def test_identity_refusal_branch_exists_before_the_timeout_branch(self):
+        i_identity = self.src.find("authorize refused by identity")
+        self.assertGreater(i_identity, 0, "the identity-refusal branch is missing")
+        i_timeout = self.src.find("face=match but neither a ledger landing")
+        self.assertGreater(i_timeout, 0)
+        self.assertLess(i_identity, i_timeout,
+                        "the identity branch must run BEFORE the timeout branch")
+
+    def test_branch_matches_the_self_authorization_shape(self):
+        i = self.src.find("authorize refused by identity")
+        window = self.src[max(0, i - 900):i + 200]
+        self.assertIn("sign(authorize)", window)
+        self.assertTrue("self-authorize" in window or "self-sign" in window
+                        or "agent role name" in window)
+
+    def test_message_names_the_expected_identity(self):
+        i = self.src.find("send a human")
+        self.assertGreater(i, 0,
+                           "the refusal must name what the caller should send instead")
+
+
+class LandingVerdictRuleStillIntact(unittest.TestCase):
+    """The pin rule the same manual lane carries: a gate round pins what it proved."""
+
+    def test_the_engine_still_pins_the_revision_the_gate_ran_on(self):
+        src = open(_DEV_LANE, encoding="utf-8").read()
+        self.assertIn("_ki220_record_green_run", src)
+        self.assertIn('face["sha"] = str(res.sha)', src,
+                        "the green-run face must record the lane HEAD the round ran on")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
