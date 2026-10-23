@@ -90,6 +90,7 @@ from lib_gate import (Fail, accepted, parse_out_json, poc_python,  # noqa: E402
                       require_bench, require_stage, run_poc_client, stage_down)
 from lib_pool_exclude_lane import build_lane  # noqa: E402
 import stage_docker  # noqa: E402
+import lib_bench_stage as bench_stage  # noqa: E402
 
 LANE_MARKERS = ("SANDBAR_TASK_QUEUE", "SANDBAR_TASK_QUEUES", "SANDBAR_WATCH_WORKFLOW")
 PROJECT_KEY = "lightlane-e2e"
@@ -268,8 +269,14 @@ def cli(py, stage, sub, args, extra=None, timeout=180):
     return parse_out_json(out)
 
 
-def wait_snap(fail, py, stage, tid, pred, label, deadline_s):
-    """轮询 ticket-query 直到 pred(snapshot) 成立；超时=点名红并返回 None。"""
+def wait_snap(fail, py, stage, tid, pred, label, deadline_s, may_block=False):
+    """轮询 ticket-query 直到 pred(snapshot) 成立；超时=点名红并返回 None。
+
+    261023 (host order): a BLOCKED ticket that does not satisfy this step's
+    predicate can never reach it without a wake signal, so waiting out the
+    ceiling only hides the finding — it fails AT ONCE, naming the stage, the
+    state and the receipt it saw. Steps that legitimately expect a blocked
+    ticket pass may_block=True."""
     t0 = time.time()
     last = {}
     while time.time() - t0 < deadline_s:
@@ -279,6 +286,13 @@ def wait_snap(fail, py, stage, tid, pred, label, deadline_s):
             last = snap
             if pred(snap):
                 return snap
+            if not may_block and snap.get("stage_state") == "blocked":
+                fail.check(False, "%s（票在 %.1fs 时已 blocked，等不到本步：stage=%s/%s "
+                                  "blocked=%r——不再耗上限）"
+                           % (label, time.time() - t0, last.get("stage"),
+                              last.get("stage_state"),
+                              str(last.get("blocked_reason") or "")[:160]))
+                return None
         time.sleep(2)
     fail.check(False, "%s（%ds 内未达；末次 stage=%s/%s blocked=%r）"
                % (label, deadline_s, last.get("stage"), last.get("stage_state"),
@@ -538,6 +552,7 @@ def main():
             stats["pass"] += 1
         return r
     stage_mod = None
+    bench_handle = None
     bench = None
     stage = None
     G["tmp"] = tempfile.mkdtemp(prefix="sandbar-lightlane-e2e-")
@@ -557,8 +572,13 @@ def main():
         # ---------- L0 环境与红线自证 ----------
         bench = require_bench(fail)
         py = poc_python(bench)
-        stage_mod, stage = require_stage(fail, "lightlane-e2e-%d" % os.getpid(),
-                                         "lightlane-e2e-%d" % os.getpid())
+        # 261023 (host order): the stage is the plain-process bench, not a docker
+        # container. Same shape as before (ports.temporal / namespace), up in ~0.2 s
+        # instead of minutes, and it is reaped with residue assertions.
+        stage_mod = None
+        bench_stage_mod = bench_stage
+        bench_handle = bench_stage.up(fail)
+        stage = bench_handle.state()
         fe = int(stage["ports"]["temporal"])
         check(fe not in stage_docker.FORBIDDEN_PORTS,
                    "L0 写守卫：舞台端口 %d ∉ 禁区端口集（含 3099）" % fe)
@@ -616,7 +636,7 @@ def main():
             s3 = wait_snap(fail, py, stage, TID_UI,
                            lambda x: x.get("stage") == "run_integration_tests"
                            and x.get("stage_state") == "blocked",
-                           "L2c UI 票走到机器闸（先跑过 UI 证据段）", 420)
+                           "L2c UI 票走到机器闸（先跑过 UI 证据段）", 150)
             if s3 is not None:
                 tl_ui = [(str(e.get("stage")), str(e.get("state")))
                          for e in (s3.get("timeline") or [])]
@@ -673,7 +693,7 @@ def main():
             s2 = wait_snap(fail, py, stage, TID_NOWS,
                            lambda x: x.get("stage") == "implement"
                            and x.get("stage_state") == "blocked",
-                           "L2b 空写集票在 implement 落盘被拒后 blocked", 420)
+                           "L2b 空写集票在 implement 落盘被拒后 blocked", 150, may_block=True)
             if s2 is not None:
                 d2 = s2.get("blocked_detail") or {}
                 check(str(d2.get("reason_code") or "") == "write_set_missing",
@@ -693,7 +713,7 @@ def main():
         # ---------- L3 红轮：闸不绿 → blocked（完整违规集，不仲裁不自动重跑） ----------
         snap = wait_snap(fail, py, stage, TID,
                          lambda x: x.get("stage") == "run_integration_tests"
-                         and x.get("stage_state") == "blocked", "L3 票停在机器闸 blocked", 600)
+                         and x.get("stage_state") == "blocked", "L3 票停在机器闸 blocked", 150, may_block=True)
         if snap is not None:
             reason = str(snap.get("blocked_reason") or "")
             detail = snap.get("blocked_detail") or {}
@@ -859,7 +879,7 @@ def main():
         snap2 = wait_snap(fail, py, stage, TID,
                           lambda x: x.get("stage") in ("merge_check", "merge")
                           or x.get("status") == "closed",
-                          "L4 唤醒后闸重跑并推进（红转绿）", 600)
+                          "L4 唤醒后闸重跑并推进（红转绿）", 150)
         rows2 = read_jsonl(G["gate_ledger"])[n_before:]
         check(len(rows2) >= 3,
                    "L4 唤醒后闸**真重跑**（新增账本记录 %d 条 ≥3）" % len(rows2))
@@ -911,7 +931,7 @@ def main():
         human = wait_snap(fail, py, stage, TID,
                           lambda x: x.get("stage") == "merge"
                           and x.get("stage_state") == "awaiting-human",
-                          "L5 走到轻道唯一人门（merge）", 420)
+                          "L5 走到轻道唯一人门（merge）", 150)
         if human is not None:
             tl3 = human.get("timeline") or []
             done_marks = [e for e in tl3
@@ -941,7 +961,7 @@ def main():
                              and len([e for e in (x.get("timeline") or [])
                                       if str(e.get("stage")) == "implement"
                                       and str(e.get("state")) == "running"]) >= 2,
-                             "L5b rework 后重走全链回到人门（implement 二次进入）", 420)
+                             "L5b rework 后重走全链回到人门（implement 二次进入）", 150)
             if back is not None:
                 n_impl_after = len([st for st in stub_stages_of(TID) if st == "implement"])
                 check(n_impl_after == n_impl_before + 1,
@@ -957,7 +977,7 @@ def main():
             check(sig.get("ok") is True, "L5 人签 approve 受理（%s）"
                        % str(sig.get("error") or "")[:120])
             fin = wait_snap(fail, py, stage, TID,
-                            lambda x: x.get("status") == "closed", "L5 票收口 closed", 420)
+                            lambda x: x.get("status") == "closed", "L5 票收口 closed", 150)
             if fin is not None:
                 check(str(fin.get("stage_state")) == "awaiting",
                            "L5 终态 stage_state=awaiting（收口形态）")
@@ -1007,7 +1027,7 @@ def main():
             sp = wait_snap(fail, py, stage, TID_LAG,
                            lambda x: x.get("paused") is True
                            and x.get("paused_phase") == "at_gate",
-                           "L7 票停在段间门口（paused=True / paused_phase=at_gate）", 300)
+                           "L7 票停在段间门口（paused=True / paused_phase=at_gate）", 120, may_block=True)
             lane_lag = ""
             if sp is not None:
                 lane_lag = str(((sp.get("meta") or {}).get("workspace") or {}).get("path") or "")
@@ -1035,7 +1055,7 @@ def main():
                 lag = wait_snap(fail, py, stage, TID_LAG,
                                 lambda x: x.get("stage") == "merge"
                                 and x.get("stage_state") == "awaiting-human",
-                                "L7 主同步后闸转绿 → 推进到人门", 420)
+                                "L7 主同步后闸转绿 → 推进到人门", 150)
                 check(lag is not None,
                       "L7 闸结果被主同步改变（无同步=旧快照三条红 → blocked）")
                 if lag is not None:
@@ -1083,9 +1103,9 @@ def main():
                 check(not left, "L6 收尾：本场景零残留进程（实得 %r）" % left[:3])
         except Exception as e:  # noqa: BLE001
             check(False, "残留进程复核异常：%s" % str(e)[:160])
-        if stage is not None and stage_mod is not None:
+        if stage is not None and bench_handle is not None:
             try:
-                print("  stage_down: %s" % str(stage_down(stage_mod, stage))[:200], flush=True)
+                print("  stage_down: %s" % str(bench_stage.down(bench_handle, fail, tag="lightlane bench"))[:200], flush=True)
             except Exception as e:  # noqa: BLE001
                 print("  (stage_down 容错：%s)" % str(e)[:160], flush=True)
         if not os.environ.get("SANDBAR_LIGHTLANE_E2E_KEEP_TMP"):
