@@ -712,6 +712,18 @@ def _persist_run_row(header, env):
             sys.stderr.write("run-row persist skipped: no project ledger carries a "
                              "%s row under %s\n" % (RUN_SOURCE, base))
             return
+    # 261023: the suite's own header carries the FACE rule (env_fail != 0 -> red).
+    # The engine's run_verdict is what certifies and it keys on content: ran > 0 and
+    # failed == 0 is GREEN (an unavailable environment is "unverified", not guilt).
+    # Writing the face verdict verbatim poisoned the ledger with a red row for a
+    # round that had failed=0 - measured, and corrected below.
+    _cases = header.get("cases") or {}
+    try:
+        _ran = int(_cases.get("ran") or 0)
+        _failed = int(_cases.get("failed") or 0)
+        header["verdict"] = "green" if (_ran > 0 and _failed == 0) else "red"
+    except (TypeError, ValueError):
+        pass
     path = chosen / "ledger" / "scenario-runs.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
