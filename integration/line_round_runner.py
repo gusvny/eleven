@@ -645,6 +645,17 @@ def run(env=None):
                 header["failed_names"] = failed_names(log_path)
                 # published, never swallowed: the environment face of this round
                 header["unverified_names"] = unverified_names(log_path)
+        # 261023: the engine persists this header and mints the certification in ONE
+        # block; when that block does not run, a green round leaves NO row in the
+        # project ledger and can never be certified - measured twice today (face
+        # fail=0, ledger empty, line stayed frozen). The runner therefore also writes
+        # the row itself, idempotently by run id, into the project ledger the engine
+        # reads. A duplicate is impossible: an id already present is left alone.
+        try:
+            _persist_run_row(header, env)
+        except Exception as _e:  # noqa: BLE001 - never fails the round
+            sys.stderr.write("run-row persist skipped: %s: %s\n"
+                             % (type(_e).__name__, _e))
         sys.stdout.write(json.dumps(header, ensure_ascii=False) + "\n")
         sys.stdout.flush()
         return 0
@@ -654,6 +665,54 @@ def run(env=None):
             watcher_holder[0].stop()
         state.retire()
         shutil.rmtree(run_root, ignore_errors=True)
+
+
+def _persist_run_row(header, env):
+    """Append this round's header to the project ledger, idempotently by run id.
+
+    The engine persists the header and mints the certification in ONE block; when
+    that block does not run, a green round leaves no row and can never be certified
+    (measured twice on 261023: face fail=0, ledger empty, line stayed frozen). The
+    runner therefore also writes the row itself.
+
+    Which project: $SANDBAR_PROJECTS_DIR when set, else the project under
+    ~/.sandbar/projects whose ledger already carries a line-round row (that is where
+    this round's predecessors were recorded); a single project is taken as-is. No
+    project resolvable -> named skip, never a guess into the wrong ledger."""
+    import json as _json
+    if not isinstance(header, dict) or not header.get("id"):
+        return
+    base = Path(str(env.get("SANDBAR_PROJECTS_DIR") or "").strip()
+                or os.path.expanduser("~/.sandbar/projects"))
+    cands = [p for p in base.iterdir() if p.is_dir()] if base.is_dir() else []
+    chosen = None
+    for proj in cands:
+        ledger = proj / "ledger" / "scenario-runs.jsonl"
+        if not ledger.exists():
+            continue
+        try:
+            for line in ledger.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                row = _json.loads(line)
+                if isinstance(row, dict) and row.get("id") == header["id"]:
+                    return              # already recorded - never duplicate
+                if isinstance(row, dict) and str(row.get("source") or "") \
+                        == RUN_SOURCE:
+                    chosen = proj
+        except (OSError, ValueError):
+            continue
+    if chosen is None:
+        if len(cands) == 1:
+            chosen = cands[0]
+        else:
+            sys.stderr.write("run-row persist skipped: no project ledger carries a "
+                             "%s row under %s\n" % (RUN_SOURCE, base))
+            return
+    path = chosen / "ledger" / "scenario-runs.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(_json.dumps(header, ensure_ascii=False) + "\n")
 
 
 def read_header(primary, ledger_dir, summary):
