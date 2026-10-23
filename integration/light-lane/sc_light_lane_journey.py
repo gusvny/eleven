@@ -674,64 +674,75 @@ def main():
         if not good:
             fail.bail("建票未受理，后续子用例无从进行：%s" % why, 1)
 
-        # ---------- L2c UI 票：ui_evidence 条件段「出现且真跑，且在机器闸之前」 ----------
-        # 独立 worker（一票一队列）：该票的桩额外写 UI 路径文件，使改动面命中夹具
-        # verify.yaml 声明的 ui_evidence.dirs → helper 判为 UI 票 → 条件段真跑。
-        ui_worker = start_worker(py, stage, queues="sandbar-ticket-%s" % TID_UI,
-                                 stub_files=UI_FILE, watch=TID_UI)
-        _rc, _br2 = git("rev-parse", "--short", "HEAD")
-        _rc3, out3 = run_poc_client(py, "ticket-start", {
-            "ticket_id": TID_UI, "template_id": "light-lane", "project": PROJECT_KEY,
-            "base_ref": (_br2 or "").strip(),
-            "title": "[e2e] light-lane UI ticket (conditional ui_evidence stage)",
-            "user_request": "integration e2e: a UI-surface change must run the ui_evidence stage before the gate",
-            "write_set": [UI_FILE],
-            "caller_project": PROJECT_KEY,
-        }, env_for(stage), timeout=300)
-        good3, why3 = accepted(out3, TID_UI)
-        check(good3, "L2c UI 票受理（%s）" % why3)
-        if good3:
-            s3 = wait_snap(fail, py, stage, TID_UI,
-                           lambda x: x.get("stage") == "run_integration_tests"
-                           and x.get("stage_state") == "blocked",
-                           "L2c UI 票走到机器闸（先跑过 UI 证据段）", 150)
-            if s3 is not None:
-                tl_ui = [(str(e.get("stage")), str(e.get("state")))
-                         for e in (s3.get("timeline") or [])]
-                seq_ui = [st for st, _s in tl_ui]
-                check(("ui_evidence", "running") in tl_ui and ("ui_evidence", "done") in tl_ui,
-                      "L2c **UI 票**：ui_evidence 出现且真跑（时间线 running/done；实得 %r）"
-                      % [x for x in tl_ui if x[0] == "ui_evidence"])
-                rec_ui = (s3.get("results") or {}).get("ui_evidence") or {}
-                check(str(rec_ui.get("status")) == "ok" and bool(rec_ui.get("deliverables")),
-                      "L2c UI 票：票据回执有记账（results.ui_evidence status=%r shots=%r）"
-                      % (rec_ui.get("status"), rec_ui.get("deliverables")))
-                # 段序：ui_evidence 两条都排在 implement/done 之后、机器闸 running 之前
-                i_impl_done = tl_ui.index(("implement", "done")) if ("implement", "done") in tl_ui else -1
-                i_ui_run = (tl_ui.index(("ui_evidence", "running"))
-                            if ("ui_evidence", "running") in tl_ui else -1)
-                i_ui_done = (tl_ui.index(("ui_evidence", "done"))
-                             if ("ui_evidence", "done") in tl_ui else -1)
-                i_gate = (tl_ui.index(("run_integration_tests", "running"))
-                          if ("run_integration_tests", "running") in tl_ui else -1)
-                check(-1 < i_impl_done < i_ui_run <= i_ui_done < i_gate,
-                      "L2c UI 票段序：implement→ui_evidence→机器闸（下标 %r）"
-                      % [i_impl_done, i_ui_run, i_ui_done, i_gate])
-                check("handoffs" in s3 and any(str(h.get("stage")) == "ui_evidence"
-                                               for h in (s3.get("handoffs") or [])),
-                      "L2c UI 票：交接面有 ui_evidence 记账")
-                check(not (set(seq_ui) & set(EXCLUDED_STAGES)),
-                      "L2c UI 票仍零被裁段（实得 %r）" % sorted(set(seq_ui)))
-                # 截图实物：泳道 .sandbar/screenshots/ 下真有 png（隔离台桩写 1x1 PNG）
-                lane_ui = str(((s3.get("meta") or {}).get("workspace") or {}).get("path") or "")
-                shots = []
-                if lane_ui:
-                    import glob as _glob
-                    shots = _glob.glob(os.path.join(lane_ui, ".sandbar", "screenshots", "*.png"))
-                check(bool(shots), "L2c UI 票：泳道 .sandbar/screenshots/ 有截图实物（%d 张）"
-                      % len(shots))
-                print_timeline(s3, "UI ticket at the machine gate")
-            stop_worker(fail, "L2c UI 票 worker 收尾", ui_worker)
+        # 261031 host order (261023): SKIP the UI leg for now.
+        # Why: the UI ticket parks at implement/queued waiting for a concurrency
+        # slot (fixture project limit) and its acquire path was closing the whole
+        # workflow FAILED (KI-339). Until that is settled the journey proves the
+        # light-lane chain itself; the ui_evidence conditional stage is NOT
+        # covered by this case meanwhile - named here, not silently dropped.
+        SKIP_UI_LEG = True
+        if SKIP_UI_LEG:
+            print("SKIP L2c UI 票段（host order 261023：并发队列未收口前跳过；"
+                  "ui_evidence 条件段本用例暂不覆盖）", flush=True)
+        else:
+            # ---------- L2c UI 票：ui_evidence 条件段「出现且真跑，且在机器闸之前」 ----------
+            # 独立 worker（一票一队列）：该票的桩额外写 UI 路径文件，使改动面命中夹具
+            # verify.yaml 声明的 ui_evidence.dirs → helper 判为 UI 票 → 条件段真跑。
+            ui_worker = start_worker(py, stage, queues="sandbar-ticket-%s" % TID_UI,
+                                     stub_files=UI_FILE, watch=TID_UI)
+            _rc, _br2 = git("rev-parse", "--short", "HEAD")
+            _rc3, out3 = run_poc_client(py, "ticket-start", {
+                "ticket_id": TID_UI, "template_id": "light-lane", "project": PROJECT_KEY,
+                "base_ref": (_br2 or "").strip(),
+                "title": "[e2e] light-lane UI ticket (conditional ui_evidence stage)",
+                "user_request": "integration e2e: a UI-surface change must run the ui_evidence stage before the gate",
+                "write_set": [UI_FILE],
+                "caller_project": PROJECT_KEY,
+            }, env_for(stage), timeout=300)
+            good3, why3 = accepted(out3, TID_UI)
+            check(good3, "L2c UI 票受理（%s）" % why3)
+            if good3:
+                s3 = wait_snap(fail, py, stage, TID_UI,
+                               lambda x: x.get("stage") == "run_integration_tests"
+                               and x.get("stage_state") == "blocked",
+                               "L2c UI 票走到机器闸（先跑过 UI 证据段）", 150)
+                if s3 is not None:
+                    tl_ui = [(str(e.get("stage")), str(e.get("state")))
+                             for e in (s3.get("timeline") or [])]
+                    seq_ui = [st for st, _s in tl_ui]
+                    check(("ui_evidence", "running") in tl_ui and ("ui_evidence", "done") in tl_ui,
+                          "L2c **UI 票**：ui_evidence 出现且真跑（时间线 running/done；实得 %r）"
+                          % [x for x in tl_ui if x[0] == "ui_evidence"])
+                    rec_ui = (s3.get("results") or {}).get("ui_evidence") or {}
+                    check(str(rec_ui.get("status")) == "ok" and bool(rec_ui.get("deliverables")),
+                          "L2c UI 票：票据回执有记账（results.ui_evidence status=%r shots=%r）"
+                          % (rec_ui.get("status"), rec_ui.get("deliverables")))
+                    # 段序：ui_evidence 两条都排在 implement/done 之后、机器闸 running 之前
+                    i_impl_done = tl_ui.index(("implement", "done")) if ("implement", "done") in tl_ui else -1
+                    i_ui_run = (tl_ui.index(("ui_evidence", "running"))
+                                if ("ui_evidence", "running") in tl_ui else -1)
+                    i_ui_done = (tl_ui.index(("ui_evidence", "done"))
+                                 if ("ui_evidence", "done") in tl_ui else -1)
+                    i_gate = (tl_ui.index(("run_integration_tests", "running"))
+                              if ("run_integration_tests", "running") in tl_ui else -1)
+                    check(-1 < i_impl_done < i_ui_run <= i_ui_done < i_gate,
+                          "L2c UI 票段序：implement→ui_evidence→机器闸（下标 %r）"
+                          % [i_impl_done, i_ui_run, i_ui_done, i_gate])
+                    check("handoffs" in s3 and any(str(h.get("stage")) == "ui_evidence"
+                                                   for h in (s3.get("handoffs") or [])),
+                          "L2c UI 票：交接面有 ui_evidence 记账")
+                    check(not (set(seq_ui) & set(EXCLUDED_STAGES)),
+                          "L2c UI 票仍零被裁段（实得 %r）" % sorted(set(seq_ui)))
+                    # 截图实物：泳道 .sandbar/screenshots/ 下真有 png（隔离台桩写 1x1 PNG）
+                    lane_ui = str(((s3.get("meta") or {}).get("workspace") or {}).get("path") or "")
+                    shots = []
+                    if lane_ui:
+                        import glob as _glob
+                        shots = _glob.glob(os.path.join(lane_ui, ".sandbar", "screenshots", "*.png"))
+                    check(bool(shots), "L2c UI 票：泳道 .sandbar/screenshots/ 有截图实物（%d 张）"
+                          % len(shots))
+                    print_timeline(s3, "UI ticket at the machine gate")
+                stop_worker(fail, "L2c UI 票 worker 收尾", ui_worker)
 
         # ---------- L2b write_set_missing 出路改写（宿主 260930 裁定的端到端面） ----------
         # 空写集票（显式声明 no_file_changes）+ 桩照旧落文件 → 落盘路径闸拒
