@@ -389,6 +389,15 @@ def build_fixture(fail):
     # 项目注册表（KI-032 硬闸消费面：ticket-start 带 project 必过锚定）
     projects = os.path.join(fixture, ".e2e-projects")
     os.makedirs(os.path.join(projects, PROJECT_KEY), exist_ok=True)
+    # 261023: the lane judges its concurrency slot per project BEFORE the first
+    # stage, and load_limit is fail-closed on an absent declaration. The fixture
+    # project had none, so the UI ticket's acquire raised "Concurrency-limit
+    # declaration absent", the activity burned its three attempts, and the ticket's
+    # workflow was closed FAILED while its face still read implement/awaiting
+    # (KI-339's measured shape). Same declaration as the quickmanual fixture.
+    with open(os.path.join(projects, PROJECT_KEY, "concurrency-limit.json"), "w",
+              encoding="utf-8") as f:
+        f.write('{"version": 1, "limit": 2}\n')
     with open(os.path.join(projects, ".migrated"), "w", encoding="utf-8") as f:
         f.write("fixture-local hermetic registry (light-lane e2e)\n")
     with open(os.path.join(projects, PROJECT_KEY, "project.yaml"), "w",
