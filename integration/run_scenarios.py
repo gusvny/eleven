@@ -2519,7 +2519,7 @@ SCENARIOS = [
 # t260916-26-stage-plugins-selfcheck：261002 宿主令退役（留痕 integration/retired-scenarios.md）
     ("t260916-26-console-boot-no-plugin-banner",
      "生产版本真宿主装载活体零回归（t260916-26 验收①④生产半边，灰盒 L3 browser-free，隔离台=本泳道 worktree 直起 dsh 0.1.1-rc.2 台，t260915-19 通道先例）：同一份 knowledge/providers 装机包在生产版本（conversationViews 在场）上照常激活——台面无「Failed to load plugins / did not activate」事故文案（锚原文词不锚横幅类名）；正向控制先行（夹具甲项目行可见先证台面真渲染，absence 断言不空转=KI-052 绿≠真查防御；dsh 首跑 API key 向导先关不挡走查）；「模型路由」视图烟测渲染出显式状态（点夹具甲组 aria-label=模型路由 图标，作用域锚复制 t260915-10 同款；验收①「两页签可用」校准语义 providers 半边，docs 半边归 t260905-06/t260915-10 深锁不重复）。防错树夹具自检：台面 profile 三插件覆盖链（workbench/knowledge/providers）realpath 全落本泳道仓——lib_fix17 原样会把 knowledge/providers realpath 回主树旧产物（KI-052 别树假绿同族），故本台走 lib_t260916_26_bench 三插件泳道覆盖变体（漂移责任=两侧头注）。本台宿主=0.1.1，实现前后都应绿（纯回归守卫）；对修复的判别力归 t260916-26-plugin-inject-contract；0.1.5 活体子用例归宿主 stage 3199 走查非本地机械可复现。零 3099/7233/8233 接触、死端口 Temporal、票源桩、四路径回收。dsh/起台/playwright 缺席=ENV_FAIL exit 2 点名（KI-036 家族）",
-     "node integration/t260916-26/sc_console_boot_no_plugin_banner.mjs", "browser-free"),
+     "node integration/t260916-26/sc_console_boot_no_plugin_banner.mjs", "exclusive"),
     # ---- t260916-24: dsh 升级 T4——版本钉路径可观测 + 预期不符响亮（epic dsh-upgrade）----
     # 三场景三面（探针工具自检 / 启动记录面 / spawn 执行面），两 engine 场景共享夹具
     # lib_t26091624.py（无 sc_ 前缀不登记）。断言契约=方案 gen1（integration review
