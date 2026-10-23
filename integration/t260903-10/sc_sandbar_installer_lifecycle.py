@@ -85,8 +85,19 @@ def main():
         # 进程的 stub 被安装器 TERM 后会成 zombie（场景不 waitpid），安装器
         # os.kill 探活如实报 zombie「需人工介入」——那是拓扑伪影不是实现错。
         worker_pid, worker_stamp = spawn_daemon_term_stub(tmp, "worker_stamp")
+        # 261023: the daemon writes its alive stamp asynchronously, so reading it once
+        # right after the fork is a race - measured red in a loaded round ("worker stub
+        # 预置在位（pid=38222）" failed while every down assertion after it passed) and
+        # green standalone. Wait for the stamp instead of assuming it; the assertion and
+        # its budget stay, only the schedule becomes honest.
+        _deadline = time.time() + 10.0
+        while time.time() < _deadline:
+            if worker_pid and read_text(worker_stamp + ".alive") == str(worker_pid):
+                break
+            time.sleep(0.1)
         fail.check(bool(worker_pid) and read_text(worker_stamp + ".alive") == str(worker_pid),
-                   "worker stub 预置在位（pid=%s）" % worker_pid)
+                   "worker stub 预置在位（pid=%s，等待 %.1fs）"
+                   % (worker_pid, 10.0 - max(0.0, _deadline - time.time())))
         with open(os.path.join(run_dir, "worker.pid"), "w") as f:
             f.write(str(worker_pid))
 
