@@ -344,6 +344,36 @@ def resolve_develop_dir(repos, env=None):
     return None, None
 
 
+def _pointer_owner_alive(run_id):
+    """Is the round named by the live pointer still running? (261023)
+
+    Round ids carry the runner pid: `round-<YYYYMMDDTHHMMSSZ>-<pid>`. A pointer
+    left behind by a round that died (laptop sleep, SIGKILL, power loss) used to
+    block EVERY later round from publishing a live face - the console then shows
+    no running round and the certification tab looks empty while a round is
+    actually measuring. Liveness is judged from the pid, never from the name
+    merely existing; an id that carries no pid is treated as stale (it cannot
+    prove itself alive).
+    """
+    rid = str(run_id or "")
+    m = re.search(r"-(\d+)$", rid)
+    if not m:
+        return False
+    try:
+        pid = int(m.group(1))
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def _read_current_run_id(rounds_dir):
     """The run id the live pointer on disk currently names — the guard that
     keeps one round from deleting another's pointer (review condition 1)."""
@@ -444,7 +474,8 @@ class FaceWriter:
         on stderr and this round publishes NO live face (its terminal record
         still lands)."""
         on_disk = _read_current_run_id(self.rounds_dir)
-        if on_disk is not None and on_disk != self.run_id:
+        if on_disk is not None and on_disk != self.run_id \
+                and _pointer_owner_alive(on_disk):
             if not self._foreign_named:
                 self._foreign_named = True
                 sys.stderr.write(
