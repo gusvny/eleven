@@ -46,18 +46,28 @@ import { runAdminCli } from '../../../../sandbar-tools.ts'
 import { findProject, loadProjects, primaryDir } from '../../../../project-registry.ts'
 import { listEpics, resolveEpicsDir } from './epics.ts'
 import {
-  aggregateTicketUsage, resolveAllSessionFiles, resolveLedgerSessionFiles, stageWindowsFromTimeline,
+  aggregateTicketUsage, resolveAllSessionFiles, resolveLedgerSessionFiles, resolveProjectSessionFiles,
+  stageWindowsFromTimeline,
   type StageWindow,
 } from './agent-usage.ts'
 
 const execFileP = promisify(execFile)
 
+/** v2→v3 (t261021-06, contract document bumped to v2): the metrics v2 data layer
+ *  (additive stage_runs/rounds_ok cache-record fields) rides the source_version
+ *  bump — the whole per-ticket cache is voided and recomputed once (v1 block 3
+ *  allows the cache to be discarded and rebuilt). Version mapping (written down in
+ *  docs/design/metrics-api-contract-v2.md, "Version discipline"): source_version is
+ *  a monotonic cache-generation counter in this document's lineage; it was 'v2'
+ *  while the document title was v1 (the t260904-09 semantic bump did not retitle
+ *  the document); from contract v2 on, counter and document title move together —
+ *  'v3' from this freeze. */
 /** v1→v2（t260904-09）：settle 出仓快照语义 + 归档口径收窄（票号前缀）。bump 后
  *  全量 per-ticket 缓存整条作废重算（契约成文「缓存整体可弃置重建」）——存量
  *  non-null frozen 记录（如 t260904-05 归档 5783）由此获得唯一重算入口，收窄后
  *  重算=5658。副作用面：collectArchivedRows 记忆行按 source_version 过滤，
  *  bump 后旧记忆行缺席（聚合宇宙暂缩，重算入口=既有 list/全量门；在-list 票不受影响）。 */
-export const SOURCE_VERSION = 'v2'
+export const SOURCE_VERSION = 'v3'
 /** health 视图静默阈值（分钟）：模块常量，env SANDBAR_METRICS_SILENT_MIN 仅测试覆盖；可调 UI 参数归 M2c 修约。 */
 export const SILENT_RUNNING_MIN = 30
 /** blocked_reason 榜逐票 show 封顶（成本上限，超出折叠计数+reason；票多项目不炸）。 */
@@ -300,6 +310,13 @@ export interface MetricsCacheRecord {
    * 既有「list 行 timeline / show 取 timeline」补齐路径，读侧向后兼容。 */
   created_ms?: number | null
   closed_ms?: number | null
+  /* metrics v2 (t261021-06, contract v2 freeze): per-stage execution counts
+   * (timeline running-entry counts, key=stage) plus a history-readable flag.
+   * rounds_ok=false means the history was unreadable: the ticket is excluded from
+   * every rounds denominator and counted in notices — missing is never coerced
+   * to 0. */
+  stage_runs?: Record<string, number>
+  rounds_ok?: boolean
 }
 
 /**
@@ -447,6 +464,14 @@ export interface Durations {
   closed_ms: number | null
   created_ms: number | null
   reasons: string[]
+  /** metrics v2 (t261021-06): running-entry count per stage (a rework re-entry and
+   *  a retry that re-marks running each count one; a silent retry that does not
+   *  re-mark is invisible = the known approximation declared in the contract).
+   *  Produced in the same window loop as by_stage — one source of truth. */
+  runs: Record<string, number>
+  /** True only when the timeline itself was readable (an array). False = rounds
+   *  unknown; aggregation excludes the ticket from rounds denominators. */
+  history_ok: boolean
 }
 
 /**
@@ -456,7 +481,7 @@ export interface Durations {
  * humanStages = 所选模板 stages 链里 exit==='human' 的 stage id 集。
  */
 export function computeDurations(timeline: any, humanStages: Set<string>, nowMs: number = Date.now()): Durations {
-  const out: Durations = { by_stage: {}, by_round: {}, human_wait: 0, closed_ms: null, created_ms: null, reasons: [] }
+  const out: Durations = { by_stage: {}, by_round: {}, human_wait: 0, closed_ms: null, created_ms: null, reasons: [], runs: {}, history_ok: Array.isArray(timeline) }
   const entries = (Array.isArray(timeline) ? timeline : []).map((t: any) => ({
     stage: String(t?.stage ?? ''), state: String(t?.state ?? ''), at: t?.at, ms: isoMs(t?.at),
   }))
@@ -482,6 +507,8 @@ export function computeDurations(timeline: any, humanStages: Set<string>, nowMs:
     const dur = (w.toMs ?? nowMs) - w.fromMs
     const d = Math.max(0, dur)
     out.by_stage[w.stage] = (out.by_stage[w.stage] ?? 0) + d
+    // rounds counting (metrics v2): each running window of a stage counts one execution
+    out.runs[w.stage] = (out.runs[w.stage] ?? 0) + 1
     // by_round：同 stage 每重入一轮计一列（rework 多窗加总口径的可视分列）
     const r = (roundOf.get(w.stage) ?? 0) + 1
     roundOf.set(w.stage, r)
@@ -735,6 +762,8 @@ async function ticketRecord(
     ticket_id: id,
     template,
     durations: { by_stage: durations.by_stage, by_round: durations.by_round, human_wait: durations.human_wait },
+    stage_runs: durations.runs,
+    rounds_ok: durations.history_ok,
     delivery,
     tokens,
     open: showFellBackToRow ? (prev?.open ?? String(ticket?.status ?? '') !== 'closed') : String(ticket?.status ?? '') !== 'closed',
@@ -784,8 +813,260 @@ function stableReasons(entries: RecordWithAnchor[], cacheDir: { dir: string; ena
 
 /* ------------------------------------------------ 视图组装（响应形状契约块 2，逐字段冻结） */
 
+/* ------------------------------------------------ metrics v2 data layer (t261021-06, contract v2 freeze) */
+
+/** One v2 aggregation item: the in-window ticket record plus the row fields the rollups need (workflow/epic/updated). */
+interface V2Item {
+  rec: MetricsCacheRecord
+  createdMs: number | null
+  closedMs: number | null
+  workflow: string
+  epic: string
+  updatedMs: number | null
+}
+
+/**
+ * The v2 aggregation universe spans templates: rows carry their own workflow and
+ * chains are never mixed. fast serves cache-only records; full reuses the existing
+ * per-ticket record path (another template's tickets go through the same
+ * ticketRecord; the cache is shared — a ticket belongs to exactly one template, so
+ * there is no key collision). Rows with an empty/unknown workflow never enter the
+ * universe; they are counted and surfaced via notices, never silently dropped.
+ */
+async function v2Population(
+  deps: MetricsDeps, rows: any[], chains: Map<string, any[]>,
+  cacheDir: { dir: string; settleDir: string; enabled: boolean; reason?: string },
+  mode: string,
+): Promise<{ items: V2Item[]; skips: string[]; unknownWf: number }> {
+  const eligible = rows.filter((r: any) => {
+    const wf = String(r?.workflow ?? '')
+    return wf !== '' && chains.has(wf)
+  })
+  const unknownWf = rows.length - eligible.length
+  const engineVersions = new Map<string, string>()
+  for (const [wf, stages] of chains) engineVersions.set(wf, engineVersionOf(stages))
+  const records = await mapPool<any, RecordWithAnchor | null>(eligible, TICKET_CONCURRENCY, async (row) => {
+    const wf = String(row?.workflow ?? '')
+    const stages = chains.get(wf) ?? []
+    if (mode === 'fast') return fastCacheRecord(cacheDir, row, engineVersions.get(wf) ?? '')
+    return ticketRecord(deps, row, wf, stages, engineVersions.get(wf) ?? '', cacheDir)
+  })
+  const items: V2Item[] = []
+  const skips: string[] = []
+  for (let i = 0; i < eligible.length; i++) {
+    const e = records[i]
+    if (e === null || e === undefined) {
+      skips.push(`${String(eligible[i]?.id ?? '?')}: v2 record unavailable (fast has no cache); excluded from the workflows/stages/epics aggregates`)
+      continue
+    }
+    items.push({
+      rec: e.rec, createdMs: e.createdMs, closedMs: e.closedMs,
+      workflow: String(eligible[i]?.workflow ?? ''),
+      epic: String(eligible[i]?.epic ?? ''),
+      updatedMs: Number.isFinite(isoMs(eligible[i]?.updated)) ? isoMs(eligible[i]?.updated) : null,
+    })
+  }
+  return { items, skips, unknownWf }
+}
+
+function sumStageMs(rec: MetricsCacheRecord): number {
+  return Object.values(rec.durations.by_stage).reduce((a, b) => a + b, 0)
+}
+
+/** The v2 aggregation exit: workflows[] / stages[] / epics[] (contract v2, field by
+ *  field). Tickets without readable history are excluded from the denominators and
+ *  counted in notices — unknown is never coerced to 0. */
+function aggregateV2(
+  items: V2Item[], chains: Map<string, any[]>,
+): { workflows: any[]; stages: any[]; epics: any[] | null; notices: string[] } {
+  const notices: string[] = []
+  const roundsMissing = items.filter((it) => it.rec.rounds_ok !== true).length
+  if (roundsMissing > 0) {
+    notices.push(`${roundsMissing} tickets have an unreadable history (rounds unknown); excluded from the rounds/stage_runs denominators`)
+  }
+  const byWf = new Map<string, V2Item[]>()
+  for (const it of items) {
+    const arr = byWf.get(it.workflow) ?? (byWf.set(it.workflow, []), byWf.get(it.workflow)!)
+    arr.push(it)
+  }
+  const workflows: any[] = []
+  const stages: any[] = []
+  for (const [wf, its] of [...byWf.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    const okRounds = its.filter((it) => it.rec.rounds_ok === true)
+    const runsTotal = okRounds.reduce((s, it) => s + Object.values(it.rec.stage_runs ?? {}).reduce((a, b) => a + b, 0), 0)
+    const elapsed = its.reduce((s, it) => s + sumStageMs(it.rec), 0)
+    const entry: any = { workflow: wf, tickets: its.length, elapsed_ms: elapsed, stage_runs: runsTotal, rounds_per_ticket: okRounds.length > 0 ? round2(runsTotal / okRounds.length) : null }
+    if (okRounds.length === 0) entry.reason = 'no ticket of this workflow in the window has a readable history (rounds/stage_runs unknown, never coerced to 0)'
+    workflows.push(entry)
+    // stages: the axis is this workflow's own chain order, keyed (workflow, stage); chains are never mixed
+    const chain = chains.get(wf) ?? []
+    for (const s of chain) {
+      const stage = String(s?.id ?? '')
+      if (stage === '') continue
+      const runs = okRounds.reduce((sum, it) => sum + (it.rec.stage_runs?.[stage] ?? 0), 0)
+      const reached = okRounds.filter((it) => (it.rec.stage_runs?.[stage] ?? 0) > 0).length
+      const stageEntry: any = {
+        workflow: wf, stage,
+        runs: okRounds.length > 0 ? runs : null,
+        avg_rounds_per_ticket: reached > 0 ? round2(runs / reached) : null,
+        elapsed_ms: its.reduce((sum, it) => sum + (it.rec.durations.by_stage[stage] ?? 0), 0),
+      }
+      if (okRounds.length === 0) stageEntry.reason = 'no ticket with a readable history (runs unknown)'
+      stages.push(stageEntry)
+    }
+  }
+  // epics: grouped by the row epic (an empty epic is not an epic); no in-window epic rows -> null + notice
+  const byEpic = new Map<string, V2Item[]>()
+  for (const it of items) {
+    if (it.epic === '') continue
+    const arr = byEpic.get(it.epic) ?? (byEpic.set(it.epic, []), byEpic.get(it.epic)!)
+    arr.push(it)
+  }
+  let epics: any[] | null = []
+  if (byEpic.size === 0) {
+    epics = null
+    notices.push('no ticket with an epic in the window; the epics aggregate is empty')
+  } else {
+    for (const [epic, its] of [...byEpic.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+      const withTok = its.filter((it) => it.rec.tokens !== null)
+      const tokens = withTok.reduce((s, it) => s + (it.rec.tokens ? it.rec.tokens.in + it.rec.tokens.out : 0), 0)
+      const last = its.reduce((m, it) => (it.updatedMs !== null && (m === null || it.updatedMs! > m)) ? it.updatedMs : m, null as number | null)
+      const entry: any = {
+        epic, tickets: its.length,
+        elapsed_ms: its.reduce((s, it) => s + sumStageMs(it.rec), 0),
+        tokens: withTok.length > 0 ? tokens : null,
+        last_activity_ms: last,
+      }
+      if (withTok.length === 0) entry.reason = 'no ticket of this epic in the window has token data (tokens never coerced to 0)'
+      if (last === null) entry.reason = entry.reason ? entry.reason + '; row updated is unparseable (last_activity_ms unknown)' : 'row updated is unparseable (last_activity_ms unknown)'
+      epics.push(entry)
+    }
+  }
+  return { workflows, stages, epics, notices }
+}
+
+/**
+ * The project_sessions block (contract v2): discovery goes through
+ * resolveProjectSessionFiles (an out-of-root path refuses the whole block); parsing
+ * reuses aggregateTicketUsage (empty windows = totals only). Buckets are named by
+ * the session slug verbatim (executor/global are the mock's named buckets); no
+ * ticket-free sessions -> the whole block is null + reason (never zero-filled).
+ */
+async function computeProjectSessions(
+  repo: string, listedIds: readonly string[],
+): Promise<{ block: Record<string, unknown> | null; reason?: string }> {
+  const ref = await resolveProjectSessionFiles(repo, listedIds)
+  if (ref.refused === true) return { block: null, reason: ref.reason ?? 'project sessions discovery refused (path outside workspace root)' }
+  if (ref.paths.length === 0) return { block: null, reason: ref.reason ?? 'no ticket-free project session files under the project root' }
+  const buckets: Record<string, { in: number; out: number; cache_read: number; files: number }> = {}
+  const reasons: string[] = []
+  for (const [slug, paths] of Object.entries(ref.buckets)) {
+    // Aggregate file by file (file count = session dir count, bounded): in a mixed
+    // state one bad file's reason must surface (contract v2 "never swallowed") —
+    // batch aggregation only reports a reason when everything came up empty.
+    const b = { in: 0, out: 0, cache_read: 0, files: paths.length }
+    for (const p of paths) {
+      const agg = await aggregateTicketUsage([p], [])
+      b.in += agg.total.input
+      b.out += agg.total.output
+      b.cache_read += agg.total.cacheRead
+      const name = p.split('/').pop() ?? p
+      if (agg.reason) reasons.push(`${slug}/${name}: ${agg.reason}`)
+      if (agg.suspectDetail) reasons.push(`${slug}/${name}: ${agg.suspectDetail}`)
+    }
+    buckets[slug] = b
+  }
+  const total = { in: 0, out: 0, cache_read: 0 }
+  let any = false
+  for (const b of Object.values(buckets)) {
+    total.in += b.in
+    total.out += b.out
+    total.cache_read += b.cache_read
+    if (b.in + b.out + b.cache_read > 0) any = true
+  }
+  const block: Record<string, unknown> = { buckets, total: any ? total : null }
+  if (ref.reason) reasons.unshift(ref.reason)
+  if (reasons.length > 0) block.reason = reasons.join('; ')
+  return { block }
+}
+
+/** The health view's named v2 degrade: always null + reason (health never walks the record aggregation path). */
+function v2HealthReasons(): string[] {
+  return ['metrics v2 blocks (workflows/stages/project_sessions/epics) are not in the health direct-query path']
+}
+
+/**
+ * Additive KPIs (contract v2, field names verbatim; population = the existing
+ * single-anchor window population keptEntries). Every missing source is null
+ * (never zero-filled): closed tickets without readable history leave the rework
+ * denominator, zero closed tickets, an empty token domain and a null
+ * project_sessions each degrade to null/notice.
+ */
+function respWorkflowsStagesKpis(
+  kpis: ReturnType<typeof emptyKpis>, keptEntries: RecordWithAnchor[],
+  proj: { block: Record<string, unknown> | null; reason?: string },
+  nowMs: number, span: number,
+): string[] {
+  const extraNotices: string[] = []
+  const closed = keptEntries.filter((e) => !e.rec.open)
+  const closedWithRounds = closed.filter((e) => e.rec.rounds_ok === true)
+  if (closed.length > closedWithRounds.length) {
+    extraNotices.push(`${closed.length - closedWithRounds.length} closed tickets have an unreadable history (rounds unknown); excluded from the rework_rate denominator`)
+  }
+  kpis.rework_rate = closedWithRounds.length > 0
+    ? round4(closedWithRounds.filter((e) => Object.values(e.rec.stage_runs ?? {}).some((v) => v > 1)).length / closedWithRounds.length)
+    : null
+  // lead time: closed tickets with both anchors; median in ms
+  const leads = closed
+    .filter((e) => e.createdMs !== null && e.closedMs !== null && e.closedMs! >= e.createdMs!)
+    .map((e) => e.closedMs! - e.createdMs!)
+    .sort((a, b) => a - b)
+  kpis.median_lead_time = leads.length > 0 ? Math.round(leads[Math.floor((leads.length - 1) / 2)]!) : null
+  // throughput: closed / window days; the all window (span=0) derives the span from the population's earliest created to now (the approximation declared in the contract), floored at 1 day
+  if (kpis.closed > 0) {
+    let days = span > 0 ? span / 86_400_000 : NaN
+    if (!(Number.isFinite(days) && days > 0)) {
+      const created = keptEntries.map((e) => e.createdMs).filter((m): m is number => m !== null)
+      days = Math.max(1, (nowMs - (created.length > 0 ? Math.min(...created) : nowMs)) / 86_400_000)
+    }
+    kpis.throughput_per_day = round4(kpis.closed / days)
+  }
+  // human_wait_share: human-gate window total / all stage window total (kept records)
+  const humanWait = keptEntries.reduce((s, e) => s + e.rec.durations.human_wait, 0)
+  const totalDur = keptEntries.reduce((s, e) => s + sumStageMs(e.rec), 0)
+  kpis.human_wait_share = totalDur > 0 ? round4(humanWait / totalDur) : null
+  // token face
+  const withTok = keptEntries.filter((e) => e.rec.tokens !== null)
+  const tIn = withTok.reduce((s, e) => s + e.rec.tokens!.in, 0)
+  const tOut = withTok.reduce((s, e) => s + e.rec.tokens!.out, 0)
+  const tCache = withTok.reduce((s, e) => s + e.rec.tokens!.cacheRead, 0)
+  kpis.tokens_in_tickets = withTok.length > 0 ? tIn + tOut : null
+  const projTotal = proj.block !== null ? (proj.block as any).total : null
+  kpis.tokens_outside_tickets = projTotal ? projTotal.in + projTotal.out : null
+  kpis.tokens_per_closed_ticket = kpis.closed > 0 && kpis.tokens_in_tickets !== null
+    ? round2(kpis.tokens_in_tickets / kpis.closed)
+    : null
+  kpis.cache_hit = (tIn + tOut + tCache) > 0 ? round4(tCache / (tIn + tOut + tCache)) : null
+  return extraNotices
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000
+}
+
 function emptyKpis() {
-  return { tickets: 0, closed: 0, avg_delivery_min: 0.0, tokens_total: 0 }
+  return {
+    tickets: 0, closed: 0, avg_delivery_min: 0.0, tokens_total: 0,
+    // metrics v2 (contract v2): additive KPIs; a missing source is null (never zero-filled); the health view keeps null
+    rework_rate: null as number | null,
+    throughput_per_day: null as number | null,
+    median_lead_time: null as number | null,
+    human_wait_share: null as number | null,
+    tokens_in_tickets: null as number | null,
+    tokens_outside_tickets: null as number | null,
+    tokens_per_closed_ticket: null as number | null,
+    cache_hit: null as number | null,
+  }
 }
 
 function chart(kind: string, title: string, categories: string[], series: { name: string; data: number[] }[]) {
@@ -857,6 +1138,10 @@ export async function buildMetricsResponse(
   // 模板过滤（t260904-04，KI-043②）：被过滤的票不再静默缩宇宙——计数进 notices，
   // 用户可在 reason 看到「list 有 N 票因 workflow 为空/不匹配被排除」。
   const beforeTemplateFilter = rows.length
+  // The v2 aggregation universe (contract v2): all rows BEFORE the template
+  // filter — workflows/stages/epics span templates, chained by row.workflow, never
+  // mixed. The health view returns early below and never enters the v2 path.
+  const v2Rows = rows
   rows = rows.filter((r: any) => String(r?.workflow ?? '') === p.template)
   const templateDropped = beforeTemplateFilter - rows.length
 
@@ -941,6 +1226,7 @@ export async function buildMetricsResponse(
   // 按闭单归窗，出现「关闭数(10) > 工单数(8)」悖论，此处收口为单一人口。
   const kpis = emptyKpis()
   const kept: MetricsCacheRecord[] = []
+  const keptEntries: RecordWithAnchor[] = []
   let avgSumMin = 0
   let approxInWindow = 0
   for (const e of entries) {
@@ -948,6 +1234,7 @@ export async function buildMetricsResponse(
     if (anchor === null || !inWindow(anchor, from, to)) continue
     kpis.tickets += 1
     kept.push(e.rec)
+    keptEntries.push(e)
     // 近似 notice 计数口径=「通过归窗的近似条目数」：与 KPI
     // 人口严格一致，响应中途重算导致的边界排除票不再被 notice 多报。
     if (e.anchorApproximated === true) approxInWindow += 1
@@ -958,6 +1245,20 @@ export async function buildMetricsResponse(
   }
   kpis.avg_delivery_min = kpis.closed > 0 ? round2(avgSumMin / kpis.closed) : 0.0
   kpis.tokens_total = kept.reduce((s, r) => s + (r.tokens ? r.tokens.in + r.tokens.out : 0), 0)
+
+  /* -- metrics v2 data layer (contract v2): cross-template aggregates +
+      project_sessions + additive KPIs. Every degrade is named:
+      null + reason/notice, never zero-filled. -- */
+  const chains = new Map<string, any[]>()
+  for (const w of workflows) chains.set(String(w?.id ?? ''), Array.isArray(w?.stages) ? w.stages : [])
+  const v2 = await v2Population(deps, v2Rows, chains, cacheDir, p.mode)
+  const v2Window = v2.items.filter((it) => {
+    const anchor = it.rec.open ? it.createdMs : (it.closedMs ?? it.createdMs)
+    return anchor !== null && inWindow(anchor, from, to)
+  })
+  const agg = aggregateV2(v2Window, chains)
+  const projSess = await computeProjectSessions(deps.repo, [...listedIds])
+  const v2KpiNotices = respWorkflowsStagesKpis(kpis, keptEntries, projSess, nowMs, span)
 
   const body = buildChartsBody(p.view, kept, stageIds, kpis)
   // cache.status 契约字面语义（t260901-20 回归字面；t260903-09
@@ -973,6 +1274,11 @@ export async function buildMetricsResponse(
     charts: body.charts,
     generated_at: nowIso,
     cache: { status: cacheStatus, computed_at: nowIso, source_version: SOURCE_VERSION },
+    // metrics v2 blocks (contract v2; key names verbatim)
+    workflows: agg.workflows,
+    stages: agg.stages,
+    project_sessions: projSess.block,
+    epics: agg.epics,
   }
   const respReasons = [...fastSkips, ...skipped, ...stableReasons(entries, cacheDir)]
   // 近似归窗计数（F3）：旧版缓存无锚点的票按缓存计算时刻近似归窗，显式计数让用户
@@ -983,6 +1289,12 @@ export async function buildMetricsResponse(
   if (archivedRows.length > 0) {
     notices.push(`度量宇宙补全：${archivedRows.length} 票仅存于度量缓存（工单列表已不可见，直并/收口终态）`)
   }
+  // metrics v2 notices (contract v2: degrades are explicit; the universe never shrinks silently)
+  if (v2.unknownWf > 0) {
+    notices.push(`${v2.unknownWf} tickets have an empty workflow or are absent from the workflow table; excluded from the workflows/stages/epics aggregates`)
+  }
+  for (const n of [...v2.skips, ...agg.notices, ...v2KpiNotices]) notices.push(n)
+  if (projSess.reason) notices.push(`project_sessions：${projSess.reason}`)
   if (approxCount > 0) {
     notices.push(`其中 ${approxCount} 票旧版缓存无归窗锚点，按缓存计算时刻近似归窗（全量重算后自动转精确）`)
   }
@@ -1186,6 +1498,12 @@ async function healthView(
     // cache 块取值成文（implement 口径）：health 不走缓存通路，status 恒 'computed'、
     // computed_at=本次时刻，语义=「本次直查即产出」，非缓存命中（hit）也不误导为会回写缓存。
     cache: { status: 'computed', computed_at: nowIso, source_version: SOURCE_VERSION },
+    // metrics v2 blocks (contract v2): the health direct-query path never produces
+    // them — named degrade, null + reason
+    workflows: null,
+    stages: null,
+    project_sessions: null,
+    epics: null,
   }
   const online = await probePort('127.0.0.1', 7233, 800)
   if (!online) {
@@ -1213,6 +1531,7 @@ async function healthView(
   kpis.avg_delivery_min = 0.0
   kpis.tokens_total = 0
   reasons.push('token 维不在 health 直查路径（tokens_total 恒 0；接通归 M2c 修约）')
+  for (const r of v2HealthReasons()) reasons.push(r)
 
   // blocked_reason 榜：逐票 show 封顶 BLOCKED_SHOW_CAP，超出折叠计数+reason
   const blockedCats: string[] = []

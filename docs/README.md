@@ -33,7 +33,8 @@ updated: 2026-09-28
 | `design/deepseek_harness_and_temporal_based_multi-agent_mechanism.md` | **Engine mechanism master document**: the DSH+Temporal multi-agent ticket engine (first-read reference for engine/plugin domain tickets) |
 | `design/ticket-workflow-console-design.md` | Ticket workflow console design (multi-role collaboration infrastructure) |
 | `design/sidebar-session-entry-and-hero-design.md` | workbench right-column session entry and hero customization (appendix carries the 【valid】/【disproven】 anchor conclusions) |
-| `design/metrics-api-contract-v1.md` | workbench metrics API contract |
+| `design/metrics-api-contract-v1.md` | workbench metrics API contract (frozen v1 baseline; superseded by v2 for the new fields) |
+| `design/metrics-api-contract-v2.md` | workbench metrics API contract v2 (t261021-06): stage rounds, per-workflow totals, project sessions, extended KPIs, per-epic rollups — delta document over v1 |
 | `design/metrics-panel-ui-plan.md` | metrics panel UI plan |
 | `design/knowledge-base-design.md` | Knowledge base design (final): four categories, markdown rules, UI, migration mapping |
 | `design/dsh-seam-requirements-v1.md` | dsh plugin seam requirements (plugin family contract) |

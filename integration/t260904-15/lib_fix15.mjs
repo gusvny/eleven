@@ -263,13 +263,10 @@ export async function waitFor(pred, timeoutMs = 8000, stepMs = 200) {
  * t260929-22 face), then the panel's Settings tab ([data-tab="settings"]), then
  * the face row ([data-wb-panel-face="project-settings"]).
  *
-<<<<<<< ours
-=======
  * The entry click is scoped to the named group's own row (t261022-11): a
  * page-wide first match would open the wrong project's panel on a rail that
  * carries more than one project (the remove journey drives two).
  *
->>>>>>> theirs
  * Returns null when the dialog is on screen, else a plain-words reason (a door
  * that cannot be found is a red, never a silent skip).
  */

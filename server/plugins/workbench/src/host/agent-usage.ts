@@ -337,3 +337,91 @@ export async function aggregateTicketUsage(
   out.models.sort((a, b) => (b.input + b.output) - (a.input + a.output))
   return out
 }
+
+/* ------------------------------------------------ project-level sessions (metrics v2, t261021-06) */
+
+/**
+ * Discovery result for ticket-free project sessions (metrics contract v2 block
+ * `project_sessions`). `buckets` maps the session slug (executor/global/…, kept
+ * verbatim) to the discovered session-file paths; `paths` is the flat union.
+ */
+export interface ProjectSessionRef {
+  buckets: Record<string, string[]>
+  paths: string[]
+  /** Human-readable degrade reason; present when nothing was found or a slug dir was unreadable. */
+  reason?: string
+  /** A resolved path escaped the workspace root: refuse the whole block (same discipline as resolveAllSessionFiles). */
+  refused?: boolean
+}
+
+/**
+ * Ticket-shaped session directory names never belong to project sessions:
+ * an exact listed ticket id, or the engine ticket-id shape t<digits>-<digits>.
+ */
+function isTicketSessionName(name: string, listedTicketIds: readonly string[]): boolean {
+  if (listedTicketIds.includes(name)) return true
+  return /^t\d+-\d+/.test(name)
+}
+
+/**
+ * Discover sessions under the PROJECT ROOT's .dsh/sessions that carry no ticket id
+ * (metrics contract v2). Same traversal and refusal discipline as
+ * resolveAllSessionFiles: the final resolved path must stay inside the workspace
+ * root, otherwise the whole discovery is refused (refused=true + reason) and the
+ * consumer degrades the block to null + reason. Parsing is NOT done here — the
+ * caller feeds the paths into aggregateTicketUsage (same parser as the per-ticket
+ * path). Malformed input (missing dir, unreadable subdir, non-directory entries)
+ * degrades with a reason and never throws.
+ */
+export async function resolveProjectSessionFiles(
+  repoRoot: string,
+  listedTicketIds: readonly string[] = [],
+): Promise<ProjectSessionRef> {
+  const out: ProjectSessionRef = { buckets: {}, paths: [] }
+  const root = resolve(repoRoot)
+  const sessRoot = join(root, '.dsh', 'sessions')
+  try {
+    await stat(sessRoot)
+  } catch {
+    out.reason = `project sessions directory does not exist: ${sessRoot}`
+    return out
+  }
+  let slugs: string[] = []
+  try {
+    slugs = (await readdir(sessRoot, { withFileTypes: true }))
+      .filter(e => e.isDirectory()).map(e => e.name)
+  } catch (err: any) {
+    out.reason = `project sessions directory unreadable: ${sessRoot} (${String(err?.message ?? err)})`
+    return out
+  }
+  const reasons: string[] = []
+  for (const slug of slugs) {
+    let subs: string[] = []
+    try {
+      subs = (await readdir(join(sessRoot, slug), { withFileTypes: true }))
+        .filter(e => e.isDirectory()).map(e => e.name)
+    } catch (err: any) {
+      reasons.push(`slug ${slug} unreadable: ${String(err?.message ?? err)}`)
+      continue
+    }
+    for (const s of subs) {
+      if (isTicketSessionName(s, listedTicketIds)) continue
+      const picked = await pickNewestSessionFile(await existingSessionFilesIn(join(sessRoot, slug, s)))
+      if (picked === null) continue
+      // Double guard: the final landing spot must stay inside the workspace root
+      // (path-traversal hard rule, same as resolveAllSessionFiles).
+      if (!(resolve(picked) === root || resolve(picked).startsWith(root + sep))) {
+        return { buckets: {}, paths: [], refused: true, reason: `session path outside the workspace root (refused to read): ${picked}` }
+      }
+      ;(out.buckets[slug] ??= []).push(picked)
+      out.paths.push(picked)
+    }
+  }
+  if (out.paths.length === 0) {
+    out.reason = `no ticket-free project session files under ${sessRoot}`
+      + (reasons.length > 0 ? `; ${reasons.join('; ')}` : '')
+  } else if (reasons.length > 0) {
+    out.reason = reasons.join('; ')
+  }
+  return out
+}

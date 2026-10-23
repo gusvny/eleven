@@ -1,6 +1,6 @@
 {
   "generated_at": "2026-10-05T14:33:19+08:00",
-  "total": 27,
+  "total": 28,
   "categories": [
     "design",
     "content",
@@ -414,6 +414,20 @@
       ],
       "status": "active",
       "updated": "2026-10-04",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/metrics-api-contract-v2.md",
+      "file": "metrics-api-contract-v2.md",
+      "title": "metrics Definitions and API Contract v2",
+      "category": "design",
+      "tags": [
+        "metrics",
+        "contract",
+        "API"
+      ],
+      "status": "active",
+      "updated": "2026-10-21",
       "has_frontmatter": true
     }
   ],
