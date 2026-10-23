@@ -280,13 +280,33 @@ def wait_snap(fail, py, stage, tid, pred, label, deadline_s, may_block=False):
     ticket pass may_block=True."""
     t0 = time.time()
     last = {}
+    last_key, last_move = None, t0
+    _cap = int(os.environ.get("SANDBAR_LIGHTLANE_GLOBAL_S") or 240)
     while time.time() - t0 < deadline_s:
+        if time.time() - G.get("t0", time.time()) > _cap and not G.get("capped"):
+            G["capped"] = True
+            print("GLOBAL CAP light-lane: stopping inside wait %r (teardown still runs)"
+                  % str(label)[:120], flush=True)
+            fail.check(False, "journey stopped at the %ds global cap while waiting: %s"
+                       % (_cap, str(label)[:120]))
+            raise SystemExit(1)
         r = cli(py, stage, "ticket-query", {"ticket_id": tid})
         snap = ((r.get("result") or {}).get("snapshot") or {})
         if snap:
             last = snap
             if pred(snap):
                 return snap
+            # 261023: a ticket parked at the same (stage, state) for 30 s with no
+            # progress cannot reach this step on its own - measured real case: the UI
+            # ticket sat at implement/awaiting (blocked='') and each following step then
+            # burned its own ceiling. Name it and stop waiting.
+            key = (snap.get("stage"), snap.get("stage_state"))
+            if key != last_key:
+                last_key, last_move = key, time.time()
+            elif time.time() - last_move > 30:
+                fail.check(False, "%s（票在 %s/%s 停住 %.0fs 无进展，等不到本步——不再耗上限）"
+                           % (label, key[0], key[1], time.time() - last_move))
+                return None
             if not may_block and snap.get("stage_state") == "blocked":
                 fail.check(False, "%s（票在 %.1fs 时已 blocked，等不到本步：stage=%s/%s "
                                   "blocked=%r——不再耗上限）"
@@ -549,6 +569,20 @@ def main():
     def check(cond, msg):
         """fail.check + 通过计数（SUMMARY 行是人读面，判据仍是退出码）。"""
         G["step"] = msg            # 261023: budget watch names the step it died on
+        # 261023: one global ceiling for the whole journey. Measured: after the first
+        # red every later step burns its own wait, so the case ended up SIGKILLed at the
+        # entry budget with nothing named. Past GLOBAL_S the run stops, says which step
+        # it was on, and lets the normal teardown reap workers/bench (SystemExit runs
+        # the finally blocks; os._exit would leak them).
+        _cap = int(os.environ.get("SANDBAR_LIGHTLANE_GLOBAL_S") or 240)
+        if time.time() - G.get("t0", time.time()) > _cap and not G.get("capped"):
+            G["capped"] = True
+            print("GLOBAL CAP light-lane: %.0fs > %ds at step %r — stopping here "
+                  "(teardown still runs)" % (time.time() - G["t0"], _cap,
+                                             str(msg)[:140]), flush=True)
+            fail.check(False, "journey stopped at the %ds global cap (step=%r)"
+                       % (_cap, str(msg)[:140]))
+            raise SystemExit(1)
         r = fail.check(cond, msg)
         if r:
             stats["pass"] += 1
