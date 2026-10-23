@@ -10383,6 +10383,11 @@ BATCH_TIMEOUT_SEC = integ_batch_timeout_sec()
 # 预算的派生源（严格小于它们），单一算出点在此。
 INTEG_GUARD_SEC = BATCH_TIMEOUT_SEC + 300
 
+#: t261022-09: the read-only quick_scope_resolve subprocess bound (registry read
+#: + verify.yaml read; seconds by design). A timeout is a NAMED
+#: quick_scope_resolve_failed, reaped, never a guessed resolution.
+QUICK_SCOPE_RESOLVE_SEC = 120
+
 #: 总预算与子进程链截止之间的余量（秒）：执行器到点收口要打印点名面、闸要解析、
 #: 活动要确认泳道并写回执——三者都在这段里走完。单测锁定关系（260927）。
 INTEG_CHAIN_MARGIN_SEC = 300
@@ -11594,6 +11599,14 @@ async def _run_integration_tests_body(args: IntegrationRunArgs) -> IntegrationRu
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
+    # t261022-09 quickmanual evidence scope: check/battery modes run the NAMED
+    # verify.yaml code-lane check (battery = that check with the pytest target
+    # appended) instead of the integ lane — exactly the declared scope, receipt
+    # mapped into the same IntegrationRunResult shape. scenario/full modes and an
+    # empty quick_scope keep today's FULL-registry path byte-identical.
+    _sc = dict(getattr(args, "quick_scope", None) or {})
+    if _sc.get("mode") in ("check", "battery"):
+        return await _run_quick_named_check(wt, args, _sc)
     # t260913-03：每票段是全仓唯一显式打开「按声明排除池」的调用点——宿主管 260914
     # 口径为「声明即跳过」（例外分支已撤除），write_set 只余旧口径命中面留痕用途。
     # 策略值只透传，activity 不回填策略。
@@ -11606,6 +11619,192 @@ async def _run_integration_tests_body(args: IntegrationRunArgs) -> IntegrationRu
                                 only_names=list(getattr(args, "only_names", None) or []),
                                 # t260922-12：集测段记账来源=lane:<票>（台账单写者=闸）
                                 ledger_source="lane:%s" % args.ticket_id)
+
+
+async def _run_quick_named_check(wt: Path, args: IntegrationRunArgs,
+                                 sc: Dict[str, Any]) -> IntegrationRunResult:
+    """t261022-09: the quickmanual evidence gate for check/battery modes — run
+    verify_lane lane=code with only_check (and pytest_node for a battery) against
+    the LANE's own admin copy (the same lane-copy preference as _run_scenarios),
+    and translate the code-lane receipt into the IntegrationRunResult shape.
+
+    Three disciplines carried over from _run_scenarios (the borrowed-implementation
+    ledger, t261022-09 plan C1b): fully async subprocess (never a blocking run in an
+    activity); register/reap the whole process group on cancel and on TERM->KILL
+    timeout (KI-116 session isolation); a timeout/parse failure is a NAMED red
+    receipt naming the check — never a fallback to the full registry, never a
+    silent green. Only the ONE declared check runs; the narrowed round is honest
+    because the workflow-side receipt names the declared scope."""
+    lane_admin = wt / "server" / "admin.py"
+    admin = str(lane_admin if lane_admin.is_file() else
+                Path(__file__).resolve().parents[1] / "admin.py")
+    check_id = str(sc.get("check") or "")
+    payload: Dict[str, Any] = {"lane": "code", "path": str(wt),
+                               "only_check": check_id}
+    if sc.get("mode") == "battery":
+        payload["pytest_node"] = str(sc.get("pytest_node") or "")
+    # The check's own declared timeout (verify.yaml, default 600s) is the inner
+    # bound; the outer chain guard stays the segment-wide INTEG_GUARD_SEC.
+    chain_to = float(INTEG_GUARD_SEC)
+    p = await asyncio.create_subprocess_exec(
+        "python3", admin, "call", "verify_lane", json.dumps(payload),
+        cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env=lane_subprocess_env(wt), start_new_session=True)
+    register_owned_spawn(p, tag="quick-scope-check")
+    _t0 = time.monotonic()
+    try:
+        p_out_b, p_err_b = await asyncio.wait_for(p.communicate(), timeout=chain_to)
+    except asyncio.CancelledError:
+        await reap_spawn_group(p, tag="quick-scope-check")
+        if wait_budget_exhausted(_t0, chain_to):
+            return IntegrationRunResult(
+                ran=0, failed=1, error="quick scope check wall timed out (>%ds) "
+                "before a receipt — process reaped, named red, never a full-run "
+                "fallback" % int(chain_to))
+        raise
+    except asyncio.TimeoutError:
+        await reap_spawn_group(p, tag="quick-scope-check")
+        return IntegrationRunResult(
+            ran=0, failed=1, error="quick scope check wall timed out (>%ds) before "
+            "a receipt — process reaped, named red, never a full-run fallback"
+            % int(chain_to))
+    finally:
+        unregister_owned_spawn(p)
+    try:
+        res = json.loads(p_out_b.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return IntegrationRunResult(
+            ran=0, failed=1,
+            error="quick scope check produced no JSON receipt (%s) — named red, "
+            "never a full-run fallback" % check_id,
+            details=[{"name": check_id, "cmd": "verify_lane lane=code only_check="
+                      + check_id, "exit": 1,
+                      "output_tail": p_err_b.decode("utf-8", "replace")[-400:]}])
+    reds = [c for c in (res.get("checks") or [])
+            if isinstance(c, dict) and c.get("level") == "red"]
+    green = bool(res.get("green"))
+    items = []
+    for c in (res.get("checks") or []):
+        if not isinstance(c, dict):
+            continue
+        items.append({
+            "name": str(c.get("check") or check_id),
+            "cmd": "verify_lane lane=code only_check=%s%s"
+                   % (check_id, (" pytest_node=" + str(payload.get("pytest_node")))
+                      if payload.get("pytest_node") else ""),
+            "exit": 0 if str(c.get("level")) != "red" else 1,
+            "output_tail": "; ".join(str(i.get("detail") or "")
+                                     for i in (c.get("items") or []))[-400:]})
+    note = str(res.get("note") or "")
+    return IntegrationRunResult(
+        ran=1, passed=1 if green else 0, failed=0 if green else 1,
+        details=items,
+        warnings=([note] if note else []),
+        only_names=[check_id])
+
+
+@activity.defn
+async def quick_scope_resolve(args: "shared.QuickScopeResolveArgs"
+                              ) -> "shared.QuickScopeResolveResult":
+    """t261022-09: read-only resolution of a quickmanual evidence declaration
+    against the lane's own truth sources. Zero runs, zero ledger writes — a query.
+    Error classes (distinct on purpose):
+    - "quick_scope_resolve_failed: ..." = the resolution INFRASTRUCTURE failed
+      (runner/declaration unreadable) — an environment-shaped block (retry_qc),
+      never a ticket-defect red;
+    - "quick_scope_unresolved: ..." = the claim itself does not resolve — a defect
+      of the ticket, a named gate red, never an environment red."""
+    async with worker_termination_guard(args.ticket_id, "quick_scope_resolve", None):
+        return await _quick_scope_resolve_body(args)
+
+
+_QUICK_SCOPE_REGISTRY_SNIPPET = (
+    "import json,sys; sys.path.insert(0, 'integration'); "
+    "import run_scenarios as _r; "
+    "print(json.dumps([e[0] for e in _r.SCENARIOS]))")
+
+
+async def _quick_scope_resolve_body(args: "shared.QuickScopeResolveArgs"
+                                    ) -> "shared.QuickScopeResolveResult":
+    out = shared.QuickScopeResolveResult()
+    wt = Path(args.worktree) if args.worktree else REPO_ROOT
+    if not wt.is_absolute():
+        wt = REPO_ROOT / wt
+    # --- truth source 1: the lane's scenario registry (fresh subprocess, never
+    # imported into the worker; import builds the registry, runs nothing) ---
+    runner = wt / "integration" / "run_scenarios.py"
+    if not runner.is_file():
+        out.error = ("quick_scope_resolve_failed: the lane has no integration/"
+                     "run_scenarios.py (%s) — the registry truth source is absent"
+                     % runner)
+        return out
+    names: List[str] = []
+    p = await asyncio.create_subprocess_exec(
+        "python3", "-c", _QUICK_SCOPE_REGISTRY_SNIPPET,
+        cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env=lane_subprocess_env(wt), start_new_session=True)
+    register_owned_spawn(p, tag="quick-scope-registry")
+    try:
+        p_out_b, p_err_b = await asyncio.wait_for(
+            p.communicate(), timeout=QUICK_SCOPE_RESOLVE_SEC)
+    except asyncio.CancelledError:
+        await reap_spawn_group(p, tag="quick-scope-registry")
+        raise
+    except asyncio.TimeoutError:
+        await reap_spawn_group(p, tag="quick-scope-registry")
+        out.error = ("quick_scope_resolve_failed: reading the lane scenario "
+                     "registry timed out (>%ds) — process reaped"
+                     % QUICK_SCOPE_RESOLVE_SEC)
+        return out
+    finally:
+        unregister_owned_spawn(p)
+    if p.returncode != 0:
+        out.error = ("quick_scope_resolve_failed: reading the lane scenario "
+                     "registry failed rc=%s: %s"
+                     % (p.returncode, p_err_b.decode("utf-8", "replace")[-300:]))
+        return out
+    try:
+        names = [str(x) for x in json.loads(p_out_b.decode("utf-8", "replace"))]
+    except json.JSONDecodeError:
+        out.error = ("quick_scope_resolve_failed: the lane scenario registry read "
+                     "produced no JSON list — named failure, never a guessed "
+                     "resolution")
+        return out
+    out.registry_count = len(names)
+    # --- truth source 2: the lane's declared verify.yaml code-lane check ids ---
+    vy = wt / "verify.yaml"
+    check_ids: List[str] = []
+    if vy.is_file():
+        try:
+            import yaml  # noqa: PLC0415 - engine venv carries PyYAML; local to this face
+            cfg = yaml.safe_load(vy.read_text(encoding="utf-8")) or {}
+            lane_cfg = (cfg.get("lanes") or {}).get("code") or {}
+            for c in (lane_cfg.get("checks") or []):
+                if isinstance(c, dict) and str(c.get("id") or "").strip():
+                    check_ids.append(str(c["id"]).strip())
+        except Exception as e:  # noqa: BLE001 - fail-closed, named
+            out.error = ("quick_scope_resolve_failed: reading the lane verify.yaml "
+                         "failed (%s: %s)" % (type(e).__name__, str(e)[:200]))
+            return out
+    out.check_ids = list(check_ids)
+    # --- the pure plan (single writer; resolution facts handed in, no IO) ---
+    def _exists(rel: str) -> bool:
+        if not rel or rel.startswith("/") or ".." in rel.split("/"):
+            return False
+        return (wt / rel).is_file()
+
+    err, plan = shared.quick_scope_plan(str(args.kind or ""), list(args.names or []),
+                                        names, check_ids, _exists)
+    if err:
+        out.error = err  # quick_scope_unresolved: a defect of the ticket
+        return out
+    out.ok = True
+    out.mode = str(plan.get("mode") or "")
+    out.only_names = [str(x) for x in (plan.get("only_names") or [])]
+    out.check = str(plan.get("check") or "")
+    out.pytest_node = str(plan.get("pytest_node") or "")
+    out.note = str(plan.get("note") or "")
+    return out
 
 
 @activity.defn
@@ -13415,6 +13614,10 @@ ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     # t260917-09 探针（证据活动非闸面）：仲裁判 tests-fault 后对红项串行复跑取证
     # 「负载抖动」；缺注册=仲裁期运行时才炸（同上纪律）。
     reprobe_red_scenarios,
+    # t261022-09 quickmanual evidence scope: the declaration's read-only
+    # resolution query (the gate resolves before it runs; a missing registration
+    # only surfaces at runtime — same discipline as every query above).
+    quick_scope_resolve,
     # 巡检自有泳道 + 跑全集（t260913-02）：resolve_main_head=基点证据（main HEAD sha）；
     # sweep_inspection_lanes=残留清扫（setup 前置 + CLI 兜底）；run_inspection_suite=巡检期
     # 在自有泳道里跑全集（同一个 _run_scenarios 跑法、同一个回执形状）。

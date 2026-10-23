@@ -135,6 +135,8 @@ with workflow.unsafe.imports_passed_through():
         prepare_workspace,
         reprobe_red_scenarios,
         run_integration_tests,
+        # t261022-09: the quickmanual evidence declaration's read-only resolution
+        quick_scope_resolve,
         surface_plan,
         # t261011-10: fast-set declaration query (develop-buffer lane proof)
         fast_set_declaration,
@@ -7369,6 +7371,12 @@ QUICKMANUAL_CONCURRENCY_GATE_PATCH_ID = "quickmanual-lane-concurrency-gate-v1"
 # discipline uniform and costs nothing).
 QUICKMANUAL_MAIN_SYNC_PATCH_ID = "quickmanual-lane-main-sync-v1"
 
+# t261022-09: the evidence declaration DRIVES the gate. Replay discipline (KI-061
+# family): every new workflow-side branch below is judged through this id, so
+# histories recorded before the change replay on the old FULL-registry path
+# unchanged; the narrowed path exists only at live wake points.
+QUICKMANUAL_SCOPE_PATCH_ID = "quickmanual-lane-evidence-scope-v1"
+
 #: The machine gate declaration face (same command / same executor as dev-lane and
 #: light-lane; mirrored into shared.default_gate_for).
 QUICKMANUAL_GATES: Dict[Any, GateSpec] = {
@@ -7686,12 +7694,20 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
             return "red"
         return "green"
 
-    async def _quick_gate_round(self) -> Any:
-        """One FULL-registry machine-gate round (same activity, same single-writer
-        args as dev-lane/light-lane; a quick lane runs no narrowed fast-feedback
-        face)."""
+    async def _quick_gate_round(self, quick_scope: Optional[Dict[str, Any]] = None) -> Any:
+        """One machine-gate round (same activity, same single-writer args as
+        dev-lane/light-lane). t261022-09: when the resolved declaration plan is
+        handed in (only at live wake points, behind QUICKMANUAL_SCOPE_PATCH_ID),
+        the scenario scope rides the existing `only_names` seam (the ordinary
+        runner, fail-closed on out-of-registry names) and a check/battery scope
+        rides the additive `quick_scope` field (exactly the named check, the
+        battery = that check with the pytest target). Empty plan = the FULL
+        registry round, byte-identical to today."""
+        _args = self._integ_run_args(
+            list((quick_scope or {}).get("only_names") or []))
+        _args.quick_scope = dict(quick_scope or {})
         rraw = await workflow.execute_activity(
-            run_integration_tests, self._integ_run_args(),
+            run_integration_tests, _args,
             start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
         if isinstance(rraw, IntegrationRunResult):
             return rraw
@@ -7707,19 +7723,41 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
             only_names=[str(x) for x in (rraw.get("only_names") or [])],
             env_red=[str(x) for x in (rraw.get("env_red") or [])])
 
-    def _quick_gate_receipt(self, ir: Any, gen: int) -> Dict[str, Any]:
+    @staticmethod
+    def _quick_scope_phrase(quick_scope: Optional[Dict[str, Any]]) -> str:
+        """The honesty phrase for the receipt/face: what this round actually ran,
+        named against the declaration. Empty plan = the full gate, said out loud
+        (the narrowing is never implicit, in either direction)."""
+        sc = dict(quick_scope or {})
+        mode = str(sc.get("mode") or "")
+        names = [str(x) for x in (sc.get("names") or [])]
+        if mode == "scenario":
+            return "narrowed by declaration: scenario=%s" % ",".join(names)
+        if mode == "check":
+            return "narrowed by declaration: check=%s" % ",".join(names)
+        if mode == "battery":
+            return "narrowed by declaration: battery=%s" % ",".join(names)
+        if mode == "full":
+            return "full registry (declared: check=%s)" % ",".join(names)
+        return "full registry"
+
+    def _quick_gate_receipt(self, ir: Any, gen: int,
+                            quick_scope: Optional[Dict[str, Any]] = None
+                            ) -> Dict[str, Any]:
         """Machine-gate receipt onto the ticket face (results.run_integration_tests,
         same shape family as light-lane's; full per-scenario rows stay in evidence +
-        the lane report)."""
+        the lane report). t261022-09: the summary NAMES the declared scope, so a
+        reader sees the lane proved less than everything — honestly."""
         _wf_line = shared.worker_verified_line(getattr(ir, "worker_identity", ""),
                                                getattr(ir, "code_stamp", None))
         names = self._tests_red_names(ir)
         green = self._quick_gate_verdict(ir) == "green"
         return {
             "status": "ok" if green else "failed",
-            "summary": ("integration gate (full registry): %s ran / %s passed / %s "
+            "summary": ("integration gate (%s): %s ran / %s passed / %s "
                         "failed / %s env-red%s%s"
-                        % (ir.ran, ir.passed, ir.failed, ir.env_fail,
+                        % (self._quick_scope_phrase(quick_scope),
+                           ir.ran, ir.passed, ir.failed, ir.env_fail,
                            (" | " + str(ir.error)) if ir.error else "",
                            (" | " + _wf_line) if _wf_line else "")),
             "report": "", "deliverables": [], "files_changed": [],
@@ -7731,18 +7769,29 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
             "violations": names,
         }
 
-    def _quick_gate_blocked_text(self, ir: Any, reason_code: str, gen: int) -> str:
+    def _quick_gate_blocked_text(self, ir: Any, reason_code: str, gen: int,
+                                 quick_scope: Optional[Dict[str, Any]] = None
+                                 ) -> str:
         """Blocked digest for a red gate round (ticket face = a human-readable
         summary: one conclusion line + counts + at most FACE_NAME_LIMIT named
         violations + the ways out; the full violation set stays in
         results.run_integration_tests and the receipt)."""
+        if reason_code == "quick_scope_unresolved":
+            return ("The evidence declaration does not resolve: %s | This is a "
+                    "defect of the ticket (an unresolvable claim), NOT an "
+                    "environment red; nothing ran and the gate never falls back to "
+                    "the full registry. The declaration is creation-time input and "
+                    "cannot be mutated in place: re-create the ticket with a "
+                    "declaration that resolves, or cancel."
+                    % str(ir.error or "")[:400])
         names = [str(n) for n in self._tests_red_names(ir)]
         shown = names[:self.FACE_NAME_LIMIT]
         more = len(names) - len(shown)
         lines = [
-            "Integration gate round %d is RED (%s): %s ran / %s passed / %s failed "
-            "/ %s env-red." % (gen, reason_code, ir.ran, ir.passed, ir.failed,
-                               ir.env_fail),
+            "Integration gate round %d is RED (%s, %s): %s ran / %s passed / %s "
+            "failed / %s env-red." % (gen, reason_code,
+                                      self._quick_scope_phrase(quick_scope),
+                                      ir.ran, ir.passed, ir.failed, ir.env_fail),
             ("Violations: %s" % ", ".join(shown)) if shown
             else "Violations: none named by the product-red channel (see the reason "
                  "code).",
@@ -8063,23 +8112,93 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                         phase = str(_ms["phase"])
                     if _ms.get("stop"):
                         continue
-                # 3.3 One full-registry round.
-                ir = await self._quick_gate_round()
+                # 3.3 The machine-gate round. t261022-09: when the scope patch is
+                # live, the ticket's evidence declaration resolves first (read-only)
+                # and DRIVES the round; without the patch — and for every history
+                # recorded before it — this is today's FULL-registry round,
+                # byte-identical.
+                quick_scope: Optional[Dict[str, Any]] = None
+                if workflow.patched(QUICKMANUAL_SCOPE_PATCH_ID):
+                    _ev = dict(self.meta.get("quick_evidence") or {})
+                    rraw = await workflow.execute_activity(
+                        quick_scope_resolve,
+                        shared.QuickScopeResolveArgs(
+                            ticket_id=self.ticket_id,
+                            worktree=str(self.meta.get("worktree") or ""),
+                            kind=str(_ev.get("kind") or ""),
+                            names=[str(x) for x in (_ev.get("names") or [])]),
+                        start_to_close_timeout=SHORT, retry_policy=RETRY)
+                    r = rraw if isinstance(rraw, shared.QuickScopeResolveResult) \
+                        else shared.QuickScopeResolveResult(
+                            ok=bool(rraw.get("ok")),
+                            mode=str(rraw.get("mode") or ""),
+                            only_names=[str(x) for x in (rraw.get("only_names")
+                                                         or [])],
+                            check=str(rraw.get("check") or ""),
+                            pytest_node=str(rraw.get("pytest_node") or ""),
+                            note=str(rraw.get("note") or ""),
+                            registry_count=int(rraw.get("registry_count") or 0),
+                            check_ids=[str(x) for x in (rraw.get("check_ids")
+                                                        or [])],
+                            error=str(rraw.get("error") or ""))
+                    if r.error.startswith("quick_scope_resolve_failed"):
+                        # The resolution INFRASTRUCTURE failed — never a verdict,
+                        # never a silent fallback to full (or to nothing).
+                        await self._blocked(
+                            "run_integration_tests",
+                            "The evidence declaration could not be resolved (%s) — "
+                            "the gate never falls back to the full registry on a "
+                            "resolution fault. Remedy: retry_qc re-runs the "
+                            "resolution; if the fault repeats, the named cause above "
+                            "is the fix point." % r.error[:400])
+                        continue
+                    quick_scope = {"mode": r.mode, "names": list(
+                        dict(self.meta.get("quick_evidence") or {}).get("names")
+                        or []), "only_names": list(r.only_names),
+                        "check": r.check, "pytest_node": r.pytest_node}
+                    if r.note:
+                        quick_scope["note"] = r.note
+                    # Requirement 4: the merge human sees the declared scope next
+                    # to the claim, on the same face (snapshot quick_evidence).
+                    self.meta["quick_evidence"]["scope"] = {
+                        "mode": r.mode,
+                        "names": list(quick_scope["names"]),
+                        **({"note": r.note} if r.note else {})}
+                    self._touch()
+                    if not r.ok:
+                        # An UNRESOLVABLE CLAIM: a named red receipt, nothing ran.
+                        ir = IntegrationRunResult(
+                            ran=0, failed=1, error=r.error,
+                            details=[{"name": "; ".join(quick_scope["names"]),
+                                      "cmd": "(not run — the declaration does "
+                                             "not resolve)", "exit": 1,
+                                      "output_tail": r.error[:400]}])
+                    else:
+                        ir = None
+                else:
+                    ir = None
+                if ir is None:
+                    ir = await self._quick_gate_round(quick_scope)
                 if not ir.error:
                     self._handover_debt_clear()
                 verdict = self._quick_gate_verdict(ir)
                 self.results["run_integration_tests"] = self._quick_gate_receipt(
-                    ir, gen0)
+                    ir, gen0, quick_scope)
                 self.gate_runs.append({
                     "stage": "run_integration_tests",
-                    "label": "machine gate (verify_lane integ, round %d)"
-                             % (gen0 + 1),
+                    "label": "machine gate (%s, round %d)"
+                             % (self._quick_scope_phrase(quick_scope), gen0 + 1),
                     "green": verdict == "green",
                     "red_count": len(self._tests_red_names(ir)),
                     "counts": {"ran": ir.ran, "passed": ir.passed,
                                "failed": ir.failed, "env_fail": ir.env_fail},
                     "exit_code": 0 if not ir.error else 1,
-                    "narrowed": 0,
+                    # t261022-09 (review C5): `narrowed` was the constant 0; it is
+                    # now the declared scenario list ([] = full round — falsy like
+                    # 0, so truthiness readers keep behaving). Additive sibling key
+                    # `declared_scope` names every declared kind.
+                    "narrowed": list((quick_scope or {}).get("only_names") or []),
+                    "declared_scope": (dict(quick_scope) if quick_scope else {}),
                     "error": str(ir.error or "")})
                 self._finish("run_integration_tests", by="run_integration_tests",
                              evidence=self.results["run_integration_tests"]
@@ -8090,7 +8209,10 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                               % (gen0 + 1, ir.ran, ir.passed, ir.failed, ir.env_fail,
                                  (" | " + str(ir.error)) if ir.error else ""))
                 if verdict != "green":
-                    if str(getattr(ir, "error", "") or ""):
+                    _err = str(getattr(ir, "error", "") or "")
+                    if _err.startswith("quick_scope_unresolved"):
+                        reason_code = "quick_scope_unresolved"
+                    elif _err:
                         reason_code = "quick_gate_error"
                     elif not self._tests_red_names(ir):
                         reason_code = "quick_gate_env_unnamed"
@@ -8099,19 +8221,22 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                     if getattr(self, "_detail_face_on", False):
                         self.meta["blocked_detail"] = {
                             "check_id": "run_integration_tests",
-                            "item": "integration gate (full registry)",
+                            "item": "integration gate (%s)"
+                                    % self._quick_scope_phrase(quick_scope),
                             "red": True,
                             "reason_code": reason_code,
                             "violations": self._tests_red_names(ir),
                             "counts": {"ran": ir.ran, "passed": ir.passed,
                                        "failed": ir.failed, "env_fail": ir.env_fail},
                             "next_action": QUICKMANUAL_NEXT_ACTION_REWRITE,
+                            **({"declared_scope": dict(quick_scope)}
+                               if quick_scope else {}),
                             "evidence": str(ir.error or "")[:400],
                         }
                         self._touch()
                     await self._blocked("run_integration_tests",
                                         self._quick_gate_blocked_text(
-                                            ir, reason_code, gen0 + 1))
+                                            ir, reason_code, gen0 + 1, quick_scope))
                     continue
                 env_names, _ok = self._tests_env_red_names(ir)
                 if env_names:

@@ -211,8 +211,33 @@ def test_no_second_gate_implementation():
 
 @pytest.mark.parametrize("kind", ["l1_battery", "scenario", "check"])
 def test_evidence_valid_kinds_pass(kind):
+    # t261022-09: the normalized dict carries `names` (the list) additively beside
+    # the display `name`, so old readers of ev["name"] keep working.
     ok, reason, norm = shared.quick_evidence_validate({"kind": kind, "name": " proof "})
-    assert ok and reason == "" and norm == {"kind": kind, "name": "proof"}
+    assert ok and reason == ""
+    assert norm["kind"] == kind and norm["name"] == "proof"
+    assert norm["names"] == ["proof"]
+
+
+def test_evidence_name_list_is_accepted_and_normalized():
+    ok, reason, norm = shared.quick_evidence_validate(
+        {"kind": "scenario", "name": [" a ", "b"]})
+    assert ok and reason == ""
+    assert norm["names"] == ["a", "b"] and norm["name"] == "a, b"
+
+
+@pytest.mark.parametrize("raw,frag", [
+    ([], "empty"),
+    (["a", "a"], "repeats"),
+    (["a", ""], "non-empty string"),
+    (["a", 7], "non-empty string"),
+    (["x" * 501], "over"),
+])
+def test_evidence_name_list_malformed_inputs_are_named_and_refused(raw, frag):
+    ok, reason, norm = shared.quick_evidence_validate(
+        {"kind": "scenario", "name": raw})
+    assert not ok and norm == {}
+    assert frag in reason
 
 
 @pytest.mark.parametrize("raw,frag", [
@@ -226,7 +251,7 @@ def test_evidence_valid_kinds_pass(kind):
     ({"kind": "scenario"}, "name missing"),
     ({"kind": "scenario", "name": ""}, "name missing"),
     ({"kind": "scenario", "name": "   "}, "name missing"),
-    ({"kind": "scenario", "name": 7}, "name must be a string"),
+    ({"kind": "scenario", "name": 7}, "name must be a string or a list"),
     ({"kind": 7, "name": "x"}, "kind must be a string"),
     ({"kind": "check", "name": "x" * 501}, "over"),
 ])
@@ -444,3 +469,195 @@ def test_snapshot_adds_only_additive_keys():
     # the parent's keys are still there (shape never breaks for old consumers)
     for key in ("meta", "template_id", "stage", "status"):
         assert key in face
+
+
+# ======================================================================
+# t261022-09: the evidence declaration DRIVES the gate
+# ======================================================================
+
+# ---- shared.quick_scope_plan truth table ----
+
+def _plan(kind, names, registry=("sc-a", "sc-b", "sc-c"), checks=("lint", "test"),
+          exists=None):
+    return shared.quick_scope_plan(kind, names, registry, checks,
+                                   exists or (lambda p: p == "server/engine/tests/t_x.py"))
+
+
+def test_scope_plan_scenario_narrowed_and_list():
+    err, plan = _plan("scenario", ["sc-a"])
+    assert err == "" and plan["mode"] == "scenario"
+    assert plan["only_names"] == ["sc-a"]
+    err, plan = _plan("scenario", ["sc-b", "sc-c"])
+    assert err == "" and plan["only_names"] == ["sc-b", "sc-c"]
+
+
+def test_scope_plan_unknown_scenario_names_the_offenders_and_is_a_defect():
+    err, plan = _plan("scenario", ["sc-a", "ghost"])
+    assert err.startswith("quick_scope_unresolved")
+    assert "ghost" in err and "not an environment red" in err
+    assert plan == {}
+
+
+def test_scope_plan_check_reserved_full_gate_token_wins_before_lookup():
+    err, plan = _plan("check", ["integ"])
+    assert err == "" and plan["mode"] == "full" and plan["note"] == ""
+    # a project that ALSO declares a check id `integ`: the reserved token still
+    # wins and the collision is named (never silently shadowed)
+    err, plan = _plan("check", ["integ"], checks=("integ", "lint"))
+    assert err == "" and plan["mode"] == "full" and "collides" in plan["note"]
+
+
+def test_scope_plan_check_declared_id_and_unknown_id():
+    err, plan = _plan("check", ["lint"])
+    assert err == "" and plan["mode"] == "check" and plan["check"] == "lint"
+    err, plan = _plan("check", ["nope"])
+    assert err.startswith("quick_scope_unresolved") and "nope" in err
+
+
+def test_scope_plan_battery_path_rules():
+    ok = "server/engine/tests/t_x.py"
+    err, plan = _plan("l1_battery", [ok])
+    assert err == "" and plan["mode"] == "battery"
+    assert plan["pytest_node"] == ok
+    for bad in ("/abs/t.py", "../t.py", "a/../t.py", "a\\b.py", "missing.py"):
+        err, plan = _plan("l1_battery", [bad])
+        assert err.startswith("quick_scope_unresolved"), bad
+        assert plan == {}
+
+
+def test_scope_plan_check_and_battery_take_exactly_one_name():
+    for kind in ("check", "l1_battery"):
+        err, _ = _plan(kind, ["a", "b"])
+        assert err.startswith("quick_scope_unresolved") and "exactly one" in err
+
+
+# ---- the honesty faces ----
+
+def _ir(**kw):
+    base = dict(ran=3, passed=3, failed=0, env_fail=0, details=[], error="")
+    base.update(kw)
+    return dev_lane.IntegrationRunResult(**base)
+
+
+def test_scope_phrase_names_every_mode_out_loud():
+    QMW = dev_lane.QuickmanualLaneWorkflow
+    assert QMW._quick_scope_phrase(None) == "full registry"
+    assert QMW._quick_scope_phrase({}) == "full registry"
+    assert QMW._quick_scope_phrase(
+        {"mode": "scenario", "names": ["sc-a", "sc-b"]}) == \
+        "narrowed by declaration: scenario=sc-a,sc-b"
+    assert QMW._quick_scope_phrase({"mode": "check", "names": ["lint"]}) == \
+        "narrowed by declaration: check=lint"
+    assert QMW._quick_scope_phrase(
+        {"mode": "battery", "names": ["t_x.py"]}) == \
+        "narrowed by declaration: battery=t_x.py"
+    assert QMW._quick_scope_phrase({"mode": "full", "names": ["integ"]}) == \
+        "full registry (declared: check=integ)"
+
+
+def test_receipt_names_the_declared_scope():
+    wf = _mk_wf()
+    rec = wf._quick_gate_receipt(_ir(), 0, {"mode": "scenario",
+                                            "names": ["sc-a"]})
+    assert "narrowed by declaration: scenario=sc-a" in rec["summary"]
+    assert rec["status"] == "ok"
+    rec_full = wf._quick_gate_receipt(_ir(), 0, None)
+    assert "full registry" in rec_full["summary"]
+
+
+def test_unresolved_claim_is_a_named_gate_red_never_env_red():
+    wf = _mk_wf()
+    err = ("quick_scope_unresolved: the declaration names scenario(s) not in the "
+           "registry: ghost — a defect of the ticket, not an environment red")
+    ir = _ir(ran=0, failed=1, error=err,
+             details=[{"name": "ghost", "cmd": "(not run)", "exit": 1,
+                       "output_tail": err}])
+    assert wf._quick_gate_verdict(ir) == "red"
+    # never enters the env-red channel (so it can never be exempted as env-fail)
+    assert wf._tests_env_red_names(ir) == ([], False) or \
+        wf._tests_env_red_names(ir)[0] == []
+    text = wf._quick_gate_blocked_text(ir, "quick_scope_unresolved", 1)
+    assert "defect of the ticket" in text and "never falls back" in text
+    assert wf._quick_gate_receipt(ir, 0)["status"] == "failed"
+
+
+def test_gate_receipt_decodes_the_activity_dict_payload():
+    # the dict decode happens in _quick_gate_round (the activity shell); the
+    # receipt contract itself is IntegrationRunResult — pin the decode branch
+    wf = _mk_wf()
+    assert wf._quick_gate_receipt(_ir(), 0, None)["status"] == "ok"
+
+
+# ---- structure locks: the patch id and its consumption ----
+
+def test_scope_patch_id_declared_and_consumed():
+    assert dev_lane.QUICKMANUAL_SCOPE_PATCH_ID == \
+        "quickmanual-lane-evidence-scope-v1"
+    src = inspect.getsource(dev_lane.QuickmanualLaneWorkflow._run_quickmanual)
+    assert "workflow.patched(QUICKMANUAL_SCOPE_PATCH_ID)" in src
+    assert "quick_scope_resolve" in src
+    # an unresolved claim is classified before the generic gate-error branch
+    assert src.index("quick_scope_unresolved") < src.index("quick_gate_error")
+    # the round carries the plan through the single-writer args
+    rd = inspect.getsource(dev_lane.QuickmanualLaneWorkflow._quick_gate_round)
+    assert "_args.quick_scope = dict(quick_scope or {})" in rd
+
+
+def test_quick_scope_args_default_keeps_old_payloads_replay_legal():
+    a = shared.IntegrationRunArgs(ticket_id="t", worktree="/tmp/x")
+    assert a.quick_scope == {} and a.only_names == []
+    # empty quick_scope + empty only_names = the FULL-registry round, byte-equal
+    # to the pre-change payload shape (defaults only, nothing new serialized)
+
+
+# ---- verify_lane only_check / pytest_node (the code-lane named-check entry) ----
+
+def _write_verify_yaml(root, checks):
+    (root / "verify.yaml").write_text(
+        "schema: v1\nlanes:\n  code:\n    write_allow:\n      - server/\n"
+        "    checks:\n" +
+        "".join("      - id: %s\n        cmd: %s\n" % (cid, cmd.replace(":", "\\:"))
+                for cid, cmd in checks), encoding="utf-8")
+
+
+def test_verify_lane_only_check_runs_exactly_the_named_check(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".." / "tools"))
+    import verify_lane  # noqa: E402
+    _write_verify_yaml(tmp_path, [("t1", "true"), ("t2", "false")])
+    res = verify_lane.run({"lane": "code", "path": str(tmp_path), "only_check": "t1"})
+    ran = [c["check"] for c in res["checks"] if c["check"] in ("t1", "t2")]
+    assert ran == ["t1"] and res["green"] is True
+    res = verify_lane.run({"lane": "code", "path": str(tmp_path), "only_check": "t2"})
+    ran = [c["check"] for c in res["checks"] if c["check"] in ("t1", "t2")]
+    assert ran == ["t2"] and res["green"] is False
+
+
+def test_verify_lane_only_check_unknown_id_is_a_named_red_nothing_runs(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".." / "tools"))
+    import verify_lane  # noqa: E402
+    _write_verify_yaml(tmp_path, [("t1", "true")])
+    res = verify_lane.run({"lane": "code", "path": str(tmp_path), "only_check": "ghost"})
+    assert res["green"] is False
+    assert "ghost" in res["checks"][-1]["check"] + str(res["checks"][-1]["items"])
+
+
+def test_verify_lane_pytest_node_rules(tmp_path):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".." / "tools"))
+    import verify_lane  # noqa: E402
+    # pytest-form check: the node is appended and the narrowed command runs
+    (tmp_path / "ok_probe.py").write_text(
+        "def test_ok():\n    assert True\n", encoding="utf-8")
+    _write_verify_yaml(tmp_path, [
+        ("t1", "%s -m pytest ok_probe.py -q" % Path(sys.executable)),
+        ("grep1", "true")])
+    res = verify_lane.run({"lane": "code", "path": str(tmp_path), "only_check": "t1",
+                             "pytest_node": "ok_probe.py"})
+    assert res["green"] is True
+    # a non-pytest check + pytest_node is a NAMED red, nothing runs
+    res = verify_lane.run({"lane": "code", "path": str(tmp_path), "only_check": "grep1",
+                             "pytest_node": "ok_probe.py"})
+    assert res["green"] is False
+    assert "pytest-form" in str(res["checks"][-1]["items"])
+    # pytest_node without only_check is refused
+    res = verify_lane.run({"lane": "code", "path": str(tmp_path), "pytest_node": "ok_probe.py"})
+    assert res["green"] is False

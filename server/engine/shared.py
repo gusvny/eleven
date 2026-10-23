@@ -482,6 +482,46 @@ class IntegrationRunArgs:
     # expected=点名在册、fail-closed 校验在册性）。空=全量跑（放行唯一依据的收口
     # 跑形态）。爆炸半径/首轮决策在 dev_lane 调用点（单写者=targeted_rerun_plan）。
     only_names: List[str] = field(default_factory=list)
+    # t261022-09 quickmanual evidence scope: when the DECLARATION drives the gate,
+    # the resolved plan travels here ({mode, check, pytest_node, names}). check mode
+    # runs exactly the named verify.yaml code-lane check; battery mode runs the
+    # named pytest target through that check; full/scenario modes keep today's
+    # integ path (scenario via only_names above). Empty dict = today's behavior
+    # (the FULL registry round) — defaulted, so old payloads and replays decode
+    # byte-identically and the narrowing is never implicit.
+    quick_scope: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class QuickScopeResolveArgs:
+    """t261022-09: read-only resolution of a quickmanual evidence declaration
+    against the lane's own truth sources (scenario registry, verify.yaml check
+    ids, lane file existence). Zero runs, zero ledger writes — a query."""
+
+    ticket_id: str = ""
+    worktree: str = ""                 # lane root (the registry/declaration live there)
+    kind: str = ""                     # validated declaration kind
+    names: List[str] = field(default_factory=list)  # validated declaration names
+
+
+@dataclass
+class QuickScopeResolveResult:
+    """quick_scope_resolve receipt. error classes are DISTINCT on purpose:
+    - "quick_scope_resolve_failed: ..." = the resolution INFRASTRUCTURE failed
+      (runner/declaration unreadable) — an environment-shaped block (retry_qc),
+      never a ticket-defect red;
+    - ok=False with error empty = an UNRESOLVED CLAIM (quick_scope_plan named the
+      offenders) — a defect of the ticket, a named gate red, never env-red."""
+
+    ok: bool = False
+    mode: str = ""                     # full | scenario | check | battery (ok only)
+    only_names: List[str] = field(default_factory=list)
+    check: str = ""
+    pytest_node: str = ""
+    note: str = ""                     # honesty note (reserved-token collision)
+    registry_count: int = 0
+    check_ids: List[str] = field(default_factory=list)
+    error: str = ""
 
 
 @dataclass
@@ -4471,22 +4511,75 @@ class ReworkRequest:
 #: quick_evidence_validate and its UT truth table.
 QUICK_EVIDENCE_KINDS = ("l1_battery", "scenario", "check")
 
+#: The reserved full-gate check name (t261022-09): `kind=check, name=integ` asks for
+#: the unchanged FULL integration gate. This token is INVENTED by the quickmanual
+#: scope design — it is NOT a verify.yaml code-lane check id today — and
+#: quick_scope_plan matches it BEFORE the declared-checks lookup, never consulting
+#: verify.yaml for it. If a project ever declares a check id `integ`, the reserved
+#: token wins and the collision is named in the resolution note (never silently
+#: shadowed).
+QUICK_EVIDENCE_FULL_CHECK = "integ"
+
 #: work_done intake limits (an intake gate: oversized payloads never enter the event
 #: history; same discipline as HOST_RULING_NOTE_INPUT_LIMIT).
 QUICK_WORK_NOTE_INPUT_LIMIT = 2000
 QUICK_WORK_EVIDENCE_REF_LIMIT = 500
 
 
-def quick_evidence_validate(raw: Any) -> Tuple[bool, str, Dict[str, str]]:
+def _quick_evidence_name_list(raw_name: Any) -> Tuple[bool, str, list]:
+    """Normalize the declaration's name face: one non-blank string (today's shape)
+    or a non-empty list of DISTINCT non-blank strings ("the declared list"). Every
+    malformed shape is refused with a named reason, never coerced (external-input
+    discipline). Returns (ok, reason, names)."""
+    if isinstance(raw_name, str):
+        if not raw_name.strip():
+            return (False, "evidence name missing or blank (name the battery/scenario/"
+                    "check that proves this fix)", [])
+        if len(raw_name) > QUICK_WORK_EVIDENCE_REF_LIMIT:
+            return (False, "evidence name over %d characters (%d) — name the proof, "
+                    "do not paste its output"
+                    % (QUICK_WORK_EVIDENCE_REF_LIMIT, len(raw_name)), [])
+        return (True, "", [raw_name.strip()])
+    if isinstance(raw_name, list):
+        if not raw_name:
+            return (False, "evidence name list is empty — declare at least one "
+                    "battery/scenario/check, or the gate has nothing to run", [])
+        names = []
+        for x in raw_name:
+            if not isinstance(x, str) or not x.strip():
+                return (False, "evidence name list carries a blank or non-string "
+                        "entry (%r) — every declared name must be a non-empty string"
+                        % (x,), [])
+            nm = x.strip()
+            if len(nm) > QUICK_WORK_EVIDENCE_REF_LIMIT:
+                return (False, "evidence name list entry over %d characters (%d) — "
+                        "name the proof, do not paste its output"
+                        % (QUICK_WORK_EVIDENCE_REF_LIMIT, len(nm)), [])
+            if nm in names:
+                return (False, "evidence name list repeats %r — declare distinct "
+                        "names (a repeated name proves nothing twice)" % nm, [])
+            names.append(nm)
+        return (True, "", names)
+    if raw_name is None:
+        return (False, "evidence name missing (name the battery/scenario/check that "
+                "proves this fix)", [])
+    return (False, "evidence name must be a string or a list of strings (got %s)"
+            % type(raw_name).__name__, [])
+
+
+def quick_evidence_validate(raw: Any) -> Tuple[bool, str, Dict[str, Any]]:
     """Validate the quickmanual evidence declaration (pure function, UT truth table).
 
     Returns (ok, reason, normalized). Malformed input is refused with a NAMED reason,
     never silently coerced (external-input discipline): non-dict shape, missing/blank
     kind, kind outside QUICK_EVIDENCE_KINDS, missing/blank name, non-string shapes,
-    and an over-limit name are each named. The check validates the DECLARATION only —
-    whether the delivered work actually contains the declared battery/scenario/check
-    is the merge human gate's judgment (recorded on the merge stage acceptance, not
-    silently trusted to the machine)."""
+    and an over-limit name are each named. t261022-09: `name` may also be a non-empty
+    LIST of distinct non-blank strings (the declared list); the normalized dict always
+    carries `names` (the list) and `name` (display form: the single name, or the
+    comma-joined list) so old readers of `ev["name"]` keep working. The check
+    validates the DECLARATION only — whether the delivered work actually contains the
+    declared battery/scenario/check is the merge human gate's judgment (recorded on
+    the merge stage acceptance, not silently trusted to the machine)."""
     if not isinstance(raw, dict):
         return (False, "evidence declaration must be an object {kind, name} (got %s)"
                 % type(raw).__name__, {})
@@ -4504,19 +4597,82 @@ def quick_evidence_validate(raw: Any) -> Tuple[bool, str, Dict[str, str]]:
     if kind not in QUICK_EVIDENCE_KINDS:
         return (False, "evidence kind %r is not one of: %s"
                 % (kind, ", ".join(QUICK_EVIDENCE_KINDS)), {})
-    if name is None:
-        return (False, "evidence name missing (name the battery/scenario/check that "
-                "proves this fix)", {})
-    if not isinstance(name, str):
-        return (False, "evidence name must be a string (got %s)" % type(name).__name__,
-                {})
-    if not name.strip():
-        return (False, "evidence name missing or blank (name the battery/scenario/"
-                "check that proves this fix)", {})
-    if len(name) > QUICK_WORK_EVIDENCE_REF_LIMIT:
-        return (False, "evidence name over %d characters (%d) — name the proof, do "
-                "not paste its output" % (QUICK_WORK_EVIDENCE_REF_LIMIT, len(name)), {})
-    return (True, "", {"kind": kind, "name": name.strip()})
+    ok, reason, names = _quick_evidence_name_list(name)
+    if not ok:
+        return (False, reason, {})
+    return (True, "", {"kind": kind, "names": names,
+                       "name": names[0] if len(names) == 1 else ", ".join(names)})
+
+
+def quick_scope_plan(kind: str, names: list, registry_names,
+                     check_ids, path_exists, full_check: str = QUICK_EVIDENCE_FULL_CHECK
+                     ) -> Tuple[str, Dict[str, Any]]:
+    """Turn a VALIDATED declaration into the gate's scope plan (pure, no IO —
+    t261022-09 step 1; the resolution facts are handed in by the caller).
+
+    Returns (error, plan). plan is {} when error is non-empty. plan keys:
+      mode: "full" | "scenario" | "check" | "battery"
+      only_names: scenario scope (empty otherwise)
+      check: the declared check id (check mode; empty otherwise)
+      pytest_node: the battery target (battery mode; empty otherwise)
+      note: a human-readable honesty note naming the reserved-token collision when
+            one occurred (empty otherwise)
+    Rules:
+      - scenario: every name must be in registry_names (else error naming the
+        offenders) — the unresolvable-claim defect, never guessed around.
+      - check: exactly ONE name; the reserved full-gate token is matched BEFORE the
+        declared checks (mode "full", note names a collision); otherwise the name
+        must be a declared check id.
+      - battery: exactly ONE name; it must be a RELATIVE path (no absolute form, no
+        "..", no back-jumps) that path_exists() answers True for (the battery is a
+        pytest-addressable target; a node-native battery is refused BY NAME in v1,
+        never approximated)."""
+    registry = set(str(x) for x in (registry_names or []))
+    checks = set(str(x) for x in (check_ids or []))
+    names = [str(x) for x in (names or [])]
+    if kind == "scenario":
+        unknown = [n for n in names if n not in registry]
+        if unknown:
+            return ("quick_scope_unresolved: the declaration names scenario(s) not in "
+                    "the registry: %s (registered: %d) — a defect of the ticket, not "
+                    "an environment red"
+                    % (", ".join(unknown), len(registry)), {})
+        return ("", {"mode": "scenario", "only_names": list(names), "check": "",
+                     "pytest_node": "", "note": ""})
+    if len(names) != 1:
+        return ("quick_scope_unresolved: kind=%s takes exactly one declared name "
+                "(got %d: %s)" % (kind, len(names), ", ".join(names) or "(none)"), {})
+    if kind == "check":
+        nm = names[0]
+        if nm == full_check:
+            note = ""
+            if nm in checks:
+                note = ("the declared check name %r collides with the reserved "
+                        "full-gate token — the reserved token wins (the FULL gate "
+                        "runs), and the declared check is NOT run" % nm)
+            return ("", {"mode": "full", "only_names": [], "check": "",
+                         "pytest_node": "", "note": note})
+        if nm not in checks:
+            return ("quick_scope_unresolved: the declaration names check %r which is "
+                    "not a declared verify.yaml code-lane check (declared: %s) — a "
+                    "defect of the ticket, not an environment red"
+                    % (nm, ", ".join(sorted(checks)) or "(none declared)"), {})
+        return ("", {"mode": "check", "only_names": [], "check": nm,
+                     "pytest_node": "", "note": ""})
+    if kind == "l1_battery":
+        nm = names[0]
+        if nm.startswith("/") or "\\" in nm or ".." in nm.split("/"):
+            return ("quick_scope_unresolved: the declared battery %r is not a "
+                    "relative lane path (absolute form, backslash or .. segment) — a "
+                    "defect of the ticket, not an environment red" % nm, {})
+        if not path_exists(nm):
+            return ("quick_scope_unresolved: the declared battery %r does not exist "
+                    "in the lane (a battery is a pytest-addressable target; a "
+                    "node-native battery is not runnable in v1) — a defect of the "
+                    "ticket, not an environment red" % nm, {})
+        return ("", {"mode": "battery", "only_names": [], "check": "",
+                     "pytest_node": nm, "note": ""})
+    return ("quick_scope_unresolved: unknown evidence kind %r" % (kind,), {})
 
 
 @dataclass

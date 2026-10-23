@@ -1634,6 +1634,10 @@
     }
   },
   "scenarios": {
+    "integration/t261022-09/sc_t261022_09_quick_gate_scope.py": {
+      "anchor": "behaviour",
+      "note": "t261022-09 L3: the quickmanual gate is driven by the ticket's evidence declaration - receipt SUMMARY and gate_runs name the narrowing verbatim, an unresolvable declaration is the named product red quick_scope_unresolved outside the env-red channel (B2 can never exempt it), the single-writer args carry the declared scope with the full round still reachable and quick_scope defaulting empty behind QUICKMANUAL_SCOPE_PATCH_ID (replay), quick_scope_plan resolves against registry/checks with the reserved integ token winning before lookup, and verify_lane only_check runs exactly the declared check over a real git fixture (unknown id named red, token not shadowed, absent-params face unchanged)."
+    },
     "integration/t261016-19/sc_t26101619_disposal_hygiene.py": {
       "anchor": "contract",
       "note": "t261016-19: the out-of-scope disposal spares the lane's own venv (no unauth quarantine batch, no venv commit - KI-0202 judge-filter-not-add-widening), an out-of-write-set in-flight fix survives TWO consecutive settle rounds byte-identical behind a named refusal, a missing write set stays fail-closed, and the import-integrity guard flags a deleted module still imported by a delivered source while wiring is source-locked",

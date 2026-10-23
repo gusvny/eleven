@@ -3,14 +3,15 @@
 
 intent（用户可感知行为）：工单模板面只留内置面——
   A. 真源三表收窄：TEMPLATE_CLASS_NAMES / TEMPLATE_CLASSES / TEMPLATE_DISPLAY_NAMES
-     的 key 集合都恰为内置面 {dev-lane, light-lane}（宿主令 260930 轻道登记令：轻道
-     是宿主定案的第二条道，与 dev-lane 同级；四退役模板仍从「可用面」消失=建票入口
-     收窄的根）。t261019-32 注记：quickmanual-lane 在其登记步（名面+类面+yaml 原子
-     落地，arbitrate gen0 item 1）随本守卫同步扩面——落地面=整面相等，绝不半登记）；
+     的 key 集合都恰为内置面 {dev-lane, light-lane, quickmanual-lane}（宿主令 260930
+     轻道登记令：轻道是宿主定案的第二条道；261022 宿主令原子登记 quickmanual-lane
+     =758425b0，t261022-09 随本守卫自己声明的「落地面=整面相等」契约同步扩面；
+     四退役模板仍从「可用面」消失=建票入口收窄的根）；
   B. 物理退役面与幸存面：四退役 .py/.yaml 退场、dev-lane.yaml 在位；v1 步1
      ContentPipelineWorkflow 与 DispatcherScanWorkflow（不在删除面）幸存不过删；
   C. 拒收面文案精度：ticket-start / ticket create 传四退役模板任一被拒，报错文案
-     **恰列内置面**（=dev-lane、light-lane 两条；多列/漏列都算文案失真）；dev-lane
+     **恰列内置面**（=dev-lane、light-lane、quickmanual-lane 三条；多列/漏列都算
+     文案失真）；dev-lane
      本身仍过模板闸（错误推进到下一道必填校验，而非「未知模板」）；
   D. suggest_next 推荐面：收为「开新 dev-lane 票 / main 侧直跑验证」两类出路措辞，
      推荐清单零退役模板名（票收口后用户看到的出路不再指向已退役流程）；
@@ -71,31 +72,42 @@ def main():
     _empty = _tmp.mkdtemp(prefix="t260924-04-empty-registry-")
     # 宿主令 260930：内置面加一格 light-lane（轻道泳道，宿主定案 devlane-lite）——
     # 「空注册根=恰为内置面全集、零登记零漂移」语义不变；四退役模板复活仍必红。
-    # 261022：quickmanual-lane 完成原子注册（宿主令 261022），内置面第三条。
-    check(shared.project_template_names_merged(root=_empty)
-          == {"dev-lane": "DevLaneWorkflow", "light-lane": "LightLaneWorkflow",
-              "quickmanual-lane": "QuickmanualLaneWorkflow"},
-          "默认面合并视图（空注册根）恰 {dev-lane, light-lane, quickmanual-lane}（实得 %r）"
-          % (shared.project_template_names_merged(root=_empty),))
+    # 261022 同步（t261022-09 implement gen2，随本守卫自己声明的「落地面=整面相等」
+    # 契约）：758425b0 原子登记 quickmanual-lane（t261019-32 留的具名后续步）——
+    # 内置面扩为 {dev-lane, light-lane, quickmanual-lane}，本守卫随之扩面；退役模板
+    # 复活仍必红，守卫语义不变。
+    _BUILTIN_FACE = {"dev-lane": "DevLaneWorkflow",
+                     "light-lane": "LightLaneWorkflow",
+                     "quickmanual-lane": "QuickmanualLaneWorkflow"}
+    check(shared.project_template_names_merged(root=_empty) == _BUILTIN_FACE,
+          "默认面合并视图（空注册根）恰 {dev-lane, light-lane, quickmanual-lane}"
+          "（实得 %r）" % (shared.project_template_names_merged(root=_empty),))
     check("light-lane" in shared.TEMPLATE_CLASS_NAMES
           and shared.TEMPLATE_CLASS_NAMES["light-lane"] == "LightLaneWorkflow",
           "light-lane 在注册表（宿主令 260930 轻道登记令）")
+    check("quickmanual-lane" in shared.TEMPLATE_CLASS_NAMES
+          and shared.TEMPLATE_CLASS_NAMES["quickmanual-lane"]
+          == "QuickmanualLaneWorkflow",
+          "quickmanual-lane 在注册表（261022 宿主令原子登记）")
     check("dev-lane" in shared.TEMPLATE_CLASS_NAMES
           and shared.TEMPLATE_CLASS_NAMES["dev-lane"] == "DevLaneWorkflow",
           "dev-lane 恒在注册表（内置先占，项目模板撞名即拒不覆盖）")
 
     def table_narrow(tbl):
         """真源收窄判定（纯函数，供自证红绿与 A 段共用）：恰为内置面全集
-        （宿主令 260930 起含 light-lane）。退役模板出现在表里 = 不收窄（必红）。"""
-        return set(tbl) == {"dev-lane", "light-lane"}
+        （宿主令 260930 起含 light-lane；261022 起含 quickmanual-lane）。
+        退役模板出现在表里 = 不收窄（必红）。"""
+        return set(tbl) == {"dev-lane", "light-lane", "quickmanual-lane"}
 
     check(not table_narrow({"dev-lane": "DevLaneWorkflow",
                             "light-lane": "LightLaneWorkflow",
+                            "quickmanual-lane": "QuickmanualLaneWorkflow",
                             "content-pipeline": "X"}),
           "收窄判定自证红：残留 content-pipeline 的表被判不收窄")
     check(table_narrow({"dev-lane": "DevLaneWorkflow",
-                        "light-lane": "LightLaneWorkflow"}),
-          "收窄判定自证绿：内置两模板的表放行")
+                        "light-lane": "LightLaneWorkflow",
+                        "quickmanual-lane": "QuickmanualLaneWorkflow"}),
+          "收窄判定自证绿：内置三模板的表放行")
 
     print("== B 物理退役面与幸存面")
     for tid in lib.RETIRED_TEMPLATE_IDS:
@@ -127,7 +139,8 @@ def main():
                 except ValueError as e:
                     msg = str(e)
                     # 文案列全=「可用：」段恰为内置面全集（不锚前缀措辞，两工具同判）。
-                    # 宿主令 260930：内置面 = {dev-lane, light-lane}（轻道登记令）。
+                    # 宿主令 260930：内置面 = {dev-lane, light-lane}；261022 起含
+                    # quickmanual-lane（758425b0 原子登记，t261022-09 随本守卫同步）。
                     seg = msg.rsplit("可用：", 1)[-1] if "可用：" in msg else msg
                     check(seg == "dev-lane、light-lane、quickmanual-lane）",
                           "create 传 %s 被拒且文案恰列内置面三模板（实得 %r）"
@@ -167,7 +180,7 @@ def main():
                 msg = str(receipt.get("error") or "")
                 seg = msg.rsplit("可用：", 1)[-1] if "可用：" in msg else msg
                 check(receipt.get("ok") is False and seg == "dev-lane、light-lane、quickmanual-lane）",
-                      "ticket-start 传 %s 被拒且文案恰列内置面两模板（实得 %r）"
+                      "ticket-start 传 %s 被拒且文案恰列内置面三模板（实得 %r）"
                       % (tid, msg[:90]))
             # L9-allow: expects-refusal —— 负例：dev-lane **过模板闸**后停在下一道必填
             # （ticket_id），根本走不到身份闸，故同样不声明身份；断言=「未知模板」不出现。

@@ -123,6 +123,15 @@ TOOL = {
             'require_base': {'type': 'boolean',
                              'description': 'code 道：合并闸调用置 true——base 为空/未传时写集白名单 fail-closed 判红（不许静默跳过）'},
             'skip_slow': {'type': 'boolean', 'description': 'code 道：跳过全部命令检查（只验白名单与装配面）'},
+            'only_check': {'type': 'string',
+                           'description': 'code lane (t261022-09): run EXACTLY ONE declared check by id; an unknown id is a '
+                                          'NAMED red with nothing run. Absent = every declared check runs (old behavior). '
+                                          'The quickmanual evidence gate narrows through this — the narrowed round is '
+                                          'named as narrowed by the caller, never here.'},
+            'pytest_node': {'type': 'string',
+                            'description': 'code lane (t261022-09): valid ONLY with only_check; appends a pytest target to '
+                                           "that check's command. A non-pytest check plus pytest_node is a NAMED red. "
+                                           'Absent = the check runs as declared.'},
             'ticket_id': {'type': 'string',
                           'description': 'code lane: ticket id — the write-set whitelist admits files whose basename '
                                          'embeds this ticket slug (ticket-test-face rule, t261004-25) with a named green '
@@ -651,6 +660,40 @@ def _code(a):
 
     def _p(v):
         return root / str(v)
+
+    # t261022-09 quickmanual evidence scope: `only_check` runs EXACTLY ONE declared
+    # check by id (the declaration drives the gate; the narrowed round is named as
+    # narrowed by the caller, never here). `pytest_node` (only valid together with
+    # only_check) appends a pytest target to that check's command — the check must
+    # be a pytest-form command, else a NAMED red (never a guessed run). Absent
+    # params = byte-identical old behavior (every declared check runs).
+    _only_check = str(a.get('only_check') or '').strip()
+    _pytest_node = str(a.get('pytest_node') or '').strip()
+    if _only_check and isinstance(ck, list) and ck:
+        matched = [c for c in ck if isinstance(c, dict)
+                   and str(c.get('id') or '') == _only_check]
+        if not matched:
+            checks.append(_check(_only_check, [{'detail':
+                'only_check %r is not a declared verify.yaml code-lane check id '
+                '(declared: %s) — nothing ran'
+                % (_only_check, ', '.join(sorted(
+                    str(c.get('id') or '') for c in ck if isinstance(c, dict))))}]))
+            return checks
+        ck = matched
+    if _pytest_node:
+        if not _only_check:
+            checks.append(_check('pytest_node', [{'detail':
+                'pytest_node requires only_check (one declaration, one named check) '
+                '— nothing ran'}]))
+            return checks
+        _cmd = str(ck[0].get('cmd') or '') if (ck and isinstance(ck[0], dict)) else ''
+        if 'pytest' not in _cmd:
+            checks.append(_check(_only_check, [{'detail':
+                'pytest_node %r is only runnable through a pytest-form check; the '
+                'declared check %r command is not one — nothing ran'
+                % (_pytest_node, _only_check)}]))
+            return checks
+        ck = [dict(ck[0], cmd='%s %s' % (_cmd, _pytest_node))] if ck else ck
 
     if isinstance(ck, list) and ck:
         from concurrent.futures import ThreadPoolExecutor
