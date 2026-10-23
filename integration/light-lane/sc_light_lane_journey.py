@@ -397,7 +397,7 @@ def build_fixture(fail):
     # (KI-339's measured shape). Same declaration as the quickmanual fixture.
     with open(os.path.join(projects, PROJECT_KEY, "concurrency-limit.json"), "w",
               encoding="utf-8") as f:
-        f.write('{"version": 1, "limit": 2}\n')
+        f.write('{"version": 1, "limit": 4}\n')
     with open(os.path.join(projects, ".migrated"), "w", encoding="utf-8") as f:
         f.write("fixture-local hermetic registry (light-lane e2e)\n")
     with open(os.path.join(projects, PROJECT_KEY, "project.yaml"), "w",
