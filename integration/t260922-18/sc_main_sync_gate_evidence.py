@@ -402,13 +402,24 @@ async def main() -> int:
                 and s["stage_state"] == "blocked", 90, "票 2 验证相位 blocked")
             ok(blocked, "D1 main 不可达 → 验证相位 blocked（不静默跳过）")
             if blocked:
-                snap2 = await handle2.query(dev_lane.DevLaneWorkflow.snapshot)
-                why = str(snap2.get("blocked_reason") or "") + \
-                    str(snap2.get("blocked_detail") or "")
+                # 261023: the engine flips stage_state to blocked before it pins the
+                # reason (KI-333 family), so a single read right after the flip can see
+                # an empty face - measured here as D2/D2b red while the same reason was
+                # present a moment later. Wait for the receipt instead of racing it.
+                _deadline = asyncio.get_event_loop().time() + 10.0
+                why = ""
+                while asyncio.get_event_loop().time() < _deadline:
+                    snap2 = await handle2.query(dev_lane.DevLaneWorkflow.snapshot)
+                    why = str(snap2.get("blocked_reason") or "") + \
+                        str(snap2.get("blocked_detail") or "")
+                    if why.strip():
+                        break
+                    await asyncio.sleep(0.2)
                 # The blocked face must NAME the main-sync step so a steward knows which
                 # check failed. Its wording was translated to English ("main sync
                 # failed", t261004-36 generation); histories/reports recorded before that
                 # read "主同步". Bind to "the step is named", both generations.
+                print("  D2 why=%r" % why[:300], flush=True)   # 261023 diagnostic
                 ok(("main sync" in why) or ("主同步" in why),
                    "D2 blocked 面点名主同步（main sync/主同步）", why[:200])
                 ok("不存在" in why, "D2b blocked 面含错误原文特征（响亮可诊断）", why[:200])
