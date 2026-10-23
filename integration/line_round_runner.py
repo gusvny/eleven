@@ -390,13 +390,9 @@ def suite_env(run_root, primary_revision, env=None):
     run_env[REUSE_ENV] = "0"
     run_env[LEDGER_DIR_ENV] = str(Path(run_root) / "ledger")
     run_env[GIT_SHA_ENV] = primary_revision
-    # 261023 (measured): the certification round ran its pools at width 3-4 and every
-    # round surfaced 2-3 DIFFERENT heavy/browser cases that are green alone and red
-    # only under that load (rail, doc-face, suite-journey, herd-no-crosstalk,
-    # panel-flake, burst ...). A certification round's job is to judge content, not to
-    # prove the host can take four suites at once, so it runs SERIALLY by default; an
-    # operator who wants speed sets SANDBAR_POOL_CONC explicitly and gets it verbatim.
-    run_env.setdefault("SANDBAR_POOL_CONC", "1")
+    # 261023 host order: do NOT serialise the round. A case that goes red only under
+    # contention is an UNQUALIFIED test - it is excluded from the round's path and
+    # fixed later, not paid for by slowing every certification down.
     run_env.update(asset_env(env))
     return run_env
 
