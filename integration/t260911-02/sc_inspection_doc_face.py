@@ -91,6 +91,14 @@ def wait_until(fn, budget, interval=2.0):
 def make_dirty_tree():
     """脏夹具树：正例命中（缺登记/幽灵/缺字段/坏 YAML/断链/越界）+ 豁免 + 干净对照篇。"""
     t = lib.RepoTree("docsync-dirty-%s" % STAMP)
+    # 261023: same base-point furniture as every other inspection fixture - without a
+    # git base the lane ends the period as "Change surface unavailable" and the stub
+    # findings never land (measured: 子用例e 落账缺桩发现).
+    t.git_init()
+    try:
+        lib.seed_surface_bootstrap("docs-sync-%s" % STAMP, t.base_sha)
+    except Exception:  # noqa: BLE001 - the trigger side names a missing ledger
+        pass
     index = {
         "docs": [
             {"path": "good.md"},
@@ -125,6 +133,11 @@ def make_dirty_tree():
 def make_clean_tree():
     """全绿夹具树：index↔实体一致、frontmatter 齐全、引用全存 → 零发现+heartbeat。"""
     t = lib.RepoTree("docsync-clean-%s" % STAMP)
+    t.git_init()
+    try:
+        lib.seed_surface_bootstrap("docs-sync-%s" % STAMP, t.base_sha)
+    except Exception:  # noqa: BLE001
+        pass
     t.write("docs/index.json", json.dumps({"docs": [{"path": "only.md"}]},
                                           ensure_ascii=False))
     t.write("docs/only.md", GOOD_FM.replace("`docs/good.md`，另见 `README.md`。", "`docs/only.md`。"))
