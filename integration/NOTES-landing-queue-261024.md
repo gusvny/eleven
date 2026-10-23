@@ -51,3 +51,18 @@
 4. When a ticket stops on the iteration cap: `op=authorize kind=arbitration_verdict
    scope=[<ticket>] who=host` then `op=retry_qc`.
 5. Let a round certify between landing waves.
+
+## Final state after the 261024 night run (goal rounds 25-60)
+
+- Landed: **8** tickets on develop-buffer.
+- Open: **8** — three `merge blocked` (gates send them back: content, not mechanics),
+  one `implement blocked`, one `arbitrate blocked`, one `review_plan running`, one
+  parked at `work/awaiting`, and the manual ticket `t261023-06`.
+- The line certifies green repeatedly (the last cert is `cert-01M5MXJB2P…`); no freeze
+  is open.
+- What stops the rest is NOT mechanics: `t261021-10` / `t261021-12` conflict on other
+  tickets' delivery files, `t261021-14/-15`, `t261022-12/-14/-15` cycle between the gate
+  cap and content reds, and `t261023-06` needs its implementation written in the
+  manual lane. Each needs a developer or a host decision — the mechanics that were
+  broken (identity, registries, anchor gap, landing/cert alternation) are all fixed and
+  written up above.
