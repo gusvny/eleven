@@ -1631,6 +1631,11 @@
     "server/engine/tests/test_t261022_merge_slot_release.py": {
       "anchor": "contract",
       "note": "t261022-06: the merge gate releases its slot with cause merge-wait and re-acquires FIFO on leaving; every blocked stage and the parked work stage keep holding (rule 3); patch id dev-lane-merge-slot-release-v1."
+    },
+    "server/engine/tests/test_t261021_01_inspection_sighting.py": {
+      "anchor": "behaviour",
+      "note": "t261021-01 L1 (anchor added by t261021-08 landing-union: the develop-side unit battery carried no manifest row and tripped L16 on the merged tree): the sighting pure-builder truth tables - recording period 1 leaves entity rows only, a re-sighting in period 2 writes exactly one observation row naming finding/period/revision, duplicate content in one period is one sighting, re-recording a recorded period is a named skip, absent revision and unresolvable identity are fail-closed named refusals, malformed batch entries are non-raising refusals",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -5531,6 +5536,16 @@
     "integration/tests/test_t261022_expected_pool_knownred.py": {
       "anchor": "behaviour",
       "note": "261022 regression on the round's expected count: the pure expected_entries face keeps 'full table minus excluded pools minus the known-red entries that survive that exclusion' - all pools excluded is 0 and never negative (the live -49), a roster entry inside an excluded pool is not deducted twice, no exclusion keeps the old number, ghost roster names are harmless; plus a source lock that main() uses the pure face and keeps no inline subtraction",
+      "sync_path": ""
+    },
+    "integration/t261021-08/sc_t26102108_request_layer_gate.py": {
+      "anchor": "contract",
+      "note": "t261021-08 L3: the request-layer contract over a fixture ledger shaped like the measured live one - G1 today's write face still accepts the measured defect shapes (proof of defect), G2 the contract detectors name all seven measured classes evidence-first, G3 the fold converges duplicate condition keys to one card with count/last_seen and classifies resolved/expired/legacy, digest above the cap, G4 assertions on ledger file bytes plus fold output (KI-195)",
+      "sync_path": ""
+    },
+    "integration/t261021-01/sc_t261021_01_finding_sighting.py": {
+      "anchor": "behaviour",
+      "note": "t261021-01 L3 (anchor added by t261021-08 landing-union: the entry registered on develop-buffer carried no manifest row and tripped L16 on the merged tree): the finding sighting grain over the real inspection_review_ledger store faces - a re-sighting in a later period appends one observation row naming finding, period and revision; first sighting appends none; sighting_report answers seen-N-times per period revision; absent revision and unresolvable identity are fail-closed named refusals writing nothing",
       "sync_path": ""
     }
   },
