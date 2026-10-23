@@ -78,6 +78,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -547,10 +548,24 @@ def main():
 
     def check(cond, msg):
         """fail.check + 通过计数（SUMMARY 行是人读面，判据仍是退出码）。"""
+        G["step"] = msg            # 261023: budget watch names the step it died on
         r = fail.check(cond, msg)
         if r:
             stats["pass"] += 1
         return r
+    # 261023 (host order): this journey is too big to leave opaque. A watch dog says
+    # ONCE where the run is when it overruns, so a killed run is diagnosable instead
+    # of a bare -9; it never kills anything itself (the residue discipline stays with
+    # the case's own teardown and the entry budget).
+    G["t0"] = time.time()
+
+    def _budget_watch():
+        print("BUDGET WATCH light-lane: still running, last step=%r (%.0fs)"
+              % (str(G.get("step"))[:120], time.time() - G["t0"]), flush=True)
+    _watch = threading.Timer(int(os.environ.get("SANDBAR_LIGHTLANE_WATCH_S") or 240),
+                             _budget_watch)
+    _watch.daemon = True
+    _watch.start()
     stage_mod = None
     bench_handle = None
     bench = None
