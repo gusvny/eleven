@@ -5554,11 +5554,6 @@
       "note": "t261021-08 L3: the request-layer contract over a fixture ledger shaped like the measured live one - G1 today's write face still accepts the measured defect shapes (proof of defect), G2 the contract detectors name all seven measured classes evidence-first, G3 the fold converges duplicate condition keys to one card with count/last_seen and classifies resolved/expired/legacy, digest above the cap, G4 assertions on ledger file bytes plus fold output (KI-195)",
       "sync_path": ""
     },
-    "integration/t261021-01/sc_t261021_01_finding_sighting.py": {
-      "anchor": "behaviour",
-      "note": "t261021-01 L3 (anchor added by t261021-08 landing-union: the entry registered on develop-buffer carried no manifest row and tripped L16 on the merged tree): the finding sighting grain over the real inspection_review_ledger store faces - a re-sighting in a later period appends one observation row naming finding, period and revision; first sighting appends none; sighting_report answers seen-N-times per period revision; absent revision and unresolvable identity are fail-closed named refusals writing nothing",
-      "sync_path": ""
-    },
     "integration/t261021-13/sc_epic_doc_link_opens_reader.mjs": {
       "anchor": "behaviour",
       "note": "t261021-13 L3: the epic's document control opens the panel's own markdown reader in the same page (Docs tab, docs scope, title path epics/<code>.md, headings/list/table/fenced code rendered, no literal markers, no raw JSON); vanished/unreadable/malformed documents land in the reader's named red banner, never an empty box; empty doc-tree answer still renders the reader; double-click race lands the epic doc; zero pageerror",
