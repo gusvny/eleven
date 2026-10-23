@@ -319,7 +319,7 @@ def test_b_modified_unauthorized_reverted_with_archive(lane):
     f = wt / "integration" / "lint_tests.py"
     before = f.read_text(encoding="utf-8")
     f.write_text("HACKED=1\n", encoding="utf-8")
-    auto_note = "\u5df2\u81ea\u52a8\u5904\u7f6e"  # engine's auto-remediation note key
+    auto_note = "auto-disposed"  # engine's auto-remediation note key
     note = _settle(wt, "arbitrate")
     # the refusal names the file and the auto-remediation happened
     assert "lint_tests.py" in note
@@ -355,7 +355,7 @@ def test_b_design_stage_accepts_reapplied_edit(lane):
     note = _settle(wt, "arbitrate")
     # the edit is remediated (archived + reverted), so the settle reports the
     # auto-remediation rather than a bare structured refusal
-    assert "\u5df2\u81ea\u52a8\u5904\u7f6e" in note and "lint_tests.py" in note
+    assert "auto-disposed" in note and "lint_tests.py" in note
     assert " D" not in _status(wt)
     # the sanctioned path: re-apply the change at the stage that accepts it
     (wt / "integration" / "lint_tests.py").write_text("HACKED=1\n", encoding="utf-8")
@@ -372,7 +372,7 @@ def test_b_untracked_moved_to_quarantine(lane):
     rogue.parent.mkdir(parents=True, exist_ok=True)
     rogue.write_text("ROGUE=1\n", encoding="utf-8")
     note = _settle(wt, "arbitrate")
-    assert "已挪档" in note and "path_gate_reason" not in note
+    assert "moved aside to" in note and "path_gate_reason" not in note
     assert not rogue.exists()
     assert _status(wt) == ""
     batches = _quarantine_batches(wt)
@@ -390,7 +390,7 @@ def test_b_deleted_and_staged_left_to_human(lane):
     (wt / "integration" / "lib_env.py").unlink()  # D 态越权
     note = _settle(wt, "arbitrate")
     assert "path_gate_reason=unauthorized_path" in note
-    assert "本轮已自动处置" not in note
+    assert "auto-disposed this round" not in note
     assert " D integration/lib_env.py" in _status(wt)  # 原样保留
     assert _head_count(wt) == int(_git(root, "rev-list", "--count", "main").stdout.strip())
     # staged 子用例：正常流程闸判定先于 add，此处人为构造 staged 新增（A 态）
@@ -398,7 +398,7 @@ def test_b_deleted_and_staged_left_to_human(lane):
     _git(wt, "add", "integration/staged_rogue.py")
     note2 = _settle(wt, "arbitrate")
     assert "path_gate_reason=unauthorized_path" in note2
-    assert "本轮已自动处置" not in note2
+    assert "auto-disposed this round" not in note2
     assert "A  integration/staged_rogue.py" in _status(wt)  # 不自动动
 
 
@@ -409,7 +409,7 @@ def test_b_rename_pair_half_remediated(lane):
     new = wt / "integration" / "renamed_rogue.py"              # ??（新路径）
     new.write_text("R=1\n", encoding="utf-8")
     note = _settle(wt, "arbitrate")
-    assert "已挪档" in note and "renamed_rogue.py" in note
+    assert "moved aside to" in note and "renamed_rogue.py" in note
     assert not new.exists()
     assert " D integration/lib_env.py" in _status(wt)          # D 留人工
     assert "path_gate_reason=unauthorized_path" in note
@@ -426,7 +426,7 @@ def test_b_protected_refusal_never_touched(lane):
     note = _settle(wt, "arbitrate")
     # 闸①优先：arbitrate 面不含 verify.yaml → unauthorized 文案；但处置被抑制
     assert "path_gate_reason=unauthorized_path" in note
-    assert "本轮已自动处置" not in note
+    assert "auto-disposed this round" not in note
     assert (wt / "verify.yaml").read_text(encoding="utf-8") == "prot: hacked\n"
     assert " M verify.yaml" in _status(wt)  # 原样保留等人审
     # stage 绿（写集含 verify.yaml）而 protected 命中 → protected 文案优先（原语义）
@@ -443,7 +443,7 @@ def test_b_legal_change_still_lands_after_remediation(lane):
     note = _settle(wt, "arbitrate")
     # 首轮拒绝（处置 rogue）→ 复判 sc_good 合法 → 落盘提交；回执同时点名处置摘要
     # （I7 审计面：票面看见「落盘成功」时同步看见哪些越权件被处置，去向=隔离档）
-    assert "已挪档" in note and "本轮已自动处置" in note
+    assert "moved aside to" in note and "auto-disposed this round" in note.lower()
     assert "worker 代落盘 commit" in note
     assert _head_count(wt) == int(_git(root, "rev-list", "--count", "main").stdout.strip()) + 1
     assert not (wt / "integration" / "rogue.py").exists()
@@ -465,7 +465,7 @@ def test_b_judged_files_in_structured_refusal(lane):
     # the remaining violation list carries the D entry; the M half is named in the
     # note/evidence and is still in judged_files (that face is unchanged)
     assert "integration/lib_env.py" in set(refusal.get("files") or [])
-    auto_note = "\u5df2\u81ea\u52a8\u5904\u7f6e"  # engine's auto-remediation note key
+    auto_note = "auto-disposed"  # engine's auto-remediation note key
     assert "lint_tests.py" in note and auto_note in note
     judged = refusal.get("judged_files")
     assert isinstance(judged, list) and set(judged) >= {

@@ -5064,6 +5064,11 @@
       "note": "rerun round/wall derivation identical over old- and new-format timelines; named degradation; history rows still drive the leg",
       "sync_path": ""
     },
+    "integration/t261021-11/sc_t26102111_engine_face_english.py": {
+      "anchor": "contract",
+      "note": "t261021-11: strings the engine PRODUCES onto the ticket face are ASCII - gate refusal notes (incl. a synthesized two-prefix stage so the separator join is exercised), blocked detail, executor-request refusal faces, note/notes builder literals in agent_activities/path_gates, workbench copy mirrors free of the forked CJK tail literal; data passthrough pinned verbatim; narrowness control on a synthetic module",
+      "sync_path": ""
+    },
     "integration/t261009-59/sc_t26100959_tick_triggers.py": {
       "anchor": "behaviour",
       "note": "t261009-59 tick call site: event/backstop triggers distinguishable, idle writes nothing",

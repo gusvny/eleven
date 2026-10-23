@@ -37,7 +37,7 @@ const ZSTD_TIMEOUT_MS = 10_000
  * 分隔符 / \ : 的连续串坍缩成一个 '-'；安全字符 [A-Za-z0-9._-] 原样；其余按 UTF-16
  * code unit 转义 ~XXXX（大写 4 位）；去掉前导 '-'；截断 251 字符；包成 `--<可读串>--`；
  * 全空则为 `root`。与 dsh-session-persistence-jsonl projectKey() 对齐（260825 已用
- * 本泳道真实目录名 --Users-xingu-Documents-suyou-.worktrees-t260825-03-- 对拍）。
+ * 本泳道真实目录名 --Users-user-Documents-suyou-.worktrees-t260825-03-- 对拍）。
  */
 export function projectDirKey(cwd: string): string {
   if (cwd.length === 0) throw new Error('cannot encode an empty project path')
@@ -146,12 +146,12 @@ export const SESSION_USAGE_KEYS = ['inputTokens', 'outputTokens', 'cacheReadToke
 /** 点名清单封顶（对齐 engine SESSION_NOTE_CAP / MERGE_FILES_CAP 先例）。 */
 export const SESSION_NOTE_CAP = 20
 
-/** 类型清单 → 人话（engine _format_capped 同构：前 SESSION_NOTE_CAP 条 + 「等共 N 个」）。 */
+/** Type list -> human text (engine _format_capped isomorph: first SESSION_NOTE_CAP items + an and-N-more-in-total tail). */
 export function formatCappedTypes(items: readonly string[]): string {
   const clean = items.filter(x => x !== '')
   if (clean.length === 0) return ''
-  const tail = clean.length <= SESSION_NOTE_CAP ? '' : `（等共 ${clean.length} 个）`
-  return clean.slice(0, SESSION_NOTE_CAP).join('、') + tail
+  const tail = clean.length <= SESSION_NOTE_CAP ? '' : ` (and ${clean.length} more in total)`
+  return clean.slice(0, SESSION_NOTE_CAP).join(', ') + tail
 }
 
 /** 一份会话解压文本的解析面判定（engine _judge_session_lines 的 TS 同构）。 */
@@ -238,7 +238,7 @@ const SUSPECT_KIND_LABELS: ReadonlyArray<readonly [SuspectKind, string]> = [
   ['legacy_flat', '旧代布局'],
 ]
 
-/** 分类清单 → 人话（封顶：前 SESSION_NOTE_CAP 条 + 「等共 N 个」）。 */
+/** Grouped list -> human text (capped: first SESSION_NOTE_CAP lines + an and-N-more-in-total tail). */
 export function formatSuspectGroups(items: readonly SuspectFile[]): string {
   const lines: string[] = []
   for (const [kind, label] of SUSPECT_KIND_LABELS) {
@@ -247,8 +247,8 @@ export function formatSuspectGroups(items: readonly SuspectFile[]): string {
     }
   }
   if (lines.length === 0) return ''
-  const tail = lines.length <= SESSION_NOTE_CAP ? '' : `（等共 ${lines.length} 个）`
-  return lines.slice(0, SESSION_NOTE_CAP).join('、') + tail
+  const tail = lines.length <= SESSION_NOTE_CAP ? '' : ` (and ${lines.length} more in total)`
+  return lines.slice(0, SESSION_NOTE_CAP).join(', ') + tail
 }
 
 /**

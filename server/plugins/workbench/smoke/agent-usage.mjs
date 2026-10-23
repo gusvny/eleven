@@ -321,9 +321,9 @@ sys.exit(1)
       await writeFile(join(sessDir, `bulk${i}.session.bin`), 'x', 'utf8')
     }
     const rCap = await resolveAllSessionFiles(repo, 't-cap', { worktree: '.worktrees/wt' })
-    ok((rCap.reason ?? '').includes('等共 27 个')
+    ok((rCap.reason ?? '').includes('and 27 more in total')
       && (rCap.suspectFiles ?? []).length === 27,
-      '点名清单封顶：等共 N 个尾注（27=25 bulk + 2 他票会话档）')
+      'capped name list: and-N-more-in-total tail (27 = 25 bulk + 2 other-ticket session files)')
     // Read-only endpoint, no write branch: POST does not enter the agent-usage branch (it lands
     // on some other whitelisted route path — not examined here; write protection is guarded by
     // the OPS operation whitelist in node.ts).

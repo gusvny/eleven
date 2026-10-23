@@ -325,8 +325,8 @@ export async function aggregateTicketUsage(
     // 混合态合成（t260917-05 review 意见2）：totals 可能来自好文件，S1 明细必须
     // 独立浮出——exists:true 也要能看见坏文件清单，绝不静默。
     const s1s = reasons.filter(r => r.startsWith('会话记录格式不认识'))
-    out.suspectDetail = s1s.slice(0, SESSION_NOTE_CAP).join('；')
-      + (s1s.length > SESSION_NOTE_CAP ? `（等共 ${s1s.length} 条）` : '')
+    out.suspectDetail = s1s.slice(0, SESSION_NOTE_CAP).join('; ')
+      + (s1s.length > SESSION_NOTE_CAP ? ` (and ${s1s.length} more in total)` : '')
   }
   if (out.uncovered) {
     // t260922-02：类型并集排序去重 + 人话明细（formatCappedTypes 封顶）——

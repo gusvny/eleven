@@ -1946,7 +1946,8 @@ def _classify_suite_calls(cmds):
     violations: List[Dict[str, str]] = []
     notes: List[str] = []
     if not isinstance(cmds, list) or not all(isinstance(c, str) for c in cmds):
-        notes.append("分类器入参畸形（非串列表），本段未判")
+        notes.append("classifier input malformed (not a list of strings); "
+                     "this stage did not judge")
         return violations, notes
     targeted = 0
     fulls = 0
@@ -2317,7 +2318,7 @@ def _restore_gitfile(cwd: Path, ticket_id: str, stage_id: str, gen: int,
             n += 1
             dst = qdir / ("%s-gitdir-%s-gen%d-%d" % (fake.name, stage_id, gen, n))
         shutil.move(str(fake), str(dst))
-        note += "；假仓库 %s 已隔离到 %s" % (fake.name, dst.relative_to(cwd))
+        note += "; fake repo %s quarantined to %s" % (fake.name, dst.relative_to(cwd))
     activity.logger.warning("[%s/%s] gitfile-repair：%s", ticket_id, stage_id, note)
     return note
 
@@ -2525,7 +2526,7 @@ def _remediate_unauthorized_violations(
                 shutil.move(str(src), str(dst))
                 manifest.append({"path": str(f), "xy": xy, "action": "moved",
                                  "archive": str(dst.relative_to(cwd)), "ts": ts})
-                handled.append("?? %s 已挪档 %s" % (f, dst.relative_to(cwd)))
+                handled.append("?? %s moved aside to %s" % (f, dst.relative_to(cwd)))
             elif len(xy) == 2 and xy[0] == " " and xy[1] == "M":
                 # t261017 (integration temp branch, host order 261017): the
                 # t261016-19 Face 2a retirement of this branch was TOO BROAD. Its
@@ -2573,7 +2574,7 @@ def _remediate_unauthorized_violations(
                     continue
                 manifest.append({"path": str(f), "xy": xy, "action": "reverted",
                                  "diff": diff_name, "ts": ts})
-                handled.append("M %s 已回滚（diff 留档 %s，git apply 可还原）"
+                handled.append("M %s reverted (diff archived at %s; git apply restores it)"
                                % (f, (batch / diff_name).relative_to(cwd)))
             else:
                 # D / rename 对 / staged 态（含 xy 未知）：删除与暂存意图不可机判
@@ -3648,11 +3649,12 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                     dirty = [f for f in dirty if f in _keep]
                     entries = [(xy, f) for xy, f in entries if f in _keep]
                 if not dirty:
-                    note = ("越权改动已自动处置（%s），工作区已干净——本段无需代落盘"
-                            % "；".join(remediation)) if remediation \
-                        else "工作区已干净，无需代落盘"
+                    note = ("Out-of-scope changes auto-disposed (%s); worktree is clean — "
+                            "nothing to settle on this stage's behalf"
+                            % "; ".join(remediation)) if remediation \
+                        else "工作区已干净，无需代落盘"  # copy-lang-allow:t261016-21
                     if runtime_exempt_note:
-                        note += "；%s" % runtime_exempt_note
+                        note += "; %s" % runtime_exempt_note
                     activity.logger.info("[%s/%s] %s-settle：%s",
                                          ticket_id, stage_id, face, note)
                     return note
@@ -3665,11 +3667,11 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                 violations, reason = (list(pv), preason) if pv else (violations, reason)
             note = path_gates.gate_refusal_note(stage_id, violations, reason)
             if remediation:
-                note += "；本轮已自动处置：%s" % "；".join(remediation)
+                note += "; auto-disposed this round: %s" % "; ".join(remediation)
             if fresh_diag:
                 # gen5：豁免检查没跑成/没过的具名诊断随拒绝回执上台面——四连败期间
                 # 「豁免为什么没生效」在票面上找不到答案，就是这里缺这一句。
-                note += "；%s" % fresh_diag
+                note += "；%s" % fresh_diag  # copy-lang-allow:t261016-21
             # t260915-01 ②：结构化明细随拒绝收集（files=闸已判定的全量清单，不走
             # 文本解析——_fmt_files 的 cap 只作用于 note 文本，结构化面保真）；
             # t260916-19 ④：judged_files=本次实际判定清单（含未违规项，判定面可核对）
@@ -3774,12 +3776,12 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
                          % (head.stdout.strip() if head.returncode == 0 else "?",
                             len(dirty), "、".join(dirty[:5])))
     else:
-        notes.append("工作区已干净，无需代落盘")
+        notes.append("工作区已干净，无需代落盘")  # copy-lang-allow:t261016-21
     # t260916-19 ②：处置摘要无论拒绝（进 gate_refusal_note）还是放行（落盘成功）
     # 都随回执上台面——审计可回溯：票面看见「合法产物照常落盘」时同步看见哪些
     # 越权件被自动处置（去向=隔离档 manifest，与 note 互相印证）。
     if remediation:
-        notes.append("本轮已自动处置：%s" % "；".join(remediation))
+        notes.append("Auto-disposed this round: %s" % "; ".join(remediation))
     if runtime_exempt_note:
         notes.append(runtime_exempt_note)
     note = "；".join(notes)
@@ -8645,7 +8647,7 @@ def _aggregate_lane_usage(wt: Path, ticket_id: str) -> Tuple[Dict[str, Any], str
         tokens["uncovered_types"] = True  # t260922-02：加性旗标（同上加法纪律）
     note = "；".join(notes[:SESSION_NOTE_CAP])  # S1 逐文件文案同样封顶（点名纪律）
     if len(notes) > SESSION_NOTE_CAP:
-        note += "（等共 %d 条）" % len(notes)
+        note += " (and %d more in total)" % len(notes)
     if not saw_usage:
         note = (note + "；" if note else "") + "会话无 usage 事件（tokens 记零）"
     return tokens, note
@@ -8739,7 +8741,7 @@ def _freeze_settle_snapshot(repo: Path, wt: Path, ticket_id: str,
         os.replace(tmp, path)
         note = "settle 快照已落盘: %s" % path
         if notes:
-            note += "（" + "；".join(notes) + "）"
+            note += " (" + "; ".join(notes) + ")"
         return note
     except Exception as exc:  # catch-all: an observability debt never holds up delivery
         return "settle 快照失败（不阻塞 merge）: %s" % str(exc)[:200]
@@ -9897,7 +9899,7 @@ def _preserve_failed_shots(args: UiEvidenceArgs, shots_dir: Path) -> Tuple[List[
         note = "；capture 失败，尽力视图 %d 张已归档主树并移出泳道（机械闸维持红灯）" % len(moved) if moved else ""
         if kept:
             note += "; archive/move-out failed for %d image(s) left in the lane " \
-                    "(a human can retrieve them): %s" % (len(kept), "、".join(kept))
+                    "(a human can retrieve them): %s" % (len(kept), ", ".join(kept))
         return moved, kept, note
     except OSError as e:
         # A directory-level archive failure: everything stays in the lane (gate red +

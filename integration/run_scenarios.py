@@ -3661,6 +3661,10 @@ SCENARIOS = [
      "A stalled line and a silent round become NAMED requests exactly once, on the ladder, and a corrupt memory never silences the watch (ticket t261019-25, design executor-operational-envelope-v1 b126b37c section 1 'no round for N hours while landings are pending: a run-stalled request naming the last round id, its verdict and the pending range; a round that ended without a row: retry once; a second silent end is a run-silent request, never a silent accept' + review ruling R2's fail-toward-re-action; measured defect = the round that stopped running was noticed only by whoever happened to look; grey-box L3, the REAL watch tick over real fixture ledgers, requests read back from the SANDBAR_PANEL_DIR requests ledger on the reader side, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A STALLED - a 48h-old last round plus a newer landing row yields exactly one run-stalled request naming the last run id, its verdict and the pending landing id, and the second tick files no duplicate; B SILENT LADDER - a round dir with no run row: the first tick files NO run-silent request (the retry comes first), the second tick over the still-silent round files exactly one naming the round; C RECOVERY - the round's row appearing between ticks files no run-silent request; D CORRUPT STATE - garbage in the declared run_watch_state.json idempotency file leaves the watch ACTING (request filed), never crashed into silence (R2). Intent split: the env-red and ticket journeys belong to the sibling t261019-25 entries; the request ladder, dedupe and state-file fail direction are uniquely owned here. Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. Engine tree or activities unimportable = ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261019-25/sc_t26101925_watch_stalled_silent_requests.py", "ro", "fast"),
 
+    # ---- t261021-11: produced engine faces (gate refusals, blocked detail, notes, request refusals) are ASCII ----
+    ("t261021-11-produced-face-english",
+     "Strings the engine PRODUCES onto the ticket face are ASCII, separators counted, data never translated (ticket t261021-11, incident t261021-05: the stage arbitrate block detail rendered the path-gate refusal with the CJK enumeration comma joined prefix list (path_gates.py:838) and auto-quarantine trailers in Chinese (agent_activities.py:3668/:3782); host orders 260924/260925 make ticket-face text English and data untranslated; grey-box L3 ADVERSARIAL runtime+AST probe, offline seconds, zero docker/Temporal/browser, never touches 3099): A gate_refusal_note over every declared STAGE_PATH_RULES stage with ASCII violations is CJK-free (ideographs, U+3000-303F punctuation, fullwidth forms), PLUS a synthesized TWO-prefix stage because the separator only surfaces when the join has 2+ elements and every declared prefixes stage is single-prefix; B gate_red_detail blocked detail (check_id/evidence/disposition) CJK-free for ASCII evidence; C executor_requests.validate_request refusal faces CJK-free over a malformed-body matrix; D an INDEPENDENT AST scan (imports neither the producer's future guard nor the developer lib) of string literals concatenated/appended into note/notes in agent_activities.py and path_gates.py — the log[].note producers — names file:line + literal verbatim on any CJK; E data passthrough pinned: a CJK violation name crosses gate_refusal_note verbatim and the template-side text around it stays CJK-free (the fix must never be stripping or translating data); F narrowness control: the leg-D scanner flags exactly one planted note-literal in a synthetic module and stays silent on comments, docstrings, prompts and logger calls; G the workbench copy mirrors (agent-usage.ts / agent-live.ts / smoke/agent-usage.mjs) carry no fork of the engine CJK tail literal (等共) outside comments — a converted engine with an unmoved console tail is a fork, not a pass. fast-catch: any CJK (ideograph, CJK punctuation, fullwidth form) reappearing on a produced engine face — gate refusal notes, blocked detail, request refusals, note builders, or the console mirror tail — is caught here in offline seconds instead of rendering Chinese onto a ticket face again (the t261021-05 incident class). Intent split: t261008-47-ticket-face-english owns the static copy-position scan of dev_lane/light_lane/agent_activities (_mark/_blocked/_handoff/_auto_rework/Stage/msg) and does NOT cover path_gates, executor_requests or the note builders; the developer's lib+lint (surface list + predicate + classified inventory) is NOT imported here — this entry is the adversarial cross-check. Pre-implementation tree red naming module:line is the TDD signal; green required at the integration gate / merge. Engine tree missing = ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261021-11/sc_t26102111_engine_face_english.py", "ro", "fast"),
 ]
 
 
@@ -3948,6 +3952,12 @@ FAST_SET_CATCH = {
         "a frozen line staying un-landable after its closure row, or the "
         "closure row resuming landings it must not (the false-closure "
         "class this line paid for)",
+    "t261021-11-produced-face-english":
+        "any CJK (ideograph, CJK punctuation, fullwidth form) reappearing on "
+        "a PRODUCED engine face - a gate refusal note, blocked detail, "
+        "request refusal, note-builder literal, or the workbench console "
+        "mirror tail (the t261021-05 incident class: Chinese rendering onto "
+        "the ticket face again, separators included)",
 }
 
 
@@ -7676,10 +7686,21 @@ def _runner_cap_guard() -> bool:
         except (OSError, ValueError):
             continue
         if age > 6 * 3600:
+            # 陈旧登记就地回收（t261021-11 实测 /tmp/sandbar-integ-runners 攒了
+            # 1000+ 条死进程登记）：PID 会被操作系统复用，死登记留着只会被误判成活
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
             continue
         try:
             os.kill(pid, 0)
         except OSError:
+            # 登记者已死：同样就地回收，否则死 PID 复用后被误判活（同 t261021-11 实测）
+            try:
+                os.remove(fp)
+            except OSError:
+                pass
             continue
         if pid != os.getpid():
             alive.append(pid)

@@ -301,7 +301,7 @@ def test_note_single_line_and_names_files():
     assert "arbitrate" in note and "server/engine/a.py" in note and "(+4 more)" in note
     assert "main" in note  # 出路文案在场
     assert pg.is_gate_refusal(note)
-    assert not pg.is_gate_refusal("工作区已干净，无需代落盘")
+    assert not pg.is_gate_refusal("Worktree is clean; nothing to settle on this stage's behalf")
     assert not pg.is_gate_refusal("")
     assert not pg.is_gate_refusal(None)
 
