@@ -253,13 +253,16 @@ def main() -> int:
                              % len(res.get("findings") or []))
 
         # ── 在线子用例前置：隔离台探活（缺=ENV_FAIL，离线子用例结果如实先陈述）──
+        # 261023 (host order): the online sub-case runs on the PROCESS bench, not the
+        # docker test stage - the same endpoint (17233), up in ~0.2 s, reaped with
+        # residue assertions.
+        _bench = lib.start_process_bench()   # reaped by the bench's own atexit
         proc, parsed = lib.run_client("schedule-list", {})
         if not (isinstance(parsed, dict) and parsed.get("ok") is True):
             for m in failures:
                 print("FAIL_REASON(离线子用例已验部分): " + m, flush=True)
-            lib.die_env("在线子用例不可验：docker 测试台 %s 不可达或 temporalio 缺席"
-                        "（schedule-list 未 ok，sh server/docker-compose.test.yml up -d）"
-                        % lib.TEST_TARGET_HOST)
+            lib.die_env("在线子用例不可验：进程台 %s 不可达或 temporalio 缺席"
+                        "（schedule-list 未 ok）" % lib.TEST_TARGET_HOST)
 
         # ── 子用例e（在线 L3 全链，工单验收 c）：docs-sync 实例真跑一轮——
         #      trigger→flow→scan(face=doc)→落账报告（含子用例a 注入的命中）→人审收口 ──

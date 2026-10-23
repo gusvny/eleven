@@ -58,9 +58,9 @@ INSTANCE = "suite-journey-%05d" % STAMP
 PERIOD = "20260913"
 SIGN_WHO = "human-scenario"          # 非 agent 角色名（agent 不得自签）
 
-POLL_FACE = 180                      # 等票面成形（含套件子用例）
+POLL_FACE = 60                       # 等票面成形（含套件子用例）
 POLL_GATE = 20                       # 未签不终态的观察窗（人门真拦）
-POLL_CLOSE = 180                     # 签字后等收口
+POLL_CLOSE = 60                     # 签字后等收口
 TERMINAL = "COMPLETED"
 DONE_STATES = ("COMPLETED", "FAILED", "TERMINATED", "CANCELED", "CLOSED")
 
@@ -171,6 +171,9 @@ def main() -> int:
     lib.require_entry(lib.TRIGGER, "巡检触发入口")
     lib.require_entry(lib.CLIENT, "client 工单面")
     # 隔离台探活（真链路子用例无 stdlib 替代）
+    # 261023 (host order): the online journey runs on the plain-process Temporal bench
+    # (same 17233 endpoint, up in ~0.2 s) instead of the docker test stage.
+    _bench = lib.start_process_bench()
     _p, parsed = lib.run_client("schedule-list", {})
     if not (isinstance(parsed, dict) and parsed.get("ok") is True):
         r.env_fail("隔离台/依赖缺席", "schedule-list 未 ok：%r（docker 台 %s + temporalio；"

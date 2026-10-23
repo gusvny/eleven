@@ -103,6 +103,7 @@ def reexec_venv_if_missing(mods=("temporalio",)) -> None:
 # (SANDBAR_NAMESPACE; the process bench serves `default`, the docker test stage
 # serves `sandbar-test`). Unset keeps the docker-stage default byte-for-byte, so
 # the compose-consistency guard (t260917-07) still reads the same value.
+INTEG_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_TARGET_HOST = "127.0.0.1:17233"
 TEST_NAMESPACE = (os.environ.get("SANDBAR_NAMESPACE") or "sandbar-test")  # 绑定存量 docker 测试台命名空间（docker-compose.test.yml 契约缺省值，一致性看守=t260917-07/sc_test_ns_consistency）。t260917-02 勘误：终切 d342b46 已把台命名空间改 sandbar-test，此处漏改残留旧测试台名（naming-compat 在册，t260917-07 收口）——旧持久卷里恰好有死命名空间故此前未暴露，新卷台一律 ENV_FAIL「Namespace not found」；对齐存量台定义（宿主令 260908 suyou 退役同向），如需回摆随专门迁移票
 _ENV_OVERRIDES = ("SANDBAR_TARGET_HOST", "SANDBAR_NAMESPACE")  # 红线键：绝不穿透
@@ -499,6 +500,57 @@ def _ui_guard_mjs(anchor: str, producer_rel: str = PRODUCER_REL) -> str:
         "const label = await page.locator('.session-create').innerText();\n"
         'assert(label.includes("%s"), "守卫锚缺失");\n' % anchor
     )
+
+
+def start_process_bench(port=None):
+    """Start a plain-process Temporal bench for the online sub-cases (261023).
+
+    The inspection journeys talk to 127.0.0.1:17233 (TEST_TARGET_HOST). Until now
+    that port could only be served by the docker test stage, so every online
+    sub-case died with the docker daemon. The process bench serves the same
+    endpoint in ~0.2 s and is reaped with residue assertions. Returns a handle
+    with .down() or None when a bench is already answering on that port (a
+    shared bench the caller did not start is never stopped by this module).
+    """
+    import socket
+    wanted = int(port or (TEST_TARGET_HOST.split(":")[1]))
+
+    def _answers():
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.3)
+        try:
+            sock.connect(("127.0.0.1", wanted))
+            return True
+        except OSError:
+            return False
+        finally:
+            sock.close()
+
+    if _answers():
+        return None
+    _integ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _integ not in sys.path:
+        sys.path.insert(0, _integ)
+    import process_bench  # noqa: PLC0415
+    handle = process_bench.start(port=wanted)
+    # The bench serves the `default` namespace; the fixture lib's TEST_NAMESPACE is read
+    # from SANDBAR_NAMESPACE (falling back to the docker stage's `sandbar-test`), so pin
+    # it here or every child asks for a namespace this bench does not have.
+    os.environ["SANDBAR_NAMESPACE"] = "default"
+    globals()["TEST_NAMESPACE"] = "default"   # the module constant was bound at import
+    if not handle.get("ok"):
+        raise RuntimeError("process bench refused on port %d: %s"
+                           % (wanted, handle.get("reason")))
+
+    class _Bench(object):
+        port = wanted
+        pid = handle["pid"]
+        db = handle.get("db")
+
+        def down(self):
+            return process_bench.stop(self.port, self.pid, db=self.db)
+
+    return _Bench()
 
 
 def seed_surface_bootstrap(instance_id: str, sha: str,
