@@ -30,10 +30,12 @@ class PointerOwnerAlive(unittest.TestCase):
     def test_dead_pid_is_stale(self):
         self.assertFalse(L._pointer_owner_alive("round-20261012T143943Z-54475"))
 
-    def test_id_without_pid_is_stale(self):
-        self.assertFalse(L._pointer_owner_alive("round-20261012T143943Z"))
-        self.assertFalse(L._pointer_owner_alive(""))
-        self.assertFalse(L._pointer_owner_alive(None))
+    def test_id_without_pid_keeps_its_pointer(self):
+        # An id that carries no pid cannot prove it is dead, so it is treated as a
+        # live owner (t261011-26 C1: never steal an overlapping round's pointer).
+        self.assertTrue(L._pointer_owner_alive("round-20261012T143943Z"))
+        self.assertTrue(L._pointer_owner_alive(""))
+        self.assertTrue(L._pointer_owner_alive(None))
 
 
 class TakeoverWritesTheLiveFace(unittest.TestCase):

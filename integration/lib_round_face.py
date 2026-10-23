@@ -358,7 +358,10 @@ def _pointer_owner_alive(run_id):
     rid = str(run_id or "")
     m = re.search(r"-(\d+)$", rid)
     if not m:
-        return False
+        # No pid in the id: it cannot PROVE it is dead, so it keeps its pointer
+        # (t261011-26 C1: an overlapping round's live face must never be stolen -
+        # the measured stale case always carried a pid).
+        return True
     try:
         pid = int(m.group(1))
     except (TypeError, ValueError):
