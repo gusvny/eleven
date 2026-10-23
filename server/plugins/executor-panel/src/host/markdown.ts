@@ -120,6 +120,35 @@ export function renderMarkdown(src, opts) {
         out.push('<pre><code>' + body.join('\n') + '</code></pre>')
         continue
       }
+      // t261021-13: pipe tables — a row is a line starting and ending with '|';
+      // a separator second row (| --- | --- |) promotes row 1 to a header. Cell
+      // content goes through the same inline pass; escaping already happened, so
+      // a hostile cell stays literal text.
+      if (/^\s*\|.*\|\s*$/.test(line)) {
+        flushPara()
+        var trows = []
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { trows.push(lines[i]); i++ }
+        var tcells = function (r) { return r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|') }
+        var tsep = function (r) { return /^\s*\|[\s:|-]+\|\s*$/.test(r) }
+        var thead = trows.length >= 2 && tsep(trows[1])
+        var tbody = thead ? trows.slice(2) : trows
+        var thtml = '<table>'
+        if (thead) {
+          thtml += '<thead><tr>'
+          for (var t1 = 0; t1 < tcells(trows[0]).length; t1++) thtml += '<th>' + inlineHtml(tcells(trows[0])[t1].trim()) + '</th>'
+          thtml += '</tr></thead>'
+        }
+        thtml += '<tbody>'
+        for (var t2 = 0; t2 < tbody.length; t2++) {
+          thtml += '<tr>'
+          var rowCells = tcells(tbody[t2])
+          for (var t3 = 0; t3 < rowCells.length; t3++) thtml += '<td>' + inlineHtml(rowCells[t3].trim()) + '</td>'
+          thtml += '</tr>'
+        }
+        thtml += '</tbody></table>'
+        out.push(thtml)
+        continue
+      }
       var h = line.match(/^(#{1,4})\s+(.*)$/)
       if (h) { flushPara(); var lv = h[1].length; out.push('<h' + lv + '>' + inlineHtml(h[2]) + '</h' + lv + '>'); i++; continue }
       if (/^&gt;\s?/.test(line)) {

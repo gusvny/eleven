@@ -144,4 +144,26 @@ for (const s of SAMPLES) {
   n++
 }
 
+// ---- t261021-13: pipe tables (the reader must render tables per the ticket) ----
+{
+  const out = renderMarkdown('| col a | col b |\n| --- | --- |\n| one | two |')
+  assert(out.includes('<table>'), 'pipe table becomes a table element')
+  assert(out.includes('<thead>') && out.includes('<th>col a</th>'), 'separator row promotes a header')
+  assert(out.includes('<td>one</td>') && out.includes('<td>two</td>'), 'body cells render as td')
+  assert(!out.includes('|'), 'no literal pipe survives')
+  n++
+}
+{
+  const out = renderMarkdown('| a | b |\n| 1 | <b>hostile</b> |')
+  assert(out.includes('<table>'), 'table without a separator row still renders (headerless)')
+  assert(!out.includes('<b>hostile</b>'), 'a hostile cell never survives as a tag')
+  assert(out.includes('&lt;b&gt;hostile&lt;/b&gt;'), 'a hostile cell stays literal text')
+  n++
+}
+{
+  const out = renderMarkdown('| a | b |\n| **x** | `y` |')
+  assert(out.includes('<strong>x</strong>') && out.includes('<code>y</code>'), 'inline marks still work inside cells')
+  n++
+}
+
 done(n)

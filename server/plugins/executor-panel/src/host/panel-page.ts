@@ -1708,10 +1708,24 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       ? '<span class="chip" style="border-color:#9ec9a8;color:#1a7f37;background:#f0fff4">online</span>'
       : '<span class="chip" style="border-color:#eac54f;color:#9a6700;background:#fff8c5">retired</span>';
   }
+  // t261021-13: the epic document opens in the console's own Docs reader, never a
+  // raw api/ JSON tab. The control carries data-epicdoc only — no href, no
+  // target — so no anchor on this page can navigate straight at an api/ route
+  // (page-wide sweep rule, enforced by integration/t261021-13).
   function epicDocLink(code){
-    return '<a class="btn" style="text-decoration:none" target="_blank" rel="noopener" '
-      +'href="/sandbar-workbench/api/wf/docs/doc?scope=docs&path='+encodeURIComponent('epics/'+code+'.md')
-     +'&project='+encodeURIComponent(state.project)+'">Open docs/epics/'+esc(code)+'.md</a>';
+    return '<a class="btn" style="text-decoration:none;cursor:pointer" role="button" tabindex="0" '
+      +'data-epicdoc="'+esc(code)+'">Open docs/epics/'+esc(code)+'.md</a>';
+  }
+  // t261021-13: reuse the Docs tab reader path — set the docs scope and the
+  // document selection first, then select the tab so its lazy loader fetches the
+  // tree; renderDocs() renders the reader because state.docSel is already set.
+  // If the tree answers empty (the file vanished), renderDocBody() still renders
+  // the named error banner — never an empty box.
+  function openEpicDoc(code){
+    state.docsScope='docs'; state.docs=null; state.docSel='epics/'+code+'.md';
+    var radio=el('t-docs');
+    if(radio) radio.checked=true;
+    showTab('t-docs');
   }
   function renderEpics(){
     var list=el('epicsList'), det=el('epicDetail');
@@ -1797,6 +1811,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       var open=function(){ openTicketInHost(n.dataset.ticket, n.dataset.epic); };
       n.onclick=open;
       n.onkeydown=function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); open(); } };
+    });
+    Array.prototype.forEach.call(list.querySelectorAll('[data-epicdoc]'), function(n){
+      var openDoc=function(){ openEpicDoc(String(n.dataset.epicdoc||'')); };
+      n.onclick=openDoc;
+      n.onkeydown=function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); openDoc(); } };
     });
   }
   function openTicketInHost(id, epicCode){
@@ -1892,7 +1911,10 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var d=(state.docs && state.docs.result) ? state.docs.result : state.docs;
     if(!d){ e.innerHTML=bannerHtml('The doc tree could not be reached (the workbench plugin may not be loaded).', true); tree.innerHTML=''; reader.innerHTML=''; return; }
     e.innerHTML='';
-    if(d.empty===true){ tree.innerHTML='<div class="empty">'+esc(d.reason||emptyCopyOf('docs_tree'))+'</div>'; reader.innerHTML=''; return; }
+    // t261021-13: an empty tree must not wipe an in-flight reader selection (an
+    // epic document click can land here when the library answers empty) — the
+    // reader renders the document body or its own named error instead.
+    if(d.empty===true){ tree.innerHTML='<div class="empty">'+esc(d.reason||emptyCopyOf('docs_tree'))+'</div>'; if(state.docSel) renderDocBody(); else reader.innerHTML=''; return; }
     var groups=Array.isArray(d.groups)?d.groups:[];
     var html='';
     for(var i=0;i<groups.length;i++){
