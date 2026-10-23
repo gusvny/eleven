@@ -1634,7 +1634,7 @@
     },
     "server/engine/tests/test_t261021_01_inspection_sighting.py": {
       "anchor": "behaviour",
-      "note": "t261021-01 L1 (anchor added by t261021-08 landing-union: the develop-side unit battery carried no manifest row and tripped L16 on the merged tree): the sighting pure-builder truth tables - recording period 1 leaves entity rows only, a re-sighting in period 2 writes exactly one observation row naming finding/period/revision, duplicate content in one period is one sighting, re-recording a recorded period is a named skip, absent revision and unresolvable identity are fail-closed named refusals, malformed batch entries are non-raising refusals",
+      "note": "t261021-01 developer L1: inspection sighting decision core (registry entry added on the line 261023 to close an L16 gap - the file landed without an anchor, so every lane carrying it read a missing entry)",
       "sync_path": ""
     }
   },
