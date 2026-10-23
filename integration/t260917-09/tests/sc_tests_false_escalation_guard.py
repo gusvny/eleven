@@ -194,8 +194,12 @@ def wait_cap_blocked(py, env, tid, worker, wlog, fail, budget):
         if worker.poll() is not None:
             break
         s = query_snapshot(py, env, tid)
+        # 261023: the stop can now be declared from ANY stage - the identical-face
+        # verdict lands while the ticket is still at run_integration_tests, so requiring
+        # one of the three over-limit stages read a declared stop as "not reached"
+        # (measured: the bail printed the very marker this list looks for).
         marker = declared_stop(s) if s.get("stage_state") == "blocked" else ""
-        if s.get("stage") in OVER_LIMIT_STAGES and marker:
+        if marker:
             return s
         if s.get("stage_state") == "blocked":
             time.sleep(0.5)
