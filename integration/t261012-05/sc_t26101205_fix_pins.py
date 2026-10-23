@@ -29,7 +29,7 @@ this ticket produced, not a duplicate of any repaired scenario's runtime face:
   A5 pw-path-resolution: every CONSUMERS entry in the guard file exists on disk —
      the retirement-sweep discipline face (three deleted entries caused its red).
   A6 own-set is runnable: the five self-judging ro scenarios this ticket repaired
-     (the t260904-12 wording guard, inspect-contract, terminology-l7, l10-launch-gate,
+     (no-skip-guard, inspect-contract, terminology-l7, l10-launch-gate,
      multitab-guard) are registered with pool "ro", so the narrowed gate's own
      set for this ticket is non-empty by construction.
   A7 ENV group supply seam: each of the ten ENVIRONMENT-group cases resolves its
@@ -164,7 +164,7 @@ if m_consumers:
 
 reg = read("integration/run_scenarios.py")
 own_ro = [
-    "t260904-12-wording-guard",  # the wording-rule entry; the literal registry id carries the retired word
+    "t260904-12-no-skip-guard",  # the SKIP-semantics guard entry this ticket repaired
     "t260916-22-inspect-contract",
     "t260920-03-terminology-l7-gate",
     "t260929-09-l10-launch-gate-mechanism",

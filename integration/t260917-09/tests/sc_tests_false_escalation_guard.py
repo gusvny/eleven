@@ -112,11 +112,25 @@ STOP_MARKERS = (
 
 
 def declared_stop(snap):
-    """The stop marker this snapshot carries, or "" (unmatched = not a stop)."""
-    text = snapshot_text(snap, limit=4000)
-    for marker in STOP_MARKERS:
-        if marker in text:
-            return marker
+    """The stop marker this snapshot carries, or "" (unmatched = not a stop).
+
+    The scan reads the RECEIPT FIELDS first (t261024 line fix): the compact dump
+    is truncated by design, and the ticket's own acceptance list sits ahead of
+    `blocked_reason` in the sorted dump, so a long acceptance pushed the very
+    marker the bail then printed past the 4000-char budget - the case read a
+    lawful declared stop as "not reached" (a false red measured on the round
+    at 0b58cd27). The dump stays as a fallback for a snapshot that carries the
+    receipt somewhere else; the marker list and the negative judgement are
+    unchanged, so an undeclared receipt still fails here."""
+    texts = [str((snap or {}).get("blocked_reason") or "")]
+    detail = (snap or {}).get("blocked_detail")
+    if detail:
+        texts.append(snapshot_text(detail, limit=4000))
+    texts.append(snapshot_text(snap, limit=4000))
+    for text in texts:
+        for marker in STOP_MARKERS:
+            if marker in text:
+                return marker
     return ""
 
 #: Drive ceilings in SECONDS, graded by the measured normal path on the process
