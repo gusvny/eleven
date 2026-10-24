@@ -39,7 +39,16 @@ ok(PAGE.includes('Defective registry entry'), 'a defective registry row renders 
 
 // ---- the page: summary is the only prose ----
 ok(PAGE.includes("typeof e.summary==='string'"), 'the summary comes from the front-matter summary field')
-const EPIC_BLOCK = PAGE.slice(PAGE.indexOf('function renderEpics'), PAGE.indexOf('function openTicketInHost'))
+// t261024-21: locate the Epics-tab renderer by its tab wiring, not by the first
+// name match of 'function renderEpics' — a same-name twin declared later used to
+// shadow it, and a first-match slice happily measured the WRONG function.
+const EPIC_BLOCK = (() => {
+  const body = PAGE.indexOf("var list=el('epicsList')")
+  if (body < 0) return ''
+  const head = PAGE.lastIndexOf('function ', body)
+  return PAGE.slice(head, PAGE.indexOf('function openTicketInHost'))
+})()
+ok(EPIC_BLOCK.includes("el('epicsList')"), 'the slice anchors on the Epics-tab renderer (tab wiring, not the first name match)')
 ok(!/e\.title|meta\.status|meta\.note|\.status\|\|/.test(EPIC_BLOCK), 'the old title/status/note face is gone from the epic renderers')
 ok(!PAGE.includes('notes/epics'), 'no notes/epics path remains in the page')
 ok(PAGE.includes('docs/epics/'), 'the document link names docs/epics/')

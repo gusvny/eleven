@@ -5583,6 +5583,10 @@
       "anchor": "source-text",
       "note": "t261021-13 sweep rule: zero href aiming at an api/ route anywhere in the panel page source, enforced without the browser stack; the detector is proven non-vacuous by a synthetic incident-shape negative control and the target file is byte-compared before/after",
       "sync_path": ""
+    },
+    "integration/t261024-21/sc_dup_decl_guard_bites.py": {
+      "anchor": "behaviour",
+      "note": "t261024-21 L3: the duplicate-declaration guard bites on a real mutated copy of panel-page.ts - detector reports the injected duplicate and not a nested twin; node --test on the developer guard test is green on a pristine scratch copy and red (naming the identifier) on a mutated copy; the real tree is byte-unchanged. Anchored to runtime behaviour of the guard, not to the page's source text."
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

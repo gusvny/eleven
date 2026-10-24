@@ -1929,11 +1929,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       n.onkeydown=function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); openDoc(); } };
     });
   }
-  function openTicketInHost(id, epicCode){
-    if(!id) return;
-    if(window.parent===window) return;
-    window.parent.postMessage({ type:'sandbar-executor-panel:open-ticket', ticketId:String(id) }, window.location.origin);
-  }
+  // t261024-21: the stale no-epicCode twin of openTicketInHost (same name at
+  // closure top level) is deleted — hoisting made the epicCode-bearing version
+  // below the only executing body, so this is dead-code removal.
   // Ticket row -> the host console opens the existing ticket overlay (UI-3; the
   // overlay machinery lives in the host since t261005-04). Standalone (no parent
   // page) = a no-op — the overlay is not this page's to build. The tab also flips
@@ -2143,7 +2141,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         + '<span class="meta">' + esc(t.sub) + '</span></div>'
     }).join('')
     renderTimeCard()
-    renderEpics()
+    renderMetricsEpics()
     // Tokens by role + Project sessions (real rows where the payload has them).
     el('mtRoles').innerHTML = roleRowsOf(vm).map(function (r) {
       return '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0">'
@@ -2212,7 +2210,10 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       + '<span class="mono" style="min-width:44px;text-align:right">' + esc(String(r.rounds)) + '</span></div>'
       + '<div class="meta">' + esc(String(r.sub)) + '</div></div>'
   }
-  function renderEpics() {
+  // t261024-21: renamed from renderEpics — a same-name twin at closure top level
+  // shadowed the Epics-tab renderer and left that tab blank (see the guard test
+  // t261024-21-no-duplicate-top-level-functions.test.mjs).
+  function renderMetricsEpics() {
     var vm = MT.vm
     var list = el('mtEpicList')
     if (list) {
