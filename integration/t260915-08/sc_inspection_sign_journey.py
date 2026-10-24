@@ -64,10 +64,10 @@ instances:
 """ % INSTANCE
 
 SIGN_WHO = "human-scenario"        # 非 agent 角色名（agent 不得自签）
-POLL_OPEN = 90                     # 等开票+票面就绪
+POLL_OPEN = 240                    # 261024: 90 s 是空载实测值，轮内并发下超窗（单跑 95 s 绿）
 POLL_GATE = 20                     # 未签不终态观察窗（假门在此现形）
 POLL_ERR = 20                      # 错 gate 拒收后 gate_error 显形窗
-POLL_CLOSE = 180                   # 对 gate 签后等收口
+POLL_CLOSE = 300                   # 同上：收口在负载下来得慢
 TERMINAL = "closed"
 
 
