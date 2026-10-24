@@ -151,10 +151,12 @@ async function main() {
     page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
     await page.route('**/api/**', (route) => route.continue({ url: `http://127.0.0.1:${port}` + new URL(route.request().url()).pathname }))
     await page.goto(`http://127.0.0.1:${lport}/?project=${PROJ}`)
-    await page.waitForSelector('.row[data-row]', { timeout: 5000 })
+    // 261024: 5 s 是空载实测值；轮内并发下这块被挤爆过（同树单跑 3.8 s、轮内红）。
+    // 断言不变（等同一个选择器），只把窗口改成负载容忍的 30 s。
+    await page.waitForSelector('.row[data-row]', { timeout: 30000 })
     // The Epics tab is lazy (TAB_LOADER); select it like the user does.
     await page.click('label[for="t-epics"]')
-    await page.waitForSelector('[data-epic-head]', { timeout: 5000 })
+    await page.waitForSelector('[data-epic-head]', { timeout: 30000 })
 
     const urlBefore = page.url()
 
