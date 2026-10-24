@@ -205,14 +205,14 @@
   {
     "entry": "t260915-20-project-identity-realchain",
     "pool": "exclusive",
-    "project_pattern": "insa-*,insb-*",
+    "project_pattern": "insa-*",
     "reason": "261024 宿主令「换到 process bench」：本用例的在线面对 Temporal 前端的要求由 integration/process_bench.py 的纯进程台自供给（lib_proc_bench.ensure），不需要 docker 台，也就不需要批台预起。",
     "evidence": "integration/t260915-20/sc_inspection_project_identity.py main() 首步 lib_proc_bench.ensure(modules=(lib,))；无 docker 台时实测 PASS 22/0（process bench on 127.0.0.1:17233, namespace default）"
   },
   {
     "entry": "t260916-02-relocation-realchain",
     "pool": "exclusive",
-    "project_pattern": "rlxa-*,rlxb-*",
+    "project_pattern": "rlxa-*",
     "reason": "同上：真链旅程只要求 Temporal 前端，process bench 自供给，不起批台。",
     "evidence": "integration/t260916-02/sc_inspection_decl_relocation.py main() 首步 lib_proc_bench.ensure(modules=(lr, lib_inspection))；无 docker 台时实测 PASS 29/0"
   },
