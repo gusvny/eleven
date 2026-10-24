@@ -73,6 +73,28 @@ def _namespace(modules, namespace):
     return namespace or DEFAULT_NAMESPACE
 
 
+
+def _namespace_exists(port, ns, modules=()):
+    """Does the answering bench serve this namespace? Probed through the CLI."""
+    bin_path = os.environ.get("SANDBAR_TEMPORAL_BIN")
+    if not bin_path:
+        for mod in modules:
+            cand = getattr(mod, "TP_DIR", None)
+            if isinstance(cand, str) and cand:
+                bin_path = os.path.join(cand, "bin", "temporal")
+                break
+    if not bin_path or not os.path.exists(bin_path):
+        return True            # no CLI: keep the declared namespace (never guess)
+    import subprocess
+    proc = subprocess.run([bin_path, "--address", "127.0.0.1:%d" % port,
+                           "--namespace", ns, "operator", "namespace", "describe"],
+                          capture_output=True, text=True, timeout=15)
+    blob = ((proc.stdout or "") + (proc.stderr or "")).lower()
+    if proc.returncode == 0:
+        return True
+    return not ("not found" in blob or "notfound" in blob)
+
+
 def ensure(modules=(), namespace=DEFAULT_NAMESPACE, host=None):
     """Make sure a Temporal endpoint answers; start the process bench if not."""
     modules = tuple(m for m in modules if m is not None)
@@ -80,8 +102,13 @@ def ensure(modules=(), namespace=DEFAULT_NAMESPACE, host=None):
     port = int(str(endpoint).rsplit(":", 1)[1])
     if _answers(port):
         # A bench is already there (a shared stage or a bench another caller
-        # started): use it exactly as the modules declare, never stop it.
+        # started): use it exactly as the modules declare, never stop it - unless
+        # that namespace does not exist on it (measured 261024: a leftover
+        # process bench answers on the stage port but only serves "default", and
+        # every child then died with "Namespace sandbar-test is not found").
         ns = _namespace(modules, namespace)
+        if not _namespace_exists(port, ns, modules):
+            ns = namespace or DEFAULT_NAMESPACE
         os.environ.setdefault("SANDBAR_TARGET_HOST", "127.0.0.1:%d" % port)
         os.environ.setdefault("SANDBAR_NAMESPACE", ns)
         return {"started": False, "port": port, "namespace": ns, "handle": None}

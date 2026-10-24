@@ -113,6 +113,15 @@ def sign_via_client_channel(tid, who, gate, decision="approve", note=""):
 
 
 def main() -> int:
+    # 261024 (host order: drop docker): the endpoint is served by the plain-process
+    # bench when nothing answers on it - the sign journey only needs a Temporal
+    # front end, not a stage.
+    sys.path.insert(0, os.path.dirname(HERE))
+    import lib_proc_bench
+    try:
+        lib_proc_bench.ensure(modules=(lib,))
+    except RuntimeError as e:
+        lib.die_env("process bench 起不来（%s）——签字旅程需要真台真票" % e)
     lib.require_entry(lib.CLIENT, "client 工单面（签字通道）")
     lib.require_entry(lib.TRIGGER, "巡检触发入口")
     # 主进程零 temporalio 依赖（client/trigger 子进程自选 venv python）；探活失败统一归因
