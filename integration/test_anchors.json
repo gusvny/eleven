@@ -1676,6 +1676,9 @@
       "anchor": "contract",
       "note": "t261021-15 L1: the plan-side write-set gap gate pure faces and stub-shell matrix - incident conjunction (integration-only initial+current set + empty/absent files_changed + no no_file_changes) refuses named WRITE_SET_PLAN_GAP with three facts and both lawful outs; each fact missing in turn proceeds (real scope, non-empty receipt, declared no_file_changes); prior widening counts as real scope; prose-vs-receipt mismatch named in the log and inside the stop reason; stop classifies judgement; unpatched gate replays legacy byte for byte; malformed receipts never gate or crash",
       "sync_path": "server/engine/dev_lane.py; server/engine/shared.py"
+    },
+    "server/engine/tests/test_t261025_02_own_gate_run.py": {
+      "anchor": "behaviour"
     }
   },
   "scenarios": {
@@ -5673,6 +5676,9 @@
       "anchor": "contract",
       "note": "t261021-15 grey-box L3: a lane that passed its own targeted faces must not carry a HALF landing union - every scenario cmd naming a repo file finds it on disk, every anchor manifest path key exists, the engine import chain (dev_lane/agent_activities/shared) imports whole in a fresh process, and a fabricated registry with one missing file fails by name (the guard is not vacuous)",
       "sync_path": "integration/run_scenarios.py; integration/test_anchors.json"
+    },
+    "integration/t261025-02/sc_t261025_02_own_never_peeled.py": {
+      "anchor": "behaviour"
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

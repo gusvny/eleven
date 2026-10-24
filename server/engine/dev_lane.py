@@ -887,6 +887,20 @@ KI220_ZERO_RUN_PATCH_ID = "t261008-24-zero-run-supply-stop-v1"
 # the identical command sequence (no lane_head_sha call where history has none).
 KI350_NARROWED_FACE_PATCH_ID = "t261024-12-narrowed-green-face-v1"
 
+# t261025-02 (KI-355): the CLOSING run (the develop-buffer scoped-feedback arm)
+# must carry the ticket's OWN scenario face too. Measured root cause: the
+# closing caliber was declared "the fast set only" (own names passed none), so a
+# ticket whose own scenario lives outside the fast set — t261022-14's
+# browser-free case — closed a release verdict that never ran its own proof;
+# together with the per-ticket pool exclusion this is the second half of why two
+# green-apart-from-gate tickets could never land. The rule is unchanged, the
+# place moved: a ticket's own declared scenarios are always in its gate run,
+# whatever pool they live in. Replay discipline (KI-061): the closing run's
+# activity args change (own_names added) is executed ONLY behind this patch id —
+# an in-flight instance replaying old history evaluates it un-patched and passes
+# no own list, exactly as history recorded.
+T261025_02_OWN_CLOSING_PATCH_ID = "t261025-02-own-gate-run-v1"
+
 #: Patch guard CONCURRENCY_GATE_PATCH_ID (t261005-14; fixes the replay break
 #: CL-1 / t261004-32 introduced). 775bdb1 wired the whole concurrency command
 #: family (gate=concurrency_acquire, release, renew) into both lanes without a
@@ -2509,8 +2523,20 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                       % (len(_cplan.run_only),
                          self._gen("run_integration_tests")))
             _ct0 = self._now_epoch()
+            # t261025-02 (KI-355): the closing face is the fast set ∪ the
+            # ticket's OWN scenarios — the own proof obligation does not retire
+            # at closing. The derivation is already in hand (the fresh
+            # fast_set_declaration above); no second query. Patch-gated (KI-061):
+            # old replays pass no own list, exactly as history recorded.
+            if workflow.patched(T261025_02_OWN_CLOSING_PATCH_ID):
+                _closing_own = [str(n).strip()
+                                for n in (getattr(_fs, "own_members", None)
+                                          or []) if str(n).strip()]
+            else:
+                _closing_own = []
             rraw = await workflow.execute_activity(
-                run_integration_tests, self._integ_run_args(_cplan.run_only),
+                run_integration_tests,
+                self._integ_run_args(_cplan.run_only, own_names=_closing_own),
                 start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
             _cres = rraw if isinstance(rraw, IntegrationRunResult) else \
                 IntegrationRunResult(
@@ -2523,6 +2549,9 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             self.meta["closing_run_face"] = {
                 "gen": self._gen("run_integration_tests"),
                 "members": list(_cplan.run_only),
+                # t261025-02: the own face carried by this closing run (empty =
+                # un-patched replay / no own scenarios derived).
+                "own": list(_closing_own),
                 "wall_s": round(max(0, self._now_epoch() - _ct0), 1),
                 "error": str(getattr(_cres, "error", "") or "")}
             return _cres

@@ -565,6 +565,57 @@ def own_set_expected_error(ticket_id: str, write_set: List[str],
             % (",".join(own_files[:5]), prefix, why[:300]))
 
 
+#: The runner literal that proves a lane copy of integration/run_scenarios.py
+#: knows the own-exemption knob (t261024-40). A lane copy without it ignores
+#: SANDBAR_SCENARIO_OWN entirely, so a declared own scenario that lives in an
+#: excluded pool is silently peeled — the exact KI-355 face (t261025-02).
+OWN_KNOB_RUNNER_MARKER = "SANDBAR_SCENARIO_OWN"
+
+
+def lane_runner_lacks_own_knob(runner_text: str) -> bool:
+    """Capability probe (pure, t261025-02): does this lane runner copy know the
+    own-exemption knob? ``True`` ONLY for a non-empty runner text that does not
+    carry the marker — such a copy would silently peel the ticket's own
+    scenario out of an excluded pool, so the gate round must refuse by name
+    instead of running. Unreadable/empty text returns ``False``: the round will
+    fail on its own downstream, and the probe must never invent a second
+    failure cause from its own blindness."""
+    if not isinstance(runner_text, str):
+        return False           # malformed probe input: blind, never refusing
+    text = runner_text
+    if not text.strip():
+        return False
+    return OWN_KNOB_RUNNER_MARKER not in text
+
+
+def own_coverage_error(declared_own, executed_names) -> str:
+    """The named own-coverage refusal (pure, t261025-02): every own name the
+    round DECLARED (the same list injected as SANDBAR_SCENARIO_OWN — compared
+    against exactly what was declared for THIS receipt, never a re-derived set,
+    review_plan condition 2) must appear among the round's executed scenario
+    names. A declared own scenario that ran nowhere (peeled by the pool
+    exclusion on a stale lane runner, swallowed by a filter) means the ticket's
+    proof obligation did not run: the receipt must be a NAMED failure, never a
+    green face and never a legal-looking ran=0. Malformed inputs (non-list
+    containers, non-str items) are coerced per item and never raise; an empty
+    declared set is vacuously covered (docs-only / un-declared rounds keep the
+    old behavior byte-identically). Empty string = covered."""
+    declared = [str(n).strip() for n in (declared_own or [])
+                if isinstance(n, str) and n.strip()]
+    if not declared:
+        return ""
+    executed = {str(n).strip() for n in (executed_names or [])
+                if isinstance(n, str) and n.strip()}
+    missing = [n for n in declared if n not in executed]
+    if not missing:
+        return ""
+    return ("own-scenario coverage failure (t261025-02): declared own "
+            "scenario(s) %s did NOT run this round — a pool exclusion or a "
+            "filter dropped the ticket's own proof obligation; the ticket's "
+            "own scenario is always in its gate run, whatever pool it lives "
+            "in (KI-355)" % ",".join(missing[:10]))
+
+
 @dataclass
 class BundleOutWsArgs:
     """261019: which declared build-chain OUTPUT prefixes this lane may write.
@@ -801,6 +852,15 @@ class IntegrationRunResult:
     # （not-checked × external），**不是**从 `ENV_FAIL [...] exit=N` 文本行反推。
     # 与 env_fail 分工：env_fail=int 计数（入闸口径），env_red=名单（观测面，不入判定）。
     env_red: List[str] = field(default_factory=list)
+    # t261025-02 (KI-355) own-coverage face (**additive**; defaults = old
+    # receipts/replays decode unchanged). own_declared = the own names THIS
+    # round declared (injected as SANDBAR_SCENARIO_OWN); own_missing = the
+    # declared names absent from the round's executed scenario rows;
+    # own_coverage_error non-empty = the receipt is a NAMED failure (the
+    # ticket's own proof obligation did not run) — never a green face.
+    own_declared: List[str] = field(default_factory=list)
+    own_missing: List[str] = field(default_factory=list)
+    own_coverage_error: str = ""
     # 宿主令 260930（devlane-lite 轻道，直修无票）：**少跑面**的两块观测回执，**additive**（默认空
     # dict=老回放/老执行器形态逐字节零漂移，缺键即空）。轻道的 blocked 文案必须如实交代
     # 「本轮哪些条目**没跑**、被台账复用了几条」——此前这两块只存在于闸的 JSON 回执

@@ -59,6 +59,11 @@ class WiringLocks(unittest.TestCase):
         self.assertIn('"%s"' % OWN_ENV, act)
 
     def test_gate_carries_own_and_closing_does_not(self):
+        # t261025-02 caliber change (KI-355): the closing run now CARRIES the
+        # own face behind its own patch id — a ticket's own proof obligation
+        # does not retire at closing. The declared-caliber change is pinned in
+        # test_t261025_02_own_gate_run.py; this lock keeps the un-patched
+        # replay shape (no own list where history has none).
         dev = open(os.path.join(ENGINE, "dev_lane.py"), encoding="utf-8").read()
         # single-writer builder accepts the own face (defaulted)
         self.assertIn("def _integ_run_args(self, only_names=(), own_names=()):",
@@ -67,11 +72,12 @@ class WiringLocks(unittest.TestCase):
         # gate main run carries the derived own face
         self.assertIn("own_names=_own_face_names)", dev)
         self.assertIn('_own_face_names = []', dev)
-        # the closing run passes NO own list (the closing contract is the fast
-        # set, re-read fresh; own scenarios are not part of the closing caliber)
+        # the closing run passes an own list ONLY behind the t261025-02 patch
+        # id — an un-patched replay passes none (the historical byte shape)
         closing = dev[dev.index("async def _closing_full_run"):
-                      dev.index("async def _closing_full_run") + 4000]
-        self.assertNotIn("own_names=", closing)
+                      dev.index("async def _closing_full_run") + 5000]
+        self.assertIn("T261025_02_OWN_CLOSING_PATCH_ID", closing)
+        self.assertIn("own_names=_closing_own", closing)
 
     def test_planner_folds_the_derivation_note(self):
         dev = open(os.path.join(ENGINE, "dev_lane.py"), encoding="utf-8").read()

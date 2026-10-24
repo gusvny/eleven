@@ -11017,6 +11017,37 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     # pool-exclusion drop and the roster skip (a cheap pool is a scheduling
     # property). Empty/malformed list = no env = the old shape byte-identically.
     own_names = [str(n).strip() for n in (own_names or []) if str(n).strip()]
+    # t261025-02 (KI-355) capability probe: a LANE copy of the runner that
+    # predates the own-exemption knob ignores SANDBAR_SCENARIO_OWN entirely, so
+    # a declared own scenario living in an excluded pool (engine/exclusive) is
+    # silently peeled and the round reports a legal-looking ran=0 forever
+    # (measured: t261022-12 / t261022-14 stayed wedged through two promoted
+    # engine fixes). Gated on a NON-EMPTY declared own set (review_plan
+    # condition 1): a stale lane with no own face this round behaves exactly as
+    # today — docs-only and un-declared rounds never refuse. Unreadable runner
+    # text does NOT refuse (the round fails on its own downstream; the probe
+    # never invents a second failure cause from its own blindness).
+    if own_names:
+        _runner_copy = Path(wt) / "integration" / "run_scenarios.py"
+        try:
+            _runner_text = _runner_copy.read_text(encoding="utf-8")
+        except OSError:
+            _runner_text = ""
+        if shared.lane_runner_lacks_own_knob(_runner_text):
+            _probe_err = (
+                "own-scenario face unusable (t261025-02, KI-355): the lane "
+                "copy of integration/run_scenarios.py predates the "
+                "own-exemption knob (no %s marker) — the ticket's own "
+                "scenario(s) %s would be silently peeled out of the excluded "
+                "pool(s). Refused by name, nothing ran: re-sync the lane "
+                "(engine_ops sync / merge the line) so the lane runner "
+                "honors SANDBAR_SCENARIO_OWN, then re-run the gate."
+                % (shared.OWN_KNOB_RUNNER_MARKER, ",".join(own_names[:10])))
+            return IntegrationRunResult(
+                error=_probe_err, warnings=list(_warnings),
+                own_declared=list(own_names),
+                own_missing=list(own_names),
+                own_coverage_error=_probe_err)
     if own_names:
         _extra_env["SANDBAR_SCENARIO_OWN"] = ",".join(own_names)
     # t260930-01（宿主裁 260930：B 档只摘在册）在册红不进**每轮**路径：挂账册里的条目
@@ -11289,6 +11320,23 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     # t261024-40: own-scenario face echo (additive dynamic attribute; missing
     # key on old receipts/replays = empty list, zero drift).
     out.own_names = list(own_names)
+    # t261025-02 (KI-355) own-coverage face: every own name DECLARED for THIS
+    # round (args.own_names — the same list injected above; compared against the
+    # declaration of this receipt, never a re-derived set, review_plan
+    # condition 2) must appear among the round's executed scenario rows. A
+    # declared own scenario that ran nowhere means the ticket's proof
+    # obligation did not run: the receipt becomes a NAMED failure (never a
+    # green face, never a legal-looking ran=0), even when every count looks
+    # clean. Empty declared set = zero effect (old receipts byte-identical).
+    out.own_declared = list(own_names)
+    if own_names:
+        _executed_names = {str(d.get("name") or "").strip()
+                           for d in (out.details or []) if isinstance(d, dict)}
+        out.own_missing = [n for n in own_names if n not in _executed_names]
+        out.own_coverage_error = shared.own_coverage_error(
+            out.own_declared, sorted(_executed_names))
+        if out.own_coverage_error and not out.error:
+            out.error = out.own_coverage_error
     # 宿主令 260930（devlane-lite 轻道，直修无票）：少跑面另两块**原样透传**（additive；缺键/畸形 = 空
     # dict = 老回执/老闸形态逐字节零漂移）。此前它们只活在闸的 JSON 回执里，工作流侧
     # （轻道的 blocked 文案）看不到「本轮没跑哪几条、被台账复用了几条」——票面于是只能

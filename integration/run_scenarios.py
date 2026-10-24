@@ -2014,6 +2014,11 @@ SCENARIOS = [
      "A ticket's OWN scenario is never ledger-reused out of its gate round (ticket t261024-60, the reuse wedge behind the live witnesses t261022-12 [own scenario in the ENGINE pool, every round ran=0 reused=2] and t261022-14 [own scenario in BROWSER-FREE, flip-flopping ran=0 reused=3 / ran=3]; user words: 'a ticket's OWN declared scenarios are always in its gate run, whatever pool they live in. A pool exclusion schedules work, it never drops the ticket's own case'; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a private committed REAL git tree with an injected mini registry whose own fixture entries live under integration/t261024-60/, green ledger rows seeded by one real full round into an isolated SANDBAR_SCENARIO_LEDGER_DIR, on-disk run counters read reader-side, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE WEDGE, POSITIVE - a pointed round over own(engine pool)+own(browser-free)+non-own(main) with a green row for every name and the gate's pool exclusion runs the OWN scenarios FOR REAL (run counters grow), keeps the non-own name on the lawful reuse face (counter frozen, named on INTEG_REUSE), reports ran>=1 with ran+reused==expected, and names exactly the covered own names on the own-rerun face (INTEG_OWN_RERUN line + additive receipt key); B UNCHANGED-HEAD REPEAT - the same round again on the same commit repeats the same judgement (the observed reuse flip-flop is gone by construction); C KILL SWITCH CONTROL - SANDBAR_LEDGER_REUSE=0 disables reuse with its named stderr reason and everything runs (supply rules intact); D ECONOMY CONTROL - a pointed non-own name alone with a green row keeps the byte-stable reuse face (reused=1, ran=0, rc=0). Intent split: the four-key reuse truth table, kill-switch wording and malformed-row tolerance belong to t260930-01-ledger-reuse-round; the pool-exclusion/roster peel paths and the missing-own-name refusal belong to t261024-40-own-scenario-gate-round; the quick-gate own_names threading and the empty-derivation refusal copy belong to developer L1 batteries and the engine-gate stage driving the two live lanes; THIS entry uniquely owns 'a green ledger row never substitutes for the ticket's own proof, with the own-rerun face naming the covered names'. Pre-implement tree red on A/B = the named TDD signal (the own-rerun face is absent); green required at the integration gate/merge. git or run_scenarios.py missing = ENV_FAIL exit 2",
      "python3 integration/t261024-60/sc_t261024_60_own_never_ledger_reused.py", "browser-free"),
 
+    # ---- t261025-02: the UNPOINTED gate round keeps and counts the own scenario ----
+    ("t261025-02-own-never-peeled",
+     "On an UNPOINTED per-ticket gate round the ticket's OWN scenarios stay in the run list AND in the expected caliber, whatever pool they live in (ticket t261025-02, KI-355: the peel happens on the EXCLUSION side - the per-ticket gate excludes engine/exclusive wholesale AFTER the own set is computed; witness t261022-12's own scenario lives in the ENGINE pool and every round reported meta.last_green_run ran=0 while t261024-40/-60 landed, promoted and live; user words: 'the per-ticket gate excludes engine/exclusive wholesale AFTER the own set is computed, and an own scenario that lives in those pools disappears from the run list'; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a minimal fixture lane shaped like the live gate - verify.yaml excluding engine,exclusive, own fixtures under integration/t261025-02/ so the own-set derivation matches, seconds-scale stub scripts with on-disk execution markers read reader-side, one UNPOINTED round per case on a fresh lane so the reuse economy never enters these faces, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE WEDGE, POSITIVE - own in the engine pool + own in main + a non-own in exclusive with the own list declared: both OWN cases run (markers on disk, ran>=2), the non-own excluded entry stays out, and the completeness invariant holds exactly (expected==ran, the kept engine-pool own entry counted once - pre-fix this reds because the pool split runs the own entry while the expected caliber subtracts it); B EXCLUSION CONTROL - the same shape with no own list keeps the economy byte-stable (only the main entry runs, expected==ran==1, the skip face names the excluded pools, no own-exemption keys leak into an own-less receipt); C FAIL-CLOSED - a declared own name genuinely absent from the registry refuses BY NAME on an unpointed round (non-zero rc, REFUSED shape naming it, zero scripts executed) instead of running a subset while claiming own coverage; D MALFORMED - a whitespace-only own list behaves as absent, no phantom refusal. Intent split: the pointed-path keep/refusal/roster faces belong to t261024-40-own-scenario-gate-round; the ledger-reuse wedge belongs to t261024-60-own-never-ledger-reused; the pool-exclusion knob matrix belongs to t260913-03; the narrowed-empty fallback belongs to t260922-12; the engine-side faces (closing fast-union-own caliber, own-coverage named red, stale-lane capability probe) belong to developer L1 batteries plus the engine-gate stage driving the two live lanes; THIS entry uniquely owns 'the unpointed gate round is green and complete with an own scenario in a wholesale-excluded pool, and refuses by name when a declared own name is genuinely absent'. Pre-implement tree red on A/C = the named TDD signal; green required at the integration gate/merge. run_scenarios.py missing = ENV_FAIL exit 2",
+     "python3 integration/t261025-02/sc_t261025_02_own_never_peeled.py", "browser-free"),
+
     # ---- t260907-06: multi-repo project lane carrying sub-repos (ticket B: one ticket, several worktrees cohabiting one lane) ----
 
     ("t260907-06-multirepo-journey",
@@ -5784,16 +5789,33 @@ def pool_of(entry):
     return opt if (opt and opt != "serial") else "main"
 
 
-def expected_entries(scenarios, excluded_pools, known_red_skipped):
-    """本轮**可跑**的条目数（纯面，261022）。
+def expected_entries(scenarios, excluded_pools, known_red_skipped, own=()):
+    """Runnable entry count for the round (pure face, 261022; t261025-02 adds
+    the own caliber).
 
-    口径：全表 − 属被排除池的条目 − 「既不属被排除池、又在册红名单里」的条目。
-    `known_red_skipped` 是按**点名面**取的名单，不含池排除口径，故必须与池排除取交之后
-    才扣——直接相减会把落在被排除池里的在册条目扣两次（全池排除时 778 − 778 − 49 = −49，
-    负期望让一次零条目收窄轮被判红）。无池排除时与旧式逐字同值；返回值永不为负。"""
+    Caliber: full table − entries in an excluded pool that are NOT the ticket's
+    own − entries in the known-red roster that are NOT in an excluded pool.
+    ``known_red_skipped`` is taken over the pointed face and carries no pool
+    caliber, so it must be intersected with the pool exclusion before
+    subtracting — a plain subtraction double-counts roster entries living in
+    excluded pools (full-pool exclusion measured 778 − 778 − 49 = −49; the
+    negative expectation judged a zero-entry narrowed round red). t261025-02
+    (KI-355): main's pool split KEEPS excluded-pool entries that belong to the
+    ticket's own set (the own scenario is the ticket's proof obligation; a
+    cheap pool is a scheduling property, not a drop reason) — the expected
+    caliber must be the SAME caliber as the split, otherwise an own entry is
+    registered, runs, and is still missing from expected, self-reding the
+    ran+reused==expected completeness invariant on exactly the tickets whose
+    own scenario lives in engine/exclusive. ``own`` carries the round's
+    declared own names; the default empty set = callers not touching the own
+    face keep the legacy value byte-identically. No pool exclusion = legacy
+    value verbatim; the return never goes negative."""
     excluded = set(excluded_pools or ())
     skipped = set(known_red_skipped or ())
-    runnable = [e for e in scenarios if not (excluded and pool_of(e) in excluded)]
+    own_set = {str(n).strip() for n in (own or ()) if str(n).strip()}
+    runnable = [e for e in scenarios
+                if not (excluded and pool_of(e) in excluded
+                        and e[0] not in own_set)]
     if skipped:
         runnable = [e for e in runnable if e[0] not in skipped]
     return max(0, len(runnable))
@@ -7043,6 +7065,27 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
     # pointed rounds — an unpointed full round already contains them.
     own_names = parse_only_scenarios(os.environ.get("SANDBAR_SCENARIO_OWN"))
     own_set = set(own_names)
+    # t261025-02 (KI-355): on an UNPOINTED round a declared own name MUST be in
+    # the registry — an absent own name means the supply side (registration /
+    # derivation) is broken, and running the full round anyway would report a
+    # legal-looking receipt while the ticket's proof obligation never ran.
+    # Fail-closed family: nothing runs, zero side effects, `REFUSED [` prefix
+    # (a refused start is a gate error, not a scenario red; t261001-10 output
+    # shape discipline), each absent own name listed. Empty/malformed env = zero
+    # effect (byte-identical old behavior). The POINTED path's absent-own names
+    # are covered by the only_names check below (the existing
+    # `REFUSED [__executor__]` shape, OWN names listed per entry, locked by the
+    # t260922-12 battery) — this site only closes the same hole on the
+    # unpointed path and never changes the pointed refusal shape.
+    if own_set and not only_names:
+        _registry_names = {e[0] for e in SCENARIOS}
+        _own_absent = sorted(n for n in own_set if n not in _registry_names)
+        if _own_absent:
+            print("REFUSED [__own_set__] 本票声明的自有场景缺席在册：%s——一条都未跑"
+                  "（自有场景是本票的举证义务，缺席=供给面 bug，t261025-02/KI-355 "
+                  "fail-closed）" % ",".join(_own_absent), flush=True)
+            print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
+            return 2
     own_kept = []          # own names kept despite a drop that would have eaten them
     _dropped_by_pool = {}  # non-own pointed names lost to the pool exclusion (attribution face)
     # ---- t261009-16 fast global set: the lane's runnable entry ----
@@ -7175,7 +7218,18 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
     narrowed_face_empty = False
     if only_names and not registry:
         narrowed_face_empty = True
-        registry = [e for e in SCENARIOS if not (excluded and pool_of(e) in excluded)]
+        # t261025-02 (KI-355): the fallback keeps the own scenario (named) —
+        # the fallback face carries the same own caliber as the pool split.
+        registry = [e for e in SCENARIOS
+                    if not (excluded and pool_of(e) in excluded
+                            and e[0] not in own_set)]
+        if own_set:
+            _own_fallback = sorted(n for n in own_set
+                                   if any(e[0] == n for e in registry))
+            if _own_fallback:
+                print("INTEG_OWN_KEPT 回落面保留本票自有场景 %d 条（池排除不摘自有，"
+                      "t261025-02）：%s" % (len(_own_fallback),
+                                            ",".join(_own_fallback)), flush=True)
         # 回落面=**全量路径**，在册豁免口径必须跟着面一起重算：豁免纪律本就是「按本轮的面
         # 取交集」（上面的 `_kr_in_round`），面变宽了仍沿用旧窄面的那几条 ⇒ 「在册红不进每轮
         # 路径」在回落轮上单独失效，回落轮会把那 19 条在册红原样再跑一遍（既烧时间，又让
@@ -7211,9 +7265,15 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
     # （实测全池排除：778 − 778 − 49 = −49）。负期望从来不是产品红，它是账算错了：一次「零条目
     # 可跑」的收窄轮被闸判成红，连带把「照跑」类用例（t260913-02 子用例1/3）在轮内判红。
     # 正确口径：只扣「不属被排除池、又在册」的那部分（纯面 `expected_entries`，无池排除时逐字
-    # 等于旧式）。
+    # 等于旧式）。t261025-02 / (KI-355): on an UNPOINTED round (the per-ticket
+    # full gate round) the expected caliber is the SAME caliber as the pool
+    # split — the split keeps the ticket's own scenarios (including the ones
+    # living in excluded pools), so expected must not subtract them, otherwise
+    # the ran+reused==expected completeness invariant self-reds on exactly the
+    # tickets whose own scenario lives in engine/exclusive.
     expected = len(registry) if only_names \
-        else expected_entries(SCENARIOS, excluded, known_red_skipped)
+        else expected_entries(SCENARIOS, excluded, known_red_skipped,
+                              own=own_set)
     # ---- t260930-01 台账绿行复用（本段只**判定**；跳过发生在池切分处，见下）----
     # 前置检查一次性算出本轮复用名单；复用条目不进 pools/exclusives（既不跑也不计 ran），
     # expected 仍是本轮在册数，故不变式是 ran + reused == expected（汇总/闸两处同口径）。

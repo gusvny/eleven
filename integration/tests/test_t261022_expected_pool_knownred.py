@@ -73,7 +73,12 @@ class SourceLock(unittest.TestCase):
 
     def test_main_uses_the_pure_face(self):
         src = open(os.path.join(INTEG, "run_scenarios.py"), encoding="utf-8").read()
-        self.assertIn("expected_entries(SCENARIOS, excluded, known_red_skipped)", src)
+        # t261025-02 caliber change (KI-355): the unpointed call site threads
+        # the declared own set into the same pure face (the expected caliber
+        # must equal the pool-split caliber); the no-inline-subtraction lock
+        # itself is unchanged.
+        self.assertIn("expected_entries(SCENARIOS, excluded, known_red_skipped,\n"
+                      "                              own=own_set)", src)
         self.assertNotIn(
             "len(SCENARIOS) - len(excluded_entries) - len(known_red_skipped)", src)
 
