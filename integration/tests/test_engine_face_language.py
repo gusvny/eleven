@@ -196,6 +196,7 @@ def test_auto_quarantine_trailer_literals_ascii():
 # Inventory gate mechanics
 # ---------------------------------------------------------------------------
 
+
 def test_committed_inventory_gate_is_green():
     errors: list = []
     entries, problems = lint.sweep(errors)
@@ -217,6 +218,7 @@ def test_inventory_defect_entries_all_carry_debt_tag():
     assert ("server/engine/path_gates.py", "、") in named
     # the converted named source must have left the defect ledger
     assert ("server/engine/agent_activities.py", "；本轮已自动处置：%s") not in named
+
 
 
 def test_inventory_logonly_entries_record_evidence():

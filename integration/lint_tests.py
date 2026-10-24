@@ -99,6 +99,16 @@ practice:
         sleeping the production bound. Per-diff (L15/L21 construction, core in
         integration/lib_wait_bound.py).
 
+  L26 lane-overlay location (t261021-10): a directory named `overlay` under
+        integration/ is an error — it is a lane sandbox overlay materialised
+        INSIDE the measured tree, which the stage path gate quarantines at
+        arbitrate/settle (t261021-05 incident: integration/t261021-05/overlay/
+        with an untracked server/engine/.venv symlink read as
+        unauthorized_path). The lawful home is outside the tree:
+        integration/lib_lane_overlay.py overlay_root(ticket). The rule opens
+        nothing about integration/ generally — any other new path under
+        integration/ is still judged by the gate exactly as before.
+
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
        python3 integration/lint_tests.py --rules=L16,L17   # run a SUBSET of
        rules (t261011-22 host refinement: a mechanism test runs the rule it
@@ -1611,6 +1621,7 @@ RULES = {
     "L17": lambda base, scope=None: lint_home_paths(scope),
     "L18": lambda base, scope=None: lint_snapshot_discipline(scope),
     "L25": lint_wait_bounds,
+    "L26": lambda base, scope=None: lint_lane_overlay_location(),
 }
 
 #: Rules whose walk can be pruned to --scope-files paths (t261011-22). L25 is
@@ -1696,6 +1707,50 @@ L19_SKIP_DIRS = {".git", ".lane", "node_modules", ".venv", "__pycache__",
 L19_SANCTIONED_PREFIX = ".sandbar/"
 #: The instance projects root tree, as it appears when a relative root is resolved.
 L19_LEDGER_MARK = "/.sandbar/projects/"
+
+
+# ---- L26 lane-overlay location (t261021-10) ----------------------------------
+#
+# Incident (ticket t261021-10, blocked ticket t261021-05): a lane built its
+# full-repo verification overlay at integration/<ticket>/overlay/ INSIDE the
+# worktree; the stage path gate (arbitrate) read the untracked
+# server/engine/.venv symlink under it as unauthorized_path and quarantined the
+# overlay. Repair = option A: the overlay home moves OUT of the measured tree
+# (integration/lib_lane_overlay.py overlay_root); nothing about integration/
+# generally is opened. This rule is the static brake so the pattern cannot
+# regrow: an overlay directory under integration/ is an error naming the path
+# and the lawful home. The same predicate the helper and the lint read is
+# overlay_path_is_lawful — one judgement, one place.
+
+def lint_lane_overlay_location(root=None):
+    """L26 (t261021-10): no sandbox overlay directory under integration/.
+
+    A directory named `overlay` anywhere under integration/ means a lane is
+    materialising its scratch overlay inside the measured tree; the stage path
+    gate will quarantine it at arbitrate/settle. Error text names the path and
+    points at the lawful home (lib_lane_overlay.overlay_root). `root` is the
+    walk root, injectable so the mechanism test plants its fixture in a tmp
+    tree and never in the real one.
+    """
+    walk_root = Path(root) if root is not None else REPO / "integration"
+    hits = []
+    if walk_root.is_dir():
+        for cur, dirs, _files in os.walk(str(walk_root)):
+            dirs[:] = [d for d in dirs if d not in L19_SKIP_DIRS]
+            if "overlay" in dirs:
+                hits.append(os.path.relpath(os.path.join(cur, "overlay"),
+                                            str(REPO)).replace(os.sep, "/"))
+                dirs.remove("overlay")
+    if hits:
+        err("L26 lane-overlay location: sandbox overlay directory inside the "
+            "measured tree at %s (the stage path gate refuses these at "
+            "arbitrate/settle, t261021-05 incident); build it under "
+            "lib_lane_overlay.overlay_root(ticket) instead"
+            % ", ".join(hits[:6]))
+    else:
+        ok("L26 lane-overlay location: no overlay directory under %s "
+           "(lane scratch overlays stay outside the measured tree)"
+           % os.path.relpath(str(walk_root), str(REPO)))
 
 
 def lint_runtime_state_location():
@@ -1967,7 +2022,9 @@ def main():
         # L25 wait-bound discipline (t261011-22): no test buys evidence with
         # real wall-clock minutes (per-diff face).
         lint_wait_bounds(base=pinned_base)
-        # L26 engine face language (t261021-11): strings the engine PRODUCES
+        # L27 engine face language (t261021-11; renumbered L26->L27 in the
+        # develop-buffer landing union: this ticket's lane-overlay rule keeps
+        # L26, the id it was plan-declared with): strings the engine PRODUCES
         # onto the ticket face (log[].note, blocked_detail, pending entries,
         # request envelopes) are English/ASCII, separators counted (the
         # punctuation-blind face of L15). Static sweep of the declared producer
@@ -1976,8 +2033,13 @@ def main():
         # t261021-11 until the engine conversion lands — new CJK or a rotting
         # ledger entry goes red here in milliseconds. Surface list, predicate
         # and classification rules: integration/lib_engine_face_language.py.
-        from lint_engine_face_language import lint_engine_face_language as _l26
-        _l26(errors)
+        from lint_engine_face_language import lint_engine_face_language as _l27
+        _l27(errors)
+        # L26 lane-overlay location (t261021-10): a lane sandbox overlay must
+        # live OUTSIDE the measured tree (lib_lane_overlay.overlay_root); an
+        # overlay directory under integration/ is the t261021-05 arbitrate
+        # quarantine incident and is refused here by name.
+        lint_lane_overlay_location()
     n_e, n_w = len(errors), len(warns)
     # t261009-12 Defect B: the verdict line names any unstable-input condition
     # that fired, so two different verdicts for the same inputs can never print

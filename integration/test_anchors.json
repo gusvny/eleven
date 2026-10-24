@@ -5559,6 +5559,11 @@
       "note": "t261021-06: metrics-api-contract-v2.md exists as a new file with all field names, formula/approximation/degrade sections, the inherited failure-mode list for reused discovery/parser code, the source_version-vs-doc-version mapping, v1 untouched, and the no-cost verdict",
       "sync_path": "docs/design/metrics-api-contract-v2.md; docs/design/metrics-api-contract-v1.md"
     },
+    "integration/t261021-10/sc_t26102110_lane_overlay_out_of_tree.py": {
+      "anchor": "contract",
+      "note": "t261021-10: the lane sandbox overlay home lives OUTSIDE the tree the stage path gate measures (incident t261021-05 unauthorized_path on integration/<ticket>/overlay), the one predicate admits only the out-of-tree root and refuses both the incident shape and a hand-written file next to it, dispose reclaims from disk, and the real lint brake reds on a planted in-tree overlay dir naming the helper as the lawful home",
+      "sync_path": "integration/lib_lane_overlay.py"
+    },
     "integration/t261022-10/sc_process_bench_docker_free.py": {
       "anchor": "behaviour",
       "note": "t261022-10: docker-free process bench - start a native temporal stage as plain processes, hand its endpoint to a scenario, reap the process group and assert zero residue (port refuses, group empty) re-read from a fresh process.",

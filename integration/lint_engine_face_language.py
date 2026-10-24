@@ -272,16 +272,16 @@ def sweep(errors: Optional[List[str]] = None) -> Tuple[List[Dict[str, Any]], Lis
     for key, e in sorted(live_defects.items()):
         ld = ledger_defects.get(key)
         if ld is None:
-            problems.append("L26 new CJK literal on the engine face without a "
+            problems.append("L27 new CJK literal on the engine face without a "
                             "ledger entry: %s:%d %r %r — classify it in %s or fix it"
                             % (e["path"], e["line"], e["char"], e["text"][:60],
                                INVENTORY.name))
         elif ld.get("debt") != DEBT_TAG:
-            problems.append("L26 ledger defect entry without the debt tag %s: %s %r"
+            problems.append("L27 ledger defect entry without the debt tag %s: %s %r"
                             % (DEBT_TAG, e["path"], e["text"][:60]))
     for key, ld in sorted(ledger_defects.items()):
         if key not in live_defects:
-            problems.append("L26 stale ledger defect entry (literal gone or "
+            problems.append("L27 stale ledger defect entry (literal gone or "
                             "re-worded — delete the entry): %s %r"
                             % (ld["path"], ld["text"][:60]))
     if errors is not None:
@@ -331,11 +331,11 @@ def write_inventory(entries: List[Dict[str, Any]]) -> None:
 
 
 def lint_engine_face_language(errors: List[str], base: Optional[str] = None) -> None:
-    """Battery entry (registered as L26 in integration/lint_tests.py)."""
+    """Battery entry (registered as L27 in integration/lint_tests.py)."""
     entries, problems = sweep(errors)
     n = sum(1 for e in entries if e["classification"] == "defect")
     if not problems:
-        print("L26 engine face language: %d CJK code occurrences swept across %d "
+        print("L27 engine face language: %d CJK code occurrences swept across %d "
               "producer modules; %d defect entries allowlisted under debt %s"
               % (len(entries), len(PRODUCER_MODULES), n, DEBT_TAG))
 

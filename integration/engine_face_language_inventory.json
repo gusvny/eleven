@@ -5826,6 +5826,24 @@
       "evidence": "copy-lang-allow:t261016-21 - operator ruling (implement gen10): the fresh_diag joiner is pinned by test_t261002_10_codegen_freshness as a structural anchor and stays as-is; restored byte-for-byte with the inline marker",
       "path": "server/engine/agent_activities.py",
       "text": "；%s"
+    },
+    {
+      "char": "工",
+      "classification": "defect",
+      "debt": "t261021-11",
+      "evidence": "line-side conversion (t261021-11) not yet landed on this tree; the literal is the pre-conversion engine face - allowlisted under the same debt until the conversion lands",
+      "line": 3777,
+      "path": "server/engine/agent_activities.py",
+      "text": "工作区已干净，无需代落盘"
+    },
+    {
+      "char": "；",
+      "classification": "defect",
+      "debt": "t261021-11",
+      "evidence": "line-side conversion (t261021-11) not yet landed on this tree; the literal is the pre-conversion engine face - allowlisted under the same debt until the conversion lands",
+      "line": 12499,
+      "path": "server/engine/agent_activities.py",
+      "text": "；%s"
     }
   ],
   "generated_by": "python3 integration/lint_engine_face_language.py --write-inventory"

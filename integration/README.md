@@ -221,6 +221,23 @@ fault behind this rule (KI-01M4HD396VNTTAY20CH0681N0Q): the anchors file flipped
 1-space ↔ 2-space between writers, so a three-entry append produced a 9082-line diff
 with zero semantic change.
 
+## Lane sandbox overlays live OUTSIDE the measured tree (t261021-10)
+
+A lane's scratch overlay — the full-repo copy a ticket builds to verify its work
+(tree files applied, tests run in isolation) — must never be materialised inside the
+worktree. Measured fault (t261021-05): an overlay at
+`integration/t261021-05/overlay/` carried an untracked `server/engine/.venv`
+symlink, and the stage path gate refused it `unauthorized_path` at arbitrate,
+quarantining the whole directory.
+
+The lawful home is `integration/lib_lane_overlay.py` `overlay_root(ticket_id)`
+(`<system temp>/sandbar-lane-overlay/<ticket_id>` by default, `SANDBAR_LANE_OVERLAY_ROOT`
+to override). Build with `build_overlay`, reclaim with `dispose_overlay` on every exit
+path. The one predicate, `overlay_path_is_lawful(path, repo_root)`, is read by both
+the helper and `lint_tests.py` L26, which refuses any `overlay/` directory under
+`integration/` by name. The rule opens nothing about `integration/` generally — any
+other new path is still judged by the stage path gate exactly as before.
+
 ## 环境前提
 
 Node >=22.18（type-stripping 直跑，全部测试）；其余按条目按需探测：

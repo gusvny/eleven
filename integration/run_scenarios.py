@@ -3717,6 +3717,10 @@ SCENARIOS = [
      "A narrowed green gate round re-anchors the landing face HONESTLY and the stale-revision refusal names the run that satisfies it (ticket t261024-12, KI-350, root of KI-343; incident = t261021-12/t261022-12 sat at merge/blocked forever: the lane gate runs narrowed by construction (fast_proof_plan run_only = own scenarios + fast set), the green-run recorder ignored targeted-only rounds, so meta.last_green_run kept an old sha, and once the lane synced main every landing was refused 'proven revision does not contain current main'; grey-box L3, the REAL dev_lane._ki220_record_green_run through the stubbed workflow facade (t261011-17 seam), the REAL shared.green_run_check_item public item, and the REAL agent_activities.land_to_line over a real fixture git repo (main advances past the proven revision), offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A a narrowed green round records an honest face (declared narrowed marker + the sha it ran on + at) and the check item judges it green BY NAME (a narrowed reason code, never the plain full-close code) with a detail declaring it is not a full close (t260923 D: a targeted round is never minted into a full proof), the marker readable on the ticket face without the log; B after a main sync the OLD narrowed face is stale - red by name, and the real land_to_line refusal is actionable: it names WHICH run/sha would satisfy the precondition, never a bare stale-revision refusal; C THE ESCAPE JOURNEY - the lane syncs main, ONE fresh narrowed green round re-anchors the face on the new tree, the contains-main guard passes (refusal moves past it; the landing act itself belongs to the t261009-46/t261019-41 family); D a FULL closing green round is unchanged - face without the marker, reason_code=ok as today; E invariants - a zero-run targeted round records NO face (KI-220 fail-closed) and an unpatched replay is inert (no face, no lane_head_sha call, replay-safety patch ids intact). Intent split: face/check-item truth tables, patch-gate mechanics and the miss-note matrix belong to developer L1 and t261011-17; the full landing act journey belongs to t261019-41/t261009-46; THIS entry uniquely owns the KI-350 escape journey judged from the reader side. fast-catch: the KI-350 wedge class - a narrowed green round that leaves NO honest landing anchor (or a refusal that names no satisfying run, or a narrowed round minted into a silent full close) is caught here in seconds, offline, instead of two tickets sitting at merge/blocked forever until a human intervenes. Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. git, the engine tree or temporalio unimportable = ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261024-12/sc_t26102412_narrowed_green_landing.py", "ro", "fast"),
 
+    # ---- t261021-10: the lane sandbox overlay lives outside the measured tree ----
+    ("t261021-10-lane-overlay-out-of-tree",
+     "The lane sandbox overlay lives OUTSIDE the measured tree and a static brake refuses in-tree regrowth (ticket t261021-10, incident = t261021-05 blocked at arbitrate by path_gate@arbitrate / unauthorized_path on integration/t261021-05/overlay/server/engine/.venv - a scratch overlay the lane's scenario sandbox materialised INSIDE the ticket worktree, so the stage path gate auto-quarantined it; chosen option A, the gate is untouched, the home moves): grey-box L3, the REAL integration/lib_lane_overlay.py + the REAL integration/lint_tests.py over tmp fixtures, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233: A THE HOME JOURNEY - overlay_root yields a path OUTSIDE the repo tree the gate measures, the incident shape (mirrored bit + a venv-shaped symlink) materialised there is LAWFUL by the one predicate, and dispose reclaims the whole tree judged from disk; B BOTH DIRECTIONS, the ticket's hard rule - inside a tmp fake repo a path under integration/<ticket>/overlay/ is REFUSED and a HAND-WRITTEN file next to it under integration/<ticket>/ is REFUSED too (the fix opens nothing about integration/ generally); C THE STATIC BRAKE - the real lint reds on a planted in-tree overlay dir in a throwaway copy, its output NAMES the path and points at the helper as the lawful home, and stays silent without the fixture; D MALFORMED INPUT, fail-closed - empty ticket id, '../'-traversal id, and an env knob pointed INTO the repo tree never yield a lawful path, and no refusal leaves a directory behind. Intent split (no intent-level duplication): the predicate/env-knob unit truth table and the lint rule internals belong to developer L1 (integration/tests/test_lib_lane_overlay.py); the settle-side unauthorized-write and disposal journeys belong to t260911-03 and t261016-19 (they judge the SETTLE gate over delivered files; THIS entry owns the overlay HOME contract and the lint brake). Binding note: the helper's public names and the lint rule label L26 are the plan-declared contract of this ticket, not implementation accidents. Pre-implement tree: missing helper = ENV_FAIL exit 2 (supply face); A-D red = the named TDD signal; green required at the integration gate / merge",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261021-10/sc_t26102110_lane_overlay_out_of_tree.py", "ro", "fast"),
     # ---- t261021-11: produced engine faces (gate refusals, blocked detail, notes, request refusals) are ASCII ----
     ("t261021-11-produced-face-english",
      "Strings the engine PRODUCES onto the ticket face are ASCII, separators counted, data never translated (ticket t261021-11, incident t261021-05: the stage arbitrate block detail rendered the path-gate refusal with the CJK enumeration comma joined prefix list (path_gates.py:838) and auto-quarantine trailers in Chinese (agent_activities.py:3668/:3782); host orders 260924/260925 make ticket-face text English and data untranslated; grey-box L3 ADVERSARIAL runtime+AST probe, offline seconds, zero docker/Temporal/browser, never touches 3099): A gate_refusal_note over every declared STAGE_PATH_RULES stage with ASCII violations is CJK-free (ideographs, U+3000-303F punctuation, fullwidth forms), PLUS a synthesized TWO-prefix stage because the separator only surfaces when the join has 2+ elements and every declared prefixes stage is single-prefix; B gate_red_detail blocked detail (check_id/evidence/disposition) CJK-free for ASCII evidence; C executor_requests.validate_request refusal faces CJK-free over a malformed-body matrix; D an INDEPENDENT AST scan (imports neither the producer's future guard nor the developer lib) of string literals concatenated/appended into note/notes in agent_activities.py and path_gates.py — the log[].note producers — names file:line + literal verbatim on any CJK; E data passthrough pinned: a CJK violation name crosses gate_refusal_note verbatim and the template-side text around it stays CJK-free (the fix must never be stripping or translating data); F narrowness control: the leg-D scanner flags exactly one planted note-literal in a synthetic module and stays silent on comments, docstrings, prompts and logger calls; G the workbench copy mirrors (agent-usage.ts / agent-live.ts / smoke/agent-usage.mjs) carry no fork of the engine CJK tail literal (等共) outside comments — a converted engine with an unmoved console tail is a fork, not a pass. fast-catch: any CJK (ideograph, CJK punctuation, fullwidth form) reappearing on a produced engine face — gate refusal notes, blocked detail, request refusals, note builders, or the console mirror tail — is caught here in offline seconds instead of rendering Chinese onto a ticket face again (the t261021-05 incident class). Intent split: t261008-47-ticket-face-english owns the static copy-position scan of dev_lane/light_lane/agent_activities (_mark/_blocked/_handoff/_auto_rework/Stage/msg) and does NOT cover path_gates, executor_requests or the note builders; the developer's lib+lint (surface list + predicate + classified inventory) is NOT imported here — this entry is the adversarial cross-check. Pre-implementation tree red naming module:line is the TDD signal; green required at the integration gate / merge. Engine tree missing = ENV_FAIL exit 2",
@@ -3780,6 +3784,13 @@ FAST_SET_BUDGET_NOTE = (
 #: therefore cannot drift into a second membership list — membership itself
 #: lives only on the registry markers.
 FAST_SET_CATCH = {
+    "t261021-10-lane-overlay-out-of-tree":
+        "the lane sandbox overlay regrowing inside the measured tree - an "
+        "overlay path under integration/<ticket>/ admitted by the predicate, "
+        "a hand-written file next to it opened too, the lint brake staying "
+        "silent on the incident shape, or a malformed ticket id / env knob "
+        "yielding a lawful-looking in-tree path (caught offline in seconds "
+        "instead of at the next arbitrate path_gate unauthorized_path block)",
     "t26102412-narrowed-green-landing":
         "the KI-350 wedge class - a narrowed green round that leaves no "
         "honest landing anchor (marker absent, refusal that names no "
@@ -7722,6 +7733,18 @@ RUNNER_REG_DIR_ENV = "SANDBAR_INTEG_RUNNER_REG_DIR"
 #: 正常并存（两个泳道轮 + 各自基线 + 巡检）≤6，故取 8 兜住「异常翻倍」而不误伤正常并存。
 RUNNER_CAP_MACHINE = int(os.environ.get("SANDBAR_INTEG_RUNNER_CAP") or 8)
 
+#: 到帽后的等位预算（秒，t261021-10：全机帽被**兄弟泳道**的正常验证占满 ⇒ 纯供给面
+#: 拥塞，不是本树风暴）。实测事故（261023，t261021-10 merge_check 三红 + 两轮闸收口
+#: REFUSED）：帽登记的存活项全部来自他树，本树零在跑——全机帽把「多泳道正常并存」
+#: 误判成「自递归风暴」。修法=**预算面**（仲裁 gen6 点名的 "cap keying or budget" 二选一
+#: 取 budget，不动键控语义）：到帽先按本预算轮询等位，期间兄弟泳道退出即放行；预算耗尽
+#: 仍满才具名拒绝——递归风暴防护不变（风暴是持续占满，等满预算照样拒），拒绝形状
+#: （`REFUSED [__executor__]`、`FAIL [` 不出现）一字不改，闸解析面不漂。
+#: 旋钮 `SANDBAR_INTEG_RUNNER_WAIT_SEC`：默认 120；0=恢复旧的立即拒绝行为。
+RUNNER_WAIT_BUDGET_ENV = "SANDBAR_INTEG_RUNNER_WAIT_SEC"
+RUNNER_WAIT_BUDGET_DEFAULT_SEC = 120
+_RUNNER_WAIT_POLL_SEC = 2.0
+
 
 def _runner_reg_dir() -> str:
     d = str(os.environ.get(RUNNER_REG_DIR_ENV) or "").strip()
@@ -7736,14 +7759,8 @@ def _runner_reg_dir() -> str:
     return d
 
 
-def _runner_cap_guard() -> bool:
-    """同树并发执行器 ≤ `RUNNER_CAP_PER_TREE`；超限=具名拒绝（exit 2）。
-
-    登记文件名=sha1(树根)[:12]-<pid>；每次进入执行器登记一次、退出时（finally）清掉。
-    死活按 `os.kill(pid, 0)` 判（历史残留不算数），超过 6 小时的登记按陈旧忽略。"""
-    d = _runner_reg_dir()
-    if not d:
-        return True
+def _runner_alive_pids(d):
+    """存活登记名单（排除本进程）：死活按 `os.kill(pid, 0)` 判，>6h 按陈旧忽略。"""
     alive = []
     now = time.time()
     try:
@@ -7778,19 +7795,53 @@ def _runner_cap_guard() -> bool:
             continue
         if pid != os.getpid():
             alive.append(pid)
-    if len(alive) >= RUNNER_CAP_MACHINE:
-        print("REFUSED [__executor__] 同树并发执行器超限（本树已有 %d 个在跑：%s；上限 %d）——"
-              "拒绝开跑。261001 自递归风暴的兜底判据：层级嵌套会反复重跑同一个面，"
-              "本护栏按**文件登记**判（env 计数值会被内层调用的「干净 env 重建」冲掉）。"
-              "`REFUSED [` 起首而非 `FAIL [`：拒绝开跑是闸错误、不是场景红——`FAIL [` 形状"
-              "会让这段人话被闸当成场景名（261001-10 第 5/6/7 轮实案：每轮把面收窄成这个"
-              "不在册的名字 ⇒ 每轮 fail-closed ⇒ 票永远出不来）"
-              % (len(alive), ",".join(str(x) for x in sorted(alive)[:6]), RUNNER_CAP_MACHINE),
-              flush=True)
-        return False
+    return alive
+
+
+def _runner_wait_budget_sec():
+    """等位预算秒数：旋钮缺省 120；畸形值按 0（立即拒绝，fail-closed 不猜）。"""
+    try:
+        return float(os.environ.get(RUNNER_WAIT_BUDGET_ENV)
+                     or RUNNER_WAIT_BUDGET_DEFAULT_SEC)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _runner_cap_guard() -> bool:
+    """同树并发执行器 ≤ `RUNNER_CAP_PER_TREE`；超限=具名拒绝（exit 2）。
+
+    登记文件名=run-<pid>；每次进入执行器登记一次、退出时（atexit）清掉。
+    死活按 `os.kill(pid, 0)` 判（历史残留不算数），超过 6 小时的登记按陈旧忽略。
+    t261021-10 预算面：到帽先按 `SANDBAR_INTEG_RUNNER_WAIT_SEC`（默认 120s）轮询
+    等位——兄弟泳道的正常验证占满全机帽是供给拥塞不是本树风暴，等一个槽位即放行；
+    预算耗尽仍满才拒（持续占满=风暴面，防护语义不变），拒绝文本点名预算旋钮。"""
+    d = _runner_reg_dir()
+    if not d:
+        return True
+    budget = _runner_wait_budget_sec()
+    deadline = time.monotonic() + budget
+    while True:
+        alive = _runner_alive_pids(d)
+        if len(alive) < RUNNER_CAP_MACHINE:
+            break
+        if time.monotonic() >= deadline:
+            print("REFUSED [__executor__] 同树并发执行器超限（本树已有 %d 个在跑：%s；上限 %d）——"
+                  "拒绝开跑。261001 自递归风暴的兜底判据：层级嵌套会反复重跑同一个面，"
+                  "本护栏按**文件登记**判（env 计数值会被内层调用的「干净 env 重建」冲掉）。"
+                  "到帽后已按 %s=%.0fs 等位仍满（t261021-10 预算面：供给拥塞等槽位，"
+                  "预算耗尽仍满=拒绝，风暴面防护不变）。"
+                  "`REFUSED [` 起首而非 `FAIL [`：拒绝开跑是闸错误、不是场景红——`FAIL [` 形状"
+                  "会让这段人话被闸当成场景名（261001-10 第 5/6/7 轮实案：每轮把面收窄成这个"
+                  "不在册的名字 ⇒ 每轮 fail-closed ⇒ 票永远出不来）"
+                  % (len(alive), ",".join(str(x) for x in sorted(alive)[:6]),
+                     RUNNER_CAP_MACHINE, RUNNER_WAIT_BUDGET_ENV, budget),
+                  flush=True)
+            return False
+        time.sleep(_RUNNER_WAIT_POLL_SEC)
     try:
         pathlib.Path(os.path.join(d, "run-%d" % os.getpid())).write_text(
-            json.dumps({"pid": os.getpid(), "tree": _REPO_ROOT, "ts": now}), encoding="utf-8")
+            json.dumps({"pid": os.getpid(), "tree": _REPO_ROOT,
+                        "ts": time.time()}), encoding="utf-8")
     except OSError:
         pass
     return True
