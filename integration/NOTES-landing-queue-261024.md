@@ -117,3 +117,42 @@ Also found: the designed auto-repair path is dead — `run_watch.run_watch_now` 
    `renderEpics` fix ticket is written to be pasted the moment main has the code.
 4. `t261021-10` still needs a host ruling (its handover names the design conflict);
    `t261022-15` waits for a working session.
+
+## 261024 afternoon/evening — the line was green on content long before it could certify
+
+The morning's red was one product defect plus two integration bugs. The afternoon found
+that the certification machinery itself was the bottleneck, not the code.
+
+### What landed (develop-buffer; promoted to main at 090314e6)
+
+| ticket | what it fixed |
+| --- | --- |
+| `t261024-12` | KI-350: a narrowed green gate round now refreshes the landing anchor |
+| `t261024-16` | the inspection human-gate sign chain (self-sign refused by name, human sign closes, `human_gate.who` receipt) |
+| `t261024-21` | the Epics tab: the metrics renderer no longer shadows the tab renderer |
+| `t261024-30` | KI-352: a round always leaves exactly one named record |
+| `t261021-10`, `t261021-14`, `t261021-15` | their own delivery work |
+
+### What the investigation found (all registered)
+
+- KI-345 the Epics tab was blank because `panel-page.ts` declared `renderEpics` twice.
+- KI-346 `run_watch` could not open the fix ticket it decided on (case rows unavailable, empty write set).
+- KI-347 a landed lane had rewritten an integration case's pin and the anchors registry.
+- KI-348 the "line worktree not clean" refusal blames engine corruption when the truth is an operator edit.
+- KI-349 the same run content judged green or red depending on whether a relative block was produced.
+- KI-350 the landing anchor only came from a full closing run, so narrowed gates could never land (fixed).
+- KI-351 a case that reclaims stages killed the round hosting it.
+- KI-352 eight of nineteen rounds wrote no certification at all (fixed by `t261024-30`).
+- KI-353 a ticket whose own scenario sits in a cheap pool can be peeled to a zero-run gate and never land (open: `t261024-40`).
+
+### The known-red book (measured today)
+
+- 795 registry entries; the fast set is 91, so 704 cases separate a lane gate from a full round.
+- A round now skips 106 rows: 63 docker-dependent cases (host order "exclude every docker case"), plus booked product debt and contention rows.
+- 63 of the 795 touch docker (engine 20 / ro 17 / exclusive 15 / browser-free 7 / main 3 / browser 1). Five cases moved to `integration/process_bench.py` today and run docker-free.
+- Rows retired today because the fix landed and was re-measured green: the two Epics journeys, the sign journey, the fast-set orphans.
+
+### Still open at hand-off
+
+- `t261024-40` KI-353 (in progress), `t261022-14` (its live witness, engine-paused), `t261022-12` and `t261021-12` (acceptance / merge_check), `t261022-15` (waiting for a working session).
+- Durable follow-ups worth a ticket: the fixed wall-clock windows (5 s / 60 s / 90 s) measured on an idle box are the single largest source of red; each should either own its resource or scale with the measured bench, never stay a constant.
