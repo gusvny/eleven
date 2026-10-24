@@ -298,7 +298,14 @@ def lint_registry():
     # and is not in SCENARIOS — see the ticket-lifecycle entry under
     # "Known limitations" in README)
     DEREGISTERED = {INTEG / "baselines" / "sc_ticket_lifecycle.mjs",
-                    INTEG / "t260917-01" / "sc_t260917_01_arb_gate_refusal.mjs"}
+                    INTEG / "t260917-01" / "sc_t260917_01_arb_gate_refusal.mjs",
+                    # t261021-14 (incidental fix, gen5): host order 261022
+                    # retired both from the roster (main 091a8d1d — the 900s
+                    # pytest-corridor guard and the 274s red console-docker
+                    # journey) but left the files; they stay in the repo for
+                    # the manual list, unregistered and unanchored.
+                    INTEG / "sc_scenarios_guard_pipeline.py",
+                    INTEG / "t260910-04" / "sc_console_paused_list.mjs"}
     # t261009-54 debt note (merge-gate rework, gen 2): the create_plan-promised
     # live-console dismiss journey was DELETED, not registered — an exit-2
     # marker cannot enter SCENARIOS (the gate would run it and go red) and an

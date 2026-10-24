@@ -111,6 +111,18 @@ async function boot() {
     logger: { info: () => {}, warn: () => {}, error: () => {} },
   }
   let nodeApi
+  // t261021-14: the route now resolves the ledger directory through the
+  // engine's declared location (shared.INSPECTION_DIR override chain). Pin the
+  // env override — the SAME first branch the engine honors — to this
+  // scenario's seeded archive, so the harness stays hermetic instead of
+  // reading the real repo's engine ledger. Restored on exit.
+  const seedDir = join(iso, 'out', 'inspection')
+  const prevOverride = process.env.SANDBAR_INSPECTION_DIR
+  process.env.SANDBAR_INSPECTION_DIR = seedDir
+  cleanups.push(() => {
+    if (prevOverride === undefined) delete process.env.SANDBAR_INSPECTION_DIR
+    else process.env.SANDBAR_INSPECTION_DIR = prevOverride
+  })
   try { nodeApi = await import(join(REPO, 'server/plugins/workbench/node.ts')) } catch (e) {
     C.case('workbench-host-importable', false, String(e?.message ?? e).slice(0, 200)); C.exit()
   }

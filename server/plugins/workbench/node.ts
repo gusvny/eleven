@@ -173,6 +173,11 @@ import { readTicketTimeFile } from './src/host/ticket-time-file.ts'
 import { isTicketTimeMode } from './src/shared/ticket-time-model.ts'
 import { ticketShowErrorReply } from './src/host/ticket-error.ts'
 import { readInspectionArchive, readPeriodReport } from './src/host/inspection-archive.ts'
+// t261021-14: the inspection ledger directory is resolved ONCE through the
+// engine's own resolver (shared.INSPECTION_DIR via a bounded subprocess) — the
+// previous join(root, 'out', 'inspection') literal here had drifted from the
+// writer's declared location.
+import { resolveInspectionDir } from './src/host/inspection-dir.ts'
 // t260926-05：巡检落账报告只读端点（report_path → 可读摘要；fail-closed 200+reason 同 /file 风格）。
 import { readInspectionReportFile } from './src/host/inspection-report.ts'
 // Per-project session ledger file (sessions.json, UI-5 t261005-06): the single
@@ -1483,8 +1488,16 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    * core = src/host/inspection-archive.ts); with period+instance it serves that single
    * report. The project root goes through anchorOf (same contract as docs/tree: unknown
    * key 400 / isolated-or-broken entry 502, never a silent fallback to the default
-   * repo). An absent archive directory = 200 + ok:false + human reason (no inspection
-   * has run — not a server error, the same degraded style as scan-report).
+   * repo). The ledger directory is NOT derived here: it comes from
+   * resolveInspectionDir (t261021-14) — the engine's own declared location
+   * (shared.INSPECTION_DIR), so the read face cannot drift from the writer
+   * again. The ledger is ONE global per-engine directory: per-project
+   * separation stays filename-whitelist-only inside the archive reader
+   * (unchanged); `project` still gates the anchor only. An absent archive
+   * directory = 200 + ok:false + human reason (no inspection has run — not a
+   * server error, the same degraded style as scan-report); a resolver failure
+   * = 200 + ok:false + the named error (explicit degradation, never a
+   * fallback literal).
    */
   async function handleInspectionArchive(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (req.method !== 'GET') {
@@ -1495,7 +1508,12 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     const a = anchorGuard(res, anchorOf(url))
     if (a === null) return
     try {
-      const dir = join(a.root, 'out', 'inspection')
+      const r = await resolveInspectionDir(repo)
+      if (!r.ok) {
+        sendJson(res, 200, { ok: false, error: r.error })
+        return
+      }
+      const dir = r.dir
       const period = url.searchParams.get('period')
       const instance = url.searchParams.get('instance')
       if (period !== null || instance !== null) {
