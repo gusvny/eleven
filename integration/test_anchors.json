@@ -448,6 +448,11 @@
       "note": "",
       "sync_path": ""
     },
+    "server/engine/tests/test_t261024_16_inspection_sign_gate.py": {
+      "anchor": "behaviour",
+      "note": "t261024-16 L1: the inspection human-gate sign handler judges in the order authorize -> validate_close_signature -> cross-project judge -> accept; agent role names refused by name under any caller identity; malformed/absent who fail-closed; undeclared human sign record-and-allow with the record row booked on the timeline; declared mismatched caller still refused",
+      "sync_path": "server/engine/inspection_flow.py"
+    },
     "server/engine/tests/test_t260912_03_authz_sign.py": {
       "anchor": "behaviour",
       "note": "",
@@ -2896,6 +2901,11 @@
     "integration/t260915-08/sc_inspection_sign_journey.py": {
       "anchor": "behaviour",
       "note": "",
+      "sync_path": ""
+    },
+    "integration/t261024-16/sc_inspection_sign_caller_identity.py": {
+      "anchor": "behaviour",
+      "note": "t261024-16: the sign channel judges caller identity per identity class end to end on a real stage ticket - declared foreign caller refused by name and kept in the gate; agent who refused by name even with a declared own-project caller; absent who refused for its own reason; undeclared human sign record-and-allow (ticket closes, ledger human_gate.who, named record row on the timeline)",
       "sync_path": ""
     },
     "integration/t260915-17/sc_ticket_time_file.mjs": {
@@ -5584,5 +5594,13 @@
     "anchor": "behaviour",
     "note": "t261019-02 developer L1: line_landing_closeout_verdict truth tables - vacuous passes (missing lines.json, absent ledger, no landing row), named blocks (landing row with ruling+line+ways-out+retry_qc wording, per-ticket/per-line isolation, malformed declaration, corrupt-ledger bad face, malformed/empty keys), blank ledger lines are not corruption, patch id literal pinned",
     "sync_path": ""
+  },
+  "integration/t261024-16/sc_inspection_sign_caller_identity.py": {
+    "anchor": "contract",
+    "note": "t261024-16: the inspection sign channel judges caller identity per identity class after the validate-first reorder - declared foreign caller refused by name and the gate stays closed; agent who refused by name even with a clean own-project caller; absent who refused for its own reason, fail-closed; undeclared bare human sign is record-and-allow (ticket closes, ledger human_gate.who lands, a named record row for the undeclared sign is readable on the face/timeline). Sub-strand of t260915-08-sign-journey, which owns the close chain."
+  },
+  "server/engine/tests/test_t261024_16_inspection_sign_gate.py": {
+    "anchor": "behaviour",
+    "note": "t261024-16 developer L1: direct-handler drives of InspectionPeriodicWorkflow.sign - order authorize -> validate -> cross-project judge -> accept; policy=record at the sign call site books the undeclared record row into the timeline; guards kept (agent refused by name, malformed/absent who fail-closed, declared mismatch refused)."
   }
 }

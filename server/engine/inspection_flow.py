@@ -1213,16 +1213,40 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
         """Human-gate signature (the existing approval-gate machinery). A signature whose
         gate does not match is ignored with a note, never accepted by mistake.
 
-        t260912-03：本巡检模板无授权面——带 authorize 的载荷在 validate 之前显式拒收
-        （validate_close_signature 不感知 authorize，若放行会被当作普通人门签字）。"""
+        t260912-03: this inspection template has no authorization face — an authorize
+        payload is rejected explicitly BEFORE validate (validate_close_signature does not
+        know authorize; letting it through would book it as an ordinary human sign).
+
+        t261024-16: judgement order = authorize -> validate_close_signature ->
+        cross-project judge -> accept. validate runs BEFORE the judge: an identity-class
+        refusal (agent self-sign / missing who / gate mismatch) must show under its own
+        rule name, never masked by the cross-project text (the user reads gate_error on
+        the face to learn why the sign did not land). validate is pure and accepts
+        nothing — refusing first never mis-books a payload. The cross-project judge
+        still runs BEFORE acceptance: a true cross-project overreach stays a structured
+        refusal (t260915-12 semantics unchanged). One deliberate relaxation, pinned to
+        this channel only (t261024-16): an UNDECLARED caller signing the human gate is
+        record-and-allow (policy="record" here) instead of the default refuse — the gate
+        waits for a human and the `who` receipt is this gate's identity authority
+        (validate stays fail-closed on agent names / malformed who); a DECLARED caller
+        from another project is still refused. Hard-coding policy="record" is a choice:
+        the env knob governs overreach writes, not human-gate reachability."""
         if getattr(sig, "authorize", None) is not None:
             self._gate_err = ("this inspection template has no authorization face; authorize payload "
                           "rejected (no signature recorded)")
             workflow.logger.warning("拒收 authorize 载荷：本巡检模板无人授权面")
             return
-        # t260915-12 跨项目闸（第二道，统一接闸不留分叉）；t260915-20 升级：target=
-        # 本票项目身份（SA ProjectKey 优先、payload project_key 回退，双空=""恒放行
-        # =老 history 现状不变）——异项目 caller 对已归属巡检票签字即结构化拒收。
+        payload, err = validate_close_signature(sig)
+        if err:
+            self._gate_err = err
+            workflow.logger.warning("signature refused: %s", err)
+            return
+        # t260915-12 cross-project judge (second gate, one seam for every write op);
+        # t260915-20: target = this ticket's project identity (SA ProjectKey first,
+        # payload project_key fallback, both empty = "" always allowed = old-history
+        # behavior) — a foreign-project caller signing an owned inspection ticket is a
+        # structured refusal. t261024-16: policy="record" at THIS call site only (see
+        # the handler docstring).
         sa_project = ""
         try:
             pairs = workflow.info().typed_search_attributes or []
@@ -1232,20 +1256,29 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
                     break
         except Exception:  # noqa: BLE001——SA 读面故障回落 payload 链（闸不因读面炸而失效）
             sa_project = ""
-        # _input 缺席防御：signal 先于 run 的 handler 直调形态（object.__new__ 面）不炸
+        # _input-absent defense: the signal-before-run handler-direct shape
+        # (object.__new__ face) must not raise
         target = sign_target_project(sa_project, str(getattr(getattr(self, "_input", None),
                                                              "project_key", "") or ""))
         g = cross_project_judge(str(getattr(sig, "caller_project", "") or ""), target,
-                                str(getattr(sig, "cross_project_note", "") or ""))
+                                str(getattr(sig, "cross_project_note", "") or ""),
+                                policy="record")
         if g["action"] == "refuse":
             self._gate_err = g["why"]
             workflow.logger.warning("%s", g["why"])
             return
-        payload, err = validate_close_signature(sig)
-        if err:
-            self._gate_err = err
-            workflow.logger.warning("拒收签字：%s", err)
-            return
+        if g["record"] is not None:
+            # t261024-16 (review C1): the record leg must not be dropped silently —
+            # this workflow family has no cross_project_uses face, so the record row
+            # lands on the timeline (pure in-memory append, replay-safe, same face as
+            # _enter).
+            row = dict(g["record"])
+            row["target_project"] = target
+            self.timeline.append({
+                "at": workflow.now().isoformat(timespec="seconds"),
+                "stage": self.stage, "state": self.stage_state,
+                "reason": "cross-project gate record (sign): %s"
+                          % json.dumps(row, ensure_ascii=False, sort_keys=True)})
         if self._close_sig is None:
             self._close_sig = payload
 

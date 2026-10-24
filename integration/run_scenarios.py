@@ -2403,6 +2403,33 @@ SCENARIOS = [
     ("t260915-08-sign-journey",
      "巡检人门签字链路真签收口（t260915-08 验收①「真签一张沙箱巡检票收口」+④零旁路，灰盒 L3 真台真票 exclusive，镜 t260905-03 journey+lib_inspection，取舍见方案 §3.5 镜C）：夹具声明+进程戳实例开真票→close/awaiting-human 常态 face 无 human_gate 键（签字前常态契约，待签判定走 stage_state）→错 gate 签=workflow 拒收 gate_error 可读且票留门内→agent 自签拒收（对的 gate 也不放）→对 gate 经工作台同款通道（client.py ticket op=sign——node.ts op=sign 调的即它）真签→closed+human_gate 落面（who 对）+落账在（out/inspection/<票号>.json）；附带签字前 ticket-query engine/ticket 面（gate_id/instance_id/period/report_path/title，坑A 活体半边）；板面收录子用例——收口票进 ticket-list{kind:inspection}（完整巡检形+inspection_filter 白名单回执，SANDBAR_INSPECTION_DECL 注入声明，规格① 真台端到端）。与 t260905-03-period-journey（巡检全链旅程：发现落面/心跳证明/双实例不串票）intent 分工：彼守链路质量，本守「签字通道把票签收口」；私有队列+StageWorker 自供给（生产 worker 不注册本 workflow 的竞态消除面照搬）。实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿；temporalio/共享测试台缺席=ENV_FAIL exit 2 点名。tier: real shared-stage journey over a fixture sandbox ticket (real Temporal workflow + real sign channel — no offline seam reaches the sign gate); cost: minutes, one exclusive stage",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t260915-08/sc_inspection_sign_journey.py", "exclusive"),
+    # ---- t261024-16: inspection human-gate sign x caller identity (gate ordering +
+    # undeclared record-and-allow at the sign call site). Intent division:
+    # t260915-08-sign-journey owns "the sign channel closes the ticket" (its four
+    # acceptance assertions, unchanged); this case owns how the sign channel judges
+    # CALLER IDENTITY per identity class after the validate-first reorder.
+    ("t261024-16-sign-caller-identity",
+     "Inspection human-gate sign x caller identity (t261024-16, grey-box L3, real stage "
+     "+ real ticket, exclusive; self-supplied plain-process bench + private queue + "
+     "StageWorker, mirrors t260915-08-sign-journey fixtures): A guard — declared FOREIGN "
+     "caller sign refused by name (cross-project rule named, both projects readable), "
+     "ticket stays in the gate, never terminal (validate-first reorder must not open the "
+     "foreign channel); B guard — agent who with a declared OWN-project caller still "
+     "refused by name (self-sign rule wins regardless of caller identity); C injected — "
+     "absent who refused for its OWN reason (the refusal names the missing who, never a "
+     "generic cross-project mask) and fail-closed (no terminal); D core — undeclared "
+     "(bare workbench) human sign is record-and-allow: ticket closes, ledger lands with "
+     "human_gate.who, AND a named record row for the undeclared-caller sign is readable "
+     "on the ticket face/timeline (acceptance recorded, not silent). Division: "
+     "t260915-08-sign-journey owns the close chain and its four acceptance assertions "
+     "(unchanged, not repeated here); t260915-12 offline/offline knob scenarios own the "
+     "judge matrix as pure functions; this case owns the identity-class behaviour of the "
+     "sign channel end to end. C/D red before the fix lands (TDD signal), A/B guards "
+     "must stay green across it; arbitrate/merge must be green. Bench/temporalio missing "
+     "= ENV_FAIL exit 2, named. tier: real shared-stage journey over a fixture sandbox "
+     "ticket (real Temporal workflow + real sign channel with injected caller identity — "
+     "no offline seam reaches the sign gate); cost: minutes, one exclusive stage",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261024-16/sc_inspection_sign_caller_identity.py", "exclusive"),
 
 # t260915-09-epics-client-project-wire：t261005-10 UI-2 退役（宿主立项单视图随 Epics 迁入面板 Epics tab 退役；面板 epic 面由 t261005-10 journey U1/U2 承接；留痕 integration/retired-scenarios.md）
 
