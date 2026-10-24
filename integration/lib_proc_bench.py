@@ -109,8 +109,13 @@ def ensure(modules=(), namespace=DEFAULT_NAMESPACE, host=None):
         ns = _namespace(modules, namespace)
         if not _namespace_exists(port, ns, modules):
             ns = namespace or DEFAULT_NAMESPACE
-        os.environ.setdefault("SANDBAR_TARGET_HOST", "127.0.0.1:%d" % port)
-        os.environ.setdefault("SANDBAR_NAMESPACE", ns)
+        os.environ["SANDBAR_TARGET_HOST"] = "127.0.0.1:%d" % port
+        os.environ["SANDBAR_NAMESPACE"] = ns   # a declared-but-absent namespace must lose
+        for mod in modules:
+            if hasattr(mod, "TEST_NAMESPACE"):
+                mod.TEST_NAMESPACE = ns
+            if hasattr(mod, "TEST_TARGET_HOST"):
+                mod.TEST_TARGET_HOST = "127.0.0.1:%d" % port
         return {"started": False, "port": port, "namespace": ns, "handle": None}
     # We start the bench, so the namespace is the bench's own: the docker stage's
     # namespace name does not exist here and every child would ask for it.
