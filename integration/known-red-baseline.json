@@ -622,7 +622,7 @@
       "name": "t261005-10-ui2-epics-docs-metrics-tabs-journey",
       "verdict": "booked",
       "home": "产品面：同一条根因（Epics 页签渲染器被遮蔽），本节守页签门面",
-      "note": "261024 挂账（integration 岗位判词）：与 t261021-13-epic-doc-link-opens-reader 同因（panel-page.ts 两次 renderEpics，metrics 那支遮蔽页签那支）；定点复跑红 1 腿。改名后同场景 PASS 15.7s。",
+      "note": "261024 挂账（integration 岗位判词）：与 t261021-13-epic-doc-link-opens-reader 同因（panel-page.ts 两次 renderEpics，metrics 那支遮蔽页签那支）；定点复跑红 1 个子用例。改名后同场景 PASS 15.7s。",
       "booked_at": "2026-10-24T07:40:00+08:00",
       "booked_sha": "0b58cd27a1e879b1a6b3859fa9189be805e4cee6",
       "owner": "integration 岗（跟踪：晋级后在 main 基泳道重开修复票）",
