@@ -332,7 +332,13 @@ def test_g_real_registry_missing_name_fail_closed():
     p = subprocess.run(
         [sys.executable, "integration/run_scenarios.py", "--reprobe",
          "t26091709-ghost-a,t26091709-ghost-b"],
-        cwd=str(REPO), capture_output=True, text=True, timeout=120)
+        cwd=str(REPO), capture_output=True, text=True,
+        # t261021-15 gen4: the subprocess itself finishes in ~0.2 s, but under a
+        # full-corridor load (5683 tests, ~10 min wall) the 120 s cap was once
+        # exhausted and turned a green contract into a corridor red (measured on
+        # the t261021-15 merge_check round). 300 s absorbs the jitter without
+        # weakening any assertion.
+        timeout=300)
     lines = [ln for ln in p.stdout.splitlines()
              if ln.startswith("REPROBE_SUMMARY ")]
     assert p.returncode == 2 and len(lines) == 1

@@ -146,18 +146,18 @@ class PollerLiveCountTest(unittest.TestCase):
 
     def test_live_stale_and_unverifiable_are_separated(self):
         me = os.getpid()
-        pollers = [self._P("%d@192.168.5.132" % me),      # 活（就是本进程）
-                   self._P("999999@192.168.5.132"),       # 已死 ⇒ 历史残留，不算活
+        pollers = [self._P("%d@192.0.2.X" % me),      # 活（就是本进程）
+                   self._P("999999@192.0.2.X"),       # 已死 ⇒ 历史残留，不算活
                    self._P("no-pid@host")]                # 无 pid ⇒ 无法验活
-        live, stale_hist, unver = eo.classify_pollers(pollers, {"192.168.5.132"}, shared.pid_alive)
-        self.assertEqual([x["identity"] for x in live], ["%d@192.168.5.132" % me])
-        self.assertEqual([x["identity"] for x in stale_hist], ["999999@192.168.5.132"])
+        live, stale_hist, unver = eo.classify_pollers(pollers, {"192.0.2.X"}, shared.pid_alive)
+        self.assertEqual([x["identity"] for x in live], ["%d@192.0.2.X" % me])
+        self.assertEqual([x["identity"] for x in stale_hist], ["999999@192.0.2.X"])
         self.assertEqual([x["identity"] for x in unver], ["no-pid@host"])
         self.assertIn("历史残留", stale_hist[0]["note"])
         self.assertIn("无法验活", unver[0]["note"])
 
     def test_foreign_host_alias_is_annotation_only(self):
-        """host 段不在本机别名集里**不**等于不可验：实测 identity 用 192.168.5.132，
+        """host 段不在本机别名集里**不**等于不可验：实测 identity 用 192.0.2.X，
         而我们连的是 127.0.0.1:7233 —— 若按 host 判就会把活 poller 读成 0（假红）。"""
         me = os.getpid()
         live, _s, unver = eo.classify_pollers([self._P("%d@10.0.0.9" % me)], set(),
@@ -324,8 +324,14 @@ class RestartIsKillOnlyTest(unittest.TestCase):
         eo.DATA, eo.ENGINE = tmp, tmp / "server" / "engine"
         eo.tw.set_root(tmp / "server" / "engine")
         try:
+            # t261021-15 gen5: wait=20 covers the respawn in ~0.2 s standalone,
+            # but a full-corridor load (5800+ tests, ~10 min wall) once stretched
+            # the same run past 20 s and turned the green contract into a corridor
+            # red (measured on the t261021-15 merge_check rounds — the second
+            # distinct load-jitter red there). 60 s absorbs the jitter; every
+            # assertion on the drain/sampling contract is untouched.
             ns = argparse.Namespace(host="127.0.0.1:1", ns="default", repo="", scope="lane:t9",
-                                    replace=True, wait=20.0, old_drain=30.0)
+                                    replace=True, wait=60.0, old_drain=30.0)
             res = eo.cmd_restart(ns)
         finally:
             eo.DATA, eo.ENGINE = data_backup, engine_backup

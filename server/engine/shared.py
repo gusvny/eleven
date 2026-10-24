@@ -5693,6 +5693,103 @@ def plan_write_set_mismatch(initial: Any, plan_files: Any) -> List[str]:
     return refresh_write_set(initial, plan_files)[1]
 
 
+# ---------------------------------------------------------------------------
+# t261021-15: the plan-side write-set gap gate (pure faces).
+#
+# Incident: six tickets were born with a write set of only the auto-injected
+# `integration/`; create_plan returned files_changed=[]; the union admitted
+# nothing; implement then reverted every out-of-set edit for three rounds. The
+# gate refuses to advance to implement when THREE facts hold together (an
+# empty receipt alone must stay a non-blocking reminder — 260930 decision):
+# integration-only initial set + empty/absent files_changed + no
+# no_file_changes declaration.
+# ---------------------------------------------------------------------------
+
+#: The named stop code prefixing the refusal reason (a named stop with its own
+#: code, never a generic blocked). The code-prefixed text classifies as
+#: judgement under classify_stop_tier (human lift), which matches the lawful
+#: outs: rework back to create_plan, or host path authorization.
+WRITE_SET_PLAN_GAP_STOP_CODE = "WRITE_SET_PLAN_GAP"
+
+#: Prose markers co-occurring with "write set" that suggest the plan NEEDS a
+#: wider set (log-only enrichment; a miss never gates — a heuristic must stay
+#: off the refusal path).
+_PROSE_WIDER_MARKERS = ("wider", "widen", "widened", "authorize", "authorise")
+
+
+def write_set_is_integration_only(ws: Any) -> bool:
+    """Does the write set carry NO entry outside the auto-injected integration/
+    (pure)? Non-empty list of strings whose every top-level scope is
+    "integration". Strict on shape: a non-list or a non-string entry returns
+    False (fail-open onto today's behaviour — the gate never crashes on a
+    malformed stored set; the shape faces own that report).
+
+    Which set to feed: the ticket's INITIAL set (`initial_write_set`,
+    t261009-58 key) when present, falling back to `write_set` — requirement 1
+    says "the ticket's initial write set"; after a rework round the current set
+    may carry a prior plan's union, and a prior widening is a real scope, not a
+    gap."""
+    if not isinstance(ws, list) or not ws:
+        return False
+    if any(not isinstance(x, str) for x in ws):
+        return False
+
+    def _scope(entry: str) -> str:
+        # a directory-form entry ("integration/") carries its own name as the
+        # scope — _annex_scope_root is file-shaped and returns "" for it
+        e = str(entry or "").strip()
+        if e.endswith("/"):
+            e = e.rstrip("/")
+            return e.split("/", 1)[0] if "/" in e else e
+        return _annex_scope_root(e)
+
+    return all(_scope(x) == "integration" for x in ws)
+
+
+def plan_prose_needs_wider_write_set(*texts: Any) -> bool:
+    """Does any plan-receipt text ask for a wider write set in prose (pure,
+    heuristic)? True only when ONE text mentions the write set AND a
+    widening/authorization word — the t261021-11 receipt said the conversion
+    was 'flagged for widened write set' while files_changed stayed []. A miss
+    never gates: this only sharpens the log line (the structured field, or
+    nothing, feeds the union)."""
+    for t in texts:
+        if not isinstance(t, str) or not t:
+            continue
+        low = t.lower()
+        if "write set" not in low:
+            continue
+        if any(m in low for m in _PROSE_WIDER_MARKERS):
+            return True
+    return False
+
+
+def plan_write_set_gap_stop_reason(initial_ws: Any, files_state: str,
+                                   has_prose_signal: bool = False) -> str:
+    """The named stop reason for the plan-side gap (pure, ticket-face text,
+    English per rule 6). Starts with the stop code, names the three facts
+    (integration-only initial set, empty/absent receipt, no declaration) and
+    the one lawful way out."""
+    entries = ", ".join(str(x) for x in (initial_ws or [])) or "(empty)"
+    if files_state == "empty":
+        receipt = "an empty array"
+    elif files_state == "absent":
+        receipt = "absent"
+    else:
+        receipt = str(files_state)
+    prose = (" The plan prose itself names a wider write set, so the empty "
+             "receipt is a shape gap, not a no-change claim."
+             if has_prose_signal else "")
+    return ("%s: refusing to advance to implement — the write set cannot hold "
+            "this plan. Three facts: (1) the initial write set is "
+            "integration-only (%s); (2) the create_plan receipt files_changed "
+            "is %s; (3) no_file_changes is not declared.%s Lawful way out: "
+            "rework back to create_plan and list every file the plan will "
+            "change in files_changed (the write set follows the plan), or ask "
+            "the host to authorize specific paths."
+            % (WRITE_SET_PLAN_GAP_STOP_CODE, entries, receipt, prose))
+
+
 def render_write_set_history(record: Any) -> str:
     """The history face as one human-readable string (pure; scenario contract
     name). Consumes ONLY the record — never a quarantine diff. Answers "who

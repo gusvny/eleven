@@ -1651,6 +1651,11 @@
       "anchor": "behaviour",
       "note": "t261024-30 L1: one named record per terminal line round - the settle guard books exactly one range-growth row naming the cause when the cert append faults, the env-only shape certifies green with the unverified count named, the old face-red/content-clean shape replays to the same single record, and the record stamps the verdict rule it used",
       "sync_path": ""
+    },
+    "server/engine/tests/test_t261021_15_plan_gap_gate.py": {
+      "anchor": "contract",
+      "note": "t261021-15 L1: the plan-side write-set gap gate pure faces and stub-shell matrix - incident conjunction (integration-only initial+current set + empty/absent files_changed + no no_file_changes) refuses named WRITE_SET_PLAN_GAP with three facts and both lawful outs; each fact missing in turn proceeds (real scope, non-empty receipt, declared no_file_changes); prior widening counts as real scope; prose-vs-receipt mismatch named in the log and inside the stop reason; stop classifies judgement; unpatched gate replays legacy byte for byte; malformed receipts never gate or crash",
+      "sync_path": "server/engine/dev_lane.py; server/engine/shared.py"
     }
   },
   "scenarios": {
@@ -5612,6 +5617,16 @@
       "anchor": "behaviour",
       "note": "t261024-30: a round dying inside its settle window leaves exactly ONE named record read from the reader side - a failing append surfaces the original error and books one range-growth row naming the cause, a totally failing append face stays loud on stderr, an abort inside the settle window books exactly one row and a second none, and the run row project and the round face resolve to ONE develop dir",
       "sync_path": ""
+    },
+    "integration/t261021-15/sc_t261021_15_plan_gap_gate.py": {
+      "anchor": "contract",
+      "note": "t261021-15 grey-box L3: the plan-side write-set gap gate over the real _refresh_write_set_after_plan - incident conjunction (integration-only set + empty/absent files_changed + no no_file_changes) refuses named WRITE_SET_PLAN_GAP with three facts and both lawful outs; real scope keeps the 260930 reminder; each fact missing in turn proceeds; prior widening counts as real scope; prose-vs-receipt mismatch named in the log; stop classifies judgement; unpatched gate replays legacy; source locks on the review_plan pass branch blocking instead of advancing",
+      "sync_path": "server/engine/dev_lane.py; server/engine/shared.py"
+    },
+    "integration/t261021-15/sc_t261021_15_landing_union_wholeness.py": {
+      "anchor": "contract",
+      "note": "t261021-15 grey-box L3: a lane that passed its own targeted faces must not carry a HALF landing union - every scenario cmd naming a repo file finds it on disk, every anchor manifest path key exists, the engine import chain (dev_lane/agent_activities/shared) imports whole in a fresh process, and a fabricated registry with one missing file fails by name (the guard is not vacuous)",
+      "sync_path": "integration/run_scenarios.py; integration/test_anchors.json"
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

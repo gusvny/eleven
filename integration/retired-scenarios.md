@@ -222,3 +222,41 @@ t261002-03 并发标定合并处置）——按 261002 直修批同款「终态/
 - 为什么退：它锁的是 **`record` 现状**，而该现状已由 `t260925-08`（KI-119 收口）翻成 `refuse` ⇒ **断言对象已被产品自己废弃**（"移除机制时钉住它的东西只扫了一半"，同 `KI-01M4FEPBXC34V3KD5W7CMDZEPR`）；台账 5 行 **fail 5（一次没绿过）**、最后一行 10-10 08:58 ⇒ 典型的陈旧幻影红。它自身第 275-276 行还断言"真链路场景已登记"，与该场景同批退役。
 - 移交：翻严后的新契约就由 `t260925-08` 两场景钉住（真源与它同款模式）。
 - 认赔：无（断言对象已不存在，属"无对象"而非"降覆盖"）。
+
+---
+
+## 261022 退役批（宿主令 261022，主侧 091a8d1d 撤注册；本票 t261021-15 补文件删除与留痕）
+
+### scenario-guard-pipeline-landed（integration/sc_scenarios_guard_pipeline.py）
+- 守什么：UT 工序与 verify test 道落地防回退（合并守卫，exclusive 池）。
+- 为什么退：整条跑 engine pytest 走廊（900s 超时兜底才停），与 L1 电池重复，每轮白烧 ~15 分钟（宿主令 261022）。
+- 移交：守卫语义由 engine L1 电池承担（arbitrate 已改为本地定点跑受影响面 pytest）。
+- 认赔：走廊级「全量 UT 一次跑绿」的合并守卫面不再有场景，靠 arbitrate 定点跑与 lint 静态闸。
+
+### t260910-04-console-paused-list（integration/t260910-04/sc_console_paused_list.mjs）
+- 守什么：console 接口面暂停透传全链（GET /wf/tickets 行 paused/paused_phase 与 snapshot 逐键一致），真 docker 台 + 私有全档台，exclusive 池。
+- 为什么退：全场最重 docker 舞台旅程（274s）且长期红；docker 台退役后一并退场（宿主令 261022）。
+- 移交：引擎面暂停语义由 t260908-01-ticket-pause-gate（engine 池）承接；workbench 假引擎 UT 管投影形状。
+- 认赔：console HTTP 投影与 snapshot 的**逐键一致性**不再有真台场景——投影回归只能靠 L1 形状桩。
+
+---
+
+## 261023 暂缓批（t261021-15 仲裁 round 15 option b——**非退役**，判定器随 line squash 归队）
+
+两条场景从 line head 3bfe0581 随 landing union 复位，但其**被判定文件**不在此道写集
+（`server/plugins/workbench/smoke/agent-usage.mjs`、`server/tools/verify_lane.py`，
+均属其他票/line 落地件），在本道恒红。按仲裁处置：注册整条注释 + 锚键摘除 + 本留痕；
+**line squash merge 落地时逐字恢复**（注册块以 `# ---- deferred by t261021-15` 头注释
+标位，锚键原文在 git 历史）。
+
+### t261021-11-produced-face-english
+- 守什么：引擎产出面（gate refusals / blocked detail / request refusals / note builders）ASCII + workbench 镜像无 CJK 尾注分叉。
+- 为什么暂缓：其 G 面判 workbench 镜像文件，本道仍是 main 侧未清理版（7 处 等共 尾注）。
+- 移交：workbench 镜像清理件随 line squash 归队后逐字恢复本条。
+- 认赔：本道在产引擎面暂无该对抗性运行时探针（L1 静态闸仍在）。
+
+### t261022-09-quick-gate-scope
+- 守什么：quickmanual 闸由证据声明驱动（收窄具名 / unresolved 为产品红 / only_check 精准跑）。
+- 为什么暂缓：D1-D3 面依赖 line 侧 `server/tools/verify_lane.py`（only_check 支持），本道是 main 侧版。
+- 移交：verify_lane.py 随 line squash 归队后逐字恢复本条。
+- 认赔：quick 闸收窄契约本道暂无场景（其 L1 真值表在 test_quickmanual_lane.py 仍在）。

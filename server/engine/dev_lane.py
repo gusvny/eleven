@@ -251,6 +251,11 @@ with workflow.unsafe.imports_passed_through():
         WS_WIDEN_ANNEX,
         WS_WIDEN_PLAN_UNION,
         WRITE_SET_RECORD_NAME,
+        # t261021-15: the plan-side write-set gap gate (pure faces)
+        WRITE_SET_PLAN_GAP_STOP_CODE,
+        plan_prose_needs_wider_write_set,
+        plan_write_set_gap_stop_reason,
+        write_set_is_integration_only,
         annex_admission,
         annex_request_faults,
         apply_write_set_widening,
@@ -593,6 +598,11 @@ SANDBAR_TEST_DISABLE_KI061 = os.environ.get("SANDBAR_TEST_DISABLE_KI061") == "1"
 # → visible red + warning, write set left untouched (no more silent no-op).
 # Same-shaped boolean gate (see the first PATCH_ID note).
 WRITE_SET_FAULT_PATCH_ID = "dev-lane-write-set-fault"
+# t261021-15: the plan-side write-set gap gate. Unique id per entry (the SDK
+# memoizes the first patched() verdict per id), so an in-flight ticket replaying
+# across this code change never sees the gate: existing tickets already past
+# create_plan keep their history byte for byte (requirement 5).
+WRITE_SET_PLAN_GAP_PATCH_ID = "dev-lane-write-set-plan-gap-v1"
 # t260904-18 KI-050 gate 3: at lane start, preload verify.yaml's ui_evidence.dirs
 # declaration into meta (disk read happens in an activity, the workflow only reads meta
 # = replay safe); the review_gate patched branch judges UI tickets from it.
@@ -1842,10 +1852,18 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             entry["gen"] = self._gen(step_id)
         self.meta.setdefault("handoffs", []).append(entry)
 
-    def _refresh_write_set_after_plan(self) -> None:
+    def _refresh_write_set_after_plan(self) -> Optional[str]:
         """Write-set refresh after the plan is finalized (conditional passes included)
         (t260829-07; the inline code from the old review_plan ok branch moved up
-        verbatim — the selfcheck_write_lifecycle section E pins on that exact string)."""
+        verbatim — the selfcheck_write_lifecycle section E pins on that exact string).
+
+        t261021-15: returns the named gap-stop reason when the plan-side gate
+        fires (integration-only initial set + empty/absent files_changed + no
+        no_file_changes declaration, all three together — an empty receipt alone
+        keeps the 260930 non-blocking reminder). The caller blocks on the reason
+        instead of advancing to implement. Every other path returns None (all
+        pre-existing callers/tests ignore the return, so the widened signature
+        is compatible)."""
         # t260829-07: plan finalized → refresh the write set (union, pure function; the
         # list comes from the create_plan receipt — already in workflow history, so
         # deterministic).
@@ -1866,6 +1884,41 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             # discussion.
             plan_shape = (self.results.get("create_plan") or {}).get(
                 "files_changed_shape") or "absent"
+            # t261021-15: the plan-side write-set gap gate (three-fact
+            # conjunction). Runs BEFORE the KI-049 fault branch: for the
+            # incident shape (files_changed=[] on an integration-only set) the
+            # empty-array case IS the fault branch and it returns after the
+            # non-blocking reminder, so the gate must decide here, before that
+            # return — a set that cannot hold its own plan never reaches
+            # implement. Fact 1 reads the INITIAL set (initial_write_set, AND the
+            # current set: a prior widening is a real scope, not a gap.
+            # falling back to write_set): a prior plan's widening is a real
+            # scope, not a gap. Patch-gated (replay-safe, requirement 5).
+            if workflow.patched(WRITE_SET_PLAN_GAP_PATCH_ID) \
+                    and plan_shape != "malformed" \
+                    and (plan_files == [] or plan_files is None) \
+                    and not bool(self.meta.get("no_file_changes")):
+                initial_ws = self.meta.get("initial_write_set")
+                if not isinstance(initial_ws, list) or not initial_ws:
+                    initial_ws = self.meta.get("write_set")
+                # a prior plan round's widening put real scope into the CURRENT
+                # set — that round was already admitted, so a later empty
+                # receipt is a reminder case, never a gap refusal
+                if write_set_is_integration_only(initial_ws) \
+                        and write_set_is_integration_only(
+                            self.meta.get("write_set")):
+                    _receipt = self.results.get("create_plan") or {}
+                    prose = plan_prose_needs_wider_write_set(
+                        _receipt.get("summary"), _receipt.get("report"))
+                    reason = plan_write_set_gap_stop_reason(
+                        initial_ws,
+                        "empty" if plan_files == [] else "absent",
+                        prose)
+                    self.meta["write_set_plan_gap"] = {
+                        "stage": "create_plan", "reason": reason,
+                        "ts": self._now_epoch()}
+                    self._log(reason)
+                    return reason
             fault = None
             if plan_shape == "malformed" and workflow.patched(WRITE_SET_FAULT_PATCH_ID):
                 fault = ("files_changed shape invalid (%s, not a string array — "
@@ -1878,6 +1931,18 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 self.meta["write_set_refresh_fault"] = {
                     "stage": "create_plan", "reason": fault,
                     "ts": self._now_epoch()}
+                # t261021-15: name the prose-vs-receipt mismatch explicitly —
+                # when the plan text itself asks for a wider write set, an
+                # empty files_changed is a shape gap, not a no-change claim
+                # (the union is fed by the structured field, never the prose).
+                if plan_files == [] and plan_prose_needs_wider_write_set(
+                        (self.results.get("create_plan") or {}).get("summary"),
+                        (self.results.get("create_plan") or {}).get("report")):
+                    self._log("create_plan receipt names a wider write set in "
+                              "prose but files_changed is empty (t261021-15): "
+                              "the union is fed by the structured field, not "
+                              "the prose — refill files_changed or the set "
+                              "stays as-is")
                 # 260930（dengzhufpv E6／批次 A）：**两态区分 + 去掉会诱发空转的处方**。
                 # 实测（t260929-15/-29/-31/-33 四次）：写集零污染、票自行跑完、**零交付损失**，
                 # 四次都不需要 rework——旧文案的「处置：rework 回 create_plan」把人引去一轮空转
@@ -4562,7 +4627,15 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     # review_plan passes; a blocked create_plan leaves the main loop
                     # directly and can never arrive here in a bad state.
                     if workflow.patched(REFRESH_WRITE_SET_PATCH_ID):
-                        self._refresh_write_set_after_plan()
+                        _ws_gap = self._refresh_write_set_after_plan()
+                        if _ws_gap and workflow.patched(WRITE_SET_PLAN_GAP_PATCH_ID):
+                            # t261021-15: a set that cannot hold its own plan
+                            # never enters implement (requirement 3) — named
+                            # stop, not a generic blocked. _blocked pins the
+                            # reason and its tier on the ticket face and wakes
+                            # on retry_qc or rework (the two lawful outs).
+                            await self._blocked("review_plan", _ws_gap)
+                            continue
                         # t261009-58: the union result becomes the ticket's durable
                         # effective-write-set record (condition 1). The widening was
                         # stashed by the refresh; persist it right here, while the
