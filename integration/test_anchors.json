@@ -1013,6 +1013,11 @@
       "note": "t261004-28 carrier: the t261004-19 source-order lock (epic assignment must precede the executor gate's consumption in cmd_ticket_start; UnboundLocalError defect class); author text preserved at integration/t261004-28/evidence/t261004-19_source_order_lock.py.txt",
       "sync_path": ""
     },
+    "server/engine/tests/test_t261024_50_known_red_candidate_roster.py": {
+      "anchor": "behaviour",
+      "note": "t261024-50 L1 (developer): the candidate-tree roster truth table over a real tmp git fixture - a booking on the line branch reaches the round roster with main untouched and merge-base(main, line tip) == main; non-JSON / non-object books raise the named known_red_roster_unreadable CertifyError (never a silent empty roster); a book on no declared repo is the legal inert {}; two carriers raise the named known_red_roster_ambiguous; the SANDBAR_KNOWN_RED_ROSTER env face injects the carrier worktree copy and a missing worktree file yields the named roster_env_not_injected note (never a guessed skip); scheduled-tick wiring surfaces the path and note on the tick entry.",
+      "sync_path": "server/engine/develop_certify.py"
+    },
     "server/engine/tests/test_t261004_23_executor_requests.py": {
       "anchor": "contract",
       "note": "t261004-20 backfill: §8 write-side contract (named refusals, row shape, TS mirror drift lock)",
@@ -4160,6 +4165,10 @@
       "anchor": "behaviour",
       "note": "t261005-02 self-heal component contract (status face + cancel act)",
       "sync_path": ""
+    },
+    "integration/t261024-50/sc_t261024_50_book_never_blocks_promotion.py": {
+      "anchor": "behaviour",
+      "note": "t261024-50 L3: the booking -> promotion-verdict journey on real git history - a booking committed on the line branch between two landings keeps merge-base(main, cert rev) == main and merge-base(main, line tip) == main with main byte-identical (no main-side commit), the round roster read at the declared line branch tip contains the fresh booking, a corrupt book raises the named known_red_roster_unreadable instead of a silent empty roster, a bookless second repo keeps the carrier visible, and two carrier repos are refused by a named ambiguity error (known_red_roster_ambiguous)."
     },
     "integration/t261005-02/sc_watchdog_self_heal_fires_once.py": {
       "anchor": "behaviour",

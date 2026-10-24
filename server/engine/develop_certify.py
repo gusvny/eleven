@@ -1029,18 +1029,167 @@ def _ensure_baseline(project, repo, runner, flaky):
             "cache_built:%s@%s" % (repo, main_tip[:12]))
 
 
-def _known_red_roster():
-    """The maintained known-red roster (the flaky list's seed): this checkout's
-    integration/known-red-baseline.json. Absent/unreadable -> {} (no flaky
-    names; the comparison then treats every line fail as a potential
-    regression, fail-closed), never a guessed roster."""
-    p = (Path(__file__).resolve().parents[2]
-         / "integration" / "known-red-baseline.json")
+def _known_red_rel():
+    import shared
+    return shared.KNOWN_RED_BASELINE_REL
+
+
+def _known_red_book_show(repo_wt, ref):
+    """The book's text at one branch tip: `git -C <wt> show <ref>:<rel>`.
+    Returns (returncode, stdout, stderr) — the caller decides which outcome
+    means "absent" and which means "unreadable" (never a guessed one)."""
+    import subprocess
+    rel = _known_red_rel()
     try:
-        obj = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        p = subprocess.run(
+            ["git", "-C", str(repo_wt), "show", "%s:%s" % (ref, rel)],
+            capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 1, "", "git show failed: %s: %s" % (type(e).__name__, e)
+    return p.returncode, p.stdout or "", p.stderr or ""
+
+
+def _line_roster_for_round(project, line):
+    """One round's roster read: (roster, worktree_file_or_None, note).
+
+    The book-level faces stay FAIL-LOUD (t261024-50): an unreadable or
+    ambiguous book raises CertifyError — the round never starts on a guessed
+    empty roster. Declaration-level unavailability (the line itself cannot
+    be resolved here) degrades to the inert {} with the reason carried as a
+    named note: the round will name the same declaration problem when it
+    resolves its candidate, so this read must not pre-empt it with a
+    different error shape."""
+    try:
+        roster = _known_red_roster(project, line)
+    except CertifyError as e:
+        if str(e).startswith("known_red_roster_"):
+            raise
+        return {}, None, str(e)
+    wt_file, note = known_red_roster_worktree_file(project, line)
+    return roster, wt_file, note
+
+
+def known_red_roster_source(project, line):
+    """The ONE declared repository whose line branch carries the known-red
+    book (t261024-50: the book's home is the CANDIDATE tree — the declared
+    line branch tip — never main's tip).
+
+    Why the candidate side: promotion is a strict fast-forward
+    (merge-base(main, certified revision) == main). A booking committed on
+    MAIN breaks that; a booking committed on the LINE never does, and the
+    promotion that follows fast-forwards main onto the booking — the book
+    travels with landings and needs no main-side commit. The round reads the
+    branch TIP (not the certified landing revision) because an operator books
+    a red exactly after a landing's round went red on it, and the next round
+    re-certifies the same landing: read at the landing revision, the booking
+    would not be seen until the next landing.
+
+    Returns ((repo, branch, wt_path), "") when exactly one declared repo
+    carries the book at its branch tip, (None, "") when NO declared repo
+    carries it (the deliberate legal-empty: the mechanism is inert by
+    "nothing booked", never by "could not read"), or (None, why) with a
+    named why. Borrowed failure-mode decisions (same parity as
+    agent_activities._load_sensitive_roster): absent file = legal empty;
+    present-but-unreadable / malformed = fail-closed named error; per-entry
+    drop rules stay with the roster's consumer (shared.known_red_roster)."""
+    if not isinstance(project, str) or not project.strip():
+        return None, "project_unknown"
+    try:
+        from develop_line import load_line  # local: develop_line imports us
+        import shared
+    except Exception as e:  # noqa: BLE001
+        return None, "import_failed:%s" % type(e).__name__
+    try:
+        decl = load_line(project, line)
+    except Exception as e:  # noqa: BLE001
+        return None, "line_undeclared:%s" % e
+    try:
+        wt_root = shared.develop_dir(project) / "wt"
+    except Exception as e:  # noqa: BLE001
+        return None, "develop_dir_unresolved:%s" % type(e).__name__
+    rel = _known_red_rel()
+    carriers = []
+    for repo_meta in decl.repositories or []:
+        name = getattr(repo_meta, "name", "")
+        branch = getattr(repo_meta, "branch", "")
+        if not name or not branch:
+            return None, "declaration_incomplete:%s" % (name or "?")
+        ref = "refs/heads/%s" % branch
+        wt = wt_root / name
+        if not _git_ref(wt, ref):
+            # An unresolvable branch tip: the line cannot be certified from
+            # this repo anyway (line_head_candidate names that separately) —
+            # the roster scan simply does not count it as a carrier.
+            continue
+        rc, _out, _err = _known_red_book_show(wt, ref)
+        if rc == 0:
+            carriers.append((name, branch, wt))
+    if not carriers:
+        return None, ""
+    if len(carriers) > 1:
+        return None, ("known_red_roster_ambiguous:%s"
+                      % ",".join(sorted(c[0] for c in carriers)))
+    return carriers[0], ""
+
+
+def known_red_roster_worktree_file(project, line):
+    """The working-tree copy of the book inside the carrier repo's line
+    worktree — the path handed to the round's child runner through
+    SANDBAR_KNOWN_RED_ROSTER. Returns (path_or_None, note_or_""): the path
+    is None (with a named note) when no repo carries the book at its branch
+    tip, when the carrier is ambiguous, or when the carrier's working-tree
+    file is absent — that last one is RECORDED, never a guessed skip
+    (review condition 2, t261024-50)."""
+    (src, why) = known_red_roster_source(project, line)
+    if why:
+        return None, why
+    if src is None:
+        return None, ""
+    name, _branch, wt = src
+    wt_file = wt / _known_red_rel()
+    if not wt_file.is_file():
+        # The two read faces agree because line commits land through the wt
+        # checkout (the worktree stays on the declared branch), so the
+        # working file tracks the branch tip. When they DO diverge (a ref
+        # moved without a checkout), this named note is the observable face:
+        # the engine-side roster (branch tip) stays fresh while the child
+        # runner falls back to its own tree's copy (review condition 1).
+        return None, ("roster_env_not_injected:worktree_file_absent:%s" % name)
+    return wt_file, ""
+
+
+def _known_red_roster(project, line):
+    """The known-red roster read at the carrier repo's DECLARED BRANCH TIP
+    (the candidate tree — t261024-50). The old read pointed at THIS engine
+    checkout's copy, i.e. main's tip, which made every main-side booking
+    break the fast-forward the booking was meant to unblock.
+
+    Fail-closed parity (same decisions as _load_sensitive_roster): absent
+    everywhere = {} (inert, deliberate); present but unreadable — a failed
+    git show, non-JSON text, or a non-object document — raises a NAMED
+    CertifyError, never the old silent-empty fallback. The roster is still
+    integration's ledger at the same repo-relative path; rows keep
+    owner/retire_when (this read hands the document to the existing
+    consumers; per-entry rules stay in shared.known_red_roster), and the
+    book only shrinks (unchanged hygiene gate)."""
+    (src, why) = known_red_roster_source(project, line)
+    if why:
+        raise CertifyError(why)
+    if src is None:
         return {}
-    return obj if isinstance(obj, dict) else {}
+    name, branch, wt = src
+    rc, out, err = _known_red_book_show(wt, "refs/heads/%s" % branch)
+    if rc != 0:
+        raise CertifyError("known_red_roster_unreadable:%s:%s"
+                           % (name, (err.strip() or ("exit %d" % rc))[:160]))
+    try:
+        obj = json.loads(out)
+    except ValueError as e:
+        raise CertifyError("known_red_roster_unreadable:%s:json:%s" % (name, e))
+    if not isinstance(obj, dict):
+        raise CertifyError(
+            "known_red_roster_unreadable:%s:document_not_object" % name)
+    return obj
 
 
 def relative_round_verdict(project, candidate, header, runner, roster):
@@ -2267,18 +2416,22 @@ def resolve_runner(line, env=None):
         # this injection); "not run" is never "green" — the receipt's
         # INTEG_KNOWN_RED channel names every skipped entry per round.
         run_env.setdefault("SANDBAR_KNOWN_RED_EXCLUDE", "1")
-        # 261012 (same host order, second face): the roster the round reads
-        # must be the MAINTAINED one. The clone is pinned at the line
-        # revision, so its default roster copy lags every main-side booking
-        # until the next landing (measured: a fresh booking for a 1838s
-        # timeout entry did not reach the very next round — 31 skips, not
-        # 32). The roster is integration's ledger maintained on main, not
-        # product code under test: point the round at THIS checkout's copy.
-        # An explicit operator override keeps priority (setdefault).
-        _roster = (Path(__file__).resolve().parents[2]
-                   / "integration" / "known-red-baseline.json")
-        if _roster.exists():
-            run_env.setdefault("SANDBAR_KNOWN_RED_ROSTER", str(_roster))
+        # 261012 (same host order, second face; RESHAPED by t261024-50): the
+        # roster the round reads must be the MAINTAINED one. The clone is
+        # pinned at the line revision, so its default roster copy lags every
+        # booking until the next landing (measured: a fresh booking for a
+        # 1838s timeout entry did not reach the very next round — 31 skips,
+        # not 32). The book's home is now the CANDIDATE tree (the declared
+        # line branch tip), so a booking committed on the line reaches the
+        # round WITHOUT a main-side commit, and never breaks the promotion
+        # fast-forward. The caller resolves the carrier repo's working-tree
+        # copy and pre-sets the variable in `env` (setdefault keeps an
+        # explicit operator override winning); a book whose working-tree file
+        # is absent while the branch tip carries it is named by the caller
+        # (roster_env_not_injected:worktree_file_absent) — never a silent
+        # skip. If nothing was injected here, the runner's own-tree default
+        # copy applies (run_scenarios reads its own tree when the variable is
+        # unset).
         try:
             proc = subprocess.Popen(
                 cmd, shell=True, stdout=subprocess.PIPE,
@@ -2515,9 +2668,27 @@ def line_round_tick(project_key, load_lines, read_rows, append_rows,
         if not go and why in ("range_empty", "backstop_not_elapsed"):
             entries.append({"line": line, "state": "idle", "reason": why})
             continue
-        runner = resolve_runner_fn(line, env)
+        # t261024-50: the book is read from the candidate tree (the declared
+        # line branch tip) and the child runner is pointed at the carrier
+        # repo's working-tree copy. An unreadable book raises a NAMED
+        # CertifyError here — the line records an error entry and the round
+        # never starts on a guessed empty roster.
+        line_env = dict(env) if env else {}
+        try:
+            roster, wt_file, roster_note = _line_roster_for_round(
+                project_key, line)
+            if wt_file is not None:
+                line_env.setdefault("SANDBAR_KNOWN_RED_ROSTER", str(wt_file))
+        except CertifyError as e:
+            entries.append({"line": line, "state": "error",
+                            "error": str(e)})
+            continue
+        runner = resolve_runner_fn(line, line_env)
         if runner is None:
-            entries.append({"line": line, "state": "runner_missing"})
+            missed = {"line": line, "state": "runner_missing"}
+            if roster_note:
+                missed["note"] = roster_note
+            entries.append(missed)
             continue
         trigger = "change" if why == "range_non_empty" else "backstop"
         try:
@@ -2527,13 +2698,16 @@ def line_round_tick(project_key, load_lines, read_rows, append_rows,
                                  chain_limit=chain_limit, lane_reds=lane_reds,
                                  runs_store=runs_store,
                                  project=project_key,
-                                 roster=_known_red_roster())
+                                 roster=roster)
         except CertifyError as e:
             entries.append({"line": line, "state": "error", "error": str(e)})
             continue
-        entries.append({"line": line, "state": res["end"]["state"],
-                        "trigger": trigger, "reason": why,
-                        "rounds": res["rounds"]})
+        entry = {"line": line, "state": res["end"]["state"],
+                 "trigger": trigger, "reason": why,
+                 "rounds": res["rounds"]}
+        if roster_note:
+            entry["note"] = roster_note
+        entries.append(entry)
     asked = [e for e in entries if "rounds" in e]
     failed = [e["line"] for e in entries if e.get("state") in
               ("error", "runner_missing")]
@@ -2654,9 +2828,24 @@ def line_round_run_now(project_key):
     guard_path = str(ledger.parent / "tick-anchor")
     entries = []
     for line in sorted(load_lines(project_key)):
-        runner = resolve_runner(line, None)
+        # t261024-50: same candidate-tree book read + env injection as the
+        # scheduled tick (one source of truth for both trigger shapes).
+        line_env = {}
+        try:
+            roster, wt_file, roster_note = _line_roster_for_round(
+                project_key, line)
+            if wt_file is not None:
+                line_env.setdefault("SANDBAR_KNOWN_RED_ROSTER", str(wt_file))
+        except CertifyError as e:
+            entries.append({"line": line, "state": "error",
+                            "error": str(e)})
+            continue
+        runner = resolve_runner(line, line_env)
         if runner is None:
-            entries.append({"line": line, "state": "runner_missing"})
+            missed = {"line": line, "state": "runner_missing"}
+            if roster_note:
+                missed["note"] = roster_note
+            entries.append(missed)
             continue
         try:
             res = run_line_round(line, "manual", guard_path, runner,
@@ -2667,12 +2856,15 @@ def line_round_run_now(project_key):
                                  now_ms=int(time.time() * 1000),
                                  runs_store=str(ledger.parent / "scenario-runs.jsonl"),
                                  project=project_key,
-                                 roster=_known_red_roster())
+                                 roster=roster)
         except CertifyError as e:
             entries.append({"line": line, "state": "error", "error": str(e)})
             continue
-        entries.append({"line": line, "state": res["end"]["state"],
-                        "trigger": "manual", "rounds": res["rounds"]})
+        entry = {"line": line, "state": res["end"]["state"],
+                 "trigger": "manual", "rounds": res["rounds"]}
+        if roster_note:
+            entry["note"] = roster_note
+        entries.append(entry)
     forced = len([e for e in entries if "rounds" in e])
     return {"lines": entries,
             "summary": "line_round_run_now: %d lines, forced %d"
