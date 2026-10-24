@@ -179,8 +179,11 @@ def main() -> int:
             json.dump(orphan, f, ensure_ascii=False)
         tid_d = "t260101-%02d" % (PID % 90 + 4)
         write_report(out_dir, tid_d)
+        # 261024: archive/ 里可能有本场景自己种下的坏字节件（A3a/A3b 的 corrupt 件）。
+        # 逐件按「读不开=不匹配」处理，绝不让一个坏件把整条场景崩掉（轮内归档件
+        # 累积顺序与单跑不同，实测 UnicodeDecodeError 直接把场景打挂）。
         orphan_kept = any(
-            read_json(os.path.join(out_dir, ARCHIVE_DIR, n)) == orphan
+            _safe_read(os.path.join(out_dir, ARCHIVE_DIR, n)) == orphan
             for n in archive_files(out_dir)
             if n.endswith(".json"))
         check("A4 缺 ticket_id 旧件按他跑归档且内容可读（身份不明≠丢弃）",
