@@ -65,8 +65,8 @@ instances:
 SIGN_WHO = "human-scenario"          # not an agent role name
 FOREIGN_PROJECT = "caller-foreign-proj"   # valid key shape, NOT the ticket's project
 OWN_PROJECT = "sandbar"              # the fixture ticket's project (== target)
-POLL_OPEN = 90
-POLL_ERR = 20
+POLL_OPEN = 240   # 261024: 90 s 是空载实测值；轮内并发下票到人门超窗（单跑 ~110 s 绿）
+POLL_ERR = 60     # 同上：拒绝面在负载下来得慢
 POLL_CLOSE = 180
 TERMINAL = "closed"
 

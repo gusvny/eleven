@@ -362,7 +362,7 @@ async function runBrowser(pw, browser) {
       if (!intercepted) return true
       const later = page.getByText('Configure later', { exact: true }).first()
       if (await later.count()) {
-        await later.click({ timeout: 2000 }).catch(() => {})
+        await later.click({ timeout: 30000 }).catch(() => {})
       } else {
         const clicked = await page.evaluate(() => {
           const ovs = [...document.querySelectorAll('[role="presentation"],[role="dialog"]')]
@@ -392,7 +392,9 @@ async function runBrowser(pw, browser) {
       // locator.click enforces hit-testing; a late platform mask would block
       // it — fall back to a DOM click on the same card (the mask is platform
       // chrome, not the surface under test).
-      await card.click({ timeout: 4000 }).catch(async () => {
+      // 261024: 2-4 s 是空载实测值，轮内并发下点击超时（同树单跑 38 s 绿、轮内红）。
+      // 断言不变（等同一个元素可点），窗口改成负载容忍的 30 s。
+      await card.click({ timeout: 30000 }).catch(async () => {
         await page.evaluate((tid) => {
           const el = document.querySelector(`[data-ticket-id="${tid}"]`)
           el?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -557,7 +559,7 @@ async function runBrowser(pw, browser) {
       if (!hasChip) {
         record('A7 crumb-walk-back', 'fail', 'no epic badge in the detail head to drill from')
       } else {
-        await chip.click({ timeout: 4000 })
+        await chip.click({ timeout: 30000 })
         const epicUp = await waitFor(async () =>
           page.evaluate(() => !!document.querySelector('.wb-overlay-epic, .wb-ep-root')).catch(() => false), 8000)
         if (!epicUp) {
