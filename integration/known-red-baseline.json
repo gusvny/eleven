@@ -634,7 +634,7 @@
       "home": "产品面：巡检期心跳口径与「未压制的 agent 面发现」不一致（KI-337），用例侧断言正确",
       "note": "261024 挂账（integration 岗位判词）：本用例迁到 process bench 后首次真正跑满全部子用例（此前一直 docker 台不可达=环境不可验），唯一剩余红=P2「heartbeat=False 而 any_agent_live=False」——与 KI-337 同一条产品缺陷（压制后心跳仍报 false）。断言语义不动、不豁免；修 KI-337 后本行即撤。",
       "booked_at": "2026-10-24T10:25:00+08:00",
-      "booked_sha": "f0d87fe3a0e",
+      "booked_sha": "f0d87fe36dad3b3b2c5f1352996e0be571d93ea6",
       "owner": "integration 岗（跟踪 KI-337 修复）",
       "retire_when": "KI-337 修好且本用例在 process bench 上过 runner 连续 2 轮 PASS 后删行并下调 max_entries"
     }
