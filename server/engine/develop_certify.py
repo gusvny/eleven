@@ -2371,6 +2371,23 @@ def runner_timeout_s_from_env(env=None):
     return value
 
 
+def _line_env(env=None):
+    """The child environment for one line round: a SNAPSHOT AT CALL TIME of
+    the process environment (the runner command, its timeout and the target
+    host are ambient by design — they live in the worker's own environment),
+    overlaid by whatever the line/roster logic adds; the overlay wins.
+
+    t261024-70: an injected-but-empty env must NOT blank the ambient base.
+    Measured 261025 ~02:00: t261024-50 built ``line_env = dict(env) if env
+    else {}``, the only production caller passes env=None, so the tick handed
+    resolve_runner an empty dict and every line answered ``runner_missing``
+    — the round could never start. Do not hoist the os.environ read out of
+    this helper: it must reflect the environment at call time."""
+    merged = dict(os.environ)
+    merged.update(env or {})
+    return merged
+
+
 def resolve_runner(line, env=None):
     """The production runner seam. Returns a callable
     ``runner(candidate_repos) -> run header`` built from the declared command,
@@ -2673,12 +2690,18 @@ def line_round_tick(project_key, load_lines, read_rows, append_rows,
         # repo's working-tree copy. An unreadable book raises a NAMED
         # CertifyError here — the line records an error entry and the round
         # never starts on a guessed empty roster.
-        line_env = dict(env) if env else {}
+        # t261024-70: the env inherits the process environment (the runner
+        # command is ambient) and the roster overlay wins on top of it.
+        line_env = _line_env(env)
         try:
             roster, wt_file, roster_note = _line_roster_for_round(
                 project_key, line)
             if wt_file is not None:
-                line_env.setdefault("SANDBAR_KNOWN_RED_ROSTER", str(wt_file))
+                # hard assignment, not setdefault (t261024-70 rework): the
+                # ambient base now carries the whole worker environment, and
+                # a stray ambient SANDBAR_KNOWN_RED_ROSTER must never shadow
+                # the candidate-tree overlay — the roster overlay wins.
+                line_env["SANDBAR_KNOWN_RED_ROSTER"] = str(wt_file)
         except CertifyError as e:
             entries.append({"line": line, "state": "error",
                             "error": str(e)})
@@ -2788,14 +2811,19 @@ def line_round_tick_activity(project_key):
             _force.unlink()
         except OSError:
             pass  # a marker that cannot be cleared must not block the tick
-        return line_round_run_now(project_key)
+        out = line_round_run_now(project_key)
+        # t261024-70: the forced path leaves the same refusal face as the
+        # scheduled path — one source of truth for both trigger shapes.
+        record_tick_refusals(ledger.parent, out.get("lines", []),
+                             project_key)
+        return out
     # t261011-21 defect 3: registered so an activity-level abort
     # (abort_inflight_ticks) can find this tick's guard and leave the ONE
     # named row; popped the moment the body returns either way.
     _INFLIGHT_TICKS[str(project_key)] = {
         "guard_path": guard_path, "ledger": str(ledger), "at": time.time()}
     try:
-        return line_round_tick(
+        out = line_round_tick(
             project_key,
             load_lines=load_lines,
             read_rows=lambda: read_rows(ledger),
@@ -2807,6 +2835,12 @@ def line_round_tick_activity(project_key):
             runs_store=str(ledger.parent / "scenario-runs.jsonl"))
     finally:
         _INFLIGHT_TICKS.pop(str(project_key), None)
+    # t261024-70: the refusal face — a runner_missing (or named per-line
+    # error) must be readable on disk without reading Temporal history.
+    # ledger.parent is the ledger_path-resolved absolute directory, so the
+    # face follows the same path construction as the ledger itself.
+    record_tick_refusals(ledger.parent, out.get("lines", []), project_key)
+    return out
 
 
 def line_round_run_now(project_key):
@@ -2830,12 +2864,17 @@ def line_round_run_now(project_key):
     for line in sorted(load_lines(project_key)):
         # t261024-50: same candidate-tree book read + env injection as the
         # scheduled tick (one source of truth for both trigger shapes).
-        line_env = {}
+        # t261024-70: same ambient env inheritance as the scheduled tick.
+        line_env = _line_env()
         try:
             roster, wt_file, roster_note = _line_roster_for_round(
                 project_key, line)
             if wt_file is not None:
-                line_env.setdefault("SANDBAR_KNOWN_RED_ROSTER", str(wt_file))
+                # hard assignment, not setdefault (t261024-70 rework): the
+                # ambient base now carries the whole worker environment, and
+                # a stray ambient SANDBAR_KNOWN_RED_ROSTER must never shadow
+                # the candidate-tree overlay — the roster overlay wins.
+                line_env["SANDBAR_KNOWN_RED_ROSTER"] = str(wt_file)
         except CertifyError as e:
             entries.append({"line": line, "state": "error",
                             "error": str(e)})
@@ -2869,6 +2908,49 @@ def line_round_run_now(project_key):
     return {"lines": entries,
             "summary": "line_round_run_now: %d lines, forced %d"
                        % (len(entries), forced)}
+
+
+#: The tick's refusal face: append-only, beside the delivery ledger
+#: (t261024-70). A ``runner_missing`` or named ``error`` entry used to live
+#: only inside the activity's return value (Temporal history); the operator
+#: could not see WHY a round never started. The face file names it on disk.
+TICK_REFUSALS_NAME = "tick-refusals.jsonl"
+
+
+def record_tick_refusals(ledger_dir, entries, project_key):
+    """Append the tick's non-idle named entries to the refusal face.
+
+    Only entries that carry a ``state`` of ``runner_missing`` or ``error``
+    are written — early-return shapes (entries keyed by a bare ``error``
+    with no ``state``) and idle/round entries are skipped, so the face never
+    carries a half-row. Every per-row failure (unwritable dir, non-
+    serializable field) is swallowed after naming: the face must never take
+    the tick down."""
+    from datetime import datetime, timezone  # local: import-light module
+
+    face = Path(ledger_dir) / TICK_REFUSALS_NAME
+    for e in entries:
+        if not isinstance(e, dict) or e.get("state") not in \
+                ("runner_missing", "error"):
+            continue
+        row = {"at": datetime.now(timezone.utc).isoformat(),
+               "project": str(project_key), "line": e.get("line"),
+               "state": e["state"]}
+        for key in ("error", "note", "reason"):
+            if key in e:
+                row[key] = e[key]
+        try:
+            # mkdir first (t261024-70 rework, design defect 2): a refusal on
+            # a line whose ledger directory does not exist yet must not
+            # vanish again — the named row is the whole point of this face.
+            face.parent.mkdir(parents=True, exist_ok=True)
+            with open(str(face), "a", encoding="utf-8") as f:
+                # default=repr: a malformed producer input (a junk field on
+                # the entry) is coerced, never dropped — the named row
+                # survives and the face stays parseable.
+                f.write(json.dumps(row, sort_keys=True, default=repr) + "\n")
+        except (OSError, TypeError, ValueError):
+            pass  # a face that cannot be written must not block the tick
 
 
 # ---- the bounded red ladder (goal 9 / goal 10) -----------------------------

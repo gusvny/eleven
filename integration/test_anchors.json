@@ -1023,6 +1023,11 @@
       "note": "t261024-50 L1 (developer): the candidate-tree roster truth table over a real tmp git fixture - a booking on the line branch reaches the round roster with main untouched and merge-base(main, line tip) == main; non-JSON / non-object books raise the named known_red_roster_unreadable CertifyError (never a silent empty roster); a book on no declared repo is the legal inert {}; two carriers raise the named known_red_roster_ambiguous; the SANDBAR_KNOWN_RED_ROSTER env face injects the carrier worktree copy and a missing worktree file yields the named roster_env_not_injected note (never a guessed skip); scheduled-tick wiring surfaces the path and note on the tick entry.",
       "sync_path": "server/engine/develop_certify.py"
     },
+    "server/engine/tests/test_t261024_70_line_env_inherit.py": {
+      "anchor": "behaviour",
+      "note": "t261024-70 L1 (developer): the line round's child env is a call-time snapshot of the process environment overlaid by the roster logic - the ambient SANDBAR_LINE_ROUND_RUNNER reaches resolve_runner through both the scheduled tick and line_round_run_now, and an injected overlay wins; a runner_missing refusal lands as a named, timestamped row on tick-refusals.jsonl beside the delivery ledger and never as a delivery-ledger row; the recorder skips entries without a state (early-return shapes), coerces non-serializable fields via repr, and survives an unwritable face directory.",
+      "sync_path": "server/engine/develop_certify.py"
+    },
     "server/engine/tests/test_t261004_23_executor_requests.py": {
       "anchor": "contract",
       "note": "t261004-20 backfill: §8 write-side contract (named refusals, row shape, TS mirror drift lock)",
@@ -4175,6 +4180,10 @@
       "anchor": "behaviour",
       "note": "t261005-02 self-heal component contract (status face + cancel act)",
       "sync_path": ""
+    },
+    "integration/t261024-70/sc_t261024_70_line_env_inherit.py": {
+      "anchor": "contract",
+      "note": "t261024-70 L3: the line round ambient-env contract - a tick and the forced entry hand the runner seam the ambient SANDBAR_LINE_ROUND_RUNNER (env=None caller), the round starts (real header + run dir + delivery-ledger row naming the line), and with the runner command absent both faces answer runner_missing AND a named refusal row lands on a jsonl face beside the delivery ledger (never a delivery-ledger row, t261024-50 kept: the candidate-tree overlay wins over an ambient roster and an unreadable book stays a named CertifyError)."
     },
     "integration/t261024-50/sc_t261024_50_book_never_blocks_promotion.py": {
       "anchor": "behaviour",
