@@ -3733,15 +3733,6 @@ FAST_SET_BUDGET_NOTE = (
 #: therefore cannot drift into a second membership list — membership itself
 #: lives only on the registry markers.
 FAST_SET_CATCH = {
-    # t261022-09: the entry's own membership declaration — the guard family
-    # (t261009-16 B / --print-fast-set) refuses a fast member without one.
-    "t261022-09-quick-gate-scope":
-        "the quickmanual gate drifting back to FULL-registry-every-round while "
-        "the evidence declaration stays a claim on the face only (the host-order "
-        "261022 incident), the receipt losing the 'narrowed by declaration: ...' "
-        "honesty face, or an unresolvable declaration falling back silently to "
-        "full or to nothing (caught offline in seconds instead of at the next "
-        "merge human asking why the 'quick' lane took twelve minutes)",
     "t261019-43-request-replies-visible":
         "the panel page hiding replies again - a reply demoted back into the "
         "11px trace (the 37-fact-replies-read-as-none incident), a collapsed "
@@ -3981,12 +3972,6 @@ FAST_SET_CATCH = {
         "a frozen line staying un-landable after its closure row, or the "
         "closure row resuming landings it must not (the false-closure "
         "class this line paid for)",
-    "t261021-11-produced-face-english":
-        "any CJK (ideograph, CJK punctuation, fullwidth form) reappearing on "
-        "a PRODUCED engine face - a gate refusal note, blocked detail, "
-        "request refusal, note-builder literal, or the workbench console "
-        "mirror tail (the t261021-05 incident class: Chinese rendering onto "
-        "the ticket face again, separators included)",
 }
 
 
