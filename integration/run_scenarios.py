@@ -2004,6 +2004,10 @@ SCENARIOS = [
     ("t260907-05-route-renamed-serves",
      "工单台路由前缀迁移契约（t260907-05 正文②＋「怎么算好：工单台面板/路由全通」的机器化，灰盒 L3）：黑盒 import workbench/node.ts＋mock ctx（webServer.register 收集）自起 127.0.0.1 ephemeral server 按 exact/prefix 语义分发——新前缀真 handler 应答（/sandbar-workbench/api/wf/temporal-health→200，零引擎 spawn，生产 Temporal 只读红线允许面）；旧前缀死透（旧前缀通配→404，非 301/308/410/200——「直接换不留旧」策略的机器化）；注册面收口（全部路由注册 path 零旧前缀残留、全新前缀，含 src/host 常量挂载的 session-charter 路由——KI-042 同源防漂移面）；bundle 双产物（lib/client.js+cjs）含新前缀零旧前缀（src 改了产物没重建=浏览器半仍打旧名）。3099 全程零接触；不 fetch 新 tickets（spawn 真 admin CLI 面，业务旅程归既有场景族与隔离台）。与 t260903-13/sc_workbench_bundle_loads（bundle 可加载）intent 不同面：加载成功≠名字改对。实现段已迁 node.ts/import/主文件——T1~T5 应绿，bundle 未随票重建则 T5 红（该红正是本条存在意义）",
      "node integration/t260907-05/sc_workbench_route_renamed_serves.mjs", "ro"),
+    # ---- t261024-40: the ticket's OWN scenario is never peeled out of its gate round
+    ("t261024-40-own-scenario-gate-round",
+     "A ticket's OWN scenario is never peeled out of its gate round, whatever pool it lives in (ticket t261024-40, incident = t261022-14 landing starvation: the change's own scenario sits in the browser-free pool, the gate round's run list was emptied by supply-side filters, ran=0 with only marker rows, no green-run face on HEAD, every landing refused 'proven revision does not contain current main'; user words: 'the run list was emptied ... KI-350 does not cover it'; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a minimal fixture lane - real pool-exclusion consumption, real own-set derivation by the integration/<ticket_id>/ path marker, a fixture known-red roster, seconds-scale stub scripts with on-disk execution markers, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE INCIDENT SHAPE, POSITIVE - with the own scenario's pool declared excluded and a prev-red pointed name dropped, the OWN case still runs (ran>=1, marker on disk), the keep decision is named (INTEG_OWN_KEPT), the receipt carries the drop-attribution face naming the dropped name and its filter, and expected counts the own-exempt entry exactly once; B ROSTER - the roster-booked OWN scenario still runs and is named while a NON-own booked entry stays skipped with its named t260930-01 face (the economy is untouched); C FAIL-CLOSED - an OWN name missing from the registry refuses rc=2 in the REFUSED shape naming it as an OWN scenario with zero side effects; D LEGACY PRESERVED - with no own list the narrowed-empty widen contract stands, no own-exemption keys leak into an own-less receipt, and an unpointed exclusion-free round runs everything as today; E MALFORMED - a whitespace-only SANDBAR_SCENARIO_OWN value behaves as absent, never a phantom face. Intent split: the empty-derivation refusal copy and the args/env threading belong to developer L1 (test_t261018_01 / test_t260922_12 batteries per plan gen1); the pool-exclusion switch forms and the narrowed-empty fallback contract have their own entries (t260913-03, t260922-12) and appear here only as the legacy-preservation control; THIS entry uniquely owns 'the change's own scenario stays in the run across both supply-side filters, with the drop-attribution face on the receipt'. Pre-implement tree red on A/B/C = the named TDD signal (the OWN face is absent); green required at the integration gate/merge. run_scenarios.py missing = ENV_FAIL exit 2",
+     "python3 integration/t261024-40/sc_t26102440_own_scenario_gate_round.py", "browser-free"),
 
     # ---- t260907-06: multi-repo project lane carrying sub-repos (ticket B: one ticket, several worktrees cohabiting one lane) ----
 
@@ -6996,6 +7000,19 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
     only_names = parse_only_scenarios(
         os.environ.get("SANDBAR_SCENARIO_ONLY")
         if only_scenarios is None else only_scenarios)
+    # ---- t261024-40 own-scenario face: the ticket's OWN declared scenarios ----
+    # (the integration/<ticket_id>/ derived set, carried by the engine via
+    # SANDBAR_SCENARIO_OWN). Own names annotate the pointed list: they are
+    # EXEMPT from the pool-exclusion drop and the known-red roster skip (a
+    # cheap pool is a scheduling property, not a drop reason; the own scenario
+    # is the ticket's proof obligation), and a missing own name joins the
+    # existing fail-closed refusal named as OWN. Absent/empty env = zero
+    # effect on the round (byte-identical old behavior); own names only act on
+    # pointed rounds — an unpointed full round already contains them.
+    own_names = parse_only_scenarios(os.environ.get("SANDBAR_SCENARIO_OWN"))
+    own_set = set(own_names)
+    own_kept = []          # own names kept despite a drop that would have eaten them
+    _dropped_by_pool = {}  # non-own pointed names lost to the pool exclusion (attribution face)
     # ---- t261009-16 fast global set: the lane's runnable entry ----
     # Runs EXACTLY the marked members through the same named-round machinery
     # (fail-closed preflight: malformed declaration, booked-red member, or an
@@ -7037,17 +7054,35 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
             # 于是这段人话被当成「场景名」写进红名集，下一轮又它做快反馈面 ⇒ 点名不在册 ⇒
             # 再打这一段 ⇒ **每轮 fail-closed、票永远出不来**（t261001-10 第 5/6/7 轮实案）。
             # 拒绝开跑=闸错误（不可判），不是场景红：一律 `REFUSED [` 起首，两件事各归各位。
+            # t261024-40：缺席名里属本票自有场景（SANDBAR_SCENARIO_OWN）的逐条点名 OWN
+            # ——自有场景不在册=供给 bug，必须具名（调用方据此修注册面），不能混在
+            # 一般点名错里。
+            _own_missing = [n for n in missing_only if n in own_set]
             print("REFUSED [__executor__] 点名名单含不在册条目：%s——一条都未跑"
-                  "（--only fail-closed，t260922-12）" % ",".join(missing_only),
+                  "（--only fail-closed，t260922-12%s）"
+                  % (",".join(missing_only),
+                     ("；其中本票自有场景(OWN)缺席：%s"
+                      % ",".join(_own_missing)) if _own_missing else ""),
                   flush=True)
             print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
             print("ONLY_SUMMARY %s" % json.dumps(
                 {"ran": 0, "missing": missing_only,
                  "error": "点名名单含不在册条目"}, ensure_ascii=False), flush=True)
             return 2
-        registry = [by_name[n] for n in only_names
-                    if not (excluded and pool_of(by_name[n]) in excluded)]
-        _skipped_only = len(only_names) - len(registry)
+        # t261024-40：点名面的池排除逐条归因；自有场景（OWN）**不摘**——在被排除
+        # 池里也照排进它自己的池（便宜的池=调度属性，不是少跑理由），并具名
+        # own_kept。非自有点名名保持逐字旧语义（落被排除池=不跑，只记归因面）。
+        registry = []
+        for _n in only_names:
+            _e = by_name[_n]
+            if excluded and pool_of(_e) in excluded:
+                if _n in own_set:
+                    own_kept.append(_n)
+                else:
+                    _dropped_by_pool[_n] = pool_of(_e)
+                    continue
+            registry.append(_e)
+        _skipped_only = len(_dropped_by_pool)
         print("本轮只跑点名 %d 条（点名=%s%s）"
               % (len(registry), ",".join(only_names),
                  ("；其中 %d 条属被排除池未跑" % _skipped_only) if _skipped_only else ""),
@@ -7077,7 +7112,12 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
                   % _kr_err, file=sys.stderr, flush=True)
         else:
             _kr_in_round = set(e[0] for e in registry)
-            known_red_skipped = [n for n in _kr_names if n in _kr_in_round]
+            # t261024-40：本票自有场景不被在册豁免摘走（自有场景是本票的举证义务，
+            # 挂账判词也替代不了它本轮的绿面）；豁免面照旧只吃非自有名。
+            known_red_skipped = [n for n in _kr_names
+                                 if n in _kr_in_round and n not in own_set]
+            own_kept.extend(n for n in _kr_names
+                            if n in _kr_in_round and n in own_set)
             if known_red_skipped:
                 _kr_set = set(known_red_skipped)
                 registry = [e for e in registry if e[0] not in _kr_set]
@@ -7088,6 +7128,12 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
                 print("INTEG_KNOWN_RED_NOTE 未跑 ≠ 判绿：这些条目本轮**没有**被验证，其状态"
                       "以巡检/合并前全量的回执为准（本行是避免「没跑」与「跑了判绿」长成"
                       "一个样子的具名通道）", flush=True)
+    # t261024-40：自有场景保留面（池排除/在册豁免都没能摘走它们）——具名通道，
+    # 让「这张票自己的举证义务本轮真的起跑了」在回执上可读。
+    if own_kept:
+        print("INTEG_OWN_KEPT 本票自有场景保留起跑 %d 条（池排除/在册豁免不摘自有"
+              "场景，t261024-40）：%s"
+              % (len(own_kept), ",".join(own_kept)), flush=True)
     # ---- 宿主 260930 实报（真票 t260930-14 第 4 轮 0 ran / 0 passed / 0 failed → blocked）：
     # **收窄面被清空 = 面不可判，不是产品红**。快反馈面=上轮红名；本轮那批红名全被挂账册
     # 豁免（或在被排除池里）⇒ 点名面扣完为空 ⇒ 执行器「一轮零场景」⇒ 闸判红。两个各自都对的
@@ -7104,7 +7150,9 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         # 「本轮跳过在册红 N 条」这句话与真实面不符）。重算后两侧口径一致。
         if _kr_names:
             _kr_wide = set(e[0] for e in registry)
-            known_red_skipped = [n for n in _kr_names if n in _kr_wide]
+            # t261024-40：回落面的豁免重算同样不摘自有场景（与窄面同口径）。
+            known_red_skipped = [n for n in _kr_names
+                                 if n in _kr_wide and n not in own_set]
             _kr_set2 = set(known_red_skipped)
             registry = [e for e in registry if e[0] not in _kr_set2]
         print("INTEG_NARROWED_EMPTY 收窄面扣除在册豁免/被排除池后为空（点名 %d 条：%s）"
@@ -7160,7 +7208,10 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         registry = [e for e in registry if e[0] not in _reuse_set]
     pools, exclusives = {}, []
     for e in registry:
-        if excluded and pool_of(e) in excluded:
+        if excluded and pool_of(e) in excluded and e[0] not in own_set:
+            # t261024-40：自有场景（OWN）不被池排除摘除——点名面已把它保留进
+            # registry（INTEG_OWN_KEPT 具名），池切分处必须同样放行，否则
+            # expected 计了、场景没排，完整性自检自红。
             continue
         opt = e[3] if len(e) > 3 else None
         if opt == "exclusive":
@@ -7575,6 +7626,16 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
             _report["known_red_names"] = list(known_red_skipped)
         if only_names:
             _report["only_scenarios"] = list(only_names)
+            # t261024-40：点名面逐条归因（additive 观测键；缺省键形状=老报告零漂移）
+            # ——点名了谁、谁被池排除摘走、谁被在册豁免摘走、哪些自有场景被保留起跑。
+            # 「ran=0 且只有标记行」的轮次据此能机械点名是哪个供给面吃掉了跑面。
+            _report["only_plan"] = {
+                "pointed": list(only_names),
+                "own": list(own_names),
+                "dropped_by_pool": dict(_dropped_by_pool),
+                "dropped_by_roster": [n for n in known_red_skipped
+                                      if n in set(only_names)],
+                "own_kept": list(own_kept)}
         # 260929 直修 B1（宿主令·不开票）：报告落档同带环境红具名名单（与汇总行同名同源，
         # 排序去重；既有键一个不动）。
         _report["env_red_names"] = sorted(set(env_red_names))

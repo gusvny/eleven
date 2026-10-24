@@ -482,6 +482,13 @@ class IntegrationRunArgs:
     # expected=点名在册、fail-closed 校验在册性）。空=全量跑（放行唯一依据的收口
     # 跑形态）。爆炸半径/首轮决策在 dev_lane 调用点（单写者=targeted_rerun_plan）。
     only_names: List[str] = field(default_factory=list)
+    # t261024-40: the ticket's OWN declared scenarios (the --print-own-set
+    # derived set), carried to the runner via SANDBAR_SCENARIO_OWN. The runner
+    # exempts own names from the pool-exclusion drop and the known-red roster
+    # skip (a cheap pool is a scheduling property; the own scenario is the
+    # ticket's proof obligation). Empty = the old behavior byte-identically
+    # (defaulted, so old payloads and replays decode unchanged).
+    own_names: List[str] = field(default_factory=list)
     # t261022-09 quickmanual evidence scope: when the DECLARATION drives the gate,
     # the resolved plan travels here ({mode, check, pytest_node, names}). check mode
     # runs exactly the named verify.yaml code-lane check; battery mode runs the

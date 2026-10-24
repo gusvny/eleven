@@ -453,22 +453,28 @@ class ScopedFeedbackPlan:
     blocked_reason: str = ""
 
 
-def scoped_feedback_plan(own_names, prev_red_names=()) -> ScopedFeedbackPlan:
+def scoped_feedback_plan(own_names, prev_red_names=(), derivation_note="") -> ScopedFeedbackPlan:
     """Change-scoped feedback = own scenarios ∪ last-round red names. The
     fast set is NOT part of this face (host order 261016: it runs once, at
     closing). Malformed inputs (None, non-string entries, whitespace) are
     dropped by the same strip filter as ``fast_proof_plan`` — never raise,
-    never widen."""
+    never widen. ``derivation_note`` (t261024-40) is the own-set derivation
+    evidence (query error, member count, expected source path); on the empty
+    plan it is folded into ``blocked_reason`` so the refusal names WHICH
+    scenario face was expected and WHY the set came out empty — instead of a
+    bare zero-scenario line that starves the anchor."""
     def _s(x):
         return str(x).strip()
     run_only = sorted({_s(n) for n in (list(own_names or []) +
                                        list(prev_red_names or [])) if _s(n)})
     if not run_only:
+        _note = str(derivation_note or "").strip()
         return ScopedFeedbackPlan(run_only=[], blocked_reason=(
             "scoped-feedback plan empty: no change-scoped scenarios (own-set/"
             "surface/prev-red faces all empty) — supply-side failure "
             "KI-01M551AR1XT01W9DNR2AN88B52; the round is refused before any "
-            "run and the full suite is never a lane fallback"))
+            "run and the full suite is never a lane fallback"
+            + ("; derivation: %s" % _note[:400] if _note else "")))
     return ScopedFeedbackPlan(run_only=run_only, blocked_reason="")
 
 
@@ -2439,7 +2445,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         return workflow.patched("%s#%d" % (KI061_WAKE_RESET_PATCH_ID, n))
 
     # ---------- t260923 D：收口全量跑（串行/平行两分支共用） ----------
-    def _integ_run_args(self, only_names=()):
+    def _integ_run_args(self, only_names=(), own_names=()):
         """集成跑入参构造（t260913-03 唯一真站锁的单写者收拢，260923 D）：
         apply_skip_pools 策略值只此一处显式置位（语句字面量唯一命中=锁的判据）；
         主跑传定点面（可空），收口跑传空=全量。attempt=本代数口径与既有调用点
@@ -2453,7 +2459,12 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             write_set=self._effective_write_set(),
             apply_skip_pools=True,
             handover_runs=self._handover_debt_legs(),
-            only_names=list(only_names or []))
+            only_names=list(only_names or []),
+            # t261024-40: the ticket's own-scenario face (empty default = old
+            # payloads/replays decode unchanged; the closing run passes none -
+            # the closing face is the fast set, own scenarios are not part of
+            # the closing caliber).
+            own_names=list(own_names or []))
 
     async def _closing_full_run(self):
         """D 收口跑（260923 宿主直修令）：定点跑后的全量跑=唯一放行依据。与主跑
@@ -5163,6 +5174,10 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     # the legacy version stays byte-identical and in-flight
                     # replays take the verbatim old path (KI-061 discipline).
                     _fs_refusal = ""
+                    # t261024-40: own-scenario face (empty default = the
+                    # unpatched path stays zero-drift; overwritten by the
+                    # derived face below when the declaration succeeds).
+                    _own_face_names = []
                     if workflow.patched(DEV_BUFFER_FAST_PROOF_PATCH_ID) and \
                             is_develop_buffer_ticket(self.meta):
                         _fs_t = self._now_epoch()
@@ -5197,7 +5212,20 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                             # deferred_to_closing so a closing-run refusal is
                             # diagnosable from the round receipt alone.
                             _deferred = True
-                            _fplan = scoped_feedback_plan(_own_names)
+                            # t261024-40: an empty plan must NAME the expected
+                            # own face and why the set came out empty - fold in
+                            # the own-set derivation evidence (query error,
+                            # member count, expected source path).
+                            _fplan = scoped_feedback_plan(
+                                _own_names,
+                                derivation_note=(
+                                    "ticket=%s own-set members=%d own_error=%s "
+                                    "expected-source=integration/%s/ registry "
+                                    "entries" % (self.ticket_id,
+                                                 len(list(getattr(_fs, "own_members", None) or [])),
+                                                 (str(getattr(_fs, "own_error", "") or "")
+                                                  or "none"),
+                                                 self.ticket_id)))
                         else:
                             _fplan = fast_proof_plan(_own_names, _fs)
                         self.meta["fast_set_proof"] = {
@@ -5214,6 +5242,13 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                             "own_error": str(getattr(_fs, "own_error", "")
                                              or ""),
                             "deferred_to_closing": _deferred}
+                        # t261024-40: own-scenario face (--print-own-set derived
+                        # set) rides the main run; the runner exempts it from
+                        # supply-side drops. The closing run carries none (the
+                        # closing face is the fast set).
+                        _own_face_names = list(
+                            (self.meta.get("fast_set_proof") or {}).get(
+                                "own_members") or [])
                         if getattr(_fs, "own_error", ""):
                             self._log("own-set face unavailable this round "
                                       "(%s) — named, the proof still carries "
@@ -5263,7 +5298,13 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                         _integ_t = self._now_epoch()   # t260925-12
                         rraw = await workflow.execute_activity(
                             run_integration_tests,
-                            self._integ_run_args(run_only),
+                            # t261024-40: the main run carries the ticket's own
+                            # scenario face - the runner exempts own names from
+                            # the pool/roster drops (a cheap pool is a
+                            # scheduling property, not a drop reason).
+                            self._integ_run_args(
+                                run_only,
+                                own_names=_own_face_names),
                             start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
                         gate_integ_s += max(0, self._now_epoch() - _integ_t)
                         ir = rraw if isinstance(rraw, IntegrationRunResult) else IntegrationRunResult(

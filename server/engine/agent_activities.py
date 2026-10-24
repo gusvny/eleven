@@ -7500,7 +7500,7 @@ def _readonly_query_env(cwd):
     count stays at the locked 2 while the strip criterion stays one."""
     env = lane_subprocess_env(cwd)
     for k in ("SANDBAR_SCENARIO_ONLY", "SANDBAR_SCENARIO_EXCLUDE_POOLS",
-              "SANDBAR_KNOWN_RED_EXCLUDE"):
+              "SANDBAR_KNOWN_RED_EXCLUDE", "SANDBAR_SCENARIO_OWN"):
         env.pop(k, None)
     return env
 
@@ -10953,6 +10953,7 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                          handover_runs=None,
                          ledger_source: str = "",
                          only_names=None,
+                         own_names=None,
                          run_budget_sec: float = 0.0,
                          supply_timeout_sec: float = 0.0,
                          suite_timeout_sec: float = 0.0) -> IntegrationRunResult:
@@ -11011,6 +11012,13 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     only_names = [str(n).strip() for n in (only_names or []) if str(n).strip()]
     if only_names:
         _extra_env["SANDBAR_SCENARIO_ONLY"] = ",".join(only_names)
+    # t261024-40: the ticket's OWN scenario face rides SANDBAR_SCENARIO_OWN (the
+    # --print-own-set derived set) - the runner exempts own names from the
+    # pool-exclusion drop and the roster skip (a cheap pool is a scheduling
+    # property). Empty/malformed list = no env = the old shape byte-identically.
+    own_names = [str(n).strip() for n in (own_names or []) if str(n).strip()]
+    if own_names:
+        _extra_env["SANDBAR_SCENARIO_OWN"] = ",".join(own_names)
     # t260930-01（宿主裁 260930：B 档只摘在册）在册红不进**每轮**路径：挂账册里的条目
     # 已在册（每条带认领人与退场条件），每轮重跑它们只烧墙钟——实测一轮全量的墙钟由一条
     # 串行链单独决定，而链上 9 条里 7 条在册、6 条非绿灯。开关**只在本处（泳道轮）注入**：
@@ -11278,6 +11286,9 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
     out.forced_by = [str(x) for x in (_pe.get("former_force_assets") or [])]
     # t260923 D：跑面回执回显（少跑必须可见）——空=全量；非空=定点复跑面。
     out.only_names = list(only_names)
+    # t261024-40: own-scenario face echo (additive dynamic attribute; missing
+    # key on old receipts/replays = empty list, zero drift).
+    out.own_names = list(own_names)
     # 宿主令 260930（devlane-lite 轻道，直修无票）：少跑面另两块**原样透传**（additive；缺键/畸形 = 空
     # dict = 老回执/老闸形态逐字节零漂移）。此前它们只活在闸的 JSON 回执里，工作流侧
     # （轻道的 blocked 文案）看不到「本轮没跑哪几条、被台账复用了几条」——票面于是只能
@@ -11631,6 +11642,9 @@ async def _run_integration_tests_body(args: IntegrationRunArgs) -> IntegrationRu
                                 handover_runs=list(getattr(args, "handover_runs", None) or []),
                                 # t260923 D：定点复跑面透传（空=全量；决策在 dev_lane）
                                 only_names=list(getattr(args, "only_names", None) or []),
+                                # t261024-40: own-scenario face passthrough (the
+                                # runner exempts it from supply-side drops)
+                                own_names=list(getattr(args, "own_names", None) or []),
                                 # t260922-12：集测段记账来源=lane:<票>（台账单写者=闸）
                                 ledger_source="lane:%s" % args.ticket_id)
 

@@ -62,9 +62,10 @@ class Harness:
         self.preboot_calls = []
 
     def drive(self, entries, only_kw=None, only_env="__unset__", exclude=None,
-              known_red=False, roster_names=()):
+              known_red=False, roster_names=(), own_env="__unset__"):
         """only_kw=main() 关键字路（None=不传=读 env）；only_env=env 注入路
-        （__unset__ 哨兵=清除该键，测缺省零分支）。"""
+        （__unset__ 哨兵=清除该键，测缺省零分支）；own_env=t261024-40 自有场景
+        面（SANDBAR_SCENARIO_OWN，同哨兵约定）。"""
         with tempfile.TemporaryDirectory(prefix="t922only-") as td:
             td_path = Path(td)
             table, markers = [], {}
@@ -92,6 +93,7 @@ class Harness:
             env[ONLY_ENV] = None if only_env == "__unset__" else only_env
             if exclude is not None:
                 env["SANDBAR_SCENARIO_EXCLUDE_POOLS"] = exclude
+            env["SANDBAR_SCENARIO_OWN"] = None if own_env == "__unset__" else own_env
             if known_red:
                 # 夹具册子（booked）落临时目录，经 SANDBAR_KNOWN_RED_ROSTER 路径缝投喂
                 roster = td_path / "known-red.json"
@@ -286,3 +288,71 @@ def test_g_parse_only_scenarios():
     assert rs.parse_only_scenarios("") == []
     assert rs.parse_only_scenarios(None) == []
     assert rs.parse_only_scenarios("x") == ["x"]
+
+
+# ---------------- t261024-40 自有场景面（SANDBAR_SCENARIO_OWN） ----------------
+# 本票自有场景是本票的举证义务：池排除与在册豁免都不得摘走它（便宜的池=调度属性）；
+# 缺席=供给 bug，fail-closed 具名 OWN。
+
+def test_own1_own_in_excluded_pool_still_runs(h):
+    """点名+池排除吃掉自有场景的病面回归：a 在被排除池、点名 a、OWN=a ⇒ a 照跑。
+
+    判据：①真跑（marker 在）；②INTEG_OWN_KEPT 具名行在文；③expected/ran 口径
+    自有保留条计入一次（ran==expected==1）。"""
+    rc, out, ran = h.drive(TRIO, only_env="t922-a", exclude="main",
+                           own_env="t922-a")
+    assert rc == 0, out[-400:]
+    assert ran == ["t922-a"], "自有场景不得被池排除摘走（实得 %r）" % ran
+    assert "INTEG_OWN_KEPT" in out and "t922-a" in out
+    s = summary_of(out)
+    assert s and s["ran"] == 1 and s["expected"] == 1, s
+
+
+def test_own2_own_booked_in_roster_still_runs(h):
+    """自有场景也在挂账册里 ⇒ 照跑（举证义务替代不了本轮绿面）+ 具名保留。
+
+    判据：①真跑；②INTEG_OWN_KEPT 在文；③豁免计数不含自有名（known_red_skipped==0）。"""
+    rc, out, ran = h.drive(TRIO, only_env="t922-b", known_red=True,
+                           roster_names=["t922-b"], own_env="t922-b")
+    assert rc == 0, out[-400:]
+    assert ran == ["t922-b"], "自有场景不得被在册豁免摘走（实得 %r）" % ran
+    assert "INTEG_OWN_KEPT" in out
+    s = summary_of(out)
+    assert s and s["ran"] == 1 and s.get("known_red_skipped") == 0, s
+
+
+def test_own3_missing_own_name_refuses_named_and_parse_safe(h):
+    """自有名不在册 ⇒ 沿用 fail-closed REFUSED 面，且点名 OWN（供给 bug 具名）。
+
+    输出形状纪律（t261001-10）：拒绝行 `REFUSED [` 起首，**不得**被闸侧解析成
+    场景结果行（无 `FAIL [` 起首行）；假脚本零执行。"""
+    rc, out, ran = h.drive(TRIO, only_env="ghost-own", own_env="ghost-own")
+    assert rc == 2 and ran == []
+    assert "REFUSED [__executor__]" in out
+    assert "本票自有场景(OWN)缺席：ghost-own" in out
+    assert "SCENARIOS ran=0" in out
+    assert not [ln for ln in out.splitlines() if ln.startswith("FAIL [")], \
+        "拒绝面不得长成场景结果行（t261001-10 输出形状契约）"
+    assert h.preboot_calls == []
+
+
+def test_own4_own_face_absent_keeps_old_semantics_byte_identical(h):
+    """负锁：OWN 缺席 ⇒ 逐字旧语义——点名 a、b，a 属被排除池被静默摘走（只剩
+    stderr 一句），面未清空 ⇒ 不回落全量，INTEG_OWN_KEPT 不出现。"""
+    rc, out, ran = h.drive(TRIO, only_env="t922-a,t922-b", exclude="main")
+    assert rc == 0, out[-400:]
+    assert ran == ["t922-b"], "OWN 缺席=池排除照摘（实得 %r）" % ran
+    assert "INTEG_OWN_KEPT" not in out
+    assert "其中 1 条属被排除池未跑" in out, "旧点名面文案逐字保留"
+    s = summary_of(out)
+    assert s and s["ran"] == 1 and s["expected"] == 1, s
+
+
+def test_own5_own_in_nonexcluded_pool_is_plain_pointed_run(h):
+    """自有场景在非排除池（如 browser-free 形态）⇒ 就是普通点名跑，无保留面行。"""
+    rc, out, ran = h.drive(TRIO, only_env="t922-b", exclude="engine",
+                           own_env="t922-b")
+    assert rc == 0 and ran == ["t922-b"]
+    assert "INTEG_OWN_KEPT" not in out
+    s = summary_of(out)
+    assert s and s["ran"] == 1 and s["expected"] == 1, s

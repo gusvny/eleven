@@ -80,3 +80,27 @@ class SourceLock(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class OwnKeptCountedOnce(unittest.TestCase):
+    """t261024-40: own-scenario entries the runner KEEPS despite pool exclusion /
+    roster skip ride the pointed-round expected path (``len(registry)``), so an
+    own-kept entry is counted exactly once and the ``ran + reused == expected``
+    invariant holds. The behavior face lives in
+    test_t260922_12_only_scenarios.py (test_own1/test_own2: ran==expected==1);
+    this file pins the source shape so the pure-face path cannot silently grow
+    a second own subtraction."""
+
+    def test_pointed_expected_is_registry_length_with_own_kept_inside(self):
+        src = open(os.path.join(INTEG, "run_scenarios.py"),
+                   encoding="utf-8").read()
+        # the pointed-round expected stays `len(registry)` — own-kept entries are
+        # IN the registry by the time this line runs
+        self.assertIn("expected = len(registry) if only_names", src)
+        # no second own-scenario subtraction anywhere (counted once, or not at
+        # all); the pool-split face keeps the own exemption, so an own-kept
+        # entry is both counted AND scheduled
+        self.assertNotIn("- len(own_", src)
+        self.assertIn(
+            "if excluded and pool_of(e) in excluded and e[0] not in own_set:",
+            src)

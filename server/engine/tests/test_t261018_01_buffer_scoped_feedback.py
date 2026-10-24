@@ -130,3 +130,43 @@ def test_patch_id_is_ticket_scoped():
     # distinct from the t261011-10 id (KI-061: separate replay gates)
     assert dl.DEV_BUFFER_SCOPED_FEEDBACK_PATCH_ID != \
         dl.DEV_BUFFER_FAST_PROOF_PATCH_ID
+
+
+# ---------- t261024-40: the empty derivation refuses BY NAME ----------
+
+def test_scoped_empty_with_derivation_note_quotes_it():
+    """Empty plan + derivation evidence => blocked_reason names WHICH own face
+    was expected and WHY the set came out empty (the starved-anchor incident:
+    a bare zero-scenario line read like a docs-only round)."""
+    p = dl.scoped_feedback_plan(
+        [], [],
+        derivation_note="ticket=t261022-14 own-set members=0 "
+                        "own_error=none expected-source=integration/t261022-14/")
+    assert p.run_only == [] and p.blocked_reason
+    assert "t261022-14" in p.blocked_reason
+    assert "integration/t261022-14/" in p.blocked_reason
+    assert "KI-01M551AR1XT01W9DNR2AN88B52" in p.blocked_reason, \
+        "the registered supply-side failure id stays"
+
+
+def test_scoped_nonempty_ignores_derivation_note():
+    p = dl.scoped_feedback_plan(["own-1"], [],
+                                derivation_note="ticket=x own_error=boom")
+    assert p.run_only == ["own-1"] and p.blocked_reason == ""
+
+
+def test_scoped_default_call_sites_unchanged():
+    """Two-arg / one-arg calls keep the exact old empty-refusal copy."""
+    p = dl.scoped_feedback_plan([], [])
+    assert p.run_only == [] and p.blocked_reason
+    assert "derivation" not in p.blocked_reason
+    p2 = dl.scoped_feedback_plan([], ["red-1"])
+    assert p2.run_only == ["red-1"]
+
+
+def test_scoped_derivation_note_malformed_never_raises():
+    for note in (None, 17, {"a": 1}, ["x"] * 300, "x" * 5000):
+        p = dl.scoped_feedback_plan([], [], derivation_note=note)
+        assert p.run_only == [] and p.blocked_reason
+    p = dl.scoped_feedback_plan([], [], derivation_note="y" * 5000)
+    assert len(p.blocked_reason) < 700, "note is truncated, never unbounded"

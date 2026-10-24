@@ -77,7 +77,11 @@ def test_wiring_structural_locks():
     # patch 门 + 收口拦截（双支）+ 入参接线（单写者方法）+ 簿记
     assert "TARGETED_RERUN_PATCH_ID" in dev
     assert dev.count("收口全量跑有新增红") == 2        # 串行/平行两支各一处
-    assert "self._integ_run_args(run_only)" in dev
+    # t261024-40: the gate's main run now carries the own-scenario face
+    # alongside the pointed list; the single-writer builder keeps its shape.
+    assert "self._integ_run_args(\n                                run_only," in dev
+    assert "own_names=_own_face_names)" in dev
+    assert "_own_face_names = []" in dev   # unpached/undeclared path stays empty = zero drift
     assert "only_names=list(only_names or [])" in dev   # 构造单写者（唯一真站同源）
     assert "last_run_only = list(run_only)" in dev
     assert "targeted_rerun_plan(" in dev
