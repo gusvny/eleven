@@ -169,6 +169,7 @@ with workflow.unsafe.imports_passed_through():
         tests_supply_assembly_error,
         tests_supply_assembly_note,
         green_run_face,
+        green_run_face_narrowed,
         supply_stop_route,
         gate_zero_run_supply_blocker,
         TICKET_STATUSES,
@@ -854,6 +855,21 @@ MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID = "t261002-10-merge-check-resync"
 # replaying old history evaluate it un-patched => byte-identical old behaviour
 # (KI-061 replay discipline).
 KI220_ZERO_RUN_PATCH_ID = "t261008-24-zero-run-supply-stop-v1"
+
+# KI-350 (t261024-12): a NARROWED (targeted-only) green gate round also records
+# the ticket's `last_green_run` face — with a declared `narrowed: True` marker —
+# so the develop-buffer landing anchor tracks the tree the gate actually judged.
+# Root cause measured: the lane gate is narrowed by construction and the KI-220
+# recorder ignored targeted-only rounds, so a ticket that must land before its
+# closing run kept a stale proven sha forever (t261021-12 / t261022-12 wedged at
+# merge). The narrowed marker refreshes the LANDING ANCHOR only: merge_check's
+# green-run item judges it by name (reason_code=narrowed, never a full close,
+# t260923 D) and no release/closing verdict reads this face. Replay discipline
+# (KI-061): the face selection switches to shared.green_run_face_narrowed ONLY
+# behind this patch id — an in-flight instance replaying old history evaluates
+# it un-patched, keeps `green_run_face` (None for targeted rounds), and executes
+# the identical command sequence (no lane_head_sha call where history has none).
+KI350_NARROWED_FACE_PATCH_ID = "t261024-12-narrowed-green-face-v1"
 
 #: Patch guard CONCURRENCY_GATE_PATCH_ID (t261005-14; fixes the replay break
 #: CL-1 / t261004-32 introduced). 775bdb1 wired the whole concurrency command
@@ -2520,24 +2536,44 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         return True
 
     async def _ki220_record_green_run(self, receipt, targeted_only: bool) -> None:
-        """Record the ticket's `last_green_run` face after a full GREEN gate round
-        (KI-220 / KI-217 exit (1), ONE mechanism). Face shape:
-        `{"sha", "ran", "at"[, "no_scenarios"]}` — sha = lane branch HEAD at the
-        round (the exact tree the green round ran on); the legal zero-scenarios
-        green round records `{"ran": 0, "no_scenarios": True}` (named legal face,
-        never a fake green). Face selection single-writer = shared.green_run_face;
-        the sha resolution failure leaves the face untouched (fail-closed: the
-        merge gate then reads zero-run red, never mints a green).
+        """Record the ticket's `last_green_run` face after a green gate round
+        (KI-220 / KI-217 exit (1), ONE mechanism; narrowed arm = KI-350 /
+        t261024-12). Face shape:
+        `{"sha", "ran", "at"[, "no_scenarios"][, "narrowed"]}` — sha = lane
+        branch HEAD at the round (the exact tree the round ran on); the legal
+        zero-scenarios FULL green round records `{"ran": 0, "no_scenarios": True}`
+        (named legal face, never a fake green); a green NARROWED (targeted-only)
+        round records `{"ran": N, "narrowed": True}` behind
+        KI350_NARROWED_FACE_PATCH_ID — an honest landing anchor that names
+        itself a narrowed proof, never a full close (t260923 D). Red rounds,
+        supply-red rounds and zero-scenarios targeted rounds record nothing
+        (fail-closed). Face selection single-writer = shared.green_run_face /
+        shared.green_run_face_narrowed; the sha resolution failure leaves the
+        face untouched (fail-closed: the merge gate then reads zero-run red,
+        never mints a green).
 
         Gated behind KI220_ZERO_RUN_PATCH_ID (the lane_head_sha activity call adds
-        history events; old in-flight replays must not execute it).
+        history events; old in-flight replays must not execute it). The narrowed
+        face selection is FURTHER gated behind KI350_NARROWED_FACE_PATCH_ID: an
+        un-patched replay takes `green_run_face` (None for targeted rounds), so
+        the recorded command sequence is byte-identical to history.
         """
         if not workflow.patched(KI220_ZERO_RUN_PATCH_ID):
             return
-        face = green_run_face(
-            getattr(receipt, "ran", 0), getattr(receipt, "failed", 0),
-            getattr(receipt, "error", ""), getattr(receipt, "blockers", None),
-            bool(targeted_only))
+        _targeted_only = bool(targeted_only)
+        if _targeted_only and workflow.patched(KI350_NARROWED_FACE_PATCH_ID):
+            # KI-350: an honest narrowed face (marker + counts) refreshes the
+            # landing anchor. The lane_head_sha failure/absence paths below are
+            # SHARED with the full-round arm — the same fail-closed behaviour
+            # and the same green_run_note observability branch fire here.
+            face = green_run_face_narrowed(
+                getattr(receipt, "ran", 0), getattr(receipt, "failed", 0),
+                getattr(receipt, "error", ""), getattr(receipt, "blockers", None))
+        else:
+            face = green_run_face(
+                getattr(receipt, "ran", 0), getattr(receipt, "failed", 0),
+                getattr(receipt, "error", ""), getattr(receipt, "blockers", None),
+                _targeted_only)
         if face is None:
             return
         try:
@@ -2575,9 +2611,10 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         self.meta["last_green_run"] = face
         # t261011-17: a recovered lane must not carry a stale failure note.
         self.meta.pop("green_run_note", None)
-        self._log("green-run face recorded (ran=%d%s, sha=%s)"
+        self._log("green-run face recorded (ran=%d%s%s, sha=%s)"
                   % (int(face.get("ran", 0)),
                      ", no_scenarios" if face.get("no_scenarios") else "",
+                     ", narrowed (not a full close)" if face.get("narrowed") else "",
                      str(face["sha"])[:12]))
 
     def _tests_env_red_names(self, cur_integ):

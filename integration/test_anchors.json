@@ -1632,6 +1632,11 @@
       "anchor": "contract",
       "note": "t261022-06: the merge gate releases its slot with cause merge-wait and re-acquires FIFO on leaving; every blocked stage and the parked work stage keep holding (rule 3); patch id dev-lane-merge-slot-release-v1."
     },
+    "server/engine/tests/test_t261024_12_narrowed_green_face.py": {
+      "anchor": "contract",
+      "note": "t261024-12 L1 (KI-350): green_run_face_narrowed truth table; green_run_check_item narrowed-by-name verdicts incl. stale-with-named-remedy and ran=0 fail-closed; legacy green_run_face byte-identical; recorder patched/unpatched/full-round arms; land_to_line actionable refusal text",
+      "sync_path": "server/engine/shared.py; server/engine/dev_lane.py; server/engine/agent_activities.py"
+    },
     "server/engine/tests/test_t261021_01_inspection_sighting.py": {
       "anchor": "behaviour",
       "note": "t261021-01 developer L1: inspection sighting decision core (registry entry added on the line 261023 to close an L16 gap - the file landed without an anchor, so every lane carrying it read a missing entry)",
@@ -5548,6 +5553,11 @@
       "anchor": "behaviour",
       "note": "261022 regression on the round's expected count: the pure expected_entries face keeps 'full table minus excluded pools minus the known-red entries that survive that exclusion' - all pools excluded is 0 and never negative (the live -49), a roster entry inside an excluded pool is not deducted twice, no exclusion keeps the old number, ghost roster names are harmless; plus a source lock that main() uses the pure face and keeps no inline subtraction",
       "sync_path": ""
+    },
+    "integration/t261024-12/sc_t26102412_narrowed_green_landing.py": {
+      "anchor": "behaviour",
+      "note": "t261024-12 L3 (KI-350): narrowed green round records an honest face (marker+sha+at) judged green by name and never a full close; stale-after-main-sync refused with an actionable named remedy on both the check item and the real land_to_line act; the escape journey (sync main, one fresh narrowed round, guard passes) plus unchanged full-close verdicts, KI-220 zero-run fail-closed and inert unpatched replay",
+      "sync_path": "server/engine/shared.py; server/engine/dev_lane.py; server/engine/agent_activities.py"
     },
     "integration/t261021-08/sc_t26102108_request_layer_gate.py": {
       "anchor": "contract",

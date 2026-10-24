@@ -1490,6 +1490,42 @@ def green_run_face(ran: Any, failed: Any, error: Any, blockers: Any,
     return None
 
 
+def green_run_face_narrowed(ran: Any, failed: Any, error: Any,
+                            blockers: Any) -> Optional[Dict[str, Any]]:
+    """Should this NARROWED (targeted-only) gate round update the ticket's
+    `last_green_run` face (pure, KI-350 / t261024-12)?
+
+    KI-350: a lane gate round is narrowed by construction (fast_proof_plan /
+    scoped_feedback_plan) and `green_run_face` returns None for every
+    targeted-only round, so a ticket that must land before its closing run
+    keeps a stale proven sha forever (measured: t261021-12 / t261022-12 wedged
+    at merge). The remedy is an HONEST narrowed face: the round is green on its
+    own terms (`error == ""`, `failed == 0`, `blockers` empty) and ran at least
+    one scenario => `{"ran": N, "narrowed": True}`. The caller adds `sha`/`at`
+    after resolving the lane HEAD. The marker names the round a NARROWED proof
+    — never a full close (t260923 D: release still reads only the full closing
+    runs); `green_run_check_item` judges it BY NAME. A zero-scenarios targeted
+    round stays None (fail-closed: the KI-220 zero-run supply face must not be
+    minted from a targeted round), and so does anything red or malformed. The
+    legacy `green_run_face` stays byte-identical — the caller switches to this
+    function only behind the KI-350 patch gate."""
+    try:
+        ran_i = int(ran or 0)
+        failed_i = int(failed or 0)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(error, str) or error:
+        return None
+    if not isinstance(blockers, list) or blockers or failed_i != 0:
+        return None
+    if ran_i <= 0:
+        # A narrowed round that ran NOTHING refreshes nothing: the zero-run
+        # supply face (KI-220) belongs to the full rounds and must stay
+        # fail-closed here too.
+        return None
+    return {"ran": ran_i, "narrowed": True}
+
+
 def green_run_check_item(last_green_run: Any, head_sha: Any) -> Dict[str, Any]:
     """merge_check's green-run precondition item (pure, KI-217 exit (1); UT-driven).
 
@@ -1498,12 +1534,13 @@ def green_run_check_item(last_green_run: Any, head_sha: Any) -> Dict[str, Any]:
     HEAD resolved by merge_check at judgement time ("" / None = query failure).
 
     Green iff the face is well-formed AND `sha == head_sha` AND (`ran > 0` OR the
-    named legal `no_scenarios` face). Red named otherwise:
+    named legal `no_scenarios` face, OR the KI-350 `narrowed` marker face —
+    judged BY NAME as a narrowed proof, never a full close). Red named otherwise:
       - missing/empty face            => reason_code=zero_run (KI-220's own face),
       - sha mismatch                  => reason_code=stale (tree changed after the
                                          last green gate round — including the
-                                         caller-side main re-merge, t261002-10; one
-                                         more gate round is the intended cost),
+                                         caller-side main re-merge, t261002-10; the
+                                         detail names the run that re-anchors),
       - malformed face / HEAD unknown => fail-closed red (never green-by-default).
     """
     item = {"item": "acceptance scenario green run on this tree",
@@ -1528,9 +1565,26 @@ def green_run_check_item(last_green_run: Any, head_sha: Any) -> Dict[str, Any]:
         return _red("malformed green-run face (sha missing) — fail closed")
     if f_sha != sha:
         item["reason_code"] = "stale"
+        # KI-350: the refusal names WHICH run satisfies the precondition — the
+        # next green gate round (narrowed or closing) anchored on THIS tree.
         return _red("green run is stale: recorded on %s, but the tree being merged is "
                     "%s (a main re-merge or a later round moved the lane HEAD) — one "
-                    "more green gate round is required" % (f_sha[:12], sha[:12]))
+                    "more green gate round on this tree (%s) re-anchors the face "
+                    "(a narrowed round refreshes the landing anchor; the full closing "
+                    "run still owns release)"
+                    % (f_sha[:12], sha[:12], sha[:12]))
+    if last_green_run.get("narrowed") is True:
+        # KI-350: the narrowed marker is judged BY NAME — a green narrowed round
+        # on this tree is a lawful landing anchor but never a full proof.
+        if f_ran <= 0:
+            return _red("green-run face carries the narrowed mark with ran=0 "
+                        "— fail closed (a narrowed round must have run its own "
+                        "scenarios to anchor a landing)")
+        return dict(item, green=True, reason_code="narrowed",
+                    detail="green NARROWED gate round ran %d targeted scenario(s) "
+                           "on this tree (%s) — landing anchor refreshed; this is "
+                           "NOT a full close (t260923 D: release still needs the "
+                           "full closing run)" % (f_ran, sha[:12]))
     if f_ran > 0 or no_sc:
         if no_sc and f_ran == 0:
             return dict(item, green=True, reason_code="no_scenarios",

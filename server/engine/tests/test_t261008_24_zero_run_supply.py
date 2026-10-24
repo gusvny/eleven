@@ -258,10 +258,16 @@ def test_dev_lane_round_account_keeps_supply_shape_exempt(monkeypatch):
 
 class _StubWf:
     flag = True
+    #: KI-350 (t261024-12): pid-aware patched() — the rows below keep pinning
+    #: the UN-patched (legacy) targeted-skip behaviour; the narrowed battery in
+    #: test_t261024_12 flips only the KI-350 gate.
+    narrowed = False
     result = {"ok": True, "sha": SHA}
 
     @staticmethod
-    def patched(_pid):
+    def patched(pid):
+        if pid == dev_lane.KI350_NARROWED_FACE_PATCH_ID:
+            return _StubWf.narrowed
         return _StubWf.flag
 
     @staticmethod
@@ -290,7 +296,9 @@ def _stub_self(meta=None, blocked=None):
 @pytest.fixture
 def gated_true(monkeypatch):
     monkeypatch.setattr(dev_lane, "workflow", _StubWf)
+    _StubWf.narrowed = False
     yield
+    _StubWf.narrowed = False
 
 
 @pytest.fixture

@@ -7207,12 +7207,26 @@ async def land_to_line(args: LandToLineArgs) -> LandToLineResult:
         except Exception:  # noqa: BLE001 — unanswerable is not licence to land
             _contains_main = False
     if not _contains_main:
+        # KI-350 (t261024-12): the refusal is ACTIONABLE — it names the current
+        # lane HEAD and the exact kind of run that re-anchors the face, instead
+        # of only the mismatched revision. Guard semantics unchanged: nothing
+        # lands, never falls back to the tip.
+        _head = ""
+        try:
+            _hp = _git(["rev-parse", "--verify", "HEAD"], Path(args.worktree))
+            if _hp.returncode == 0 and (_hp.stdout or "").strip():
+                _head = _hp.stdout.strip()
+        except Exception:  # noqa: BLE001 — the head name is best-effort observability
+            _head = ""
         return _land_to_line_refuse(
             "ticket %s: proven revision %s does not contain current main — "
             "refusing to land (a landing must carry the main it was judged "
-            "against; run a fresh gate round so the face re-anchors on a tree "
-            "that contains main, then land). Never falls back to the tip."
-            % (args.ticket_id, args.proven_sha[:12]))
+            "against). Remedy, named: one more green gate round anchored on the "
+            "CURRENT lane HEAD %s — a green NARROWED round (KI-350) refreshes "
+            "the landing anchor, and the full closing run additionally owns "
+            "release — then land. Never falls back to the tip."
+            % (args.ticket_id, args.proven_sha[:12],
+               _head[:12] if _head else "<lane HEAD unavailable>"))
     try:
         line = develop_line.load_line(args.project_key, args.line_id)
     except Exception as e:  # noqa: BLE001 — the named refusal travels in the receipt
