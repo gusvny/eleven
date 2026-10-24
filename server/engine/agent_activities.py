@@ -11746,10 +11746,34 @@ async def quick_scope_resolve(args: "shared.QuickScopeResolveArgs"
         return await _quick_scope_resolve_body(args)
 
 
-_QUICK_SCOPE_REGISTRY_SNIPPET = (
-    "import json,sys; sys.path.insert(0, 'integration'); "
-    "import run_scenarios as _r; "
-    "print(json.dumps([e[0] for e in _r.SCENARIOS]))")
+# t261024-60: the snippet derives BOTH faces in one read — the registry names
+# AND the ticket's OWN set (own_set_entries, the integration/<ticket_id>/
+# path marker over the same in-process registry). Own-derivation failure is
+# NAMED in the payload (own_error), never collapsed into an empty list; a lane
+# runner without own_set_entries degrades to names-only with the mixed-version
+# seam named (same stance as the fast-set face's capability probe).
+def _quick_scope_registry_snippet(ticket_id: str) -> str:
+    """The registry+own read snippet with the ticket id baked in (quoted via
+    json.dumps — a malformed slug is refused INSIDE own_set_entries as its own
+    named ValueError, which lands in the payload's own_error). Multi-line on
+    purpose: the own half needs a real try/except, and `python3 -c` takes it."""
+    tid = json.dumps(str(ticket_id or ""))
+    return (
+        "import json,sys\n"
+        "sys.path.insert(0, 'integration')\n"
+        "import run_scenarios as _r\n"
+        "_d = {'names': [e[0] for e in _r.SCENARIOS]}\n"
+        "_own = getattr(_r, 'own_set_entries', None)\n"
+        "_d['own'] = []\n"
+        "_d['own_error'] = ''\n"
+        "if _own is None:\n"
+        "    _d['own_error'] = 'lane runner predates own_set_entries (mixed-version seam)'\n"
+        "else:\n"
+        "    try:\n"
+        "        _d['own'] = [e[0] for e in _own(%s)]\n"
+        "    except Exception as _e:\n"
+        "        _d['own_error'] = '%%s: %%s' %% (type(_e).__name__, _e)\n"
+        "print(json.dumps(_d))" % tid)
 
 
 async def _quick_scope_resolve_body(args: "shared.QuickScopeResolveArgs"
@@ -11768,7 +11792,7 @@ async def _quick_scope_resolve_body(args: "shared.QuickScopeResolveArgs"
         return out
     names: List[str] = []
     p = await asyncio.create_subprocess_exec(
-        "python3", "-c", _QUICK_SCOPE_REGISTRY_SNIPPET,
+        "python3", "-c", _quick_scope_registry_snippet(args.ticket_id),
         cwd=str(wt), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         env=lane_subprocess_env(wt), start_new_session=True)
     register_owned_spawn(p, tag="quick-scope-registry")
@@ -11792,11 +11816,28 @@ async def _quick_scope_resolve_body(args: "shared.QuickScopeResolveArgs"
                      % (p.returncode, p_err_b.decode("utf-8", "replace")[-300:]))
         return out
     try:
-        names = [str(x) for x in json.loads(p_out_b.decode("utf-8", "replace"))]
+        _payload = json.loads(p_out_b.decode("utf-8", "replace"))
     except json.JSONDecodeError:
         out.error = ("quick_scope_resolve_failed: the lane scenario registry read "
-                     "produced no JSON list — named failure, never a guessed "
+                     "produced no JSON — named failure, never a guessed "
                      "resolution")
+        return out
+    # t261024-60: the payload carries {'names': [...], 'own': [...],
+    # 'own_error': str}. A plain list = a pre-t261024-60 shape (or a foreign
+    # runner) — names-only, own face named unavailable, never guessed.
+    if isinstance(_payload, list):
+        names = [str(x) for x in _payload]
+        out.own_error = ("the lane registry read returned a names-only payload "
+                         "(pre-t261024-60 shape) — own derivation unavailable")
+    elif isinstance(_payload, dict):
+        names = [str(x) for x in (_payload.get("names") or [])]
+        out.own_names = [str(x) for x in (_payload.get("own") or [])
+                         if str(x).strip()]
+        out.own_error = str(_payload.get("own_error") or "")
+    else:
+        out.error = ("quick_scope_resolve_failed: the lane scenario registry read "
+                     "produced an unexpected payload type %s — named failure, "
+                     "never a guessed resolution" % type(_payload).__name__)
         return out
     out.registry_count = len(names)
     # --- truth source 2: the lane's declared verify.yaml code-lane check ids ---

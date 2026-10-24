@@ -528,7 +528,41 @@ class QuickScopeResolveResult:
     note: str = ""                     # honesty note (reserved-token collision)
     registry_count: int = 0
     check_ids: List[str] = field(default_factory=list)
+    # t261024-60: the ticket's OWN derived scenario set (runner own_set_entries
+    # over the lane registry), read in the SAME resolution pass so the quick
+    # gate can thread the own face without a second spawn. own_error non-empty
+    # = the derivation failed (named), never read as "nothing own".
+    own_names: List[str] = field(default_factory=list)
+    own_error: str = ""
     error: str = ""
+
+
+def own_set_expected_error(ticket_id: str, write_set: List[str],
+                           own_names: List[str], own_error: str) -> str:
+    """The named empty-own-set refusal (t261024-60): when the ticket's change
+    actually carries own-scenario files (``integration/<ticket_id>/`` entries in
+    the effective write set) but the derived own set came out empty, the round
+    must refuse BY NAME — which source path was expected and why the derivation
+    was empty (query error text, or zero registry hits) — never a legal-looking
+    zero-run. A ticket with no own-scenario files (docs-only) is NOT refused:
+    the discriminator is the write-set marker, not a guess (review ruling on
+    the t261024-60 plan gen0: do not extend refusal to declared-evidence
+    tickets with zero own scenarios). Pure, no IO. Empty string = no refusal."""
+    tid = str(ticket_id or "").strip()
+    prefix = "integration/%s/" % tid
+    own_files = [str(f) for f in (write_set or [])
+                 if str(f).startswith(prefix)]
+    if not own_files:
+        return ""
+    if [str(n).strip() for n in (own_names or []) if str(n).strip()]:
+        return ""
+    why = (str(own_error or "").strip()
+           or ("the lane registry has no entries under %s "
+               "(--print-own-set derived zero members)" % prefix))
+    return ("own set derivation empty (t261024-60): this ticket's change "
+            "carries own-scenario file(s) %s but the derived own set is empty "
+            "— expected source %s registry entries; why empty: %s"
+            % (",".join(own_files[:5]), prefix, why[:300]))
 
 
 @dataclass

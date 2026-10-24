@@ -843,6 +843,11 @@
       "note": "t261024-40 L1: the own-scenario face threading contract - IntegrationRunArgs.own_names defaulted empty (old payloads/replays decode unchanged), the activity injects SANDBAR_SCENARIO_OWN and echoes out.own_names, the declaration query strip face pops the knob, the gate main run carries the derived own face while the closing run passes none (the closing contract is the fast set), and scoped_feedback_plan folds the derivation evidence into the empty refusal. The runner-side exemption truth table lives in integration/tests/test_t260922_12_only_scenarios.py and test_t261022_expected_pool_knownred.py (not re-asserted here).",
       "sync_path": "server/engine/dev_lane.py; server/engine/shared.py; server/engine/agent_activities.py"
     },
+    "server/engine/tests/test_t261024_60_quick_gate_own_face.py": {
+      "anchor": "contract",
+      "note": "t261024-60 L1: the quick gate's own-scenario face contract - QuickScopeResolveResult carries own_names/own_error defaulted empty (old payloads decode unchanged), own_set_expected_error refuses BY NAME only when the write set carries integration/<ticket_id>/ files and the derived own set is empty (docs-only never refused; query-error text preferred over the zero-hits fallback), the registry snippet bakes a json-quoted ticket id and compiles (malformed slug refused inside the runner face), a names-only pre-t261024-60 payload names the own face unavailable, and the dev_lane locks (quick gate threads quick_scope.own_names into _integ_run_args; the develop-buffer gate folds the same refusal into the zero-run channel as reason_code own_set_derivation_empty).",
+      "sync_path": "server/engine/dev_lane.py; server/engine/shared.py; server/engine/agent_activities.py"
+    },
     "server/engine/tests/test_t260926_tmp_fixture_water.py": {
       "anchor": "production-snapshot",
       "note": "real decl watchdog water-key values; marker added t261004-20",
@@ -3659,6 +3664,11 @@
     "integration/t261024-40/sc_t26102440_own_scenario_gate_round.py": {
       "anchor": "behaviour",
       "note": "t261024-40 L3: the change's OWN scenario stays in its gate run across both supply-side filters (pool exclusion, known-red roster skip) with the keep decision named and the drop-attribution face on the receipt; an own name missing from the registry is a fail-closed REFUSED naming it; legacy narrowed-empty and own-less receipts stay byte-stable; a malformed own value degrades to absent.",
+      "sync_path": "integration/run_scenarios.py"
+    },
+    "integration/t261024-60/sc_t261024_60_own_never_ledger_reused.py": {
+      "anchor": "behaviour",
+      "note": "t261024-60 L3: a green ledger row never substitutes for the ticket's own proof - a pointed round with green rows for every name and the gate's pool exclusion still runs the OWN scenarios for real (run counters grow, ran>=1, ran+reused==expected), names exactly the covered own names on the own-rerun face (INTEG_OWN_RERUN line + additive receipt key), keeps the non-own reuse economy byte-stable, repeats the same judgement on an unchanged head (no flip-flop), and keeps the kill-switch control intact.",
       "sync_path": "integration/run_scenarios.py"
     },
     "integration/t260928-29/sc_executor_preset_repo_contract.py": {

@@ -5228,6 +5228,22 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                                  self.ticket_id)))
                         else:
                             _fplan = fast_proof_plan(_own_names, _fs)
+                        # t261024-60: a genuinely EMPTY derived own set is a
+                        # named refusal when the ticket's change carries
+                        # own-scenario files (write-set marker) — the round
+                        # never reports a legal-looking ran=0 with a dead
+                        # derivation. Docs-only tickets (no own files) pass.
+                        _own_refusal = shared.own_set_expected_error(
+                            self.ticket_id, self._effective_write_set(),
+                            list(getattr(_fs, "own_members", None) or []),
+                            str(getattr(_fs, "own_error", "") or ""))
+                        if _own_refusal and not _fplan.blocked_reason:
+                            self._log(_own_refusal)
+                            self.meta["blocked_detail"] = {
+                                "reason_code": "own_set_derivation_empty",
+                                "item": "__own_set_empty__",
+                                "detail": _own_refusal}
+                            _fs_refusal = _own_refusal
                         self.meta["fast_set_proof"] = {
                             "members": list(getattr(_fs, "members", None)
                                             or []),
@@ -7855,7 +7871,13 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
         battery = that check with the pytest target). Empty plan = the FULL
         registry round, byte-identical to today."""
         _args = self._integ_run_args(
-            list((quick_scope or {}).get("only_names") or []))
+            list((quick_scope or {}).get("only_names") or []),
+            # t261024-60: the quick gate threads the ticket's OWN face like the
+            # develop-buffer gate — the runner exempts own names from the pool
+            # exclusion, the known-red roster skip AND the ledger reuse face
+            # (a supply-side filter schedules work, it never drops the own
+            # proof). Empty default = full rounds and old callers unchanged.
+            own_names=list((quick_scope or {}).get("own_names") or []))
         _args.quick_scope = dict(quick_scope or {})
         rraw = await workflow.execute_activity(
             run_integration_tests, _args,
@@ -8291,6 +8313,11 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                             registry_count=int(rraw.get("registry_count") or 0),
                             check_ids=[str(x) for x in (rraw.get("check_ids")
                                                         or [])],
+                            # t261024-60: the own face rides the same receipt
+                            # (defaulted empty = old payloads decode unchanged)
+                            own_names=[str(x) for x in (rraw.get("own_names")
+                                                        or [])],
+                            own_error=str(rraw.get("own_error") or ""),
                             error=str(rraw.get("error") or ""))
                     if r.error.startswith("quick_scope_resolve_failed"):
                         # The resolution INFRASTRUCTURE failed — never a verdict,
@@ -8306,7 +8333,33 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                     quick_scope = {"mode": r.mode, "names": list(
                         dict(self.meta.get("quick_evidence") or {}).get("names")
                         or []), "only_names": list(r.only_names),
-                        "check": r.check, "pytest_node": r.pytest_node}
+                        "check": r.check, "pytest_node": r.pytest_node,
+                        # t261024-60: the ticket's OWN derived set rides the
+                        # scope so the round threads it (runner exempts own
+                        # names from the pool/roster drops AND the ledger
+                        # reuse face — a supply-side filter schedules work,
+                        # it never drops the ticket's own proof).
+                        "own_names": list(r.own_names),
+                        "own_error": str(r.own_error or "")}
+                    # t261024-60: a genuinely EMPTY derived own set is refused
+                    # BY NAME when the ticket's change actually carries
+                    # own-scenario files (write-set marker) — which source was
+                    # expected, why the derivation came out empty — never a
+                    # legal-looking zero-run. A docs-only ticket (no own files)
+                    # is not refused (the discriminator is the write set).
+                    _own_refusal = shared.own_set_expected_error(
+                        self.ticket_id, self._effective_write_set(),
+                        list(getattr(r, "own_names", None) or []),
+                        str(getattr(r, "own_error", "") or ""))
+                    if _own_refusal and r.ok:
+                        ir = IntegrationRunResult(
+                            ran=0, failed=1, error=_own_refusal,
+                            details=[{"name": "__own_set_empty__",
+                                      "cmd": "(not run — the own-set "
+                                             "derivation came back empty)",
+                                      "exit": 1,
+                                      "output_tail": _own_refusal[:400]}])
+                        self._log(_own_refusal)
                     if r.note:
                         quick_scope["note"] = r.note
                     # Requirement 4: the merge human sees the declared scope next
@@ -8316,7 +8369,11 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                         "names": list(quick_scope["names"]),
                         **({"note": r.note} if r.note else {})}
                     self._touch()
-                    if not r.ok:
+                    if _own_refusal and r.ok:
+                        # the refusal receipt above already stands; do not
+                        # overwrite it with the unresolved-claim shape below.
+                        pass
+                    elif not r.ok:
                         # An UNRESOLVABLE CLAIM: a named red receipt, nothing ran.
                         ir = IntegrationRunResult(
                             ran=0, failed=1, error=r.error,

@@ -2009,6 +2009,11 @@ SCENARIOS = [
      "A ticket's OWN scenario is never peeled out of its gate round, whatever pool it lives in (ticket t261024-40, incident = t261022-14 landing starvation: the change's own scenario sits in the browser-free pool, the gate round's run list was emptied by supply-side filters, ran=0 with only marker rows, no green-run face on HEAD, every landing refused 'proven revision does not contain current main'; user words: 'the run list was emptied ... KI-350 does not cover it'; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a minimal fixture lane - real pool-exclusion consumption, real own-set derivation by the integration/<ticket_id>/ path marker, a fixture known-red roster, seconds-scale stub scripts with on-disk execution markers, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE INCIDENT SHAPE, POSITIVE - with the own scenario's pool declared excluded and a prev-red pointed name dropped, the OWN case still runs (ran>=1, marker on disk), the keep decision is named (INTEG_OWN_KEPT), the receipt carries the drop-attribution face naming the dropped name and its filter, and expected counts the own-exempt entry exactly once; B ROSTER - the roster-booked OWN scenario still runs and is named while a NON-own booked entry stays skipped with its named t260930-01 face (the economy is untouched); C FAIL-CLOSED - an OWN name missing from the registry refuses rc=2 in the REFUSED shape naming it as an OWN scenario with zero side effects; D LEGACY PRESERVED - with no own list the narrowed-empty widen contract stands, no own-exemption keys leak into an own-less receipt, and an unpointed exclusion-free round runs everything as today; E MALFORMED - a whitespace-only SANDBAR_SCENARIO_OWN value behaves as absent, never a phantom face. Intent split: the empty-derivation refusal copy and the args/env threading belong to developer L1 (test_t261018_01 / test_t260922_12 batteries per plan gen1); the pool-exclusion switch forms and the narrowed-empty fallback contract have their own entries (t260913-03, t260922-12) and appear here only as the legacy-preservation control; THIS entry uniquely owns 'the change's own scenario stays in the run across both supply-side filters, with the drop-attribution face on the receipt'. Pre-implement tree red on A/B/C = the named TDD signal (the OWN face is absent); green required at the integration gate/merge. run_scenarios.py missing = ENV_FAIL exit 2",
      "python3 integration/t261024-40/sc_t26102440_own_scenario_gate_round.py", "browser-free"),
 
+    # ---- t261024-60: a green ledger row never substitutes for the ticket's own proof
+    ("t261024-60-own-never-ledger-reused",
+     "A ticket's OWN scenario is never ledger-reused out of its gate round (ticket t261024-60, the reuse wedge behind the live witnesses t261022-12 [own scenario in the ENGINE pool, every round ran=0 reused=2] and t261022-14 [own scenario in BROWSER-FREE, flip-flopping ran=0 reused=3 / ran=3]; user words: 'a ticket's OWN declared scenarios are always in its gate run, whatever pool they live in. A pool exclusion schedules work, it never drops the ticket's own case'; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a private committed REAL git tree with an injected mini registry whose own fixture entries live under integration/t261024-60/, green ledger rows seeded by one real full round into an isolated SANDBAR_SCENARIO_LEDGER_DIR, on-disk run counters read reader-side, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE WEDGE, POSITIVE - a pointed round over own(engine pool)+own(browser-free)+non-own(main) with a green row for every name and the gate's pool exclusion runs the OWN scenarios FOR REAL (run counters grow), keeps the non-own name on the lawful reuse face (counter frozen, named on INTEG_REUSE), reports ran>=1 with ran+reused==expected, and names exactly the covered own names on the own-rerun face (INTEG_OWN_RERUN line + additive receipt key); B UNCHANGED-HEAD REPEAT - the same round again on the same commit repeats the same judgement (the observed reuse flip-flop is gone by construction); C KILL SWITCH CONTROL - SANDBAR_LEDGER_REUSE=0 disables reuse with its named stderr reason and everything runs (supply rules intact); D ECONOMY CONTROL - a pointed non-own name alone with a green row keeps the byte-stable reuse face (reused=1, ran=0, rc=0). Intent split: the four-key reuse truth table, kill-switch wording and malformed-row tolerance belong to t260930-01-ledger-reuse-round; the pool-exclusion/roster peel paths and the missing-own-name refusal belong to t261024-40-own-scenario-gate-round; the quick-gate own_names threading and the empty-derivation refusal copy belong to developer L1 batteries and the engine-gate stage driving the two live lanes; THIS entry uniquely owns 'a green ledger row never substitutes for the ticket's own proof, with the own-rerun face naming the covered names'. Pre-implement tree red on A/B = the named TDD signal (the own-rerun face is absent); green required at the integration gate/merge. git or run_scenarios.py missing = ENV_FAIL exit 2",
+     "python3 integration/t261024-60/sc_t261024_60_own_never_ledger_reused.py", "browser-free"),
+
     # ---- t260907-06: multi-repo project lane carrying sub-repos (ticket B: one ticket, several worktrees cohabiting one lane) ----
 
     ("t260907-06-multirepo-journey",
@@ -5250,6 +5255,22 @@ def _tree_state(root):
         return "", True
 
 
+def own_exempt_reuse(names, own_set):
+    """Split a reuse plan's name list into what may be ledger-reused and what
+    must run for real (t261024-60): the ticket's OWN declared scenarios are its
+    proof obligation — a green ledger row substitutes for nothing, so own names
+    NEVER enter the reuse face. Returns (reused, own_rerun): ``reused`` keeps
+    the old semantics byte-identically when ``own_set`` is empty; ``own_rerun``
+    names the own entries a green row WOULD have covered (the attribution face —
+    named on the round, never silently eaten). Pure, no IO, so the truth table
+    is unit-addressable and the ran+reused==expected invariant is checkable."""
+    names = [str(n) for n in (names or [])]
+    own = {str(n) for n in (own_set or set())}
+    reused = [n for n in names if n not in own]
+    own_rerun = sorted(n for n in names if n in own)
+    return reused, own_rerun
+
+
 def _reuse_plan(candidates, conc_width, root, env_fp_value=None):
     """本轮复用判定（main 的前置检查段；台账读取面唯一入口）。
 
@@ -6965,6 +6986,7 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
     ran = passed = failed = env_failed = 0
     reused = 0
     reused_names = []
+    own_rerun = []   # t261024-60: own names a green row would have covered, run for real
     t0 = time.time()
     lock = threading.Lock()
     # ---- 260927 总预算（缺省零分支：env 缺席=0=本段一行不启用，逐字节同改前）----
@@ -7194,7 +7216,16 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
     # 「禁用」假信号，理由只进报告 JSON 的观测键（本轮没得复用这件事在报告里可读）。
     _pre_t0 = time.time()   # t260925-12：套件前奏（清扫+台面卫生+批台预起）墙钟，闸段归因观测面
     _reuse = _reuse_plan([e[0] for e in registry], conc_width, _REPO_ROOT)
+    # t261024-60：本票自有场景**绝不进复用面**——台账绿行是调度优化，替代不了本票的
+    # 举证义务（被复用吃掉 = 什么都不跑 = KI-220 不记绿面 = 断锚；t261022-12/-14 实案）。
+    # 被绿行「本可覆盖」的自有名逐条点名（INTEG_OWN_RERUN + only_plan.own_rerun），
+    # 照旧真跑、计入 ran；非自有名的复用经济逐字不变。
+    _reuse["names"], own_rerun = own_exempt_reuse(_reuse["names"], own_set)
     reuse_env_fp = _reuse.get("env_fp") or None   # 汇总行复用同一指纹（同轮内一致）
+    if own_rerun:
+        print("INTEG_OWN_RERUN 本票自有场景不进台账复用（绿行替代不了自有举证，"
+              "t261024-60）%d 条照旧真跑：%s"
+              % (len(own_rerun), ",".join(own_rerun)), flush=True)
     if _reuse["names"]:
         reused_names = list(_reuse["names"])
         reused = len(reused_names)
@@ -7639,7 +7670,9 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
                 "dropped_by_pool": dict(_dropped_by_pool),
                 "dropped_by_roster": [n for n in known_red_skipped
                                       if n in set(only_names)],
-                "own_kept": list(own_kept)}
+                "own_kept": list(own_kept),
+                # t261024-60：被台账绿行「本可复用」却被强制真跑的自有名（additive）
+                "own_rerun": list(own_rerun)}
         # 260929 直修 B1（宿主令·不开票）：报告落档同带环境红具名名单（与汇总行同名同源，
         # 排序去重；既有键一个不动）。
         _report["env_red_names"] = sorted(set(env_red_names))
