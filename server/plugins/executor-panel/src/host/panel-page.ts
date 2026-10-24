@@ -326,6 +326,11 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .badge.zero{background:var(--panel2);color:var(--muted);font-weight:500}
 .sect{margin:0 0 6px;font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
 .sect.lead{margin-top:18px}
+/* t261021-12: the Epics-tab card is a CONTAINER, not a section heading. It used to
+   borrow .sect (a one-line heading style), so text-transform:uppercase cascaded to
+   every descendant — epic code, summary, ticket titles, counts all rendered in
+   capitals. The card carries its own box style; descendants inherit normal case. */
+.epicCard{display:block;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;text-transform:none;letter-spacing:normal}
 .row{background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden}
 .row.wait{border-left:3px solid var(--amber)}
 .row.done{border-left:3px solid var(--line);background:transparent}
@@ -1865,8 +1870,9 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       var open = state.epicOpen===code;
       var counts=epicCounts(rows, now);
       var last=epicLastActivity(code);
-      html+='<div class="sect" style="display:block;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;'
-        +(open?'box-shadow:0 1px 3px rgba(31,35,40,.06)':'')+'">'
+      // t261021-12: the card is a container — .epicCard carries the box style;
+      // .sect (uppercase one-line heading) must never wrap the whole card.
+      html+='<div class="epicCard" style="'+(open?'box-shadow:0 1px 3px rgba(31,35,40,.06)':'')+'">'
         +'<div class="eh" data-epic-head="'+esc(code)+'" role="button" tabindex="0" style="display:flex;gap:8px;align-items:center;padding:8px 11px;cursor:pointer">'
         +'<span class="muted">'+(open?'▾':'▸')+'</span><b>'+esc(code)+'</b> '+epicBadge(e)
         +'<span style="margin-left:auto;display:flex;gap:8px;align-items:center">'

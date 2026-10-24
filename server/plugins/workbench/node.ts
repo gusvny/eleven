@@ -180,6 +180,10 @@ import { readInspectionArchive, readPeriodReport } from './src/host/inspection-a
 import { resolveInspectionDir } from './src/host/inspection-dir.ts'
 // t260926-05：巡检落账报告只读端点（report_path → 可读摘要；fail-closed 200+reason 同 /file 风格）。
 import { readInspectionReportFile } from './src/host/inspection-report.ts'
+// t261021-12: epic tickets carry the ticket's last-modified time (seconds->ms at
+// this boundary; malformed -> absent) so the page's activity sorts are live.
+// (Placed away from the t261021-14 import block so the landing merge stays clean.)
+import { epicTicketRow } from './src/host/epic-tickets.ts'
 // Per-project session ledger file (sessions.json, UI-5 t261005-06): the single
 // logic point of the GET/POST routes lives in src/host/session-ledger-file.ts
 // (atomic write / merge / refusal all live there; this file is a zero-logic front).
@@ -2004,13 +2008,10 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       sendJson(res, 200, { ok: true, result: { code, degraded: true, reason: `工单状态查询降级：ticket list 失败——${detail}` } })
       return
     }
-    const rows = ((r.result?.tickets ?? []) as any[]).map((t) => ({
-      id: String(t?.id ?? ''),
-      title: String(t?.title ?? ''),
-      status: String(t?.status ?? ''),
-      stage: String(t?.stage ?? ''),
-      stage_state: String(t?.stage_state ?? ''),
-    }))
+    // t261021-12: the row mapper (epic-tickets.ts) carries the ticket's
+    // last-modified time through — seconds -> ms converted once at this boundary,
+    // malformed -> absent — so the page's newest-first and activity sorts are live.
+    const rows = ((r.result?.tickets ?? []) as any[]).map((t) => epicTicketRow(t))
     const buckets: Record<string, number> = {}
     for (const row of rows) buckets[row.status || 'unknown'] = (buckets[row.status || 'unknown'] ?? 0) + 1
     sendJson(res, 200, { ok: true, result: { code, count: rows.length, buckets, tickets: rows } })

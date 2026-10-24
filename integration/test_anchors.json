@@ -1659,6 +1659,14 @@
     }
   },
   "scenarios": {
+    "integration/t261021-12/sc_t26102112_epic_tickets_time_payload.mjs": {
+      "anchor": "contract",
+      "note": "t261021-12: the epic-tickets payload boundary - a valid updated_ts (engine epoch seconds) arrives converted to milliseconds exactly once, a malformed source value (missing/non-numeric/null/zero/negative/fractional-string) yields an ABSENT key never 0 and never a fabricated now, and the legacy id/title/status/stage/stage_state fields plus the buckets/count envelope survive the mapping untouched."
+    },
+    "integration/t261021-12/sc_t26102112_epics_tab_case_and_order.mjs": {
+      "anchor": "behaviour",
+      "note": "t261021-12: the Epics tab as the user sees it - epic code, summary, ticket title, meta and counts lines all resolve text-transform:none while a real section heading stays uppercase; epics order newest-activity-first with a no-activity epic last showing an honest no-activity face; per-epic tickets newest-first with a malformed-time row last; recent relative time; zero pageerror."
+    },
     "integration/t261022-09/sc_t261022_09_quick_gate_scope.py": {
       "anchor": "behaviour",
       "note": "t261022-09 L3: the quickmanual gate is driven by the ticket's evidence declaration - receipt SUMMARY and gate_runs name the narrowing verbatim, an unresolvable declaration is the named product red quick_scope_unresolved outside the env-red channel (B2 can never exempt it), the single-writer args carry the declared scope with the full round still reachable and quick_scope defaulting empty behind QUICKMANUAL_SCOPE_PATCH_ID (replay), quick_scope_plan resolves against registry/checks with the reserved integ token winning before lookup, and verify_lane only_check runs exactly the declared check over a real git fixture (unknown id named red, token not shadowed, absent-params face unchanged)."
