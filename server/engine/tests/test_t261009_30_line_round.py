@@ -488,9 +488,16 @@ def test_r7b_runner_error_still_releases_guard(tmp_path):
         dc.run_line_round(LINE, "change", gp, boom, reader(p), writer(p),
                           "round-engine", "booked-v1")
     assert dc.guard_held(gp) is False
+    # t261024-30 re-ruled: a round that dies leaves ONE named record. The
+    # old pin here demanded ZERO rows; the one-record contract (the silent
+    # end of t261024-30's four face rounds) replaces it: exactly one
+    # range_growth row naming the exception, never a certification/freeze.
     rows, _ = dc.read_rows(p)
-    assert not [x for x in rows if x["kind"] in ("certification", "freeze",
-                                                 "range_growth")]
+    assert not [x for x in rows if x["kind"] in ("certification", "freeze")]
+    grown = [x for x in rows if x["kind"] == "range_growth"]
+    assert len(grown) == 1
+    assert grown[0]["reason"] == \
+        "round_settle_failed:RuntimeError:runner died"
 
 
 # ---- R8: the delivered checkout is refused by name -------------------------

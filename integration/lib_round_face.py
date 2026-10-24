@@ -168,6 +168,23 @@ def terminal_verdict(counts):
     return "red"
 
 
+def content_verdict(counts):
+    """The RECORD's rule (t261024-30), the canonical content roll-up the
+    engine certifies under: green iff ran > 0 and fail == 0. An unavailable
+    environment (env_fail > 0, fail == 0) is NOT guilt — the runner publishes
+    those names as ``unverified_names`` and the certification names the count.
+    This is the ONE place on the integration side; the face's stricter
+    ``terminal_verdict`` above stays as declared (env_fail>0 ⇒ red), and the
+    terminal face carries BOTH verdicts (``outcome.record_verdict`` +
+    ``outcome.record_rule``) so the two rules can never disagree silently.
+    Nothing ran / unreadable counts -> None: nothing judged, no record
+    verdict. Cross-checked against the engine's content rule by
+    test_t261011_26_round_face.py (source lock, both files)."""
+    if not counts or counts.get("ran", 0) <= 0:
+        return None
+    return "green" if counts.get("fail", 0) == 0 else "red"
+
+
 def _now_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -435,13 +452,21 @@ class FaceWriter:
         else:
             self.face.pop("counts_note", None)
 
-    def finish(self, state, verdict=None, reason=None):
+    def finish(self, state, verdict=None, reason=None,
+               record_verdict=None, record_rule=None):
         """Terminal write: face.json inside the run dir (outcome stays
         visible), then retire the live pointer ONLY IF it still names THIS
-        run — a second, newer round may already own it."""
+        run — a second, newer round may already own it. ``record_verdict`` /
+        ``record_rule`` (t261024-30): the RECORD's content verdict beside the
+        face's own (stricter) verdict, so an env-red face never silently
+        disagrees with the green record the engine certifies under."""
         self.face["state"] = state
         self.face["updated_at"] = _now_iso()
-        self.face["outcome"] = {"verdict": verdict, "reason": reason or ""}
+        outcome = {"verdict": verdict, "reason": reason or ""}
+        if record_verdict is not None:
+            outcome["record_verdict"] = record_verdict
+            outcome["record_rule"] = str(record_rule or "content-v1")
+        self.face["outcome"] = outcome
         try:
             atomic_write_json(self.run_dir / FACE_NAME, self.face)
         except OSError as e:

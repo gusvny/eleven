@@ -1090,10 +1090,14 @@ def relative_round_verdict(project, candidate, header, runner, roster):
         name = r.get("repo")
         baseline, note = _ensure_baseline(project, name, runner, flaky)
         if baseline is None:
+            # t261024-30: regressions come from the CONTENT fail set. The
+            # old `line_fails` here could book a red over a name that is
+            # also in the unverified set (env-only guilt) — content wins
+            # everywhere else in this function, so it wins here too.
             per_repo[name] = {"verdict": "red", "note": note,
                               "new_regressions": sorted(content_fails),
                               "carried_debt": [], "flaky_hits": []}
-            regressions.extend(sorted(line_fails))
+            regressions.extend(sorted(content_fails))
             continue
         v, detail = relative_verdict(content_fails, baseline)
         detail["note"] = note
@@ -1200,6 +1204,22 @@ def could_not_run_row(line, reason, at_ms=None):
         "reason": str(reason),
         "at": int(at_ms) if at_ms is not None else int(time.time() * 1000),
     }
+
+
+def _append_settle_row(append_rows, line, reason, at_ms=None):
+    """Append the round's ONE named row, never raising (t261024-30).
+
+    The settle guard and the CouldNotRun path both land here: a failed row
+    write must be LOUD on stderr (the named second face) and must never mask
+    the caller's own exception — the original error is the one that matters,
+    and swallowing it would turn a broken append into a fake success."""
+    import sys as _sys
+    try:
+        append_rows([could_not_run_row(line, reason, at_ms=at_ms)])
+    except Exception as e:  # noqa: BLE001 — named, loud, never raised
+        _sys.stderr.write(
+            "LINE_ROUND_SETTLE_ROW_FAILED: line=%s reason=%s row_error="
+            "%s:%s\n" % (line, reason, type(e).__name__, e))
 
 
 def should_freeze(attribution_value):
@@ -2015,10 +2035,21 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                     _content_failed = len(rel_new)
                     header["verdict"] = verdict
                     header["relative"] = rel
+                    # t261024-30: the record must SAY WHICH RULE it used — the
+                    # face may be stricter (env_fail>0 ⇒ red) but the two
+                    # verdicts must never disagree silently. The rule name and
+                    # the env-unverified count ride the persisted header.
+                    header["verdict_rule"] = "relative-content-v1"
+                    header["unverified_count"] = len([
+                        x for x in (header.get("unverified_names") or [])
+                        if isinstance(x, str) and x.strip()])
                 elif isinstance(header, dict):
                     verdict = run_verdict(header["cases"])
                     rel = None
                     _content_failed = int(header["cases"].get("failed", 0))
+                    header["verdict_rule"] = "absolute-content-v1"
+                    header["unverified_count"] = int(
+                        header["cases"].get("env_failed", 0) or 0)
                 else:
                     # could-not-run (header absent/malformed): no verdict here —
                     # build_certification raises CouldNotRun, which is the
@@ -2107,10 +2138,30 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                             entry["attribution"] = target["id"]
                 rounds.append(entry)
             except CouldNotRun as e:
-                append_rows([could_not_run_row(line, str(e), at_ms=now_ms)])
+                _append_settle_row(append_rows, line, str(e), now_ms)
                 rounds.append({"state": STATE_GREW, "reason": str(e),
                                "duration_ms":
                                    int((time.monotonic() - _t0) * 1000)})
+            except BaseException as e:
+                # t261024-30: a round that dies INSIDE the settle block (an
+                # append rejection, a ledger re-read failure, a cancellation)
+                # used to leave ZERO rows — the measured silent end (four
+                # rounds today wrote a face and a run row and nothing else).
+                # The one-record contract: every terminal path lands exactly
+                # ONE named row. The row kind is KIND_RANGE_GROWTH (the
+                # could_not_run_row shape: the proof exists but the record
+                # could not be completed — range grows, no freeze, goal 24)
+                # and the reason names the exception. The row append runs
+                # through _append_settle_row: if THAT append also fails (the
+                # review's real gap — the production symptom IS an append
+                # failure), the original exception still surfaces unchanged
+                # and the row-write failure is loud on stderr; neither error
+                # masks the other. Re-raised: the caller (tick entry / abort
+                # face) keeps its named error, never a fake success.
+                _append_settle_row(append_rows, line,
+                                   "round_settle_failed:%s:%s"
+                                   % (type(e).__name__, e), now_ms)
+                raise
         finally:
             guard_release(guard_path)
         trigger = "change"  # a chained round re-evaluates as a change tick

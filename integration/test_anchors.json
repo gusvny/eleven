@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 322,
-      "scenarios": 776
+      "engine_tests": 331,
+      "scenarios": 794
     },
     "vocab": [
       "behaviour",
@@ -1645,6 +1645,11 @@
     "server/engine/tests/test_t261021_01_inspection_sighting.py": {
       "anchor": "behaviour",
       "note": "t261021-01 developer L1: inspection sighting decision core (registry entry added on the line 261023 to close an L16 gap - the file landed without an anchor, so every lane carrying it read a missing entry)",
+      "sync_path": ""
+    },
+    "server/engine/tests/test_t261024_30_one_record.py": {
+      "anchor": "behaviour",
+      "note": "t261024-30 L1: one named record per terminal line round - the settle guard books exactly one range-growth row naming the cause when the cert append faults, the env-only shape certifies green with the unverified count named, the old face-red/content-clean shape replays to the same single record, and the record stamps the verdict rule it used",
       "sync_path": ""
     }
   },
@@ -5587,6 +5592,16 @@
     "integration/t261024-21/sc_dup_decl_guard_bites.py": {
       "anchor": "behaviour",
       "note": "t261024-21 L3: the duplicate-declaration guard bites on a real mutated copy of panel-page.ts - detector reports the injected duplicate and not a nested twin; node --test on the developer guard test is green on a pristine scratch copy and red (naming the identifier) on a mutated copy; the real tree is byte-unchanged. Anchored to runtime behaviour of the guard, not to the page's source text."
+    },
+    "integration/t261024-30/sc_t26102430_env_only_certifies.py": {
+      "anchor": "behaviour",
+      "note": "t261024-30: an env-only round (failed==0, env_failed>0) certifies green unconditionally - exactly ONE certification row citing the run read back from the ledger, the receipt naming the env-unverified count, no freeze and no growth, replay of the old shape booking the same single record, a real content regression still red with its freeze",
+      "sync_path": ""
+    },
+    "integration/t261024-30/sc_t26102430_settle_always_names.py": {
+      "anchor": "behaviour",
+      "note": "t261024-30: a round dying inside its settle window leaves exactly ONE named record read from the reader side - a failing append surfaces the original error and books one range-growth row naming the cause, a totally failing append face stays loud on stderr, an abort inside the settle window books exactly one row and a second none, and the run row project and the round face resolve to ONE develop dir",
+      "sync_path": ""
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

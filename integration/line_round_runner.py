@@ -477,6 +477,27 @@ def tail(text, n=300):
     return (text or "").strip()[-n:]
 
 
+def resolve_face_dir(repos, env):
+    """The develop dir this round's face publishes under (t261024-30: the
+    ONE project-resolution rule). Primary: lib_round_face's lines.json
+    declaration scan. Fallback: the SAME project the run row persists into
+    (``_choose_project``'s ledger scan) — the silent-end day produced four
+    rounds with a run row and NO round directory because the two rules
+    answered "which project" differently; when the declaration scan misses,
+    the ledger answer is named on stderr and used, so a round whose run row
+    lands always gets its evidence dir. Returns (dir | None, line_id)."""
+    import lib_round_face
+    fdir, line_id = lib_round_face.resolve_develop_dir(repos, env)
+    if fdir is None:
+        proj, _already = _choose_project(env)
+        if proj is not None:
+            fdir = proj / "data" / "develop"
+            sys.stderr.write(
+                "%s note: face dir unresolved by lines.json declaration — "
+                "falling back to the run-row project (%s)\n" % (TAG, fdir))
+    return fdir, line_id
+
+
 def run(env=None):
     """The whole command. Returns the exit code; the header (the one stdout
     line) is printed inside."""
@@ -489,7 +510,7 @@ def run(env=None):
     # even a pre-spawn could-not-run is visible. Unresolved = named degrade,
     # the round runs exactly as before, only the face is absent.
     import lib_round_face
-    fdir, line_id = lib_round_face.resolve_develop_dir(
+    fdir, line_id = resolve_face_dir(
         sorted({c["repo"] for c in candidates}), env)
     face = watcher = None
     if fdir is not None:
@@ -641,7 +662,12 @@ def run(env=None):
                 except OSError:
                     pass  # keep the provisional dir; the face still lands
             face.retain_log(log_path)
-            face.finish("done", verdict, reason)
+            # t261024-30: the record's verdict rides the face — an env-red
+            # face (the stricter rule) must never silently disagree with the
+            # green record the engine certifies under.
+            face.finish("done", verdict, reason,
+                        record_verdict=lib_round_face.content_verdict(counts),
+                        record_rule="content-v1")
             # the relative-certification caliber (261014): the fail NAME set,
             # so the engine can judge new-regressions-vs-main, not just counts
             if isinstance(header, dict):
@@ -670,21 +696,19 @@ def run(env=None):
         shutil.rmtree(run_root, ignore_errors=True)
 
 
-def _persist_run_row(header, env):
-    """Append this round's header to the project ledger, idempotently by run id.
+def _choose_project(env, skip_run_id=None):
+    """The project whose ledger this round belongs to (t261024-30: the ONE
+    project-resolution rule, shared with the face fallback in ``run``).
 
-    The engine persists the header and mints the certification in ONE block; when
-    that block does not run, a green round leaves no row and can never be certified
-    (measured twice on 261023: face fail=0, ledger empty, line stayed frozen). The
-    runner therefore also writes the row itself.
-
-    Which project: $SANDBAR_PROJECTS_DIR when set, else the project under
-    ~/.sandbar/projects whose ledger already carries a line-round row (that is where
-    this round's predecessors were recorded); a single project is taken as-is. No
-    project resolvable -> named skip, never a guess into the wrong ledger."""
+    Returns (project_dir | None, already_recorded): the project under
+    $SANDBAR_PROJECTS_DIR (else ~/.sandbar/projects) whose scenario-runs
+    ledger already carries a ``lane:line-round`` row (that is where this
+    round's predecessors were recorded); a single project is taken as-is.
+    ``already_recorded`` is True when the ledger already carries
+    ``skip_run_id`` — the caller must not duplicate the row. No project
+    resolvable -> (None, False) with the named stderr line, never a guess
+    into the wrong ledger."""
     import json as _json
-    if not isinstance(header, dict) or not header.get("id"):
-        return
     base = Path(str(env.get("SANDBAR_PROJECTS_DIR") or "").strip()
                 or os.path.expanduser("~/.sandbar/projects"))
     cands = [p for p in base.iterdir() if p.is_dir()] if base.is_dir() else []
@@ -698,32 +722,56 @@ def _persist_run_row(header, env):
                 if not line.strip():
                     continue
                 row = _json.loads(line)
-                if isinstance(row, dict) and row.get("id") == header["id"]:
-                    return              # already recorded - never duplicate
-                if isinstance(row, dict) and str(row.get("source") or "") \
-                        == RUN_SOURCE:
+                if not isinstance(row, dict):
+                    continue
+                if skip_run_id is not None \
+                        and row.get("id") == skip_run_id:
+                    return proj, True   # already recorded - never duplicate
+                if str(row.get("source") or "") == RUN_SOURCE:
                     chosen = proj
         except (OSError, ValueError):
             continue
+    if chosen is None and len(cands) == 1:
+        chosen = cands[0]
     if chosen is None:
-        if len(cands) == 1:
-            chosen = cands[0]
-        else:
-            sys.stderr.write("run-row persist skipped: no project ledger carries a "
-                             "%s row under %s\n" % (RUN_SOURCE, base))
-            return
+        sys.stderr.write("line-round project unresolved: no project ledger "
+                         "carries a %s row under %s\n" % (RUN_SOURCE, base))
+    return chosen, False
+
+
+def _persist_run_row(header, env):
+    """Append this round's header to the project ledger, idempotently by run id.
+
+    The engine persists the header and mints the certification in ONE block; when
+    that block does not run, a green round leaves no row and can never be certified
+    (measured twice on 261023: face fail=0, ledger empty, line stayed frozen). The
+    runner therefore also writes the row itself.
+
+    Which project: ``_choose_project`` (the one resolution rule — the face
+    fallback in ``run`` uses the SAME answer, so a round whose run row lands
+    can no longer be the round whose face directory never appeared).
+    """
+    import json as _json
+    if not isinstance(header, dict) or not header.get("id"):
+        return
+    chosen, already = _choose_project(env, skip_run_id=header["id"])
+    if already:
+        return
+    if chosen is None:
+        return
     # 261023: the suite's own header carries the FACE rule (env_fail != 0 -> red).
     # The engine's run_verdict is what certifies and it keys on content: ran > 0 and
     # failed == 0 is GREEN (an unavailable environment is "unverified", not guilt).
     # Writing the face verdict verbatim poisoned the ledger with a red row for a
-    # round that had failed=0 - measured, and corrected below.
+    # round that had failed=0 - measured, and corrected below. t261024-30: the
+    # rule lives in ONE place (lib_round_face.content_verdict) and the row
+    # NAMES the rule it used — a reader never has to guess which caliber a
+    # stored verdict came from.
+    import lib_round_face
     _cases = header.get("cases") or {}
-    try:
-        _ran = int(_cases.get("ran") or 0)
-        _failed = int(_cases.get("failed") or 0)
-        header["verdict"] = "green" if (_ran > 0 and _failed == 0) else "red"
-    except (TypeError, ValueError):
-        pass
+    _counts = lib_round_face.normalize_summary_counts(_cases)
+    header["verdict"] = lib_round_face.content_verdict(_counts) or "red"
+    header["verdict_rule"] = "content-v1"
     path = chosen / "ledger" / "scenario-runs.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
