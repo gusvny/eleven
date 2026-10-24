@@ -335,9 +335,16 @@ def t5_board(tid_a, tid_b1, tid_b2):
     check("T5a 聚合白名单收全 A/B 两项目三实例（零 env 覆盖层）",
           rows is not None and all(t in ids for t in (tid_a, tid_b1, tid_b2)),
           "ids=%s parsed=%s" % (ids[:6], blob[:160]))
+    # 261024: the bench is SHARED by every case in a round, so a global "no id starts
+    # with inspection-" read other cases' tickets (measured on the round at a50b0c6e:
+    # ids carried inspection-lfr-ins-* rows another case minted in the same
+    # namespace). The intent is about the tickets THIS ticket's declaration mints:
+    # scope the ids to this case's own fixture instances and keep the same negative.
+    own_ids = [i for i in ids
+               if any(m in i for m in (INST_A, INST_B1, INST_B2))]
     check("T5b 新票行零旧形前缀（inspection- 前缀零残留·运行时子用例）",
-          rows is not None and not any(i.startswith("inspection-") for i in ids),
-          "ids=%s" % ids[:6])
+          rows is not None and not any(i.startswith("inspection-") for i in own_ids),
+          "ids=%s own=%s" % (ids[:6], own_ids[:6]))
     row_a = row_of(rows, tid_a)
     check("T5c 行 instance/period==SA 真源值",
           str((row_a or {}).get("instance_id") or "") == INST_A
