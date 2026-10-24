@@ -156,3 +156,41 @@ that the certification machinery itself was the bottleneck, not the code.
 
 - `t261024-40` KI-353 (in progress), `t261022-14` (its live witness, engine-paused), `t261022-12` and `t261021-12` (acceptance / merge_check), `t261022-15` (waiting for a working session).
 - Durable follow-ups worth a ticket: the fixed wall-clock windows (5 s / 60 s / 90 s) measured on an idle box are the single largest source of red; each should either own its resource or scale with the measured bench, never stay a constant.
+
+## 261025 01:00-06:30 — two engine stalls, both located and cleared
+
+After the last promotion the line stopped producing rounds altogether. Two independent
+faults sat on top of each other:
+
+1. **A stale round guard.** `ledger/delivery-guard.json` read `{"held": true, "by":
+   "dispatcher-scan", "at": 1792858803558}` from 00:51 onward, with no pid in it. Every
+   round afterwards answered `{"rounds": [], "end": {"state": "joined", "reason":
+   "guard_held"}}` — the scheduled tick and the manual force marker alike — and wrote
+   nothing. Cleared with the engine's own `guard_release`; the guard carries no owner pid,
+   so a dead owner cannot be detected (KI-354's family: the same class as the stale round
+   pointer fixed earlier in `lib_round_face`).
+2. **`line_env` stopped inheriting the process environment.** `develop_certify.line_round_tick`
+   builds `line_env = dict(env) if env else {}` and the forced path passes `env=None`, so
+   `resolve_runner` never saw `SANDBAR_LINE_ROUND_RUNNER` (present in the worker's own
+   environment, both paths existing) and answered `runner_missing`. The regression came with
+   the t261024-50 landing (the candidate-tree roster change touches exactly that block).
+   Fixed by ticket `t261024-70` (landed `4135c3f8`, promoted).
+
+With both cleared the loop heals itself: the worker now writes its own certification
+(`05:20 4135c3f8 green dispatcher-scan`, no operator act).
+
+### Still open, and what each needs
+
+- `t261022-14` and `t261022-12`: both green apart from a gate run that peels their OWN
+  scenario out of the run list (engine pool: `ran=0`; browser-free: the fast set only), so
+  no landing anchor is ever minted. Two fixes landed (`t261024-40`, `t261024-60`) and the
+  witnesses did not move - KI-355 records the conclusion: the peel is on the POOL EXCLUSION
+  side, not in the plan builder those two tickets touched. Next attempt starts there.
+- `t261022-15` still waits for a working session.
+
+### Numbers at hand-off (261025 06:30)
+
+main `4135c3f8`; 46 landings; 74 certifications; known-red book 104 rows; KI 345-355 open
+(11 entries, each with the measured evidence and the reproduction path). Six fix tickets
+landed across the day: KI-350 anchor refresh, the inspection sign chain, the Epics renderer,
+KI-352 single record, the zero-run gate (two attempts), and the runner/env regression.
