@@ -110,6 +110,15 @@ def verdict_rejected(label, *args):
 
 def main() -> int:
     global INST, DECL
+    # 261024 (host order: drop docker): serve the endpoint from the plain-process
+    # bench when nothing answers there, so the verdict legs need no docker stage.
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import lib_proc_bench
+    import lib_inspection
+    try:
+        lib_proc_bench.ensure(modules=(lib, lib_inspection))
+    except RuntimeError as e:
+        die_env("process bench 起不来（%s）——裁定旅程需要真台真票" % e)
     lib.require_entry(lib.TRIGGER, "巡检触发入口")
     lib.require_entry(lib.CLIENT, "client 工单面")
     _proc, parsed = lib.run_client("schedule-list", {})

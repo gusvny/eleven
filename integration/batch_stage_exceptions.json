@@ -201,5 +201,26 @@
     "project_pattern": "sandbar-t261008-45",
     "reason": "被测对象=真 worker 进程对 workflow 沙箱的接纳面（t261008-45）：场景对 docker 台 require_stage 起 worker.py，断言沙箱不再拒收 ExecutorDeliveryWorkflow（第二读进程 describe_task_queue 见 poller、日志无 RestrictedWorkflowAccessError）；消费的是台子本身而非台机制，批台复用不触契约。",
     "evidence": "integration/t261008-45/sc_executor_workflow_sandbox_validates.py require_stage + worker.py 子进程（grep 实证）；t260921-06 sentinel 本轮点名缺声明（arbitration gen5 修复被 settler 丢失，本轮重申报）"
+  },
+  {
+    "entry": "t260915-20-project-identity-realchain",
+    "pool": "exclusive",
+    "project_pattern": "insa-*,insb-*",
+    "reason": "261024 宿主令「换到 process bench」：本用例的在线面对 Temporal 前端的要求由 integration/process_bench.py 的纯进程台自供给（lib_proc_bench.ensure），不需要 docker 台，也就不需要批台预起。",
+    "evidence": "integration/t260915-20/sc_inspection_project_identity.py main() 首步 lib_proc_bench.ensure(modules=(lib,))；无 docker 台时实测 PASS 22/0（process bench on 127.0.0.1:17233, namespace default）"
+  },
+  {
+    "entry": "t260916-02-relocation-realchain",
+    "pool": "exclusive",
+    "project_pattern": "rlxa-*,rlxb-*",
+    "reason": "同上：真链旅程只要求 Temporal 前端，process bench 自供给，不起批台。",
+    "evidence": "integration/t260916-02/sc_inspection_decl_relocation.py main() 首步 lib_proc_bench.ensure(modules=(lr, lib_inspection))；无 docker 台时实测 PASS 29/0"
+  },
+  {
+    "entry": "t260916-22-verdict-cli",
+    "pool": "exclusive",
+    "project_pattern": "verdict-cli-*",
+    "reason": "同上：裁定旅程只要求 Temporal 前端，process bench 自供给，不起批台。",
+    "evidence": "integration/t260916-22/sc_inspection_verdict_cli.py main() 首步 lib_proc_bench.ensure(modules=(lib, lib_inspection))；无 docker 台时实测跑满全部子用例（余一红属 KI-337 产品面，非环境）"
   }
 ]

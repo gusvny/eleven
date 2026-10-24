@@ -72,7 +72,7 @@ sys.path.insert(0, os.path.join(REPO, "integration", "t260916-22"))
 import lib_inspect as inspect_lib  # noqa: E402
 from lib_inspection import (  # noqa: E402
     RepoTree, StageWorker, cleanup_tickets, die_env, die_fail, note_started_ticket,
-    run_client, run_trigger,
+    run_client, run_trigger, seed_surface_bootstrap,
 )
 
 try:
@@ -148,6 +148,10 @@ def drifty_tree(label: str, token: str) -> RepoTree:
             'const section = "项目行";\n'
             'const label = section + "『+ 钮』";\n'
             "export function buttonLabel() { return label; }\n")
+    # 261024: the inspection lane resolves its diff base with `git rev-parse` in the
+    # project root, so a fixture tree must be a repository with one commit (measured
+    # on the process bench: every finding leg died 'base point unavailable rc=128').
+    t.git_init()
     t.keep_checksums()
     return t
 
@@ -475,6 +479,16 @@ def t11_cross_family_visibility(tid_a):
 # ---------------------------------------------------------------- 主流程
 
 def main() -> int:
+    # 261024 (host order: drop docker): the endpoint is served by the plain-process
+    # bench when nothing answers on it. lib_relocation bound TEST_TARGET_HOST /
+    # TEST_NAMESPACE at import, so both that module and the shared inspection lib
+    # are handed over for the rewrite.
+    import lib_proc_bench
+    import lib_inspection
+    try:
+        lib_proc_bench.ensure(modules=(lr, lib_inspection))
+    except RuntimeError as e:
+        die_env("process bench 起不来（%s）——真链旅程需要真台" % e)
     lr.precheck_stage()
 
     tmp = tempfile.mkdtemp(prefix="sandbar-t26091602-")
@@ -483,6 +497,11 @@ def main() -> int:
     ledger_dir = os.path.join(tmp, "ledger")
     tree_a = drifty_tree("rlxa-%d" % PID, TOKEN_A)
     tree_b = drifty_tree("rlxb-%d" % PID, TOKEN_B)
+    # 261024: declare each instance's previous-period base point through the
+    # engine's own bootstrap seam (a fixture tree has no earlier period).
+    for _inst, _tree in ((INST_A, tree_a), (INST_B1, tree_b), (INST_B2, tree_b)):
+        seed_surface_bootstrap(_inst, _tree.base_sha,
+                               os.path.join(tmp, "ledger"))
     tid_a = tid_b1 = tid_b2 = ""
     try:
         # A/B 项目：声明在各**自己仓根**（默认落位 <dirs[0]>/inspection.yaml），

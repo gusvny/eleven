@@ -268,6 +268,11 @@ def drifty_tree(label: str, token: str) -> RepoTree:
             'const section = "项目行";\n'
             'const label = section + "『+ 钮』";\n'
             "export function buttonLabel() { return label; }\n")
+    # 261024: the inspection lane resolves its diff BASE POINT with `git rev-parse`
+    # in the project root, so a fixture tree must be a repository with a commit.
+    # Measured on the process bench: every finding leg died with "Change surface
+    # unavailable: this period's base point unavailable (git rev-parse rc=128)".
+    t.git_init()
     t.keep_checksums()
     return t
 
@@ -604,6 +609,14 @@ def j4_unowned_guard(queue: str, decl_path: str):
 # ---------------------------------------------------------------- 主流程
 
 def main() -> int:
+    # 261024 (host order: drop docker): serve the endpoint from the plain-process
+    # bench when nothing answers there, so the online legs do not need the docker
+    # stage. A bench the caller does not start is never stopped by this scenario.
+    import lib_proc_bench
+    try:
+        lib_proc_bench.ensure(modules=(lib,))
+    except RuntimeError as e:
+        die_env("process bench 起不来（%s）——真链路子用例需要真台" % e)
     precheck_temporal_reachable()
     precheck_temporal_cli()
     precheck_namespace()
@@ -622,6 +635,13 @@ def main() -> int:
     os.makedirs(reg_root, exist_ok=True)
     tree_a = drifty_tree("sbxa-%d" % PID, TOKEN_A)
     tree_b = drifty_tree("sbxb-%d" % PID, TOKEN_B)
+    # 261024: a fixture tree has no earlier period, so the lane refuses the diff
+    # base by name ("no usable previous-period base point"). Declare the base
+    # point through the engine's own seam (the operator-declared bootstrap file),
+    # the same furniture the other inspection journeys already use.
+    for _inst, _tree in ((INST_A, tree_a), (INST_B, tree_b)):
+        lib.seed_surface_bootstrap(_inst, _tree.base_sha,
+                                   iso_env["SANDBAR_INSPECTION_DIR"])
     stub_path = os.path.join(tmp, "inspect-stub-message.txt")
     with open(stub_path, "w", encoding="utf-8") as f:
         f.write(inspect_lib.fenced_message([]))
