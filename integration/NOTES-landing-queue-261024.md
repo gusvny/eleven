@@ -333,3 +333,37 @@ waits for a working session.
 - KI-358 (rework to implement refuses with the literal `fallback()`), KI-359 (stage lease outliving
   its scenario), KI-362 (usage dies with the lane), KI-363 (population filter), KI-365 (budget kills
   cannot be told from content reds on the face).
+
+## 261025 late shift (05:00-07:00 CST) — the certification loop ran end to end
+
+`main` moved four more times and every open ticket except one closed. The loop that finally held:
+
+    land -> baseline round on main -> candidate round on the line head -> green certification
+         -> the engine releases the freeze itself -> the executor promotes main
+
+What made it work, in order:
+
+1. **Never run a line round while a ticket gate is running its own suite.** Both share the docker
+   batch stage; a gate's teardown kills the round mid-flight. Measured signature: the suite dies at
+   a near-constant 249-506 s with `runner_failed_exit_2` and `batch-stage: received signal 15`.
+2. **An orphaned batch stage wedges everything afterwards** (KI-366). `stage_docker sweep` reported
+   it but refused to tear it down (holder heartbeat fresh, anchor tree already deleted). The fix was
+   an explicit `stage_docker down --project batch-<id>`; the next round certified green in 15 min.
+3. **A booking made on the line is invisible to the next automatic round** (KI-364): the round
+   candidates on the LAST LANDING, which predates the booking commit. A manual round (candidate =
+   line head) breaks the loop; so does landing one more ticket.
+4. **A rework can miss the landing entirely** (KI-361, three times tonight). A ticket that lands and
+   then gets a send-back closes with the fix still in the lane, and the lane is deleted at close.
+   Symptom to watch: the ticket is `merge/running` while the scenario its rework named is still red
+   on the line. Recovery when the lane is already gone: cherry-pick the orphan commit, or repair the
+   asset directly when it is integration's own (that is what the metrics anchor needed).
+
+Faces fixed tonight, all driven by host reports: the certification tab's two controls (design in
+`docs/design/executor-operational-envelope-v1.md` §5), the metrics fabrications (fake 2001
+timestamps, a population seven times too small, tokens missing cache and 70 percent of the tickets),
+the tokens-by-role and project-sessions empties, and the markdown reviewer that only recognised
+`docs/**/*.md`.
+
+Still open: `t261022-15` waits for a working session (process-bench leak), KI-358 (rework to
+implement refused with the literal `fallback()`), KI-361/362/363/364/365/366, and the display
+caliber questions the host has already ruled on (they ride in the tickets, not here).
