@@ -3840,15 +3840,6 @@ FAST_SET_BUDGET_NOTE = (
 #: therefore cannot drift into a second membership list — membership itself
 #: lives only on the registry markers.
 FAST_SET_CATCH = {
-    # t261022-09: the entry's own membership declaration — the guard family
-    # (t261009-16 B / --print-fast-set) refuses a fast member without one.
-    "t261022-09-quick-gate-scope":
-        "the quickmanual gate drifting back to FULL-registry-every-round while "
-        "the evidence declaration stays a claim on the face only (the host-order "
-        "261022 incident), the receipt losing the 'narrowed by declaration: ...' "
-        "honesty face, or an unresolvable declaration falling back silently to "
-        "full or to nothing (caught offline in seconds instead of at the next "
-        "merge human asking why the 'quick' lane took twelve minutes)",
     "t261021-10-lane-overlay-out-of-tree":
         "the lane sandbox overlay regrowing inside the measured tree - an "
         "overlay path under integration/<ticket>/ admitted by the predicate, "
