@@ -296,6 +296,73 @@ export async function resolveLedgerSessionFiles(ticketId: string): Promise<{ pat
 }
 
 /**
+ * Archived-session probe seam (t261025-14): before lane teardown, the M1-3
+ * archive_ticket activity byte-copies `.dsh/sessions/**` into
+ * <projects-root>/<key>/data/tickets/<id>/sessions/ (fail-closed; engine side,
+ * agent_activities.py intake path 3) — the only surviving body of a closed
+ * ticket's lane sessions. This function only discovers: it collects every
+ * *.jsonl.zstd under that directory.
+ *
+ * Deliberate divergence from the lane-side resolveAllSessionFiles ("newest only
+ * per leaf dir"): the archive stores each file exactly once (no dual-generation
+ * naming), so taking all of them is what keeps a second role's session counted.
+ * If a future refactor "unifies" this back to newest-only, the two-role case in
+ * tests/t261025-14-archived-usage.mjs goes red — the divergence is pinned, not
+ * accidental.
+ *
+ * Anti-traversal: project_key/ticket_id pass a shape whitelist first (the same
+ * stance as the engine's PROJECT_KEY_RE), then a double guard keeps every final
+ * path inside the archive root; any escape refuses the whole set (refused=true,
+ * the consumer nulls the block). Missing dir / no files -> paths=[] + a
+ * human-readable reason (never a silent zero).
+ */
+export async function resolveArchivedSessionFiles(
+  projectsRoot: string,
+  projectKey: string,
+  ticketId: string,
+): Promise<{ paths: string[]; reason?: string; refused?: boolean }> {
+  if (projectKey === '' || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(projectKey)) {
+    return { paths: [], refused: true, reason: `illegal project key shape (refused to read the archive): ${JSON.stringify(projectKey.slice(0, 60))}` }
+  }
+  if (ticketId === '' || !/^t\d+-\d+$/.test(ticketId)) {
+    return { paths: [], refused: true, reason: `illegal ticket id shape (refused to read the archive): ${JSON.stringify(ticketId.slice(0, 60))}` }
+  }
+  const root = resolve(projectsRoot)
+  const dir = join(root, projectKey, 'data', 'tickets', ticketId, 'sessions')
+  try {
+    await stat(dir)
+  } catch {
+    return { paths: [], reason: `archive has no session directory for this ticket: ${dir}` }
+  }
+  const paths: string[] = []
+  // Recursive walk; one unreadable level only records a reason and never destroys
+  // the set (good files still enter the totals, never silent).
+  const reasons: string[] = []
+  const walk = async (d: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(d, { withFileTypes: true })
+    } catch (err: any) {
+      reasons.push(`dir unreadable: ${d} (${String(err?.message ?? err)})`)
+      return
+    }
+    for (const e of entries) {
+      const p = join(d, e.name)
+      if (e.isDirectory()) { await walk(p); continue }
+      if (e.isFile() && e.name.endsWith('.jsonl.zstd')) paths.push(p)
+    }
+  }
+  await walk(dir)
+  if (paths.some((p) => !(resolve(p) === root || resolve(p).startsWith(root + sep)))) {
+    return { paths: [], refused: true, reason: `archived session path outside the projects root (refused to read): ${dir}` }
+  }
+  if (paths.length === 0) {
+    return { paths: [], reason: `no *.jsonl.zstd in the archived session directory: ${dir}` + (reasons.length > 0 ? `; ${reasons.join('; ')}` : '') }
+  }
+  return { paths, ...(reasons.length > 0 ? { reason: reasons.join('; ') } : {}) }
+}
+
+/**
  * 工单 usage 聚合入口（只读）。全部会话文件加总 + 按 stage 时间窗切分。
  * 任一文件有内容即 exists:true；全部文件不可读/无 usage → exists:false + 人话 reason。
  */
@@ -320,6 +387,13 @@ export async function aggregateTicketUsage(
   out.exists = out.total.input > 0 || out.total.output > 0 || out.total.cacheRead > 0
   if (!out.exists) {
     out.reason = reasons[0] ?? '无 usage 事件'
+  } else if (reasons.length > 0) {
+    // t261025-14 (archive seam, proxy-file shape): while the totals come from the
+    // good files, the skipped-file reasons (decompress failure / no usage) must
+    // still surface on the result — "the file exists but is undecodable" stays
+    // distinguishable, never a silently dropped file. Only fills reason when it is
+    // still empty (the exists path leaves reason undefined; additive, no flip).
+    out.reason = reasons.slice(0, SESSION_NOTE_CAP).join('; ')
   }
   if (out.suspect) {
     // 混合态合成（t260917-05 review 意见2）：totals 可能来自好文件，S1 明细必须

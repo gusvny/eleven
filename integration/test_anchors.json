@@ -5742,6 +5742,10 @@
       "anchor": "behaviour",
       "note": "t261025-11: the tick-level healing journey over real files on disk - witness replay (complete runner row, no citing row) heals into exactly ONE certification citing the run id, replay writes nothing; unjudgable header becomes exactly ONE range-growth row naming the run id; guard held heals nothing; line-ambiguous refuses by name on the tick-refusal face; garbage in either store is named, never guessed; a rejected settle append retries and names the face.",
       "sync_path": ""
+    },
+    "integration/t261025-14/sc_t261025_14_token_loss_at_close.mjs": {
+      "anchor": "behaviour",
+      "note": "t261025-14: the loss-at-close journey as the user sees it - a closed ticket whose lane is gone keeps its token usage via the archive, a cached tokens=null record heals once the archive appears, the lane source wins while alive (byte-identical with/without archive), a corrupt archive file never zeroes the face and is named, a measured zero outside tickets stays 0 while a missing block stays null with the named tickets-only caliber, and out-of-window archived events never inflate the total."
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

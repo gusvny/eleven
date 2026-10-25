@@ -40,13 +40,14 @@ import { execFile } from 'node:child_process'
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import { homedir } from 'node:os'
-import { isAbsolute, join } from 'node:path'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
 import { runAdminCli } from '../../../../sandbar-tools.ts'
 import { findProject, loadProjects, primaryDir } from '../../../../project-registry.ts'
 import { listEpics, resolveEpicsDir } from './epics.ts'
 import {
   aggregateTicketUsage, resolveAllSessionFiles, resolveLedgerSessionFiles, resolveProjectSessionFiles,
+  resolveArchivedSessionFiles,
   stageWindowsFromTimeline,
   type StageWindow,
 } from './agent-usage.ts'
@@ -618,11 +619,23 @@ export async function computeDelivery(deps: MetricsDeps, ticket: any): Promise<D
   }
 }
 
-/** 单票 token 维：复用 agent-usage 通路（八项故障模式随函数带入，契约块 5）。
- *  t260903-09 KI-017③ 补账缝：泳道会话不存在（已拆）→ 探测项目级 usage 账本
- *  （SANDBAR_USAGE_LEDGER_DIR，引擎侧出仓前向契约）；两处皆无 → null+人话 reason。 */
+/** Per-ticket token dimension: reuses the agent-usage path (its eight fault
+ *  modes come along; contract block 5).
+ *  t260903-09 KI-017③ fallback seam: lane sessions gone (torn down) -> probe the
+ *  project-level usage ledger (SANDBAR_USAGE_LEDGER_DIR, the engine-side export
+ *  forward contract).
+ *  t261025-14 fallback seam 2: lane gone and no ledger -> read the M1-3 archived
+ *  sessions (<projects-root>/<key>/data/tickets/<id>/sessions/, the body that
+ *  archive_ticket fail-closed copied in before teardown) — a closed ticket's
+ *  usage no longer dies with the lane. None of the three -> null + a
+ *  human-readable reason.
+ *  The archive seam's root+key are threaded in by the caller, derived from
+ *  resolveMetricsCacheDir's dir (dir = <root>/<key>/data/metrics -> root is three
+ *  levels up, key is the dir two levels up); cache disabled means no per-key data
+ *  directory convention, so the archive seam stays off. */
 export async function computeTokens(
   deps: MetricsDeps, id: string, ticket: any, windows: StageWindow[],
+  archived?: { root: string; key: string } | null,
 ): Promise<{ tokens: MetricsCacheRecord['tokens']; reason?: string }> {
   const ref = await resolveAllSessionFiles(deps.repo, id, ticket)
   if (ref.refused === true) return { tokens: null, reason: ref.reason ?? '工单字段越界（拒绝读取会话）' }
@@ -635,6 +648,16 @@ export async function computeTokens(
       srcReason = undefined
     } else if (led.reason) {
       srcReason = led.reason
+    }
+  }
+  if (paths.length === 0 && archived) {
+    const arc = await resolveArchivedSessionFiles(archived.root, archived.key, id)
+    if (arc.refused === true) return { tokens: null, reason: arc.reason ?? 'archived path escaped the root (refused to read)' }
+    if (arc.paths.length > 0) {
+      paths = arc.paths
+      srcReason = undefined
+    } else if (arc.reason) {
+      srcReason = arc.reason
     }
   }
   const agg = await aggregateTicketUsage(paths, windows)
@@ -692,6 +715,15 @@ async function ticketRecord(
     //     是零 spawn 纯内存且不受 TTL 门；刷新走既有全量重算路径（closed_ms/
     //     timeline 从 show 来——不可内存改 flag 了事，否则闭单票归窗锚点退化为
     //     created_ms 污染 KPI 归窗）。
+    //   Condition C (token healing, t261025-14): a closed (!expectedOpen) record
+    //     with tokens===null and M1-3 archive session files present -> falls
+    //     through to the full recompute path below. The gate is a pure fs probe
+    //     (zero spawn): tickets whose archive has no sessions never enter, so
+    //     archive-less tickets are not dragged into repeated recomputes. Healing
+    //     rides the existing recompute path = the F1 anchor discipline applies
+    //     unchanged (anchorApproxBaseMs keeps the pre-recompute computed_at, so a
+    //     healed ticket is not re-anchored to the request time and dropped from
+    //     the window on the first slice).
     const expectedOpen = String(row?.status ?? '') !== 'closed'
     const ts = isoMs(cached.rec.updated_ts)
     const ttlMs = reprobeTtlMin() * 60_000
@@ -699,7 +731,15 @@ async function ticketRecord(
     const expired = ttlMs === 0 || !(Number.isFinite(ts) && deps.now() - ts <= ttlMs)
     const needsReprobe = cached.rec.delivery === null && expired
     const openStale = cached.rec.open !== expectedOpen
-    if (!needsReprobe && !openStale) {
+    let archivedHeal = false
+    if (cached.rec.tokens === null && !expectedOpen && cacheDir.enabled) {
+      // dir=<root>/<key>/data/metrics -> root three levels up, key the dir two up
+      const root = dirname(dirname(dirname(cacheDir.dir)))
+      const key = basename(dirname(dirname(cacheDir.dir)))
+      const arc = await resolveArchivedSessionFiles(root, key, id)
+      archivedHeal = arc.paths.length > 0
+    }
+    if (!needsReprobe && !openStale && !archivedHeal) {
       return {
         rec: cached.rec,
         createdMs: cached.rec.created_ms ?? null,
@@ -746,7 +786,12 @@ async function ticketRecord(
       deliveryFrozen = true // 降维保留的存量=冻结快照（归档口径）
     }
     const windows = closeStageWindows(stageWindowsFromTimeline(timeline), durations.closed_ms ?? NaN)
-    const t = await computeTokens(deps, id, ticket, windows)
+    // archive seam root/key (t261025-14): cache disabled = no per-key data
+    // directory convention, the seam stays off
+    const archived = cacheDir.enabled
+      ? { root: dirname(dirname(dirname(cacheDir.dir))), key: basename(dirname(dirname(cacheDir.dir))) }
+      : null
+    const t = await computeTokens(deps, id, ticket, windows, archived)
     // token 现算失败（泳道会话已拆）→ 存量保留；同序 reason 由 stableReasons 只看 rec 状态保证双前门一致
     tokens = t.tokens ?? prev?.tokens ?? null
   }
@@ -1041,8 +1086,21 @@ function respWorkflowsStagesKpis(
   const tOut = withTok.reduce((s, e) => s + e.rec.tokens!.out, 0)
   const tCache = withTok.reduce((s, e) => s + e.rec.tokens!.cacheRead, 0)
   kpis.tokens_in_tickets = withTok.length > 0 ? tIn + tOut : null
+  // t261025-14: explicit null check (the old `projTotal ?` collapsed a measured 0
+  // into null); when null, name that ticket-external sessions are not counted —
+  // the totals cover tickets only, never a silent zero (the ticket's rule: a
+  // missing face is named).
   const projTotal = proj.block !== null ? (proj.block as any).total : null
-  kpis.tokens_outside_tickets = projTotal ? projTotal.in + projTotal.out : null
+  const fin = (x: unknown): number => (typeof x === 'number' && Number.isFinite(x) ? x : 0)
+  if (projTotal !== null && typeof projTotal === 'object') {
+    kpis.tokens_outside_tickets = fin((projTotal as any).in) + fin((projTotal as any).out)
+  } else {
+    kpis.tokens_outside_tickets = null
+    const why = proj.block === null
+      ? (proj.reason ?? 'project sessions unavailable')
+      : (((proj.block as any).reason as string | undefined) ?? 'no ticket-free project session files')
+    extraNotices.push(`tokens_outside_tickets is null: the token totals on this face cover tickets only (${why})`)
+  }
   kpis.tokens_per_closed_ticket = kpis.closed > 0 && kpis.tokens_in_tickets !== null
     ? round2(kpis.tokens_in_tickets / kpis.closed)
     : null
