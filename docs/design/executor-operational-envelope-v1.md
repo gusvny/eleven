@@ -70,6 +70,37 @@ drives the routine loop (promoting every landing, retrying every stuck ticket). 
 itself doing a routine action, that is a missing executor capability and belongs in a ticket, not in
 a habit.
 
+## 5. The panel's two controls (host ruling 261025, option c)
+
+The executor panel is the host's own surface. A click there is the host's act, not an agent's, so
+the panel may carry the two controls the certification tab used to only name as absent — and the
+rule that decides their honesty is the same rule that retired the "auto rounds" switch: no control
+without a handler, and no handler that only explains why it does nothing.
+
+**Trigger a round.** The panel may request the next certification round. It does not run the round
+inside the request: a round owns the line for tens of minutes and belongs to the scheduler, so the
+request only queues it, says that it is queued, and shows what the queue is waiting on (a round
+already in flight, a held guard, a missing runner). A queued request that the host cannot watch is
+not a feature, so the same face must show the resulting round the moment the scheduler picks it up.
+
+**Sign a promotion.** The panel may perform the signed promotion act, because the person clicking it
+is the person the act needs. Two obligations follow:
+
+* The recorded row names the human identity that signed, and the panel never invents one — it asks,
+  or reads a declared operator for the project, and shows the value before the act.
+* The engine's own refusal vocabulary is the answer the panel shows, verbatim: an agent role name
+  stays refused no matter which surface sent it, and a line that cannot be fast-forwarded, a
+  missing green certification or a frozen line read as themselves, never as a generic failure.
+
+**Why this is not the executor doing the host's job.** The executor's bounds (section 2) are about
+what an agent may lift on its own; these two controls are the human gate's own front door, rendered
+where the human already is. An agent reaching them is the same defect as an agent signing its own
+role name, and the engine's identity rules already refuse it.
+
+**What the face must show after either act.** The act's own record (the queued request, or the
+promotion row with its signer and the revisions it moved), read back from the ledger — never the
+panel's optimistic guess.
+
 ## Out of scope
 
 Per-project permissions, the panel's rendering, and the model behind the executor session.
