@@ -214,3 +214,37 @@ Also fixed tonight, both found by the round itself:
   structured fields only (state/reason/error/verdict/kind).
 - two engine stalls, cleared: the stale round guard (held since 00:51 with no owner pid) and
   the `line_env` regression that answered `runner_missing` (ticket t261024-70).
+
+## 261025 11:30 — final state and the three things that are NOT fixed
+
+Landings 48, certifications 78, main `ce872293` (7 promotions today: 5184f806 -> ce872293).
+Known-red book 106 rows. KI 345-357 open.
+
+Fixed and verified today (each with a live witness, not only a battery):
+- the Epics tab renderer collision (t261024-21)
+- the inspection sign chain, first round (t261024-16)
+- KI-350 full-round anchor refresh (t261024-12)
+- KI-352 the round now always writes exactly one record (t261024-30)
+- KI-353 the gate no longer peels a ticket's own scenario (t261025-02 - the receipts now name the
+  ticket's own cases)
+- KI-354/355 family: the stale round guard, and the line_env regression that answered runner_missing
+  (t261024-70)
+
+NOT fixed, and each has a live reproduction:
+1. KI-356/357 **the landing anchor still does not refresh for a narrowed round.** Three tickets
+   tried (t261024-12, t261025-02, t261025-08) and all three were accepted on a fixture battery
+   while the live value never moved. Witness: `t261022-14` (lane HEAD has advanced, meta.last_green_run
+   is still 5fe50423/ran=90) and `t261022-12` (still 43c5d2f2/ran=0, now also capped at
+   "test-set iterations 6 > 5"). REPRO: re-gate the lane, then read meta.last_green_run - it must equal
+   the lane HEAD; today it does not.
+2. **Inspection fixture ticket ids collide with the day's real ticket** (booked isolated, not fixed):
+   after the 07:30 daily schedule mints today's ticket, both sign fixtures are handed the same id
+   (t261025-01) and hang on the real ticket. Works before 07:30, breaks after.
+3. **`t261022-15`** still waits for a working session (process-bench leak ticket).
+
+Discipline learned tonight, worth keeping:
+- A fix is not accepted on a fixture battery: reproduce the WRITE (or the refusal) on the live path.
+- Never commit the known-red book or notes to main directly: main must stay an ancestor of the line,
+  or every promotion refuses `promotion_not_fast_forward` (happened three times).
+- Never widen a wall-clock window without confirming the failure path still fails loud
+  (the 90 s -> 240 s change hid a real stall for four minutes).
