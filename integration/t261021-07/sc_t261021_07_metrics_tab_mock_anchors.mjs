@@ -115,12 +115,16 @@ const BANNED_PROSE = [
   'no chart data drawn',
   'in this build',
 ]
+// t261025 host ruling (via t261025-13): the REWORK RATE tile is removed and the
+// per-closed-ticket tile becomes three honest ones, each with an over-N-of-M
+// coverage line. The anchor list follows the shipped face; a tile that comes back
+// must come back with its ruling, not by re-adding an expectation here.
 const KPI_LABELS = [
-  ['K1-rework-rate', 'rework rate'],
   ['K2-throughput', 'throughput'],
   ['K3-median-lead-time', 'median lead time'],
   ['K4-tokens', 'tokens'],
-  ['K5-tokens-per-closed', 'tokens per closed'],
+  ['K5-fresh-per-covered', 'fresh tokens per covered ticket'],
+  ['K5b-cache-share', 'cache share'],
   ['K6-human-wait-share', 'human wait'],
 ]
 const WORKFLOWS = [
@@ -202,6 +206,9 @@ function metricsPayload(view) {
       human_wait_share: 0.18,
       tokens_total: 3.4e6, tokens_in_tickets: 2.1e6, tokens_outside_tickets: 1.3e6,
       tokens_per_closed_ticket: 0.6e6,
+      // t261025-13 additive inputs: the three token tiles degrade to a named dash
+      // without them, so the stub carries the same shape the real API now sends.
+      tokens_cache_read: 5.2e6, tickets_with_usage: 9, closed_with_usage: 9, p90_lead_time: 8 * HOUR,
     },
     workflows: [
       { workflow: 'dev-lane', elapsed_ms: 5 * HOUR + 20 * 60_000, rounds_per_ticket: 3.1, tickets: 12, stage_runs: 40 },
@@ -312,7 +319,7 @@ async function main() {
       // anchor-wait on the first KPI label, never sleep-then-read (KI-051)
       const pane = page.locator('#paneMetrics')
       const ok = await page.waitForFunction(
-        () => { const e = document.querySelector('#paneMetrics'); return !!e && /rework rate/i.test(e.textContent || '') },
+        () => { const e = document.querySelector('#paneMetrics'); return !!e && /throughput/i.test(e.textContent || '') },
         null, { timeout: 8000 }).then(() => true).catch(() => false)
       const paneText0 = (await pane.innerText().catch(() => '')) || ''
       C.case(T('S0-metrics-pane-renders'), ok, 'no rebuilt Metrics content appeared — pane=' +
@@ -336,8 +343,10 @@ async function main() {
       C.case(T('K4-tokens-split'), /in-ticket|in ticket/.test(mText) && /outside/.test(mText),
         'tokens sub-line split missing')
       C.case(T('K7-no-cost'), !/cost|\$|price/.test(mText), 'cost surfaced on the tab')
-      C.case(T('K8-real-values'), mText.includes('12%') && mText.includes('3.4m'),
-        'stub-fed KPI values not visible')
+      // t261025 ruling: '12%' was the retired rework-rate tile. Anchor on values the
+      // shipped face still renders (throughput and the actual-traffic token total).
+      C.case(T('K8-real-values'), /6\.0\/day/.test(mText) && /8\.6m/.test(mText),
+        'stub-fed KPI values not visible (want throughput 6.0/day and tokens 8.6M = 3.4M fresh + 5.2M cache)')
 
       // ---- W workflow card ----
       const cardH0 = await page.evaluate(() => {
