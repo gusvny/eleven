@@ -3801,6 +3801,34 @@ SCENARIOS = [
     ("t261021-12-epics-tab-case-and-order",
      "The Epics tab reads in normal case and is ordered by each epic's most recently modified ticket, descending (ticket t261021-12, host order 261021 verbatim 'the whole Epics tab is capitals ... It should be normal case' + 'ordered by each epic's most recently modified ticket, descending'; grey-box L3, real browser + page-boundary API stubs, the served body is the production PANEL_PAGE_HTML export, offline seam as t261008-20/t261003-06, zero docker, never touches 3099; tier: real browser journey over the served panel page; cost: seconds): A THE CASE - the epic code, the summary line, a ticket title, a ticket meta line and an epic head counts line all resolve text-transform:none, while a REAL section heading stays uppercase (computed-style assertions, not innerText); B THE ORDER - with the source list deliberately reversed, the render orders epics newest-activity-first, an epic with no readable tickets sorts LAST and shows a no-activity face (never a fabricated time); C THE TICKET LIST - inside an epic the tickets read newest-first, a malformed-time row sorts last and breaks nothing; D SANITY - the newest epic's relative time reads recent (just now / minutes, never garbage days) and the journey logs zero pageerror. Intent split: the payload boundary conversion + absent rule belong to t261021-12-epic-tickets-time-payload; the /api/epics list shape belongs to t261019-12-epics-api-store-move; tab strip order belongs to t261005-10-ui2-panel-tab-order-contract; epics row presence and degradation belong to t261005-10-ui2-epics-docs-metrics-tabs-journey; this entry uniquely owns case and activity ordering as the user sees them. Pre-implement red on A/B = the named TDD signal (uppercase card, all epics tie); green required at the integration gate / merge. playwright-core/chromium missing = ENV_FAIL exit 2 (KI-036 family); page module missing = FAIL named (TDD red)",
      "node integration/t261021-12/sc_t26102112_epics_tab_case_and_order.mjs", "browser"),
+    # ---- t261025-11: a completed round whose settle never ran is healed with ONE row ----
+    ("t261025-11-unrecorded-round-healed",
+     "A COMPLETED line round whose engine settle block never ran leaves zero delivery rows today - the measured "
+     "261025 witnesses (run-01M5RJ2MDAEX796E7MV0KE324X at dbb88cd5, run-01M5RWBFA0A1DPBZ2A1J0RHGTJ at b3c3ca5b) "
+     "wrote a terminal face and a runner-persisted run row (each appearing exactly ONCE in scenario-runs.jsonl, "
+     "so the engine never processed the header) and nothing else; the drop sits BEFORE the settle block, so "
+     "in-settle nets cannot see it (ticket t261025-11, the measured repro of KI-352's family, grey-box L3, the "
+     "REAL develop_certify.line_round_tick over a real tmp delivery ledger + scenario-runs store + guard files "
+     "with injected seams, offline seconds, zero docker/Temporal/browser, never touches 3099/7233; "
+     "tier: real ledger files on disk through the real tick call site; cost: seconds): A WITNESS "
+     "REPLAY - a complete runner row present once with no row citing the run id heals on the next tick into "
+     "exactly ONE certification row citing the run id, judged_by naming the reconstruction, and a replayed tick "
+     "writes nothing more (idempotent, never two); B UNJUDGABLE HEADER - a runner row without readable counts "
+     "lands exactly ONE range-growth row naming the run id, never a guessed cert; C GUARD HELD - a possibly "
+     "in-flight round heals nothing (zero rows, the settle block stays the one writer); D LINE AMBIGUOUS - the "
+     "run's revision set matches no declared line landing on a multi-line project: no ledger row (never a "
+     "guess) and a named refusal on the tick-refusal face citing the run id; E MALFORMED INPUTS - garbage lines "
+     "in the runs store or the delivery ledger are named, never guessed into rows, never crash the tick; "
+     "F SETTLE-ROW WRITER CHECKED - a rejected settle append retries once and names the unrecorded round on the "
+     "refusal face, never silent zero rows. Intent split: the settle-block truth tables and the "
+     "certification/freeze mapping unit faces belong to developer L1 (server/engine/tests/, incl. "
+     "test_t261025_11_one_record_reconcile.py and the t261024-30 family); the tick-level healing journey over "
+     "real files on disk is THIS entry. Pre-implementation tree red = the named TDD signal; green required at "
+     "the integration gate / merge. Engine tree missing = ENV_FAIL exit 2;"
+     " tier: the tick-level healing seam assembled from the durable runner"
+     " row, the delivery ledger and the tick guard - no single-component"
+     " contract can express it; cost: seconds (offline, ~0.4 s measured)",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261025-11/sc_t261025_11_unrecorded_round_healed.py", "ro", "fast"),
 ]
 
 # ---- t261009-16: the lane's fast global set (the declaration) ----------------

@@ -522,6 +522,12 @@ def read_rows(path):
     return rows, bad[:10]
 
 
+#: Path-taking alias for the module reader: call sites whose ``read_rows``
+#: name is shadowed by an injected zero-arg ledger closure (line_round_tick)
+#: still need to read OTHER jsonl files by path (the runs store, t261025-11).
+_read_rows_path = read_rows
+
+
 def append_rows(rows, path):
     """Validate + append a batch under flock. One write + fsync. ``seq`` is
     assigned inside the critical section (monotonic, gaps legal) — this is
@@ -1355,20 +1361,58 @@ def could_not_run_row(line, reason, at_ms=None):
     }
 
 
-def _append_settle_row(append_rows, line, reason, at_ms=None):
+def _write_face_row(face, row):
+    """One append-style row onto a ledger-side face file (t261024-70
+    discipline, shared by the refusal face and the settle fallback): mkdir
+    first, coerce non-serializable fields with ``default=repr``, never
+    raise — a face that cannot be written must not take its caller down."""
+    try:
+        face.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(face), "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, sort_keys=True, default=repr) + "\n")
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _append_settle_row(append_rows, line, reason, at_ms=None, face_dir=None):
     """Append the round's ONE named row, never raising (t261024-30).
 
     The settle guard and the CouldNotRun path both land here: a failed row
     write must be LOUD on stderr (the named second face) and must never mask
     the caller's own exception — the original error is the one that matters,
-    and swallowing it would turn a broken append into a fake success."""
+    and swallowing it would turn a broken append into a fake success.
+
+    t261025-11: the writer's answer is now CHECKED. A batch that comes back
+    rejected (instead of raising) used to land zero rows with no trace — the
+    exact silent end this contract forbids. A rejected or failing append
+    retries once; if the row still could not land and ``face_dir`` is given,
+    ONE named row goes onto the tick refusal face beside the ledger (the
+    same face ``record_tick_refusals`` writes), so the unrecorded round is
+    named on disk, never silent."""
     import sys as _sys
-    try:
-        append_rows([could_not_run_row(line, reason, at_ms=at_ms)])
-    except Exception as e:  # noqa: BLE001 — named, loud, never raised
+    wrote = False
+    for attempt in (1, 2):  # one retry: a transient fault must not cost
+        try:                # the round its only record
+            res = append_rows([could_not_run_row(line, reason, at_ms=at_ms)])
+            if isinstance(res, dict) and res.get("written") == 1:
+                wrote = True
+                break
+            why = "rejected:%r" % (res.get("rejected")
+                                   if isinstance(res, dict) else res,)
+        except Exception as e:  # noqa: BLE001 — named, loud, never raised
+            why = "%s:%s" % (type(e).__name__, e)
         _sys.stderr.write(
-            "LINE_ROUND_SETTLE_ROW_FAILED: line=%s reason=%s row_error="
-            "%s:%s\n" % (line, reason, type(e).__name__, e))
+            "LINE_ROUND_SETTLE_ROW_FAILED(attempt %d): line=%s reason=%s "
+            "row_error=%s\n" % (attempt, line, reason, why))
+    if wrote or face_dir is None:
+        return
+    from datetime import datetime, timezone  # local: import-light module
+    _write_face_row(
+        Path(face_dir) / TICK_REFUSALS_NAME,
+        {"at": datetime.now(timezone.utc).isoformat(), "line": str(line),
+         "state": "error",
+         "error": "settle_row_unrecorded:%s" % str(reason)[:200]})
 
 
 def should_freeze(attribution_value):
@@ -2068,7 +2112,7 @@ def refuse_delivered_checkout(tree, main_checkout):
 def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                    judged_by, booked_red, backstop_ms=None, now_ms=None,
                    chain_limit=CHAIN_LIMIT, lane_reds=None, runs_store=None,
-                   project=None, roster=None):
+                   project=None, roster=None, face_dir=None):
     """Run the line's certification round(s): at most one per tick, chained
     while anything is still waiting, bounded by ``chain_limit``.
 
@@ -2287,7 +2331,8 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                             entry["attribution"] = target["id"]
                 rounds.append(entry)
             except CouldNotRun as e:
-                _append_settle_row(append_rows, line, str(e), now_ms)
+                _append_settle_row(append_rows, line, str(e), now_ms,
+                                   face_dir=face_dir)
                 rounds.append({"state": STATE_GREW, "reason": str(e),
                                "duration_ms":
                                    int((time.monotonic() - _t0) * 1000)})
@@ -2309,7 +2354,8 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                 # face) keeps its named error, never a fake success.
                 _append_settle_row(append_rows, line,
                                    "round_settle_failed:%s:%s"
-                                   % (type(e).__name__, e), now_ms)
+                                   % (type(e).__name__, e), now_ms,
+                                   face_dir=face_dir)
                 raise
         finally:
             guard_release(guard_path)
@@ -2673,7 +2719,34 @@ def line_round_tick(project_key, load_lines, read_rows, append_rows,
         named = "ledger_has_malformed_lines:%d" % len(bad)
         return {"lines": [{"error": named}],
                 "summary": "line_round_tick: %s" % named}
+    # t261025-11: the runs store feeds the tick-entry reconciliation — a
+    # completed line-round run that NO delivery row cites is healed with
+    # exactly ONE row before the tick asks its own question. Read with the
+    # module's path-taking reader: the injected ``read_rows`` parameter is
+    # the ledger's zero-arg closure (one file, one reader each).
+    runs_rows, runs_bad = ([], [])
+    if runs_store:
+        runs_rows, runs_bad = _read_rows_path(Path(runs_store))
     for line in sorted(lines):
+        if runs_store:
+            if runs_bad:
+                entries.append({"line": line, "state": "error",
+                                "error": "runs_store_has_malformed_lines:%d"
+                                         % len(runs_bad)})
+                continue
+            healed = reconcile_unrecorded_rounds(
+                line, rows, runs_rows, append_rows, judged_by, booked_red,
+                now_ms, sole_line=(len(lines) == 1),
+                guard_held=guard_held(guard_path))
+            if healed:
+                entries.extend(healed)
+                # the heal may have closed the range: re-read before the ask
+                rows, bad = read_rows()
+                if bad:
+                    entries.append({"line": line, "state": "error",
+                                    "error": "ledger_has_malformed_lines:%d"
+                                             % len(bad)})
+                    continue
         try:
             go, why = should_certify("backstop", rows, line,
                                      guard_held(guard_path), now_ms=now_ms,
@@ -2721,7 +2794,8 @@ def line_round_tick(project_key, load_lines, read_rows, append_rows,
                                  chain_limit=chain_limit, lane_reds=lane_reds,
                                  runs_store=runs_store,
                                  project=project_key,
-                                 roster=roster)
+                                 roster=roster,
+                                 face_dir=str(Path(guard_path).parent))
         except CertifyError as e:
             entries.append({"line": line, "state": "error", "error": str(e)})
             continue
@@ -2895,7 +2969,8 @@ def line_round_run_now(project_key):
                                  now_ms=int(time.time() * 1000),
                                  runs_store=str(ledger.parent / "scenario-runs.jsonl"),
                                  project=project_key,
-                                 roster=roster)
+                                 roster=roster,
+                                 face_dir=str(ledger.parent))
         except CertifyError as e:
             entries.append({"line": line, "state": "error", "error": str(e)})
             continue
@@ -2953,7 +3028,125 @@ def record_tick_refusals(ledger_dir, entries, project_key):
             pass  # a face that cannot be written must not block the tick
 
 
-# ---- the bounded red ladder (goal 9 / goal 10) -----------------------------
+# ---- the tick-entry reconciliation (t261025-11) -----------------------------
+#
+# The measured silent end (two witnesses on 261025): a chained round's runner
+# COMPLETED — face.json done, run row persisted into scenario-runs.jsonl by
+# the runner itself — and the engine side never processed the header (the
+# settle block's runs_store persist never happened, so the run appears in the
+# runs store exactly once). Hard kills (SIGKILL, worker teardown, a cancel
+# that does not unwind) sit outside every in-settle net by construction. The
+# contract therefore gets a durable second writer: at tick entry, a completed
+# line-round run that NO delivery-ledger row cites is healed with exactly ONE
+# row, driven from the runs store, idempotent by run id.
+
+#: The runs-store ``source`` value the line-round runner stamps on its rows.
+#: Declared here because the engine never imports the integration support
+#: layer; the runner's RUN_SOURCE is the same literal string.
+LINE_ROUND_RUN_SOURCE = "lane:line-round"
+
+
+def _run_repos_key(repos):
+    """Canonical key of a candidate revision set, for landing matching."""
+    if not _valid_repos(repos):
+        return None
+    return tuple(sorted((r["repo"], r["revision"]) for r in repos))
+
+
+def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
+                                judged_by, booked_red, now_ms,
+                                sole_line=False, guard_held=False):
+    """Heal completed line-round runs that no delivery-ledger row cites.
+
+    Returns named entries; every append happens HERE, exactly once per run
+    id (a run already cited by a certification, or named by a range-growth
+    reason, is never touched again — the heal is idempotent by replay).
+
+    Attribution: a run belongs to this line when its candidate revision set
+    equals a landing row's revision set (``landing_repo_match``); with no
+    match and ``sole_line`` (the project declares exactly this one line,
+    read fresh by the caller at heal time) the run is taken anyway
+    (``sole_line``). Otherwise NO row is written and the entry names the
+    ambiguity — a guessed line would forge a certification.
+
+    Heal mapping mirrors the settle block: a judgable header (``run-`` id,
+    dict ``cases``, ran >= 1) becomes ONE certification whose ``judged_by``
+    names the reconstruction (``reconciled:<run_id>``), plus freeze rows
+    only on a content red (the same should_freeze rule); anything else
+    becomes ONE range-growth row naming the run id. Never raises: an append
+    failure is a named ``error`` entry, and the next tick replays the heal.
+    """
+    entries = []
+    if guard_held:
+        # a round may be in flight; its row is the settle block's job
+        return entries
+    cited_runs = {r.get("run") for r in rows
+                  if r.get("kind") == KIND_CERT}
+    growth_reasons = [str(r.get("reason")) for r in rows
+                      if r.get("kind") == KIND_RANGE_GROWTH]
+    landings = _of_kind(rows, KIND_LANDING, line)
+    landing_keys = {_run_repos_key(l.get("repos")) for l in landings}
+    seen_ids = set()
+    for run in runs_rows:
+        if not isinstance(run, dict):
+            continue  # malformed lines are the reader's named problem
+        rid = run.get("id")
+        if not (isinstance(rid, str) and rid.startswith("run-")):
+            continue
+        if rid in seen_ids:  # runner + engine both append; one heal max
+            continue
+        seen_ids.add(rid)
+        if str(run.get("source") or "") != LINE_ROUND_RUN_SOURCE:
+            continue
+        if rid in cited_runs or any(rid in reason
+                                    for reason in growth_reasons):
+            continue
+        # attribution — never a guess
+        rule = None
+        if _run_repos_key(run.get("repos")) in landing_keys:
+            rule = "landing_repo_match"
+        elif sole_line:
+            rule = "sole_line"
+        else:
+            entries.append({"line": line, "state": "error",
+                            "run": rid,
+                            "error": "unrecorded_run:%s:line_ambiguous"
+                                     % rid})
+            continue
+        cases = run.get("cases")
+        judgable = (isinstance(cases, dict)
+                    and str(run.get("verdict") or "") in ("green", "red")
+                    and _valid_repos(run.get("repos")))
+        try:
+            if judgable:
+                cert = build_certification(
+                    run.get("repos"), run, booked_red,
+                    "reconciled:%s" % rid, at_ms=now_ms, line=line)
+                batch = [cert]
+                failed = int(cases.get("failed", 0) or 0)
+                if run.get("verdict") == "red" and should_freeze(failed > 0):
+                    batch += open_freeze_rows(cert, at_ms=now_ms)
+                what = "cert:%s" % cert["id"]
+            else:
+                batch = [could_not_run_row(
+                    line, "unrecorded_round_healed:%s:header_unjudgable"
+                    % rid, at_ms=now_ms)]
+                what = "range_growth"
+            res = append_rows(batch)
+            if not isinstance(res, dict) or res.get("written") != len(batch):
+                raise CertifyError("heal_append_rejected:%r"
+                                   % (res.get("rejected")
+                                      if isinstance(res, dict) else res,))
+            entries.append({"line": line, "state": "reconciled", "run": rid,
+                            "attribution_rule": rule, "wrote": what})
+        except Exception as e:  # noqa: BLE001 — named, never tick-fatal
+            entries.append({"line": line, "state": "error", "run": rid,
+                            "error": "heal_failed:%s:%s"
+                                     % (type(e).__name__, e)})
+    return entries
+
+
+
 
 def range_key(landing_ids):
     """Canonical name of a searched range (sorted, joined) — the value a

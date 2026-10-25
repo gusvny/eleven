@@ -1688,6 +1688,10 @@
       "anchor": "behaviour",
       "note": "t261025-08 KI-356: the narrowed landing anchor is REACHABLE for a long-lived in-flight lane - the enable_narrowed_anchor signal (event-gated, replay-safe without workflow.patched whose first verdict the SDK memoizes per instance) arms the recorder: unpatched+unenabled green targeted round records nothing (byte-identical old replay); unpatched+enabled green targeted round records {ran,narrowed,sha,at} on the current lane HEAD; enabled fail-closed shapes (failed/errored/blockers/zero-run/malformed) record nothing; lane_head_sha failure (raise and ok=False) records no face plus green_run_note; handler idempotent and payload-tolerant; full-round arm unchanged (no marker); stale narrowed face refuses by name naming the satisfying run; signal-name parity client/dev_lane and source lock of the wiring.",
       "sync_path": "server/engine/dev_lane.py; server/engine/client.py"
+    },
+    "server/engine/tests/test_t261025_11_one_record_reconcile.py": {
+      "anchor": "behaviour",
+      "note": "t261025-11 developer L1: the one-record contract on the healing paths - _append_settle_row checks the writer's answer (rejected batch retries once, then names the unrecorded round on the tick-refusal face, never silent zero rows, never masking the caller's exception); reconcile_unrecorded_rounds heals a completed runner row that no delivery row cites into exactly ONE certification (judged_by=reconciled:<run_id>) or ONE range-growth row naming the run id, idempotent by replay; content red heals cert+freeze; guard held and line-ambiguous write nothing (named entry); append failure is a named entry; the full tick heals then idles without a round; malformed runs-store lines are named, never guessed."
     }
   },
   "scenarios": {
@@ -5717,6 +5721,11 @@
     "integration/t261022-14/sc_t26102214_lane_review_comments.mjs": {
       "anchor": "behaviour",
       "note": "t261022-14: the markdown reviewer's lane comment store end to end over the real host store + client anchor modules - four block kinds persist to <lane>/.sandbar/review-comments.json, every schema field read back from disk (the lane agents' plain file-read path), and an edited block still places its threads (exact/neighbour/outdated, never dropped). behaviour anchor: it pins what the persistence does for the reader, not an internal contract form.",
+      "sync_path": ""
+    },
+    "integration/t261025-11/sc_t261025_11_unrecorded_round_healed.py": {
+      "anchor": "behaviour",
+      "note": "t261025-11: the tick-level healing journey over real files on disk - witness replay (complete runner row, no citing row) heals into exactly ONE certification citing the run id, replay writes nothing; unjudgable header becomes exactly ONE range-growth row naming the run id; guard held heals nothing; line-ambiguous refuses by name on the tick-refusal face; garbage in either store is named, never guessed; a rejected settle append retries and names the face.",
       "sync_path": ""
     }
   },
