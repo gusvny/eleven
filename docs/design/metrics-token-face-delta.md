@@ -81,6 +81,28 @@ Three inputs, additive, each null-and-named when absent (never zero-filled, v2's
 The panel never derives these from `cache_hit`: a share cannot be inverted back into an amount
 without inventing the amount.
 
+## Rule 5 — the read face may read the DSH session home (host ruling 261025, option u)
+
+The project-sessions face answers "no project-level sessions" today, and it is telling the truth
+about the directory it searches: the reader is bound to the repository root, while the console and
+executor sessions for a project live in the DSH session home (`<dsh home>/sessions/<project slug>/`).
+Measured on 261025: the repository-local directory holds two session files; the DSH home for this
+project holds 91, 62 of them touched inside the last 31 days, moving about 22.4B tokens including
+cache reads. The face was reporting an empty room while the work was next door.
+
+The host ruled that the metrics read face **may** read the DSH session home, read-only. The widening
+is a scope change, not a weakening of the guard:
+
+* The declared roots become exactly two: the repository root, and the DSH session home for the
+  project being read. Anything else stays refused with the same refusal vocabulary — an out-of-root
+  path, a traversal attempt and a symlink escape keep their existing named refusals, verbatim.
+* Read-only, always. No code path on this face may create, move or delete anything under either root.
+* Bounded: only the project's own slug directory, one newest session file per session directory, and
+  the file cap the lane reader already applies. A directory that grew by three orders of magnitude
+  must not turn a tab render into a scan.
+* The face names which roots it read, so a reader can tell "nothing ran" from "we looked in the wrong
+  place". The searched roots belong next to the number.
+
 ## Out of scope
 
 How usage is collected (the lane session file is the only source today; keeping it past close is
