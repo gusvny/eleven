@@ -429,8 +429,19 @@ def main():
            "D2 the refusal is a NAMED row on a face beside the ledger — "
            "an operator sees it without Temporal history",
            "refusal faces: %s" % json.dumps(refusals)[:250])
-        ok(not any("runner_missing" in json.dumps(r)
-                   for r in ledger_rows_d),
+        # 261025: a substring scan over the WHOLE row also catches free-text notes -
+        # the promotion note written tonight mentions "the runner_missing fix" and
+        # tripped this check while no refusal row existed. Judge the STRUCTURED
+        # fields only (a refusal row would carry the state/reason in one of these).
+        _refusal_fields = ("state", "reason", "error", "verdict", "kind")
+        def _is_refusal_row(r):
+            for k in _refusal_fields:
+                v = r.get(k)
+                if isinstance(v, str) and v.strip().lower().startswith(
+                        "runner_missing"):
+                    return True
+            return False
+        ok(not any(_is_refusal_row(r) for r in ledger_rows_d),
            "D3 the refusal never becomes a delivery-ledger row "
            "(t261009-50 contract kept)",
            "ledger rows: %d" % len(ledger_rows_d))
