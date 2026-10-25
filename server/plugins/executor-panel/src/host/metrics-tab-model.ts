@@ -225,7 +225,41 @@ export function metricsV2Of(j: unknown): Record<string, unknown> {
     sessions = {
       total_tokens: total ? ((mnum(total.in) ?? 0) + (mnum(total.out) ?? 0)) : null,
       buckets,
+      searched: mstr(ps.searched),
+      reason: mstr(ps.reason),
     }
+  }
+  // The null-path carry (t261026-02, review item 1): when project_sessions is null
+  // the reason + searched root travel in the payload's structured
+  // project_sessions_degrade block (not only inside the joined notices string) and
+  // are mapped into the view model so the row functions can name them.
+  let sessionsDegrade: Record<string, unknown> | null = null
+  if (sessions === null && o.project_sessions_degrade && typeof o.project_sessions_degrade === 'object') {
+    const dg = o.project_sessions_degrade as Record<string, unknown>
+    sessionsDegrade = { reason: mstr(dg.reason), searched: mstr(dg.searched) }
+  }
+  // FIELD-COUPLED(t261026-02): the role_aggregate block's field names verbatim —
+  // one read here, like every other v2 block. Roles are guarded entry by entry
+  // (a null/junk role row is malformed, never a crash).
+  let roleAggregate: Record<string, unknown> | null = null
+  if (o.role_aggregate && typeof o.role_aggregate === 'object') {
+    const ra = o.role_aggregate as Record<string, unknown>
+    const roles: Record<string, unknown> = {}
+    if (ra.roles && typeof ra.roles === 'object') {
+      for (const role of Object.keys(ra.roles as Record<string, unknown>)) {
+        const e = (ra.roles as Record<string, unknown>)[role]
+        if (!e || typeof e !== 'object') continue
+        const ee = e as Record<string, unknown>
+        roles[role] = {
+          tickets: mnum(ee.tickets),
+          files: mnum(ee.files),
+          tokens: ((mnum(ee.in) ?? 0) + (mnum(ee.out) ?? 0)),
+          cache_read: mnum(ee.cache_read),
+          reason: mstr(ee.reason),
+        }
+      }
+    }
+    roleAggregate = { roles, searched: mstr(ra.searched), reason: mstr(ra.reason) }
   }
   const cache = (o.cache && typeof o.cache === 'object') ? o.cache as Record<string, unknown> : {}
   return {
@@ -236,6 +270,8 @@ export function metricsV2Of(j: unknown): Record<string, unknown> {
     stages,
     epics,
     sessions,
+    sessions_degrade: sessionsDegrade,
+    role_aggregate: roleAggregate,
     cache_status: mstr(cache.status),
     generated_at: mstr(o.generated_at),
   }
@@ -347,10 +383,18 @@ export function epicCardsOf(vm: Record<string, unknown>, sortKey: string, picked
 }
 
 /** The Project sessions rows (the mock's two buckets named; any other slug
- *  verbatim). sessions null → the named empty state, never zeros. */
+ *  verbatim). sessions null or empty → the named empty state with the reason and
+ *  the searched root (t261026-02: no bare dash for an unexplained absence), never
+ *  zeros. */
 export function sessionRowsOf(vm: Record<string, unknown>): Array<Record<string, string>> {
   const s = vm.sessions as Record<string, unknown> | null
-  if (!s) return [{ name: 'project sessions', value: DASH, sub: 'no project-level sessions' }]
+  if (!s || ((s.buckets ?? []) as Array<Record<string, unknown>>).length === 0) {
+    const dg = (vm.sessions_degrade ?? null) as Record<string, unknown> | null
+    let sub = (s ? mstr(s.reason) : null) ?? (dg ? mstr(dg.reason) : null) ?? 'no project-level sessions'
+    const searched = s ? mstr(s.searched) : (dg ? mstr(dg.searched) : null)
+    if (searched) sub = sub + ' (searched ' + searched + ')'
+    return [{ name: 'project sessions', value: DASH, sub }]
+  }
   const buckets = (s.buckets ?? []) as Array<Record<string, unknown>>
   return buckets.map(function (b) {
     const name = String(b.name) === 'executor' ? 'executor session' : (String(b.name) === 'global' ? 'global session' : String(b.name))
@@ -451,13 +495,46 @@ export function tokensStackOf(j: unknown): Record<string, unknown> | null {
   }
 }
 
-/** The Tokens-by-role rows. The role faces the payload carries are the
- *  project-session buckets; the developer/integration/executor role rows stay
- *  the named dash until a per-role face ships (never invented from models). */
+/**
+ * The Tokens-by-role rows (t261026-02): each role face comes from the payload's
+ * role_aggregate block — fresh tokens (in+out), cache share and ticket coverage.
+ * A role with no session files in the window says 'no sessions in window' (a role
+ * nobody ran under is never invented); a role with files but an unreadable face
+ * carries its per-file reason; when the whole block is missing or empty the
+ * block-level reason (which names the searched root) is the sub-line, so the
+ * reader can tell 'nothing ran' from 'we looked in the wrong place'. Roles the
+ * payload carries beyond the fixed three are appended verbatim.
+ */
 export function roleRowsOf(vm: Record<string, unknown>): Array<Record<string, string>> {
   const rows: Array<Record<string, string>> = []
-  for (const role of ['developer', 'integration', 'executor']) {
-    rows.push({ name: role, value: DASH, sub: 'no per-role face' })
+  const ra = (vm.role_aggregate ?? null) as Record<string, unknown> | null
+  const roles = (ra && typeof ra.roles === 'object' ? ra.roles : null) as Record<string, unknown> | null
+  const names = ['developer', 'integration', 'executor']
+  if (roles) for (const k of Object.keys(roles)) if (names.indexOf(k) < 0) names.push(k)
+  for (const role of names) {
+    const e = roles ? roles[role] as Record<string, unknown> | undefined : undefined
+    if (!e) {
+      // Block absent entirely (an older payload): 'no per-role face' is the honest
+      // word — we cannot claim anything about sessions we never saw. Block present
+      // but the role missing: genuinely no sessions for it in the window — unless
+      // the block is entirely empty, then the block reason (naming the searched
+      // root) is the honest sub-line.
+      if (!roles) { rows.push({ name: role, value: DASH, sub: 'no per-role face' }); continue }
+      const blockReason = mstr(ra.reason)
+      const anyRole = Object.keys(roles).length > 0
+      rows.push({ name: role, value: DASH, sub: (!anyRole && blockReason) ? blockReason : 'no sessions in window' })
+      continue
+    }
+    const files = mnum(e.files) ?? 0
+    const tokens = mnum(e.tokens)
+    const reason = mstr(e.reason)
+    if (files === 0 || tokens === null || tokens <= 0) {
+      rows.push({ name: role, value: DASH, sub: reason ?? 'no sessions in window' })
+      continue
+    }
+    const cache = mnum(e.cache_read)
+    const cachePct = (cache !== null && cache > 0) ? ' · cache ' + Math.round((cache / (tokens + cache)) * 100) + '%' : ''
+    rows.push({ name: role, value: fmtTokensM(tokens), sub: fmtInt(e.tickets) + ' tickets' + cachePct })
   }
   for (const r of sessionRowsOf(vm)) rows.push(r)
   return rows

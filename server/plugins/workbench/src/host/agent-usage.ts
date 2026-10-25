@@ -422,6 +422,8 @@ export async function aggregateTicketUsage(
 export interface ProjectSessionRef {
   buckets: Record<string, string[]>
   paths: string[]
+  /** The sessions root this discovery searched (t261026-02 shape (b): the face names where it looked). */
+  searched?: string
   /** Human-readable degrade reason; present when nothing was found or a slug dir was unreadable. */
   reason?: string
   /** A resolved path escaped the workspace root: refuse the whole block (same discipline as resolveAllSessionFiles). */
@@ -454,6 +456,7 @@ export async function resolveProjectSessionFiles(
   const out: ProjectSessionRef = { buckets: {}, paths: [] }
   const root = resolve(repoRoot)
   const sessRoot = join(root, '.dsh', 'sessions')
+  out.searched = sessRoot
   try {
     await stat(sessRoot)
   } catch {
@@ -493,6 +496,111 @@ export async function resolveProjectSessionFiles(
   }
   if (out.paths.length === 0) {
     out.reason = `no ticket-free project session files under ${sessRoot}`
+      + (reasons.length > 0 ? `; ${reasons.join('; ')}` : '')
+  } else if (reasons.length > 0) {
+    out.reason = reasons.join('; ')
+  }
+  return out
+}
+
+/* ------------------------------------------------ per-role ticket sessions (metrics v2 additive, t261026-02) */
+
+/**
+ * The role suffix of a lane session directory named `<ticket>-<role>` (e.g.
+ * 't261025-12-developer' -> 'developer'). Returns null for any other shape.
+ * Note the boundary against isTicketSessionName: `/^t\d+-\d+-(.+)$/` is
+ * stricter than `/^t\d+-\d+/` — a dir like 't1-2x-old' is ticket-shaped (kept
+ * out of project sessions) but carries no parseable role, and the caller must
+ * name that skip rather than fold it into 'no sessions'.
+ */
+export function ticketRoleOf(name: string): string | null {
+  const m = /^t\d+-\d+-(.+)$/.exec(name)
+  return m ? m[1] : null
+}
+
+/**
+ * Discovery result for per-role ticket sessions (metrics additive block
+ * `role_aggregate`, t261026-02). `roles` maps the role suffix (verbatim) to
+ * its discovered session-file paths and the distinct ticket ids they belong
+ * to; `skips` names the ticket-shaped dirs from which no role could be parsed
+ * (never silently folded into an empty role).
+ */
+export interface RoleSessionRef {
+  roles: Record<string, { tickets: string[]; paths: string[] }>
+  paths: string[]
+  /** The sessions root this discovery searched (shape (b): the face names where it looked). */
+  searched?: string
+  /** Human-readable degrade reason; present when nothing was found or a slug dir was unreadable. */
+  reason?: string
+  /** Ticket-shaped dirs with no parseable role (named skips, review carried item). */
+  skips: string[]
+  /** A resolved path escaped the workspace root: refuse the whole block (same discipline as resolveProjectSessionFiles). */
+  refused?: boolean
+}
+
+/**
+ * Discover TICKET-SHAPED session dirs (`<ticket>-<role>`) under the PROJECT
+ * ROOT's .dsh/sessions — exactly the names resolveProjectSessionFiles excludes,
+ * same tree, same traversal and refusal discipline (final resolved path must
+ * stay inside the workspace root, else refused=true; never throws; missing or
+ * unreadable dirs degrade with a named reason). Parsing is NOT done here — the
+ * caller feeds the paths into aggregateTicketUsage (same parser as everywhere).
+ * The guard is NOT widened by this ticket: only the repo-local tree is read.
+ */
+export async function resolveTicketRoleSessionFiles(repoRoot: string): Promise<RoleSessionRef> {
+  const out: RoleSessionRef = { roles: {}, paths: [], skips: [] }
+  const root = resolve(repoRoot)
+  const sessRoot = join(root, '.dsh', 'sessions')
+  out.searched = sessRoot
+  try {
+    await stat(sessRoot)
+  } catch {
+    out.reason = `sessions directory does not exist: ${sessRoot}`
+    return out
+  }
+  let slugs: string[] = []
+  try {
+    slugs = (await readdir(sessRoot, { withFileTypes: true }))
+      .filter(e => e.isDirectory()).map(e => e.name)
+  } catch (err: any) {
+    out.reason = `sessions directory unreadable: ${sessRoot} (${String(err?.message ?? err)})`
+    return out
+  }
+  const reasons: string[] = []
+  for (const slug of slugs) {
+    let subs: string[] = []
+    try {
+      subs = (await readdir(join(sessRoot, slug), { withFileTypes: true }))
+        .filter(e => e.isDirectory()).map(e => e.name)
+    } catch (err: any) {
+      reasons.push(`slug ${slug} unreadable: ${String(err?.message ?? err)}`)
+      continue
+    }
+    for (const s of subs) {
+      const role = ticketRoleOf(s)
+      if (role === null) {
+        // Ticket-shaped but role-less dirs are named, never folded into an
+        // empty role; non-ticket-shaped dirs belong to project sessions and
+        // are out of scope here.
+        if (/^t\d+-\d+/.test(s)) out.skips.push(`${slug}/${s} (ticket-shaped, no role parsed)`)
+        continue
+      }
+      const picked = await pickNewestSessionFile(await existingSessionFilesIn(join(sessRoot, slug, s)))
+      if (picked === null) continue
+      // Double guard: the final landing spot must stay inside the workspace
+      // root (path-traversal hard rule, same as resolveAllSessionFiles).
+      if (!(resolve(picked) === root || resolve(picked).startsWith(root + sep))) {
+        return { roles: {}, paths: [], skips: out.skips, refused: true, reason: `session path outside the workspace root (refused to read): ${picked}` }
+      }
+      const ticketId = /^t\d+-\d+/.exec(s)?.[0] ?? s
+      const bucket = (out.roles[role] ??= { tickets: [], paths: [] })
+      if (!bucket.tickets.includes(ticketId)) bucket.tickets.push(ticketId)
+      bucket.paths.push(picked)
+      out.paths.push(picked)
+    }
+  }
+  if (out.paths.length === 0) {
+    out.reason = `no ticket-shaped per-role session files under ${sessRoot}`
       + (reasons.length > 0 ? `; ${reasons.join('; ')}` : '')
   } else if (reasons.length > 0) {
     out.reason = reasons.join('; ')

@@ -5636,6 +5636,16 @@
       "note": "t261021-06: metrics-api-contract-v2.md exists as a new file with all field names, formula/approximation/degrade sections, the inherited failure-mode list for reused discovery/parser code, the source_version-vs-doc-version mapping, v1 untouched, and the no-cost verdict",
       "sync_path": ""
     },
+    "integration/t261026-02/sc_metrics_role_tokens_face.mjs": {
+      "anchor": "behaviour",
+      "note": "t261026-02: the Tokens-by-role face aggregates the <ticket>-<role> session dirs (exact per-role fresh in/out/cache sums, distinct-ticket coverage, verbatim extra roles, empty role reads zero coverage never 'no per-role face', skipped-and-named junk dir, garbage file degrades per file without destroying sibling totals, block total = role sum)",
+      "sync_path": ""
+    },
+    "integration/t261026-02/sc_metrics_project_sessions_honest_absence.mjs": {
+      "anchor": "behaviour",
+      "note": "t261026-02: the empty project-sessions face names the searched repo-local .dsh/sessions root AND the DSH-home candidate root (mention only - the path guard is not widened, no out-of-root sums enter the payload); a missing sessions root degrades naming the absent path",
+      "sync_path": ""
+    },
     "integration/t261021-01/sc_t261021_01_finding_sighting.py": {
       "anchor": "behaviour",
       "note": "t261021-01 (carried in from the develop line's own registration during the t261022-12 landing-union resolution; the line's registry entry arrives without an anchor key): a finding SEEN AGAIN in a later period leaves an observation row naming the finding, the seeing period and the revision, over the real inspection_review_ledger store faces and on-disk findings/observations rows - grain, re-observation, sighting_report counts, fail-closed batch/identity, malformed-input refusals, cross-face collapse and idempotent re-recording.",

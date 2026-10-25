@@ -47,7 +47,7 @@ import { findProject, loadProjects, primaryDir } from '../../../../project-regis
 import { listEpics, resolveEpicsDir } from './epics.ts'
 import {
   aggregateTicketUsage, resolveAllSessionFiles, resolveLedgerSessionFiles, resolveProjectSessionFiles,
-  resolveArchivedSessionFiles,
+  resolveArchivedSessionFiles, resolveTicketRoleSessionFiles,
   stageWindowsFromTimeline,
   type StageWindow,
 } from './agent-usage.ts'
@@ -999,10 +999,10 @@ function aggregateV2(
  */
 async function computeProjectSessions(
   repo: string, listedIds: readonly string[],
-): Promise<{ block: Record<string, unknown> | null; reason?: string }> {
+): Promise<{ block: Record<string, unknown> | null; reason?: string; searched?: string }> {
   const ref = await resolveProjectSessionFiles(repo, listedIds)
-  if (ref.refused === true) return { block: null, reason: ref.reason ?? 'project sessions discovery refused (path outside workspace root)' }
-  if (ref.paths.length === 0) return { block: null, reason: ref.reason ?? 'no ticket-free project session files under the project root' }
+  if (ref.refused === true) return { block: null, reason: ref.reason ?? 'project sessions discovery refused (path outside workspace root)', searched: ref.searched }
+  if (ref.paths.length === 0) return { block: null, reason: ref.reason ?? 'no ticket-free project session files under the project root', searched: ref.searched }
   const buckets: Record<string, { in: number; out: number; cache_read: number; files: number }> = {}
   const reasons: string[] = []
   for (const [slug, paths] of Object.entries(ref.buckets)) {
@@ -1029,15 +1029,67 @@ async function computeProjectSessions(
     total.cache_read += b.cache_read
     if (b.in + b.out + b.cache_read > 0) any = true
   }
-  const block: Record<string, unknown> = { buckets, total: any ? total : null }
+  const block: Record<string, unknown> = { buckets, total: any ? total : null, searched: ref.searched }
   if (ref.reason) reasons.unshift(ref.reason)
   if (reasons.length > 0) block.reason = reasons.join('; ')
   return { block }
 }
 
+/**
+ * The role_aggregate block (t261026-02 additive, per-role faces for the Metrics
+ * tab's Tokens-by-role card): discovery goes through resolveTicketRoleSessionFiles
+ * (the ticket-shaped `<ticket>-<role>` session dirs in the same repo-local tree,
+ * same refusal discipline, guard NOT widened); parsing reuses aggregateTicketUsage
+ * file by file (a bad file's reason surfaces per role, never swallowed). Roles are
+ * named verbatim; a role with no session files is simply absent from `roles` (the
+ * UI says 'no sessions in window' — a role nobody ran under is never invented).
+ * Shape (b) discipline: `searched` names the root that was searched; the DSH-home
+ * candidate is only ever named in a notice, never read.
+ */
+async function computeRoleAggregate(repo: string): Promise<Record<string, unknown>> {
+  const ref = await resolveTicketRoleSessionFiles(repo)
+  const searched = ref.searched ?? ''
+  if (ref.refused === true) {
+    return { searched, roles: {}, total: null, reason: ref.reason ?? 'per-role sessions discovery refused (path outside workspace root)' }
+  }
+  if (ref.paths.length === 0) {
+    return { searched, roles: {}, total: null, reason: ref.reason ?? 'no ticket-shaped per-role session files under the project root' }
+  }
+  const roles: Record<string, { tickets: number; files: number; in: number; out: number; cache_read: number; reason?: string }> = {}
+  const reasons: string[] = []
+  for (const [role, bucket] of Object.entries(ref.roles)) {
+    const b = { tickets: bucket.tickets.length, files: bucket.paths.length, in: 0, out: 0, cache_read: 0 }
+    const roleReasons: string[] = []
+    for (const p of bucket.paths) {
+      const agg = await aggregateTicketUsage([p], [])
+      b.in += agg.total.input
+      b.out += agg.total.output
+      b.cache_read += agg.total.cacheRead
+      const name = p.split('/').pop() ?? p
+      if (agg.reason) roleReasons.push(`${role}/${name}: ${agg.reason}`)
+      if (agg.suspectDetail) roleReasons.push(`${role}/${name}: ${agg.suspectDetail}`)
+    }
+    if (roleReasons.length > 0) b.reason = roleReasons.join('; ')
+    roles[role] = b
+  }
+  const total = { in: 0, out: 0, cache_read: 0 }
+  let any = false
+  for (const b of Object.values(roles)) {
+    total.in += b.in
+    total.out += b.out
+    total.cache_read += b.cache_read
+    if (b.in + b.out + b.cache_read > 0) any = true
+  }
+  const block: Record<string, unknown> = { searched, roles, total: any ? total : null }
+  if (ref.skips.length > 0) reasons.push(`skipped ticket-shaped dirs with no parseable role: ${ref.skips.join('; ')}`)
+  if (ref.reason) reasons.unshift(ref.reason)
+  if (reasons.length > 0) block.reason = reasons.join('; ')
+  return block
+}
+
 /** The health view's named v2 degrade: always null + reason (health never walks the record aggregation path). */
 function v2HealthReasons(): string[] {
-  return ['metrics v2 blocks (workflows/stages/project_sessions/epics) are not in the health direct-query path']
+  return ['metrics v2 blocks (workflows/stages/project_sessions/epics/role_aggregate) are not in the health direct-query path']
 }
 
 /**
@@ -1316,6 +1368,7 @@ export async function buildMetricsResponse(
   })
   const agg = aggregateV2(v2Window, chains)
   const projSess = await computeProjectSessions(deps.repo, [...listedIds])
+  const roleAgg = await computeRoleAggregate(deps.repo)
   const v2KpiNotices = respWorkflowsStagesKpis(kpis, keptEntries, projSess, nowMs, span)
 
   const body = buildChartsBody(p.view, kept, stageIds, kpis)
@@ -1332,11 +1385,24 @@ export async function buildMetricsResponse(
     charts: body.charts,
     generated_at: nowIso,
     cache: { status: cacheStatus, computed_at: nowIso, source_version: SOURCE_VERSION },
-    // metrics v2 blocks (contract v2; key names verbatim)
+    // metrics v2 blocks (contract v2; key names verbatim) + t261026-02 additive:
+    // role_aggregate (per-role faces) and project_sessions_degrade (the null-path
+    // carry: reason + searched root travel structured, not only inside notices).
     workflows: agg.workflows,
     stages: agg.stages,
     project_sessions: projSess.block,
     epics: agg.epics,
+    role_aggregate: roleAgg,
+  }
+  if (projSess.block === null) {
+    resp.project_sessions_degrade = { reason: projSess.reason ?? 'no project-level sessions', searched: projSess.searched ?? null }
+  }
+  // Shape (b) honesty (t261026-02): the guard is not widened, but the notice names
+  // the DSH-home candidate root (derived from the repo path, never read) so a reader
+  // can tell 'nothing ran' from 'we looked in the wrong place'.
+  if (projSess.block === null && deps.repo) {
+    const munged = '--' + deps.repo.split('/').filter(Boolean).join('-') + '--'
+    resp.project_sessions_home_candidate = join('~', '.dsh', 'sessions', munged)
   }
   const respReasons = [...fastSkips, ...skipped, ...stableReasons(entries, cacheDir)]
   // 近似归窗计数（F3）：旧版缓存无锚点的票按缓存计算时刻近似归窗，显式计数让用户
@@ -1353,6 +1419,7 @@ export async function buildMetricsResponse(
   }
   for (const n of [...v2.skips, ...agg.notices, ...v2KpiNotices]) notices.push(n)
   if (projSess.reason) notices.push(`project_sessions：${projSess.reason}`)
+  if ((roleAgg as Record<string, unknown>).reason) notices.push(`role_aggregate：${String((roleAgg as Record<string, unknown>).reason)}`)
   if (approxCount > 0) {
     notices.push(`其中 ${approxCount} 票旧版缓存无归窗锚点，按缓存计算时刻近似归窗（全量重算后自动转精确）`)
   }
@@ -1562,6 +1629,20 @@ async function healthView(
     stages: null,
     project_sessions: null,
     epics: null,
+    // t261026-02 additive: the health direct-query path never walks these blocks.
+    // role_aggregate keeps its object shape (empty roles + named reason) so the UI
+    // role face names the degrade instead of guessing; project_sessions follows the
+    // sibling null convention with a structured degrade carry.
+    role_aggregate: {
+      searched: null,
+      roles: {},
+      total: null,
+      reason: 'metrics v2 blocks (workflows/stages/project_sessions/epics/role_aggregate) are not in the health direct-query path',
+    },
+    project_sessions_degrade: {
+      reason: 'metrics v2 blocks (workflows/stages/project_sessions/epics) are not in the health direct-query path',
+      searched: null,
+    },
   }
   const online = await probePort('127.0.0.1', 7233, 800)
   if (!online) {

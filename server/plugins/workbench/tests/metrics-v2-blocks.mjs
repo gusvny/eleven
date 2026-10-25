@@ -238,6 +238,51 @@ async function runAll() {
     ok(r3.kpis.rework_rate === null && r3.kpis.median_lead_time === null, 'health：加性 kpi 恒 null')
   }
 
+  section('E2. role_aggregate (t261026-02): per-role faces / named empty roles / ticket-shaped no-role skips / bad files')
+  {
+    // Main repo: executor/t260921-01-developer is a ticket-shaped dir (carries a developer session).
+    if (HAS_ZSTD && haveSessions) {
+      const ra = r.role_aggregate
+      ok(ra && typeof ra === 'object' && typeof ra.searched === 'string' && ra.searched.endsWith(join('.dsh', 'sessions')), 'role_aggregate present with searched root', JSON.stringify(ra?.searched))
+      ok(ra.roles?.developer && ra.roles.developer.in === 7 && ra.roles.developer.out === 3 && ra.roles.developer.cache_read === 1, 'developer face in=7/out=3/cache=1 (ticket-shaped dir aggregated)', JSON.stringify(ra.roles?.developer))
+      ok(ra.roles.developer.tickets === 1, 'developer tickets=1 (t260921-01)')
+      ok(ra.total && ra.total.in === 7, 'role total.in=7 (single role)', JSON.stringify(ra.total))
+    }
+    // Dedicated repo: integration has a session (plus a bad one); executor has only a bad file;
+    // t1-2x-old is ticket-shaped with no parseable role -> named skip, never folded.
+    const raRepo = freshDir('v2-ra-')
+    mkdirSync(join(raRepo, '.worktrees'), { recursive: true })
+    const raEv = [
+      { type: 'request/context', data: { provider: 'deepseek', model: 'v3.2' }, time: 1 },
+      { type: 'assistant/message', data: { usage: { inputTokens: 7, outputTokens: 3, cacheReadTokens: 1 } }, time: 2 },
+    ]
+    if (HAS_ZSTD) {
+      makeSessionSlug(raRepo, 'slug9', 't260926-01-integration', raEv)
+      mkdirSync(join(raRepo, '.dsh', 'sessions', 'slug9', 't260926-02-executor'), { recursive: true })
+      writeFileSync(join(raRepo, '.dsh', 'sessions', 'slug9', 't260926-02-executor', 'session.jsonl.zstd'), 'not-zstd-at-all')
+    }
+    mkdirSync(join(raRepo, '.dsh', 'sessions', 'slug9', 't1-2x-old'), { recursive: true })
+    const ra = (await runMetrics(m, { ...env, repo: raRepo, SANDBAR_METRICS_DIR: freshDir('v2-cache3-') })).body.role_aggregate
+    if (!HAS_ZSTD) {
+      ok(ra && ra.roles && Object.keys(ra.roles).length === 0 && typeof ra.reason === 'string', 'no zstd: roles empty + reason (SKIP semantics)')
+    } else {
+      ok(ra.roles?.integration && ra.roles.integration.in === 7 && ra.roles.integration.tickets === 1, 'integration face present', JSON.stringify(ra.roles))
+      ok(ra.roles?.executor && ra.roles.executor.files === 1 && ra.roles.executor.in === 0 && typeof ra.roles.executor.reason === 'string', 'executor file present but bad: files=1/zeros + per-file reason (not "no sessions")', JSON.stringify(ra.roles?.executor))
+      ok(ra.roles?.developer === undefined, 'developer has no sessions: role absent (UI says no sessions in window, role never invented)')
+      ok(typeof ra.reason === 'string' && ra.reason.includes('t1-2x-old') && ra.reason.includes('no role parsed'), 'ticket-shaped role-less dir named as a skip (never silently folded)', JSON.stringify(ra.reason))
+    }
+    // Empty repo: whole block empty + reason; project_sessions degrade travels structured.
+    const emptyRepo2 = freshDir('v2-ra-empty-')
+    mkdirSync(join(emptyRepo2, '.worktrees'), { recursive: true })
+    const r2b = (await runMetrics(m, { ...env, repo: emptyRepo2, SANDBAR_METRICS_DIR: freshDir('v2-cache4-') })).body
+    ok(r2b.role_aggregate && Object.keys(r2b.role_aggregate.roles).length === 0 && typeof r2b.role_aggregate.reason === 'string', 'empty repo: role_aggregate roles empty + reason', JSON.stringify(r2b.role_aggregate))
+    ok(r2b.project_sessions_degrade && typeof r2b.project_sessions_degrade.reason === 'string' && typeof r2b.project_sessions_degrade.searched === 'string', 'null block reason+searched carried structured (not only in notices)', JSON.stringify(r2b.project_sessions_degrade))
+    ok(typeof r2b.project_sessions_home_candidate === 'string' && r2b.project_sessions_home_candidate.includes('.dsh'), 'DSH home candidate root named (named only, never read)', JSON.stringify(r2b.project_sessions_home_candidate))
+    const r3b = (await runMetrics(m, { ...env, repo: emptyRepo2, view: 'health' })).body
+    ok(r3b.role_aggregate && Object.keys(r3b.role_aggregate.roles ?? {}).length === 0 && String(r3b.role_aggregate.reason).includes('health direct-query path'), 'health: role_aggregate empty + health-path reason (object shape kept)', JSON.stringify(r3b.role_aggregate))
+    ok(r3b.project_sessions_degrade && typeof r3b.project_sessions_degrade.reason === 'string', 'health: structured project_sessions degrade', JSON.stringify(r3b.project_sessions_degrade))
+  }
+
   section('F. fast 与 full 缓存预热后聚合一致')
   {
     const full = (await runMetrics(m, { ...env, mode: 'full' })).body
