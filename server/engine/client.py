@@ -579,6 +579,43 @@ async def cmd_signal(args: Dict[str, Any]) -> Dict[str, Any]:
                 "裸 cancel 只留给引擎件清场）。")
 
 
+# t261025-08 (KI-356): engine-maintenance helper — NOT a CLI op (it deliberately
+# stays outside the gated ticket-op matrix: the signal is additive and
+# fail-closed, the handler is idempotent and refuse-free, and the decision it
+# enables is judged BY NAME at merge). The dev-lane workflow class carries the
+# same signal-name literal (dev_lane.ENABLE_NARROWED_ANCHOR_SIGNAL); it is
+# restated here as a plain string so this module needs no dev_lane import
+# (import graph: dev_lane is a workflow class module, not a client dependency).
+ENABLE_NARROWED_ANCHOR_SIGNAL = "enable_narrowed_anchor"
+
+
+async def enable_narrowed_anchor(ticket_id: str, who: str) -> Dict[str, Any]:
+    """Send ENABLE_NARROWED_ANCHOR_SIGNAL to a live dev-lane workflow (KI-356).
+
+    A long-lived in-flight lane whose `workflow.patched(KI350_...)` verdict was
+    memoized False during replay never refreshes `meta.last_green_run` on its
+    green targeted rounds; this signal is the replay-safe enable (a new signal
+    name that cannot exist in pre-fix history). Idempotent handler: re-delivery
+    changes nothing. Returns a named receipt; delivery failure is a structured
+    error, never a raise to the caller.
+
+    Runnable from an instance root (absolute paths, no CLI surface):
+        python3 -c "import asyncio, sys; sys.path.insert(0, '<engine_dir>'); \
+import client; \
+print(asyncio.run(client.enable_narrowed_anchor('<ticket_id>', '<who>')))"
+    """
+    client = await _connect()
+    handle = client.get_workflow_handle(ticket_id)
+    try:
+        await handle.signal(ENABLE_NARROWED_ANCHOR_SIGNAL, str(who or ""))
+    except Exception as e:  # noqa: BLE001 — named receipt, never a raise
+        return {"ok": False, "ticket_id": ticket_id,
+                "error": "signal delivery failed: %s: %s"
+                         % (type(e).__name__, e)}
+    return {"ok": True, "ticket_id": ticket_id, "signal": ENABLE_NARROWED_ANCHOR_SIGNAL,
+            "who": str(who or ""), "note": "idempotent enable; re-delivery changes nothing"}
+
+
 async def cmd_schedule_list(args: Dict[str, Any]) -> Dict[str, Any]:
     del args  # no arguments
     client = await _connect()

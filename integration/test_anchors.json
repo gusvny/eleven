@@ -1679,6 +1679,11 @@
     },
     "server/engine/tests/test_t261025_02_own_gate_run.py": {
       "anchor": "behaviour"
+    },
+    "server/engine/tests/test_t261025_08_narrowed_anchor_reach.py": {
+      "anchor": "behaviour",
+      "note": "t261025-08 KI-356: the narrowed landing anchor is REACHABLE for a long-lived in-flight lane - the enable_narrowed_anchor signal (event-gated, replay-safe without workflow.patched whose first verdict the SDK memoizes per instance) arms the recorder: unpatched+unenabled green targeted round records nothing (byte-identical old replay); unpatched+enabled green targeted round records {ran,narrowed,sha,at} on the current lane HEAD; enabled fail-closed shapes (failed/errored/blockers/zero-run/malformed) record nothing; lane_head_sha failure (raise and ok=False) records no face plus green_run_note; handler idempotent and payload-tolerant; full-round arm unchanged (no marker); stale narrowed face refuses by name naming the satisfying run; signal-name parity client/dev_lane and source lock of the wiring.",
+      "sync_path": "server/engine/dev_lane.py; server/engine/client.py"
     }
   },
   "scenarios": {
@@ -5679,6 +5684,11 @@
     },
     "integration/t261025-02/sc_t261025_02_own_never_peeled.py": {
       "anchor": "behaviour"
+    },
+    "integration/t261025-08/sc_t26102508_narrowed_anchor_reach.py": {
+      "anchor": "behaviour",
+      "note": "t261025-08 KI-356 grey-box L3 (offline, no docker/Temporal server/browser): a memo-poisoned in-flight lane (patched() reads False) that received the enable event records an honest narrowed face on the current lane HEAD judged green by name at merge_check; the inert control without the event stays byte-silent; idempotence and malformed payload never crash or phantom-arm; fail-closed under enable (zero-run/red/sha-failure record nothing, full round unmarked).",
+      "sync_path": "server/engine/dev_lane.py; server/engine/client.py"
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {
@@ -5698,5 +5708,9 @@
   "server/engine/tests/test_t261024_16_inspection_sign_gate.py": {
     "anchor": "behaviour",
     "note": "t261024-16 developer L1: direct-handler drives of InspectionPeriodicWorkflow.sign - order authorize -> validate -> cross-project judge -> accept; policy=record at the sign call site books the undeclared record row into the timeline; guards kept (agent refused by name, malformed/absent who fail-closed, declared mismatch refused)."
+  },
+  "integration/t261025-08/sc_t26102508_narrowed_anchor_reach.py": {
+    "anchor": "behaviour",
+    "note": "t261025-08 L3 (KI-356): the enable event reaches an in-flight lane whose patched() memo is closed - a targeted green round then re-anchors the landing face on the CURRENT lane HEAD (narrowed marker, judged by name); inert without the event; idempotent + malformed-payload-safe; zero-run/red/sha-failure stay fail-closed; full rounds unchanged; land_to_line gets past the contains-main guard on a real fixture while a stale anchor still refuses by name"
   }
 }

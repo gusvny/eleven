@@ -254,6 +254,11 @@ def test_no_release_or_closeout_surface_reads_the_green_run_face():
         "run",                              # dev-lane main loop (merge_check
                                             # argument wiring lives on the
                                             # straight-line segment there)
+        # t261025-08 (KI-356): the enable signal handler — it only NAMES the
+        # face in its docstring (it never reads or writes it); the flag it sets
+        # widens the RECORDER's eligibility, so the single-consumer property is
+        # untouched.
+        "enable_narrowed_anchor",
     }
     for fname in ("dev_lane.py", "agent_activities.py", "light_lane.py"):
         src = (POC / fname).read_text(encoding="utf-8")

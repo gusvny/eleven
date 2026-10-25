@@ -887,6 +887,22 @@ KI220_ZERO_RUN_PATCH_ID = "t261008-24-zero-run-supply-stop-v1"
 # the identical command sequence (no lane_head_sha call where history has none).
 KI350_NARROWED_FACE_PATCH_ID = "t261024-12-narrowed-green-face-v1"
 
+# t261025-08 (KI-356): the event-gated enable signal for the narrowed landing
+# anchor on an IN-FLIGHT lane. The `workflow.patched(KI350_...)` gate cannot
+# serve the two live witnesses: temporalio memoizes the first `patched()`
+# verdict per workflow-instance object (`_patches_memoized`, allocated once at
+# `WorkflowInstanceImpl.__init__`, never reset per activation), and the first
+# evaluation on a long-lived lane happens while replaying pre-KI-350 history —
+# so the False sticks for the cached instance lifetime and every later live
+# round takes the un-patched leg (measured: t261022-14 face stuck at ran=90,
+# t261022-12 at ran=0, both gates green). A NEW signal name that cannot exist
+# in any pre-fix history is replay-safe WITHOUT `workflow.patched`: the handler
+# only executes when the event exists in history, so an old replay never runs
+# it and never emits the arm's `lane_head_sha` commands. Reusing an OLD signal
+# (retry_qc / rework) would fire the arm while replaying history that predates
+# the fix — nondeterminism — hence a dedicated name.
+ENABLE_NARROWED_ANCHOR_SIGNAL = "enable_narrowed_anchor"
+
 # t261025-02 (KI-355): the CLOSING run (the develop-buffer scoped-feedback arm)
 # must carry the ticket's OWN scenario face too. Measured root cause: the
 # closing caliber was declared "the fast set only" (own names passed none), so a
@@ -1591,6 +1607,12 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         # stage boundary (admission needs the holder-scan activity → awaits → the
         # main loop drains it, never the signal handler).
         self._annex_requests: List[Dict[str, Any]] = []
+        # t261025-08 (KI-356): the event-gated enable for the narrowed landing
+        # anchor (ENABLE_NARROWED_ANCHOR_SIGNAL). Default False = the un-patched
+        # replay leg is byte-identical; only a signal event in history flips it.
+        # Read with getattr at the use site so old replay shells / UT stubs that
+        # bypass __init__ never AttributeError.
+        self._narrowed_anchor_enabled: bool = False
         self.timeline: List[Dict[str, Any]] = []
         self.human_context: Dict[str, Any] = {}
         self.engine_version: int = ENGINE_VERSION_V2
@@ -2659,14 +2681,29 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
 
         Gated behind KI220_ZERO_RUN_PATCH_ID (the lane_head_sha activity call adds
         history events; old in-flight replays must not execute it). The narrowed
-        face selection is FURTHER gated behind KI350_NARROWED_FACE_PATCH_ID: an
-        un-patched replay takes `green_run_face` (None for targeted rounds), so
+        face selection is FURTHER gated behind KI350_NARROWED_FACE_PATCH_ID — or,
+        t261025-08 (KI-356), behind the event-gated ENABLE_NARROWED_ANCHOR_SIGNAL
+        (a workflow._narrowed_anchor_enabled flag a signal handler sets): the
+        SDK memoizes the first `patched()` verdict per instance, so a long-lived
+        in-flight lane poisoned by a replay-era False can never take the patched
+        leg; the signal event is history-durable and cannot exist in pre-fix
+        history, hence replay-safe. An un-patched, un-enabled replay takes
+        `green_run_face` (None for targeted rounds), so
         the recorded command sequence is byte-identical to history.
         """
         if not workflow.patched(KI220_ZERO_RUN_PATCH_ID):
             return
         _targeted_only = bool(targeted_only)
-        if _targeted_only and workflow.patched(KI350_NARROWED_FACE_PATCH_ID):
+        # t261025-08 (KI-356): the narrowed arm is reachable two ways — the
+        # KI-350 patch gate (new executions, un-poisoned instances) OR the
+        # event-gated enable signal (ENABLE_NARROWED_ANCHOR_SIGNAL), which is
+        # what the long-lived in-flight witnesses can actually receive. Both
+        # legs are replay-safe: an instance whose history predates both takes
+        # the legacy `green_run_face` selector (None for targeted rounds) and
+        # executes the identical command sequence.
+        if _targeted_only and (workflow.patched(KI350_NARROWED_FACE_PATCH_ID)
+                               or getattr(self, "_narrowed_anchor_enabled",
+                                          False)):
             # KI-350: an honest narrowed face (marker + counts) refreshes the
             # landing anchor. The lane_head_sha failure/absence paths below are
             # SHARED with the full-round arm — the same fail-closed behaviour
@@ -7228,6 +7265,36 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             {"at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
              "state": "retry-requested",
              "reason": "%s requests rerun (attempt %d)" % (who, self._retry_token)})
+
+    @workflow.signal
+    def enable_narrowed_anchor(self, who: str = "") -> None:
+        """t261025-08 (KI-356): event-gated enable for the narrowed landing
+        anchor on an IN-FLIGHT lane. The KI-350 narrowed arm sits behind
+        `workflow.patched(KI350_NARROWED_FACE_PATCH_ID)`, and the SDK memoizes
+        the first `patched()` verdict per instance object — a long-lived lane
+        whose first evaluation happened on replay of pre-KI-350 history reads
+        False forever and its green targeted rounds never refresh
+        `meta.last_green_run` (measured: t261022-14 / t261022-12, both gates
+        green, both faces stale). This signal is the replay-safe escape: a NEW
+        signal name that cannot exist in pre-fix history, so the handler runs
+        only when the event exists in history — an old replay is byte-identical
+        and never emits the arm's `lane_head_sha` commands. The flag is the ONLY
+        replayed branch input; the timestamp rides `workflow.now()` (replay-
+        consistent) through the existing meta note, and the handler is
+        idempotent — re-delivery changes nothing. The anchor this enables is
+        still judged BY NAME as a narrowed proof at merge
+        (shared.green_run_check_item, reason_code="narrowed"): never a full
+        close, release still owns the full closing run."""
+        if getattr(self, "_narrowed_anchor_enabled", False):
+            return
+        self._narrowed_anchor_enabled = True
+        self.meta["narrowed_anchor_note"] = {
+            "enabled": True, "who": str(who or ""), "at": self._now_epoch()}
+        self._log("narrowed landing anchor ENABLED (who=%s) — the next green "
+                  "targeted gate round records a narrowed last_green_run face "
+                  "(a landing anchor, never a full close)"
+                  % (str(who or "?")))
+        self._touch()
 
     @workflow.signal
     def lift_stop(self, req: StopLiftRequest) -> None:
