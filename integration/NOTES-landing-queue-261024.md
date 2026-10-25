@@ -248,3 +248,45 @@ Discipline learned tonight, worth keeping:
   or every promotion refuses `promotion_not_fast_forward` (happened three times).
 - Never widen a wall-clock window without confirming the failure path still fails loud
   (the 90 s -> 240 s change hid a real stall for four minutes).
+
+## 261025 afternoon addendum (13:00-16:20 CST) — the two wedged tickets landed
+
+`t261022-14` and `t261022-12` both landed and closed; `main` moved twice
+(a4ab2b7 -> b3c3ca5b -> 82927fd0). What actually unblocked them, in order:
+
+1. **KI-356/357 is real but needs the enable signal.** `t261025-08` shipped a
+   replay-safe signal (`client.enable_narrowed_anchor(ticket, who)`,
+   `ENABLE_NARROWED_ANCHOR_SIGNAL`). Sending it BEFORE the re-gate is what makes
+   `_ki220_record_green_run` take the narrowed arm. Proof on the live path:
+   `t261022-14` recorded `{ran: 3, sha: 017425aa, narrowed: true}` right after the
+   signal, and `t261022-12` recorded `{ran: 2, sha: 607348dc, narrowed: true}`.
+   Rework alone does not do it — the signal is the missing operator act.
+   Both KI rows are now `fixed`.
+2. **A freeze was pinning every landing for four hours** (03:07 -> 07:00). Closer:
+   attribute + `closed` change rows with the booked-red ground (the two cause reds
+   were the inspection fixture-id collisions). Two freezes were closed that way,
+   the second one on repair evidence from a line commit.
+3. **A landing can resurrect a line-side deletion** (new KI-360). The `t261022-14`
+   landing merged the lane's older `integration/run_scenarios.py` over `e868f0fb`,
+   restoring `FAST_SET_CATCH[t261022-09-quick-gate-scope]` with no registry marker.
+   The fast-set declaration then refused as an orphan, which turned FOUR cases red
+   (`t261009-16-fast-set-declaration/gate`, `t261011-11-review-patrol`,
+   `t261018-01-closing-fast-once`) and made every round red. Repaired on the line at
+   `9061c17d` (delete the key, retire the case from the book: 106 -> 105 rows).
+4. **`t261022-12` could only move forward through the gate stage.** `rework` to
+   `implement` is refused with the impossible literal `fallback()` (new KI-358);
+   `rework` to `run_integration_tests` is the path that makes the lane re-sync main
+   and re-run the closing full run. That closing run then passed with zero new reds.
+5. **KI-352 is still alive in the product path.** The 06:00 round on `82927fd0` ran
+   709 with 0 failed and 13 env reds: face red, record green, and this time it did
+   write a cert row. The 04:20 round (4 content reds) did not need one. But the
+   03:18 round never wrote one, so the class is not closed — a content-green round
+   whose face is red is still not guaranteed a record.
+
+New KIs registered in this window: KI-358 (rework-to-implement refuses with
+`fallback()`), KI-359 (an orphan `stage_docker.py hold` lease outlived its scenario
+by 3h08m on a dead anchor pid; killed by hand), KI-360 (a landing resurrecting a
+line-side deletion).
+
+Still open after this window: `t261022-15` (process-bench leak, waits for a working
+session), KI-359's reaper, KI-358, and KI-352's product-path guarantee.
