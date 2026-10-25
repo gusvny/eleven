@@ -290,3 +290,46 @@ line-side deletion).
 
 Still open after this window: `t261022-15` (process-bench leak, waits for a working
 session), KI-359's reaper, KI-358, and KI-352's product-path guarantee.
+
+## 261026 night — six tickets delivered to main
+
+`main` moved four times after the afternoon addendum (`f070bf84` -> `5fb09030` -> `92495bcb` ->
+`5c1ed768`), and every ticket that was open at midnight is on it except `t261022-15`, which still
+waits for a working session.
+
+| ticket | what it delivered |
+| --- | --- |
+| t261025-11 | the round that wrote no ledger row now heals into exactly one |
+| t261025-12 | the panel carries the two certification controls the host asked for |
+| t261025-14 | usage is frozen before the lane dies; the face states its coverage |
+| t261026-01 | the ticket population matches the store (43 -> the real count) |
+| t261026-02 | project sessions reads the DSH session home (host ruling u) |
+| t261026-03 | markdown is a document wherever it lives, not only under docs/ |
+| t261025-13 | the token face is three honest tiles; the rework-rate tile is gone |
+
+### What actually cost the time
+
+1. **The line froze four times**, each time on a red whose content had nothing to do with the
+   revision under test: two interference faces, one stale assertion, one contention red. Each thaw
+   was an attributed `closed` row citing the booking or the repair - never a silent release.
+2. **A saturated box produces red-by-budget.** Load average 18-34 with FSEvents and mds near 100
+   percent turned four cases red in one round that all pass alone (recorded as KI-365). The rule
+   that saved the night: re-run every red alone before believing it, and run the line round with no
+   ticket gate and no operator probe in flight.
+3. **A landing can resurrect a line-side deletion** (KI-360) and **a landing can be skipped because
+   the landing record matched the ticket, not the proven revision** (KI-361). Both bit tonight; both
+   were repaired by hand and recorded.
+4. **Booking a flaky-green case is forbidden by the repo's own test** (`test_fixed_must_leave_the_book`
+   names t260921-06 explicitly). One booking was made and reverted within the hour; the rule stands:
+   a case that re-runs green is re-run, not booked.
+5. **Promotion only ever reads the newest green certification**, and every relative round writes a
+   baseline certification for main afterwards - so a promotion issued even ten minutes late loses to
+   its own baseline. The reliable shape is one job that runs the round and promotes immediately
+   afterwards; two of tonight's promotions were done that way.
+
+### Still open
+
+- `t261022-15`: the process bench must not outlive its case; needs a working session.
+- KI-358 (rework to implement refuses with the literal `fallback()`), KI-359 (stage lease outliving
+  its scenario), KI-362 (usage dies with the lane), KI-363 (population filter), KI-365 (budget kills
+  cannot be told from content reds on the face).
