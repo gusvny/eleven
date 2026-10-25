@@ -3823,8 +3823,12 @@ SCENARIOS = [
      "refusal face, never silent zero rows. Intent split: the settle-block truth tables and the "
      "certification/freeze mapping unit faces belong to developer L1 (server/engine/tests/, incl. "
      "test_t261025_11_one_record_reconcile.py and the t261024-30 family); the tick-level healing journey over "
-     "real files on disk is THIS entry. Pre-implementation tree red = the named TDD signal; green required at "
-     "the integration gate / merge. Engine tree missing = ENV_FAIL exit 2;"
+     "real files on disk is THIS entry. fast-catch: the silent-end class - a COMPLETED round whose settle "
+     "block never ran (the 261025 witnesses: terminal face + runner row on disk, ZERO delivery rows, the "
+     "line frozen, the promotion driver blind) that heals into zero or two rows, guesses a line, or stays "
+     "silent when its own settle row write is rejected, is caught here in offline seconds instead of at the "
+     "next promotion driver asking where the green certification went. Pre-implementation tree red = the "
+     "named TDD signal; green required at the integration gate / merge. Engine tree missing = ENV_FAIL exit 2;"
      " tier: the tick-level healing seam assembled from the durable runner"
      " row, the delivery ledger and the tick guard - no single-component"
      " contract can express it; cost: seconds (offline, ~0.4 s measured)",
@@ -3892,6 +3896,14 @@ FAST_SET_CATCH = {
         "silent on the incident shape, or a malformed ticket id / env knob "
         "yielding a lawful-looking in-tree path (caught offline in seconds "
         "instead of at the next arbitrate path_gate unauthorized_path block)",
+    "t261025-11-unrecorded-round-healed":
+        "the silent-end class this ticket measured on 261025 - a COMPLETED "
+        "line round whose engine settle block never ran (terminal face + "
+        "runner row on disk, ZERO delivery rows, the line frozen, the "
+        "promotion driver blind) heals into exactly ONE named row per run id, "
+        "idempotent by replay, never a guessed line, and loud when its own "
+        "row write is rejected (caught offline in seconds instead of at the "
+        "next promotion driver missing the green certification)",
     "t26102412-narrowed-green-landing":
         "the KI-350 wedge class - a narrowed green round that leaves no "
         "honest landing anchor (marker absent, refusal that names no "
