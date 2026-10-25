@@ -410,6 +410,116 @@ def round_receipt(project, run_id):
     return receipt
 
 
+# ---- the two controls' faces (t261025-12) --------------------------------
+
+def _ledger_home(project):
+    """The project's ledger directory, resolved the ONE way the engine does
+    (dc.ledger_path when the env names a ledger dir, the per-key store's
+    ledger home otherwise) — the same construction `main` uses; the marker
+    and guard paths are children of THIS dir, never a second convention."""
+    ledger_dir_env = os.environ.get(dc.LEDGER_DIR_ENV, "").strip()
+    if ledger_dir_env:
+        return Path(dc.ledger_path(project)).parent
+    return shared.perkey_projects_root() / project / "ledger"
+
+
+def _delivery_rows_for(project):
+    """The delivery ledger's rows by the same path rule the tab already
+    reads. Returns (rows, bad, delivery_path)."""
+    ledger_dir_env = os.environ.get(dc.LEDGER_DIR_ENV, "").strip()
+    delivery_path = dc.ledger_path(project) if ledger_dir_env else \
+        shared.perkey_projects_root() / project / "ledger" / dc.MAIN_NAME
+    return (*dc.read_rows(delivery_path), delivery_path)
+
+
+def queue_state_receipt(project):
+    """The `queue-state` mode: what a queued round currently waits on, each
+    state NAMED, never guessed (ruling §5 'shows what the queue waits on').
+    Four named facts, read from the engine's own faces:
+      marker    — the queue seam's own marker file (the tick consumes it)
+      guard     — the tick anchor held (a round owns the line)
+      in_flight — the live round face says a round is running
+      runners   — per declared line, resolvable / not (resolve_runner)
+    A receipt is always ok:true — 'nothing waits' is an answer, not a
+    refusal; unreadable sub-faces degrade to their own named entries."""
+    ledger = _ledger_home(project)
+    marker = ledger / dc.FORCE_MARKER_NAME
+    guard_path = str(ledger / "tick-anchor")
+    out = {"ok": True, "project": project, "mode": "queue-state",
+           "marker": {"present": marker.exists(), "path": str(marker)},
+           "guard": {"held": bool(dc.guard_held(guard_path)),
+                     "path": guard_path}}
+    try:
+        section = read_round_faces(project)
+        live = section.get("live") if isinstance(section, dict) else None
+        live_face = live.get("face") if isinstance(live, dict) else None
+        running = isinstance(live_face, dict) \
+            and live_face.get("state") == "running"
+        out["in_flight"] = {"running": bool(running),
+                            "run": live_face.get("run_id")
+                            if isinstance(live_face, dict) else None,
+                            "note": None if live is not None
+                            else str(section.get("error") or "live face unreadable")}
+    except Exception as e:  # noqa: BLE001 — the live face's own failure named
+        out["in_flight"] = {"running": False, "run": None,
+                            "note": "live face unreadable: %s" % e}
+    runners = []
+    try:
+        lines = dl.load_lines(project)
+        env = dict(os.environ)
+        for line_id in sorted(lines):
+            runner = dc.resolve_runner(lines[line_id], env)
+            runners.append({"line": line_id,
+                            "state": "resolvable" if runner is not None
+                            else "runner_missing"})
+    except Exception as e:  # noqa: BLE001
+        runners.append({"line": None, "state": "error",
+                        "error": "%s: %s" % (type(e).__name__, e)})
+    out["runners"] = runners
+    return out
+
+
+def promote_preview_receipt(project, line_id=None):
+    """The `promote-preview` mode: the writer's own validate pass (the
+    engine's `promotion_preview`), per declared line or for one named line.
+    The panel's Promote count and its refusal reason both read from HERE —
+    one truth, never a second implementation."""
+    try:
+        lines = dl.load_lines(project)
+    except Exception as e:  # noqa: BLE001
+        return _fail("line declaration unreadable: %s: %s"
+                     % (type(e).__name__, e))
+    wanted = [line_id] if line_id else sorted(lines)
+    if line_id and line_id not in lines:
+        return _fail("line_not_declared:%s" % line_id)
+    previews = [dp.promotion_preview(project, lid) for lid in wanted]
+    eligible = [p for p in previews if p.get("ok")]
+    return {"ok": True, "project": project, "mode": "promote-preview",
+            "lines": previews,
+            "promotable": len(eligible),
+            "promoteBlock": "" if eligible
+            else (previews[0].get("reason", "") if previews
+                  else "no line is declared")}
+
+
+def promote_latest_receipt(project):
+    """The `promote-latest` mode: the newest promotion row read BACK from
+    the delivery ledger — signer, certification, revisions moved, tickets.
+    The route answers with this after the act, never with the act's own
+    return value alone (the ledger is the evidence, the read-back is the
+    proof). No row yet is an ANSWER (promotion: null), not a refusal."""
+    rows, bad, _path = _delivery_rows_for(project)
+    if bad:
+        return _fail("delivery ledger has %d malformed line(s): %s"
+                     % (len(bad), bad[0]))
+    promos = [r for r in rows if isinstance(r, dict)
+              and r.get("kind") == dp.KIND_PROMOTION]
+    promos.sort(key=lambda r: (r.get("at") or 0, r.get("seq") or 0))
+    latest = promos[-1] if promos else None
+    return {"ok": True, "project": project, "mode": "promote-latest",
+            "promotion": latest, "promotions": len(promos)}
+
+
 def main(argv):
     # t261012-03: the round-dialog mode. Usage-refusal receipts, like every
     # refusal here — the reader surfaces them verbatim, never guesses.
@@ -425,6 +535,38 @@ def main(argv):
             _emit(_fail("malformed run id %r" % run_id[:80]))
             return 0
         _emit(round_receipt(project, run_id))
+        return 0
+    # t261025-12: the two controls' read faces.
+    if len(argv) >= 2 and argv[1] == "queue-state":
+        if len(argv) != 3:
+            _emit(_fail("usage: certification-adapter.py queue-state <project-key>"))
+            return 0
+        project = argv[2]
+        if not shared.PROJECT_KEY_RE.match(project):
+            _emit(_fail("malformed project key %r" % project))
+            return 0
+        _emit(queue_state_receipt(project))
+        return 0
+    if len(argv) >= 2 and argv[1] == "promote-preview":
+        # `promote-preview <project>` or `promote-preview <project> <line>`
+        if len(argv) not in (3, 4):
+            _emit(_fail("usage: certification-adapter.py promote-preview <project-key> [line-id]"))
+            return 0
+        project = argv[2]
+        if not shared.PROJECT_KEY_RE.match(project):
+            _emit(_fail("malformed project key %r" % project))
+            return 0
+        _emit(promote_preview_receipt(project, argv[3] if len(argv) == 4 else None))
+        return 0
+    if len(argv) >= 2 and argv[1] == "promote-latest":
+        if len(argv) != 3:
+            _emit(_fail("usage: certification-adapter.py promote-latest <project-key>"))
+            return 0
+        project = argv[2]
+        if not shared.PROJECT_KEY_RE.match(project):
+            _emit(_fail("malformed project key %r" % project))
+            return 0
+        _emit(promote_latest_receipt(project))
         return 0
     if len(argv) != 2:
         _emit(_fail("usage: certification-adapter.py <project-key>"))

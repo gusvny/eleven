@@ -659,6 +659,12 @@ def promote_buffer(project, line_id, signer, authority=None, on_behalf_of=None,
     import develop_line as dl  # local: promote -> certify -> (line decl)
     if not _valid_str(signer):
         raise PromotionRefused("promotion_missing_signer")
+    role_refusal = signer_role_refusal(signer)
+    if role_refusal is not None:
+        # t261025-12: the engine owns the identity rule, so an agent reaching
+        # the act through ANY surface (panel route included) is refused here,
+        # never by a UI check. Refusal is by name and travels verbatim.
+        raise PromotionRefused(role_refusal)
     rows, bad = dc.read_rows(dc.ledger_path(project))
     if bad:
         raise PromotionRefused("delivery_ledger_malformed:%d" % len(bad))
@@ -823,6 +829,79 @@ def promote_buffer(project, line_id, signer, authority=None, on_behalf_of=None,
     if sync_notes:
         row["worktree_sync_notes"] = sync_notes
     return row
+
+
+# ---- the read-only eligibility face (t261025-12) -----------------------------
+
+def signer_role_refusal(signer):
+    """The engine's own signer identity rule (t261025-12): return the named
+    refusal string when ``signer`` is an agent role name (or the agent
+    display-name family), else None. The vocabulary is the shared
+    authorization gate's own set (``shared.AUTHZ_AGENT_ROLE_NAMES``) plus the
+    same ``-agent`` suffix rule ``authz_gates.validate_authorization``
+    applies — one identity vocabulary, two enforcement points, no third
+    implementation."""
+    s = str(signer or "").strip().lower()
+    if s in shared.AUTHZ_AGENT_ROLE_NAMES:
+        return "signer_is_agent_role_name:%s" % (str(signer).strip(),)
+    if s.endswith("-agent"):
+        return "signer_is_agent_role_name:%s" % (str(signer).strip(),)
+    return None
+
+
+def promotion_preview(project, line_id, repo_paths=None):
+    """The read-only eligibility face of ONE line (t261025-12): run the SAME
+    validate pass ``promote_buffer`` runs (green certification, declared
+    line, per-repo fast-forward) and answer what one signature would move —
+    WITHOUT touching any ref and WITHOUT appending anything.
+
+    This is the panel's Promote-count truth: the count a face renders must
+    come from the writer's own validate pass, never from a second
+    implementation that can outrun it (the host's 'Promote 1' with nothing
+    promotable behind it). Returns a plain dict:
+      {ok: True, project, line_id, cert_id, revisions, main_before}
+      {ok: False, reason: <the named PromotionRefused text>}
+    ``reason`` is the refusal vocabulary verbatim
+    (``no_green_certification``, ``promotion_not_fast_forward``,
+    ``line_not_declared``, ...). Deliberately narrower than the full act:
+    the covered-ticket set is NOT computed here (it needs the containment
+    walk over every landing) — the recorded promotion row is what names the
+    tickets; the preview only answers 'may main move, and to what'.
+    """
+    try:
+        rows, bad = dc.read_rows(dc.ledger_path(project))
+        if bad:
+            raise PromotionRefused("delivery_ledger_malformed:%d" % len(bad))
+        cert = _latest_green_cert(rows, line_id, project)
+        if cert is None:
+            raise PromotionRefused("no_green_certification:%s" % line_id)
+        import develop_line as dl  # local: promote -> certify -> (line decl)
+        line = dl.load_lines(project).get(line_id)
+        if line is None:
+            raise PromotionRefused("line_not_declared:%s" % line_id)
+        cert_repos = _repos_map(cert["repos"])
+        main_before = []
+        for repo_meta in line.repositories:
+            name = repo_meta.name
+            repo = Path((repo_paths or {}).get(name)
+                        or shared.develop_dir(project) / "wt" / name)
+            crev = cert_repos.get(name)
+            if not crev:
+                raise PromotionRefused("cert_missing_repo:%s" % name)
+            cur = _git(["rev-parse", "--verify", "refs/heads/main"], repo)
+            if cur.returncode != 0:
+                raise PromotionRefused("main_unresolvable:%s" % name)
+            cur = cur.stdout.strip()
+            mb = _git(["merge-base", "refs/heads/main", crev], repo)
+            if mb.returncode != 0 or mb.stdout.strip() != cur:
+                raise PromotionRefused("promotion_not_fast_forward:%s" % name)
+            main_before.append({"repo": name, "revision": cur})
+        return {"ok": True, "project": project, "line_id": line_id,
+                "cert_id": cert["id"], "revisions": _repos_map(cert["repos"]),
+                "main_before": main_before}
+    except PromotionRefused as e:
+        return {"ok": False, "project": project, "line_id": line_id,
+                "reason": str(e)}
 
 
 # ---- the withdrawal guard ---------------------------------------------------

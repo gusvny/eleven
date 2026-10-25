@@ -134,10 +134,11 @@ const RF_SECTION = {
   // every ticket row carries id, title and epic
   assert(html.includes('t261009-20') && html.includes('Guard the route change') && html.includes('engine-hardening'), 'waiting rows carry id, title, epic')
   assert(html.includes('t261009-23') && html.includes('Promote the certified part'), 'certified rows carry id, title (the promotable set: landed, covered, not delivered)')
-  // the promote dialog is absent and named (the copy ships, hidden, on the face)
-  assert(html.includes('data-wired="false"'), 'the promote note mount declares itself unwired')
-  assert(CERT_COPIES.promoteAbsent.includes('record-signed promote stays an engine operation'), 'the named-absence sentence ships in the copies')
-  assert(PANEL_PAGE_HTML.includes('record-signed promote stays an engine operation'), 'the page embeds the named-absence copy (CERT_TABLES)')
+  // t261025-12 (ruling §5): the two controls are wired — the dialog mount
+  // declares itself wired and the queue control rides the face.
+  assert(html.includes('data-wired="true"'), 'the promote note mount declares itself wired')
+  assert(html.includes('id="certQueue"') && html.includes('id="certQueueNote"'), 'the queue control + note mount render on the face')
+  assert(html.includes('Queue round'), 'the queue control is labelled')
   n += 14
 }
 
@@ -149,7 +150,13 @@ const RF_SECTION = {
   assert(!zeroHtml.includes('id="certBanner"'), 'no freeze banner when not frozen')
   const aliveHtml = buildCertificationCore(routeAnswer(greenFace))
   assert(aliveHtml.includes('data-promotable="2"') && !aliveHtml.includes('id="certPromo" disabled'), 'Promote alive at promotable 2, unfrozen')
-  n += 3
+  // t261025-12: an unreadable count renders NO number and stays disabled —
+  // a face the tab cannot read never renders a count (the host's 'Promote 1').
+  const nullHtml = buildCertificationCore(routeAnswer({ ...greenFace, promotable: null, promoteBlock: 'preview unreadable: ledger malformed' }))
+  assert(nullHtml.includes('disabled'), 'an unreadable count disables the control')
+  assert(nullHtml.includes('preview unreadable: ledger malformed'), 'the unreadable count names why beside the control')
+  assert(!nullHtml.includes('data-promotable="2"'), 'an unreadable count never renders the stale number')
+  n += 5
 }
 
 // ---- the degrade face: a refusal renders its named reason, never a fake ----

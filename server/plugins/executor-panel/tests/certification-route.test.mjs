@@ -27,6 +27,9 @@ const Q = (s = '') => new URLSearchParams(s)
 function apiWithRead(read, extra = {}) {
   return createApi({ HOME: '/nonexistent-home', SANDBAR_PANEL_DIR: '/nonexistent-projects' }, {
     certificationRead: async (args) => read(args),
+    // t261025-12: the happy path consults the writer's preview — stubbed here
+    // (a unit test never spawns the engine adapter).
+    certPromotePreview: async () => ({ ok: true, project: 'proj-x', lines: [], promotable: 0, promoteBlock: '' }),
     ...extra,
   })
 }
@@ -49,7 +52,24 @@ function apiWithRead(read, extra = {}) {
   // the ?line= deep choice reaches the reader
   const r2 = await api.handle('GET', ROUTE, Q('project=proj-x&line=other'), '')
   assert(r2.status === 200 && r2.json.line === 'other', 'the ?line= query reaches the reader')
-  n += 6
+  // t261025-12: the writer's preview is the count truth — it overrides the
+  // derived face's promotable/promoteBlock and rides the answer.
+  const r3 = await apiWithRead(async (args) => ({
+    ok: true, project: args.project, line: 'develop-buffer',
+    lines: [{ line_id: 'develop-buffer' }], face: { promotable: 5, promoteBlock: '' },
+    raw: {}, notes: [],
+  }), { certPromotePreview: async () => ({ ok: true, project: 'proj-x', lines: [], promotable: 2, promoteBlock: '' }) })
+    .handle('GET', ROUTE, Q('project=proj-x'), '')
+  assert(r3.json.face.promotable === 2 && r3.json.promote_preview.ok === true, 'the preview overrides the face count (one truth)')
+  // an unreadable preview nulls the count — an unreadable face never renders a number
+  const r4 = await apiWithRead(async () => ({
+    ok: true, project: 'proj-x', line: 'develop-buffer',
+    lines: [{ line_id: 'develop-buffer' }], face: { promotable: 5, promoteBlock: '' },
+    raw: {}, notes: [],
+  }), { certPromotePreview: async () => ({ ok: false, reason: 'promote-preview receipt is not valid JSON' }) })
+    .handle('GET', ROUTE, Q('project=proj-x'), '')
+  assert(r4.json.face.promotable === null && r4.json.face.promoteBlock === 'promote-preview receipt is not valid JSON', 'an unreadable preview nulls the count and names why')
+  n += 8
 }
 
 // the refusal envelope: the reader's named reason travels verbatim

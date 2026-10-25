@@ -67,7 +67,7 @@ import { limitStep, concChipState, CONC_LIMITS } from './concurrency.ts'
 // t261009-44: the Certification tab's render core — embedded via String() like
 // the other pure cores, so the UT and the page run one implementation. The
 // CERT_COPIES copy table rides along as JSON (single copy source).
-import { buildCertificationCore, buildRoundDialogCore, buildRoundsRows, countsCell, roundPill, roundReason, roundTrigger, roundTriggerWord, roundMeasured, roundsSectionNote, CERT_COPIES, ROUND_COPIES } from './certification-view.ts'
+import { buildCertificationCore, buildRoundDialogCore, buildPromoteDialogCore, certQueueNoteText, buildRoundsRows, countsCell, roundPill, roundReason, roundTrigger, roundTriggerWord, roundMeasured, roundsSectionNote, CERT_COPIES, ROUND_COPIES } from './certification-view.ts'
 // t261021-07: the Metrics tab v2 model + chart option factories — pure,
 // closure-free, embedded via String(fn) like the other cores, so the UT and
 // the page run one implementation. The chart factories shape echarts OPTIONS
@@ -241,6 +241,9 @@ const EMBEDDED = EMBED_CONSTS + [
   String(buildCertificationCore), String(buildRoundsRows), String(roundsSectionNote), String(roundTriggerWord),
   String(countsCell), String(roundPill), String(roundReason), String(roundTrigger), String(roundMeasured),
   String(buildRoundDialogCore),
+  // t261025-12: the two controls' pure faces — the signed-promotion dialog
+  // body and the queue note text (one implementation with the UT).
+  String(buildPromoteDialogCore), String(certQueueNoteText),
   // t261009-57: alerts face core — relative time, coalesce-then-cap (one implementation).
   String(relTimeAgo), String(coalesceAlerts), String(capCoalesced),
   // t261021-07: the Metrics tab v2 model + chart option factories (one
@@ -736,6 +739,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
          embedded buildRoundDialogCore on a run-id click; never pre-rendered. -->
     <div id="roundDlgWrap" hidden>
       <div class="dlg" id="roundDlg" role="dialog" aria-label="round record"></div>
+    </div>
+    <!-- t261025-12 (ruling §5): the signed-promotion dialog — shows the human
+         signer before the act; filled by the embedded buildPromoteDialogCore. -->
+    <div id="promoteDlgWrap" hidden>
+      <div class="dlg" id="promoteDlg" role="dialog" aria-label="signed promotion"></div>
     </div>
   </section>
 
@@ -2877,10 +2885,13 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     });
   };
 
-  // ---- Certification tab (t261009-44; rounds faces t261012-03) ----
+  // ---- Certification tab (t261009-44; rounds faces t261012-03; the two
+  // controls wired t261025-12 per ruling §5) ----
   // Lazy like the other reference faces: a tab that is never opened must never
-  // request anything. The routes are GET-only; the promote button renders the
-  // dialog's named absence (CERT_RUNTIME.COPIES.promoteAbsent), never a fake.
+  // request anything. t261025-12: Queue round POSTs the engine's own round
+  // marker seam (queued, never run in the request); Promote opens the dialog
+  // that SHOWS the signer before the act, and the act POSTs the engine writer
+  // route — the answer is the ledger read-back row, never a guess.
   // t261012-03 degrade rule: the LAST GOOD round-faces section is kept
   // per-SECTION (CERT.roundFaces) — a live-face read that degrades leaves the
   // previous Rounds table standing and never rolls back the rest of the tab,
@@ -2894,12 +2905,67 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     body.innerHTML = buildCertificationCore(CERT.data || {ok:false, reason:'the certification face has not been read yet'});
     var line = el('certLine');
     if(line) line.onchange = function(){ loadCertification(); };
+    // t261025-12: the queue control's handler — POST the queue route, then
+    // render the ONE honest note sentence (pure builder, same as the UT).
+    var queueBtn = el('certQueue');
+    if(queueBtn) queueBtn.onclick = function(){
+      var note = el('certQueueNote');
+      if(!note) return;
+      if(!state.project){ note.hidden = false; note.textContent = 'No project is selected — nothing can be queued.'; return; }
+      note.hidden = false;
+      note.textContent = 'Queueing…';
+      postJson('/sandbar-executor-panel/api/certification/queue', { project: state.project })
+        .then(function(j){ note.textContent = certQueueNoteText(j); loadCertification(); })
+        .catch(function(e){ note.textContent = certQueueNoteText({ ok:false, error:String((e&&e.message)||e) }); });
+    };
+    // t261025-12: the promote control's handler — open the dialog that shows
+    // the signer (prefilled only from the declared owner, never an agent role
+    // name list); the act POSTs after the human confirms the shown value.
     var promo = el('certPromo');
     if(promo) promo.onclick = function(){
-      var note = el('certPromoNote');
-      if(!note) return;
-      note.hidden = false;
-      note.textContent = CERT_RUNTIME.COPIES.promoteAbsent;
+      if(!state.project || promo.disabled) return;
+      var wrap = document.getElementById('promoteDlgWrap');
+      var dlg = document.getElementById('promoteDlg');
+      if(!wrap || !dlg) return;
+      var data = CERT.data || {};
+      var owner = '';
+      var lines = data.lines || [];
+      for(var i=0;i<lines.length;i++){
+        if(String(lines[i].line_id) === String(data.line)) owner = String(lines[i].owner || '');
+      }
+      dlg.innerHTML = buildPromoteDialogCore({ owner: owner, line: data.line, preview: data.promote_preview });
+      wrap.hidden = false;
+      var cancel = el('promoteCancel');
+      if(cancel) cancel.onclick = function(){ wrap.hidden = true; };
+      if(wrap.onclick === null){
+        wrap.onclick = function(ev){ if(ev.target === wrap) wrap.hidden = true; };
+      }
+      var go = el('promoteGo');
+      if(go) go.onclick = function(){
+        var signer = (el('promoteSigner') && el('promoteSigner').value || '').trim();
+        var note = el('promoteNote');
+        if(!note) return;
+        if(!signer){ note.hidden = false; note.textContent = 'The signer is required — the recorded row must name the human who signed.'; return; }
+        note.hidden = false;
+        note.textContent = 'Signing…';
+        postJson('/sandbar-executor-panel/api/certification/promote', {
+          project: state.project, line: data.line, signer: signer
+        }).then(function(j){
+          if(j && j.ok === true){
+            var row = j.promotion || {};
+            note.textContent = CERT_RUNTIME.COPIES.promoteRecorded + ': ' + String(row.signer || signer)
+              + ' · cert ' + String(row.certification || '?')
+              + ' · ' + Object.keys(row.main_after || {}).map(function(k){
+                  return k + ':' + String(row.main_after[k]).slice(0,8); // LIST-CAP-OK: revision-label width, not a list cap
+                }).join(' · ');
+            loadCertification();
+          } else {
+            note.textContent = CERT_RUNTIME.COPIES.promoteRefusedWhy + ' ' + String((j && j.error) || 'refused');
+          }
+        }).catch(function(e){
+          note.textContent = CERT_RUNTIME.COPIES.promoteRefusedWhy + ' ' + String((e&&e.message)||e);
+        });
+      };
     };
     var rows = el('certRoundRows');
     if(rows) rows.onclick = function(ev){

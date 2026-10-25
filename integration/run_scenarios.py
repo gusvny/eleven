@@ -451,6 +451,99 @@ SCENARIOS = [
      "exit 2",
      "node integration/t261019-23/sc_t26101923_cert_tab_host_findings.mjs",
      "ro", "fast"),
+    # ---- t261025-12: the certification tab's two controls + the verdict pair ----
+    ("t261025-12-queue-round-journey",
+     "The panel queues the next certification round through the engine's OWN "
+     "seam (the line-round-force marker the tick consumes), idempotently, "
+     "with the recorded request naming who asked and when, judged from the "
+     "READER side (ticket t261025-12, host ruling 261025 option c, design "
+     "section 5 'Trigger a round'; incident = the tab had no trigger-run "
+     "control at all, only a note saying the panel starts none; grey-box L3, "
+     "the REAL createApi route handler over a real temp project store, the "
+     "real marker and record files read back from disk, offline seconds, "
+     "zero docker/Temporal-server/browser, never touches 3099/7233): A one "
+     "click queues - the engine marker EXISTS on disk afterwards, the marker "
+     "body carries requested_by/at forensics, the response carries the "
+     "recorded request and the row is read back from the very file the route "
+     "names; B two clicks queue ONE round - the second click answers "
+     "already_queued, the marker is not rewritten, no second record row; C "
+     "the queue face names what it waits on (a round in flight) and never "
+     "labels the queued request itself running; D malformed bodies are named "
+     "400s writing nothing; E a credential-less POST is refused 401 (KI-193 "
+     "carried onto the new route); F an unresolvable store/runner is a NAMED "
+     "refusal; G the route sits in PANEL_API_ROUTES (no side door). Intent "
+     "split: route validation matrices and queueStateRead parse tables "
+     "belong to developer L1; the tick CONSUMING the marker belongs to the "
+     "engine's own suite; the inspection-trigger sibling pattern's own faces "
+     "stay with the t261006-15 family - THIS entry owns the panel queue "
+     "journey over real files. Pre-implement tree red (route absent) = the "
+     "named TDD signal; green required at the integration gate/merge. api.ts "
+     "unimportable = ENV_FAIL exit 2",
+     "node integration/t261025-12/sc_t26102512_queue_round_journey.mjs",
+     "ro", "fast"),
+    ("t261025-12-promote-sign-journey",
+     "The panel's signed promotion act calls the ENGINE's promotion writer "
+     "and the engine is the enforcement point: an agent role name signer is "
+     "refused by the WRITER verbatim with the ledger byte-identical, the "
+     "engine's refusal vocabulary travels to the panel unflattened, the "
+     "success answer is the ledger READ-BACK row (signer + what moved), and "
+     "a write that claims ok while the ledger holds no row is a named "
+     "inconsistency, never success (ticket t261025-12, host ruling 261025 "
+     "option c, design section 5 'Sign a promotion'; incident = the promote "
+     "button only revealed its own absence while reading 'Promote 1' with "
+     "nothing promotable behind it; grey-box L3, the REAL route handler with "
+     "the REAL develop_promote chain answering the refusal legs over a "
+     "fixture store, the real ledger file for the read-back legs, only the "
+     "git-writing leg stubbed at the route's declared seam, plus the REAL "
+     "adapter subprocess for the eligibility face and the REAL render core "
+     "for the no-invented-signer face, offline seconds, zero docker/Temporal/"
+     "browser, never touches 3099/7233): A agent-role signer refused BY THE "
+     "ENGINE, named verbatim, ledger untouched; B no-green-certification "
+     "travels verbatim, empty signer is a named 400; C success answers with "
+     "the row read back from the real ledger file; D write-ok-but-no-row is "
+     "a named non-200; E the promote-preview face over an unreadable store "
+     "is a named refusal carrying NO promotable number; F the rendered tab "
+     "never prefills an agent-role owner as the signer value. Intent split: "
+     "promote_buffer/preview truth tables over fixture repos belong to "
+     "developer L1 pytest and the engine suite; the ledger certification/"
+     "promotion semantics to the t261009-18/-28/-30 families; the credential "
+     "gate to the queue journey's E face and L1 - THIS entry owns the "
+     "panel-to-engine refusal journey and the read-back/mismatch contract. "
+     "Pre-implement tree red = the named TDD signal; green required at the "
+     "integration gate/merge. api.ts or the adapter unspawnable = ENV_FAIL "
+     "exit 2",
+     "node integration/t261025-12/sc_t26102512_promote_sign_journey.mjs",
+     "ro", "fast"),
+    ("t261025-12-rounds-verdict-pair",
+     "The rounds table shows BOTH verdicts the face already carries - the "
+     "strict face verdict (env_fail>0 means red) AND the content record "
+     "verdict labelled with its record_rule - never collapsed into one word, "
+     "with a missing or malformed record verdict rendered as a named "
+     "absence, and the round dialog carrying the same pair; plus the item-D "
+     "faces: an unreadable certification face renders NO promotable number "
+     "and the disabled controls carry their named reasons (ticket "
+     "t261025-12, host measured 261025: nine rounds all red although seven "
+     "ran 700+ cases with 0 failed under 7-14 environment reds; grey-box L3, "
+     "the REAL certification-view render core over the incident-shaped "
+     "fixture face, offline seconds, zero docker/Temporal/browser, never "
+     "touches 3099/7233): A the red pill and the green record word coexist "
+     "on the row with the rule label; B no record fields render the named "
+     "absence, never an invented word; C a malformed record verdict degrades "
+     "without throwing and never renders as a verdict; D the dialog shows "
+     "the pair; E-F an unreadable face renders no number, "
+     "disabled-with-reason everywhere, no click-to-explain-absence copy "
+     "left. Intent split: the strict pill rule, counts/measured cells, "
+     "ordering and the one-promotable-figure rule stay with the "
+     "t261012-03/t261019-23/t261016-09 entries (re-signed by NOBODY here); "
+     "the record verdict's PRODUCTION belongs to lib_round_face + "
+     "line_round_runner (t261024-30); view truth-table matrices to developer "
+     "L1 - THIS entry uniquely owns the second word and the no-number/"
+     "disabled-with-reason faces of t261025-12. Pre-implement tree red (the "
+     "second word absent) = the named TDD signal; green required at the "
+     "integration gate/merge. certification-view.ts unimportable = ENV_FAIL "
+     "exit 2",
+     "node integration/t261025-12/sc_t26102512_rounds_verdict_pair.mjs",
+     "ro", "fast"),
     # ---- t261012-01: the round face never prints a green it cannot support ----
     ("t261012-01-round-face-truth",
      "The round face never prints a green it cannot support (ticket "
@@ -3911,6 +4004,25 @@ FAST_SET_CATCH = {
         "close) so tickets wedge at merge/blocked forever after a main "
         "sync (caught offline in seconds instead of two tickets sitting "
         "at merge until a human intervenes)",
+    "t261025-12-queue-round-journey":
+        "the certification tab regrowing a trigger control that runs the "
+        "round inside the request, double-queues on a second click, records "
+        "an anonymous or misattributed request, labels a still-queued "
+        "request running, or writes without the credential (caught offline "
+        "in seconds over the real route + real marker/record files instead "
+        "of at the next live-tab review)",
+    "t261025-12-promote-sign-journey":
+        "the promote face regrowing a lie - a panel-side role bypass the "
+        "engine never sees, an engine refusal flattened into a generic "
+        "failure, an optimistic success without the ledger read-back, or an "
+        "eligibility face rendering a number it cannot back (caught offline "
+        "in seconds against the real engine writer instead of at the next "
+        "promotion review)",
+    "t261025-12-rounds-verdict-pair":
+        "the rounds table collapsing the strict face verdict and the content "
+        "record verdict back into one word, an invented verdict on a face "
+        "without record fields, or a control re-growing a count it cannot "
+        "back (caught offline in seconds over the real render core)",
     "t26102508-narrowed-anchor-reach":
         "the KI-356 reachability wedge - an in-flight lane whose patched() "
         "memo is closed can never arm KI-350's narrowed recorder, so its "

@@ -128,6 +128,13 @@ export function certificationAdapterPath(): string {
   return new URL('./certification-adapter.py', import.meta.url).pathname
 }
 
+/** The WRITE adapter's path (t261025-12): promote-adapter.py sits beside the
+ *  read adapter — same directory discipline, same spawn face. */
+export function promoteAdapterPath(): string {
+  return new URL('./promote-adapter.py', import.meta.url).pathname
+}
+
+
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
@@ -270,6 +277,7 @@ function spawnAdapter<T>(
   argvTail: string[],
   spec: SpawnResult<T>,
   opts: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+  scriptPath: string = certificationAdapterPath(),
 ): Promise<T | { ok: false; reason: string }> {
   const run = opts.execFileFn ?? execFileCb
   return new Promise((resolve) => {
@@ -278,7 +286,7 @@ function spawnAdapter<T>(
       if (!settled) { settled = true; resolve(r) }
     }
     try {
-      run(enginePython(opts.env), [certificationAdapterPath(), ...argvTail],
+      run(enginePython(opts.env), [scriptPath, ...argvTail],
         { timeout: opts.timeoutMs ?? 30_000, maxBuffer: 1_000_000, env: opts.env },
         (err, stdout) => {
           // A non-zero exit may still carry the full JSON receipt on stdout —
@@ -367,4 +375,164 @@ export async function certificationFace(
     // t261016-09 (D3): the section rides the success envelope (see the type).
     round_faces: read.round_faces,
   }
+}
+
+// ---- the two controls' faces (t261025-12) --------------------------------
+
+/** The `queue-state` mode's receipt: four named facts about what a queued
+ *  round waits on. Every sub-face degrades to its own named entry — the
+ *  receipt is ok:true whenever the adapter answered. */
+export type QueueStateRead = {
+  ok: true
+  project: string
+  marker: { present: boolean; path: string }
+  guard: { held: boolean; path: string }
+  in_flight: { running: boolean; run: unknown; note: string | null }
+  runners: Array<{ line: string | null; state: string; error?: string }>
+}
+
+/** The `promote-preview` mode's receipt: the writer's own validate pass per
+ *  line. `promotable` is the count truth; `promoteBlock` carries the first
+ *  line's named refusal when nothing is eligible. */
+export type PromotePreviewRead =
+  | {
+      ok: true
+      project: string
+      lines: Array<Record<string, unknown>>
+      promotable: number
+      promoteBlock: string
+    }
+  | { ok: false; reason: string }
+
+/** The `promote-latest` mode's receipt: the newest promotion row read back
+ *  from the delivery ledger (null when none yet — an answer, not a refusal). */
+export type PromoteLatestRead =
+  | { ok: true; project: string; promotion: Record<string, unknown> | null; promotions: number }
+  | { ok: false; reason: string }
+
+/** The WRITE adapter's receipt: the recorded row, or the engine's named
+ *  refusal verbatim (never translated, never genericized). */
+export type PromoteWriteRead =
+  | { ok: true; row: Record<string, unknown> }
+  | { ok: false; reason: string }
+
+function parseNamedReceipt(stdout: string, label: string): { ok: false; reason: string } | { ok: true; doc: Record<string, unknown> } {
+  let doc: unknown
+  try {
+    doc = JSON.parse(String(stdout).trim() || 'null')
+  } catch {
+    return { ok: false, reason: `${label} receipt is not valid JSON (no fallback, no invented face)` }
+  }
+  if (!isObj(doc) || typeof doc.ok !== 'boolean') {
+    return { ok: false, reason: `${label} receipt has an unexpected shape (no fallback, no invented face)` }
+  }
+  if (doc.ok === false) {
+    return { ok: false, reason: typeof doc.reason === 'string' && doc.reason ? doc.reason : `${label} refused (reason absent)` }
+  }
+  return { ok: true, doc }
+}
+
+export function parseQueueStateReceipt(stdout: string): QueueStateRead | { ok: false; reason: string } {
+  const base = parseNamedReceipt(stdout, 'queue-state')
+  if (!base.ok) return base
+  const d = base.doc
+  const marker = isObj(d.marker) ? d.marker : {}
+  const guard = isObj(d.guard) ? d.guard : {}
+  const flight = isObj(d.in_flight) ? d.in_flight : null
+  if (!Array.isArray(d.runners)) {
+    return { ok: false, reason: 'queue-state receipt is missing its runners face' }
+  }
+  return {
+    ok: true,
+    project: typeof d.project === 'string' ? d.project : '',
+    marker: { present: marker.present === true, path: typeof marker.path === 'string' ? marker.path : '' },
+    guard: { held: guard.held === true, path: typeof guard.path === 'string' ? guard.path : '' },
+    in_flight: flight
+      ? { running: flight.running === true, run: flight.run ?? null, note: typeof flight.note === 'string' ? flight.note : null }
+      : { running: false, run: null, note: 'in-flight face absent from the receipt' },
+    runners: d.runners as QueueStateRead['runners'],
+  }
+}
+
+export function parsePromotePreviewReceipt(stdout: string): PromotePreviewRead {
+  const base = parseNamedReceipt(stdout, 'promote-preview')
+  if (!base.ok) return base
+  const d = base.doc
+  if (!Array.isArray(d.lines) || typeof d.promotable !== 'number' || typeof d.promoteBlock !== 'string') {
+    return { ok: false, reason: 'promote-preview receipt is missing its lines/promotable/promoteBlock face' }
+  }
+  return {
+    ok: true,
+    project: typeof d.project === 'string' ? d.project : '',
+    lines: d.lines as Array<Record<string, unknown>>,
+    promotable: d.promotable,
+    promoteBlock: d.promoteBlock,
+  }
+}
+
+export function parsePromoteLatestReceipt(stdout: string): PromoteLatestRead {
+  const base = parseNamedReceipt(stdout, 'promote-latest')
+  if (!base.ok) return base
+  const d = base.doc
+  if (typeof d.promotions !== 'number') {
+    return { ok: false, reason: 'promote-latest receipt is missing its promotions count' }
+  }
+  return {
+    ok: true,
+    project: typeof d.project === 'string' ? d.project : '',
+    promotion: isObj(d.promotion) ? d.promotion : null,
+    promotions: d.promotions,
+  }
+}
+
+export function parsePromoteWriteReceipt(stdout: string): PromoteWriteRead {
+  const base = parseNamedReceipt(stdout, 'promote write')
+  if (!base.ok) return base
+  const d = base.doc
+  if (!isObj(d.row)) {
+    return { ok: false, reason: 'promote write receipt carries no row (adapter inconsistency)' }
+  }
+  return { ok: true, row: d.row }
+}
+
+export function spawnQueueState(
+  project: string,
+  opts: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<QueueStateRead | { ok: false; reason: string }> {
+  return spawnAdapter<QueueStateRead>(['queue-state', project], { parse: parseQueueStateReceipt, label: 'queue-state' },
+    { ...opts, ...withRunsLedger(project, opts) })
+}
+
+export function spawnPromotePreview(
+  project: string,
+  lineId: string | null,
+  opts: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<PromotePreviewRead> {
+  const tail = lineId ? ['promote-preview', project, lineId] : ['promote-preview', project]
+  return spawnAdapter<PromotePreviewRead>(tail, { parse: parsePromotePreviewReceipt, label: 'promote-preview' },
+    { ...opts, ...withRunsLedger(project, opts) })
+}
+
+export function spawnPromoteLatest(
+  project: string,
+  opts: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<PromoteLatestRead> {
+  return spawnAdapter<PromoteLatestRead>(['promote-latest', project], { parse: parsePromoteLatestReceipt, label: 'promote-latest' },
+    { ...opts, ...withRunsLedger(project, opts) })
+}
+
+/** The signed act itself: the WRITE adapter calls the engine's
+ *  `promote_buffer` — the panel never reimplements the writer. The signer
+ *  travels as ONE argv item; a timeout / crash / non-zero exit with no
+ *  receipt all settle as named refusals (full-termination recovery). */
+export function spawnPromoteWrite(
+  project: string,
+  lineId: string,
+  signer: string,
+  opts: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+): Promise<PromoteWriteRead> {
+  return spawnAdapter<PromoteWriteRead>([project, lineId, signer],
+    { parse: parsePromoteWriteReceipt, label: 'promote write' },
+    { ...opts, ...withRunsLedger(project, opts), timeoutMs: opts.timeoutMs ?? 120_000 },
+    promoteAdapterPath())
 }

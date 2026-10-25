@@ -5723,6 +5723,21 @@
       "note": "t261022-14: the markdown reviewer's lane comment store end to end over the real host store + client anchor modules - four block kinds persist to <lane>/.sandbar/review-comments.json, every schema field read back from disk (the lane agents' plain file-read path), and an edited block still places its threads (exact/neighbour/outdated, never dropped). behaviour anchor: it pins what the persistence does for the reader, not an internal contract form.",
       "sync_path": ""
     },
+    "integration/t261025-12/sc_t26102512_queue_round_journey.mjs": {
+      "anchor": "behaviour",
+      "sync_path": "",
+      "note": "t261025-12 A: the panel queues a round through the engine's own line-round-force marker seam - marker exists on disk after one click with requested_by/at forensics, the recorded request names who/when and is read back from the file the route names, a second click is already_queued with no second row, waits_on names the blocker and never labels the queued request running, malformed bodies are named 400s writing nothing, credential-less POST is 401 (KI-193), an unresolvable store/runner is a named refusal"
+    },
+    "integration/t261025-12/sc_t26102512_promote_sign_journey.mjs": {
+      "anchor": "behaviour",
+      "sync_path": "",
+      "note": "t261025-12 B: the signed promotion act goes through the ENGINE's writer - an agent role name signer is refused by the writer verbatim with the ledger byte-identical, engine refusals travel unflattened, the success answer is the ledger read-back row, write-ok-but-no-row is a named inconsistency, the eligibility face over an unreadable store carries no promotable number, and the tab never prefills an agent-role owner as the signer"
+    },
+    "integration/t261025-12/sc_t26102512_rounds_verdict_pair.mjs": {
+      "anchor": "behaviour",
+      "sync_path": "",
+      "note": "t261025-12 C/D: the rounds table renders BOTH the strict face verdict (env_fail>0 red) and the content record verdict labelled with its rule, missing/malformed record verdicts render the named absence, the dialog carries the pair, an unreadable face renders no promotable number and disabled controls carry their named reasons"
+    },
     "integration/t261025-11/sc_t261025_11_unrecorded_round_healed.py": {
       "anchor": "behaviour",
       "note": "t261025-11: the tick-level healing journey over real files on disk - witness replay (complete runner row, no citing row) heals into exactly ONE certification citing the run id, replay writes nothing; unjudgable header becomes exactly ONE range-growth row naming the run id; guard held heals nothing; line-ambiguous refuses by name on the tick-refusal face; garbage in either store is named, never guessed; a rejected settle append retries and names the face.",

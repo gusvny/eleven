@@ -13,9 +13,10 @@
  *   - `Promote N` is disabled only at zero — a freeze never holds the
  *     certified part hostage.
  *   - no glyph carries meaning; every label is an engine word or a mock word.
- *   - the promote dialog is explicitly ABSENT and named: this slice renders no
- *     promotion write path (the act stays a record-signed engine operation);
- *     the button renders, and activating it surfaces the named absence.
+ *   - t261025-12 (ruling §5): the promote dialog IS wired now — the button
+ *     opens a dialog that shows the human signer before the act, and the act
+ *     posts to the engine's own writer route. A count the face cannot back
+ *     renders as NO number (never a count with nothing promotable behind it).
  *   - English copy; data (ids, titles, epics, revisions) untranslated.
  */
 
@@ -37,9 +38,27 @@ export const CERT_COPIES = {
   // Promote button always names its reason next to itself.
   deliveredMark: 'delivered',
   promoteBlockWhy: 'Nothing can be promoted:',
-  // The named absence: the one sentence that says the dialog is not faked.
-  promoteAbsent: 'Promotion is not wired from the panel yet — the record-signed promote stays an engine operation. This tab shows what one signature would promote; it does not fake the dialog.',
-  runAbsent: 'Rounds chain on the engine side; this panel starts none (the scheduler is another ticket).',
+  // t261025-12 (ruling §5): the two controls are wired — the named-absence
+  // sentences are retired. No control may exist whose only handler explains
+  // why it does nothing.
+  queue: 'Queue round',
+  queued: 'queued',
+  alreadyQueued: 'already queued',
+  queueWaitWhy: 'waiting on',
+  queuePickup: 'the engine’s scan tick picks it up and runs it in the engine worker',
+  queueRefusedWhy: 'The round was not queued:',
+  guardHeld: 'the round guard is held',
+  roundInFlight: 'a round is in flight',
+  runnerMissing: 'a runner is not resolvable',
+  recordVerdictWord: 'record',
+  recordVerdictAbsent: 'no record verdict',
+  signAs: 'Sign as',
+  signAsNote: 'This name is recorded as the signer — an agent role name is refused by the engine.',
+  promoteAct: 'Sign promotion',
+  promoteCancel: 'Cancel',
+  promoteRecorded: 'Recorded promotion',
+  promoteRefusedWhy: 'The promotion was refused:',
+  promoteUnreadable: 'Nothing can be promoted:',
   degrade: 'The certification face is not derivable',
 } as const
 
@@ -241,6 +260,18 @@ export function buildRoundsRows(rf: unknown, runs: unknown, engineRunning?: bool
         : { k: 'run', text: `${ROUND_COPIES.running} · ${ROUND_COPIES.lastWrite} ${stamp}` }
     }
     const result = f ? countsCell(f.counts, f.counts_note) : named
+    // t261025-12 (ruling §5, honesty C): the face carries TWO verdicts and
+    // the table shows BOTH — the strict face verdict (the pill; env_fail>0
+    // means red) AND the content record verdict (outcome.record_verdict,
+    // labelled by its record_rule). Never collapsed into one word; a face
+    // without the record fields names the absence instead of inventing one.
+    const out = (f && typeof f.outcome === 'object' && f.outcome !== null && !Array.isArray(f.outcome))
+      ? f.outcome as Record<string, unknown> : null
+    const recV = out && typeof out.record_verdict === 'string' ? out.record_verdict : ''
+    const recR = out && typeof out.record_rule === 'string' ? out.record_rule : ''
+    const recordVerdict = recV
+      ? `<span class="pill" data-k="${recV === 'green' ? 'green' : recV === 'red' ? 'red' : 'none'}">${CERT_COPIES.recordVerdictWord} ${esc(recV)}${recR ? ' · ' + esc(recR) : ''}</span>`
+      : `<span class="k">${CERT_COPIES.recordVerdictAbsent}</span>`
     const fromHeader = headerMeasured(id)
     const measured = fromHeader || (f ? roundMeasured(f.revision) : ROUND_COPIES.noCell)
     const started = f ? str(f.started_at) : ROUND_COPIES.noCell
@@ -251,6 +282,7 @@ export function buildRoundsRows(rf: unknown, runs: unknown, engineRunning?: bool
       + `<td class="mono">${esc(result)}</td>`
       + `<td><span class="pill" data-k="${esc(pill.k)}">${esc(pill.text)}</span>`
       + (f && roundReason(f) ? ` <span class="k">${esc(roundReason(f))}</span>` : '')
+      + ' ' + recordVerdict
       + '</td>'
       + `<td class="mono k">${esc(measured)}</td></tr>`
   }
@@ -347,7 +379,12 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
   const asOf = boundary && str(boundary.at) ? str(boundary.at) : (rounds[0] ? str(rounds[0].startedAt) : '')
   const certified = Array.isArray(face.certified) ? face.certified as Record<string, unknown>[] : []
   const waiting = Array.isArray(face.waiting) ? face.waiting as Record<string, unknown>[] : []
-  const promotable = num(face.promotable)
+  // t261025-12: the count and the button state come from the SAME face field,
+  // and a face the tab could not read renders NO number — never a count with
+  // nothing promotable behind it (the host's 'Promote 1' defect).
+  const promotable = typeof face.promotable === 'number' && Number.isFinite(face.promotable)
+    ? face.promotable as number : null
+  const promotableWord = promotable === null ? CERT_COPIES.promoteUnreadable : String(promotable)
   const frozen = face.frozen === true
   const frozenFace = (typeof face.frozenFace === 'object' && face.frozenFace !== null && !Array.isArray(face.frozenFace))
     ? face.frozenFace as Record<string, unknown> : null
@@ -378,7 +415,13 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
   const runs = raw && Array.isArray(raw.runs) ? raw.runs : []
 
   return ''
-    + `<div class="pick"><span class="lbl">Line</span><select id="certLine">${options}</select></div>`
+    + `<div class="pick"><span class="lbl">Line</span><select id="certLine">${options}</select>`
+    // t261025-12 (ruling §5, trigger run): the panel may REQUEST the next
+    // round through the engine's own queue seam — it never runs a round in
+    // the request. The button acts; the note beside it carries the queue's
+    // answer (queued / already queued / what the queue waits on).
+    + `<button class="btn" id="certQueue" title="queue the next certification round — the engine's scan tick picks it up and runs it in the engine worker">${CERT_COPIES.queue}</button></div>`
+    + `<div class="who" id="certQueueNote" hidden></div>`
     + `<div class="card" id="certStateCard"><div class="hd">`
     + `<span class="dot ${frozen ? 'r' : 'g'}" id="certDot"></span>`
     + `<span class="state" id="certBig">${esc(str(face.state))}</span>`
@@ -415,21 +458,26 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
     + `<div class="card"><h3>${CERT_COPIES.certified} <span class="k" id="certCount">${certified.length}</span></h3>`
     + `<div class="pad"><table><thead><tr><th>Ticket</th><th>Epic</th><th title="the certification that covers it: certified_by">Certified by</th><th title="the row's own landing moment">Landed</th><th></th></tr></thead><tbody id="certRows">${certRows}</tbody></table>`
     + `<div style="display:flex;align-items:center;gap:8px;margin-top:8px"><span class="grow"></span>`
-    + (promotable === 0 && str(face.promoteBlock)
+    // t261025-12: the disabled state and the number read the SAME field; an
+    // unreadable count disables the button and names why — the button never
+    // claims a promotable set the face cannot back.
+    + (promotable !== null && promotable === 0 && str(face.promoteBlock)
       ? `<span class="k" id="certPromoBlock" title="why the promo control is disabled">${CERT_COPIES.promoteBlockWhy} ${esc(str(face.promoteBlock))}</span>`
       : '')
-    // t261019-23 rework (F7): the word 'Promote' appears EXACTLY once on the
-    // face — the control itself. The internal ids/copy around it carry no
-    // second occurrence (the promotable set IS the certified-not-delivered
-    // set; it is never drawn twice).
-    + `<button class="btn p" id="certPromo" data-promotable="${promotable}"${promotable === 0 ? ' disabled' : ''} title="disabled only when nothing is certified — a freeze never holds the certified part hostage">${CERT_COPIES.promote} ${promotable}</button>`
+    + (promotable === null && str(face.promoteBlock)
+      ? `<span class="k" id="certPromoBlock" title="why the promo control is disabled">${CERT_COPIES.promoteBlockWhy} ${esc(str(face.promoteBlock))}</span>`
+      : '')
+    // t261025-12 (ruling §5, sign a promotion): the button opens the dialog
+    // that SHOWS the signer-to-be-recorded before the act (panel-page binds
+    // the handler); the act itself posts to the engine writer route.
+    + `<button class="btn p" id="certPromo" data-promotable="${promotableWord}"${promotable === null || promotable === 0 ? ' disabled' : ''} title="opens the signed-promotion dialog; disabled when the face cannot back a count">${CERT_COPIES.promote}${promotable === null ? '' : ' ' + promotable}</button>`
     + '</div>'
-    + `<div class="who" id="certPromoNote" data-wired="false" hidden></div>`
+    + `<div class="who" id="certPromoNote" data-wired="true" hidden></div>`
     + '</div></div>'
     + `<div class="card"><h3>${ROUND_COPIES.rounds}</h3><div class="pad">`
     + roundsSectionNote(rf)
     + `<table><thead><tr><th>Round</th><th>${ROUND_COPIES.started}</th><th>${ROUND_COPIES.trigger}</th><th>${ROUND_COPIES.result}</th><th>${ROUND_COPIES.verdict}</th><th title="the revision set the round measured: the line head — what would be delivered if the certified part were promoted">${ROUND_COPIES.measured}</th></tr></thead><tbody id="certRoundRows">${rf ? buildRoundsRows(rf, runs, str(face.roundState) === 'running') : ''}</tbody></table>`
-    + `<div class="who" id="certRunNote">${CERT_COPIES.runAbsent}</div></div></div>`
+    + `<div class="who" id="certRunNote">${CERT_COPIES.queuePickup}</div></div></div>`
 }
 
 /**
@@ -520,4 +568,79 @@ export function buildRoundDialogCore(d: Record<string, unknown>): string {
       ? `<span class="k" id="roundLogAbsent">${esc(logAbsent)}</span>`
       : `<span class="mono k" id="roundLogPath">${esc(logPath)}</span>`)
     + '</div>'
+}
+
+/**
+ * The signed-promotion dialog's body (t261025-12, ruling §5): it SHOWS the
+ * signer-to-be-recorded before the act (an input the human fills or confirms;
+ * prefilled only from the line's declared owner — never from an agent role
+ * name list), plus the eligible set the writer's own preview named. The act
+ * itself is the page handler's POST — this core only draws the face.
+ * `d` = { owner, line, preview } where preview is the route's promote_preview
+ * block (validated softly; a refusal renders its named reason).
+ */
+export function buildPromoteDialogCore(d: Record<string, unknown>): string {
+  const esc = (s: unknown): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&quot;')
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+  const preview = (typeof d.preview === 'object' && d.preview !== null && !Array.isArray(d.preview))
+    ? d.preview as Record<string, unknown> : null
+  let eligibility: string
+  if (!preview || preview.ok !== true) {
+    eligibility = '<div class="banner red" id="promotePreviewRefused"><b>'
+      + esc(CERT_COPIES.promoteRefusedWhy) + '</b> <span>'
+      + esc(str(preview && preview.reason) || 'the promotion face is not readable') + '</span></div>'
+  } else {
+    const lines = Array.isArray(preview.lines) ? preview.lines as Record<string, unknown>[] : []
+    const eligible = lines.filter((e) => e && e.ok === true)
+    eligibility = eligible.length
+      ? '<div class="kv">'
+        + eligible.map((e) => '<b>' + esc(str(e.line_id)) + '</b><span class="mono">'
+          + esc(str(e.cert_id)) + ' · '
+          + Object.entries((typeof e.revisions === 'object' && e.revisions !== null && !Array.isArray(e.revisions))
+            ? e.revisions as Record<string, unknown> : {})
+            .map(([repo, rev]) => repo + ':' + String(rev).slice(0, 8)) // LIST-CAP-OK: revision-label width, not a list cap
+            .join(' · ')
+          + '</span></div>').join('')
+        + '</div>'
+      : '<div class="k" id="promoteNone">' + esc(CERT_COPIES.promoteBlockWhy) + ' '
+        + esc(str(preview.promoteBlock) || 'nothing is eligible') + '</div>'
+  }
+  return '<div class="pad">'
+    + '<div style="font-weight:600;margin-bottom:6px" id="promoteTitle">' + esc(CERT_COPIES.promote) + '</div>'
+    + '<div class="kv"><b>' + esc(CERT_COPIES.signAs) + '</b>'
+    + '<span><input id="promoteSigner" value="' + esc(str(d.owner)) + '" placeholder="the human name that signs" /></span></div>'
+    + '<div class="k" id="promoteSignerNote">' + esc(CERT_COPIES.signAsNote) + '</div>'
+    + eligibility
+    + '<div style="display:flex;gap:8px;margin-top:8px">'
+    + '<button class="btn p" id="promoteGo">' + esc(CERT_COPIES.promoteAct) + '</button>'
+    + '<button class="btn" id="promoteCancel">' + esc(CERT_COPIES.promoteCancel) + '</button></div>'
+    + '<div class="who" id="promoteNote" hidden></div></div>'
+}
+
+/**
+ * The queue control's note text (t261025-12, ruling §5): the queue POST's
+ * answer -> ONE honest sentence. `queued` / `already queued` + the named
+ * wait list + who picks it up; a refusal travels verbatim. Pure — the UT
+ * and the page run one implementation.
+ */
+export function certQueueNoteText(ans: unknown): string {
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+  const a = (typeof ans === 'object' && ans !== null && !Array.isArray(ans))
+    ? ans as Record<string, unknown> : null
+  if (!a || a.ok !== true) {
+    return CERT_COPIES.queueRefusedWhy + ' ' + (str(a && a.error) || 'refused')
+  }
+  const q = (typeof a.queue === 'object' && a.queue !== null && !Array.isArray(a.queue))
+    ? a.queue as Record<string, unknown> : {}
+  const flight = (typeof q.in_flight === 'object' && q.in_flight !== null && !Array.isArray(q.in_flight))
+    ? q.in_flight as Record<string, unknown> : {}
+  const runners = Array.isArray(q.runners) ? q.runners as Record<string, unknown>[] : []
+  const waits: string[] = []
+  if (q.guard && (q.guard as Record<string, unknown>).held === true) waits.push(CERT_COPIES.guardHeld)
+  if (flight.running === true) waits.push(CERT_COPIES.roundInFlight)
+  const missing = runners.filter((r) => r && r.state === 'runner_missing').map((r) => str(r.line) || '?')
+  if (missing.length) waits.push(CERT_COPIES.runnerMissing + ' (' + missing.join(', ') + ')')
+  const state = a.state === 'already_queued' ? CERT_COPIES.alreadyQueued : CERT_COPIES.queued
+  return state + (waits.length ? ' — ' + CERT_COPIES.queueWaitWhy + ' ' + waits.join('; ') : '')
+    + '; ' + CERT_COPIES.queuePickup
 }

@@ -55,9 +55,14 @@ import { readConcurrency, spawnConcurrencyLimitWrite, CONCURRENCY_LIMIT_MIN, CON
   type ConcurrencyRead, type ConcurrencyWriteFace } from './concurrency.ts'
 import { readOneShotFace, fsOneShotIo, type OneShotIo } from './one-shot-view.ts'
 // t261009-44: the Certification tab's read face — the engine develop ledgers
-// through the adapter seam, derived into the Slice 1 face. GET-only: no write
-// path exists in this slice (certify/promote stay record-signed operations).
-import { certificationFace, spawnCertificationRound, type CertFaceRead, type RoundRead } from './certification-reader.ts'
+// through the adapter seam, derived into the Slice 1 face.
+// t261025-12 (ruling §5): the tab's two WRITE faces joined it — the queue
+// route drops the engine's own round marker; the promote route calls the
+// engine's promotion writer through promote-adapter.py. The engine keeps the
+// identity rules (an agent role name is refused engine-side, verbatim).
+import { certificationFace, spawnCertificationRound, spawnQueueState, spawnPromotePreview, spawnPromoteLatest, spawnPromoteWrite, type CertFaceRead, type RoundRead, type QueueStateRead, type PromotePreviewRead, type PromoteLatestRead, type PromoteWriteRead } from './certification-reader.ts'
+import { fsCertQueueIo, readCertQueueRecords, appendCertQueueRecord, type CertQueueIo } from './certification-queue.ts'
+import { BY_CLAIMED_MAX_CHARS } from './inspection-triggers.ts'
 import type { BridgeStatusSnapshot } from './question-bridge.ts'
 import { listOpenTicketEpics } from './open-tickets.ts'
 import { PROJECT_KEY_RE, malformedProjectMessage } from './project-key.ts'
@@ -163,6 +168,16 @@ export const PANEL_API_ROUTES: ReadonlyArray<{ path: string; methods: string[] }
   // retained evidence (terminal face + suite.log + the ledger rows citing the
   // run). GET-only; it never writes and never polls.
   { path: '/sandbar-executor-panel/api/certification/round', methods: ['GET'] },
+  // t261025-12 (ruling §5): the tab's two controls, wired. The queue POST
+  // drops the engine's own round marker (idempotent by exclusive create —
+  // two clicks cannot queue two rounds) and records WHO asked and WHEN; the
+  // queue-records GET reads that account back. The promote POST performs the
+  // signed act through the ENGINE's writer and answers with the row read
+  // back from the ledger — never an optimistic guess. All three are writes/
+  // accounts behind the KI-193 credential gate (method-based above).
+  { path: '/sandbar-executor-panel/api/certification/queue', methods: ['POST'] },
+  { path: '/sandbar-executor-panel/api/certification/queue-records', methods: ['GET'] },
+  { path: '/sandbar-executor-panel/api/certification/promote', methods: ['POST'] },
 ]
 
 export interface ApiDeps {
@@ -218,6 +233,22 @@ export interface ApiDeps {
   /** t261012-03 round dialog read face (default spawnCertificationRound via the
    *  adapter seam; tests inject a stub — a unit test never spawns the engine). */
   certificationRoundRead?: (project: string, run: string) => Promise<RoundRead>
+  /** t261025-12 queue-state read face (default spawnQueueState via the adapter
+   *  seam; tests inject a stub). Its marker.path is the ONE path rule — the
+   *  route never re-derives it. */
+  certQueueState?: (project: string) => Promise<QueueStateRead | { ok: false; reason: string }>
+  /** t261025-12 promote preview read face (default spawnPromotePreview; tests
+   *  inject a stub) — the Promote count's single truth. */
+  certPromotePreview?: (project: string, lineId: string | null) => Promise<PromotePreviewRead>
+  /** t261025-12 promotion read-back face (default spawnPromoteLatest; tests
+   *  inject a stub) — the after-act ledger read. */
+  certPromoteLatest?: (project: string) => Promise<PromoteLatestRead>
+  /** t261025-12 the signed act (default spawnPromoteWrite over
+   *  promote-adapter.py -> develop_promote.promote_buffer; tests inject a
+   *  stub — a unit test never spawns the engine writer). */
+  certPromoteWrite?: (project: string, lineId: string, signer: string) => Promise<PromoteWriteRead>
+  /** t261025-12 queue-record io (default fs; tests inject an in-memory stub). */
+  certQueueIo?: CertQueueIo
 }
 
 /** Wake-call result (ok:false always carries a human-readable reason — the receipt
@@ -1016,7 +1047,24 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
           round_faces: read.round_faces,
           note: 'the certification face is not derivable — the reason above names what could not be read' } }
       }
-      return { status: 200, json: { ...read, note: 'face derived by the engine projections (develop_certify/develop_promote) — the panel recomputes nothing' } }
+      // t261025-12: the Promote count's single truth is the writer's own
+      // validate pass (promotion_preview via the adapter). When the preview
+      // answers, it OVERRIDES the derived face's promotable/promoteBlock;
+      // when the preview itself is unreadable, the count is null — an
+      // unreadable face never renders a number.
+      const preview = await (deps.certPromotePreview
+        ?? ((p: string, l: string | null) => spawnPromotePreview(p, l, { env })))(key, read.line || null)
+      const face = { ...read.face } as Record<string, unknown>
+      if (preview.ok) {
+        face.promotable = preview.promotable
+        face.promoteBlock = preview.promoteBlock
+      } else {
+        face.promotable = null
+        face.promoteBlock = preview.reason
+      }
+      return { status: 200, json: { ...read, face,
+        promote_preview: preview,
+        note: 'face derived by the engine projections (develop_certify/develop_promote); the promotable count is the writer’s own validate pass (t261025-12)' } }
     }
     // ---- round dialog (t261012-03): one retained round's record ----
     if (path === '/sandbar-executor-panel/api/certification/round') {
@@ -1034,6 +1082,122 @@ export function createApi(env: NodeJS.ProcessEnv = process.env, deps: ApiDeps = 
           note: 'the round record is not readable — the reason above names what could not be read' } }
       }
       return { status: 200, json: { ...read, note: 'one round’s retained evidence (face.json + suite.log + citing ledger rows) — read once per open' } }
+    }
+    // ---- t261025-12 (ruling §5, trigger run): queue the next round ----
+    // Borrowed-surface dispositions (the inspection-trigger pattern): the
+    // KI-193 credential gate [carried, method-based above]; the attempt is
+    // RECORDED even on the failure path, with by_claimed/writer_mismatch
+    // [carried]; a failed write is an explicit 502 carrying the attribution
+    // row [carried]. From the engine's marker seam: idempotency by marker
+    // existence — and by EXCLUSIVE CREATE ('wx'), so two concurrent clicks
+    // race on the filesystem and only one queues [carried + hardened]; the
+    // latency is honest (the copy says the scan tick picks it up, never
+    // 'running') [carried]. The marker path is the adapter's own answer —
+    // no second path convention.
+    if (path === '/sandbar-executor-panel/api/certification/queue') {
+      if (method !== 'POST') return bad(405, 'queue face is POST-only (write operation, explicit trace)')
+      const parsed = parseJsonBody(bodyRaw)
+      if (!parsed.ok) return bad(400, parsed.error)
+      const body = parsed.body as Record<string, unknown>
+      const key = String(body.project ?? '')
+      if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      const io = deps.certQueueIo ?? fsCertQueueIo
+      const state = await (deps.certQueueState
+        ?? ((p: string) => spawnQueueState(p, { env })))(key)
+      if (!state.ok) {
+        return bad(502, `the queue state is not readable — the round was not queued: ${state.reason}`)
+      }
+      const record = {
+        at: new Date(now()).toISOString(),
+        by: 'host' as const,
+        ...(body.by !== undefined && body.by !== null && body.by !== 'host'
+          ? { by_claimed: String(body.by).slice(0, BY_CLAIMED_MAX_CHARS), writer_mismatch: true } : {}),
+        project: key,
+        source: 'panel-queue',
+        marker: state.marker.path,
+      }
+      if (state.marker.present) {
+        return { status: 200, json: { ok: true, state: 'already_queued', queue: state,
+          records: readCertQueueRecords(io, env, key).ok ? readCertQueueRecords(io, env, key).rows : [],
+          note: 'a queued round is already waiting for the engine’s scan tick — no second round was queued' } }
+      }
+      let writtenMarker = false
+      try {
+        io.writeMarkerExclusive(state.marker.path,
+          `requested_by=executor-panel\nat=${record.at}\nproject=${key}\n`)
+        writtenMarker = true
+      } catch (err) {
+        const eexist = (err as NodeJS.ErrnoException & { code?: string }).code === 'EEXIST'
+        if (eexist) {
+          // the concurrent second click lost the race at the filesystem —
+          // the same honest answer, no second round
+          return { status: 200, json: { ok: true, state: 'already_queued', queue: state,
+            records: readCertQueueRecords(io, env, key).ok ? readCertQueueRecords(io, env, key).rows : [],
+            note: 'another request queued the round first — no second round was queued' } }
+        }
+        const written = appendCertQueueRecord(io, env, key, { ...record,
+          result: { ok: false, error: `marker write failed: ${err instanceof Error ? err.message : String(err)}` } })
+        return { status: 502, json: { ok: false, error: `the round was not queued: marker write failed: ${err instanceof Error ? err.message : String(err)}`,
+          record, ...(written.ok ? { written: written.file } : {}) } }
+      }
+      const appended = appendCertQueueRecord(io, env, key, {
+        ...record, result: { ok: true, state: 'queued' } })
+      if (!appended.ok) {
+        return bad(500, `the marker landed but the request record did not: ${appended.error}`)
+      }
+      return { status: 200, json: { ok: true, state: 'queued', queue: state,
+        record, written: appended.file,
+        note: 'queued — the engine’s scan tick picks it up and runs it in the engine worker' } }
+    }
+    // ---- t261025-12: the queue-request record account (read face) ----
+    if (path === '/sandbar-executor-panel/api/certification/queue-records') {
+      if (method !== 'GET') return bad(405, 'read-only face: GET only')
+      const key = query.get('project') ?? ''
+      if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      const read = readCertQueueRecords(deps.certQueueIo ?? fsCertQueueIo, env, key)
+      if (!read.ok) {
+        return { status: 200, json: { ok: false, source: read.source, reason: read.reason, rows: [] } }
+      }
+      return { status: 200, json: { ok: true, source: read.source, rows: read.rows,
+        malformed_rows: read.malformed_rows,
+        note: 'newest first by at; who asked, when, and through which marker — the account of every queue act' } }
+    }
+    // ---- t261025-12 (ruling §5, sign a promotion): the signed act ----
+    // The engine's writer is the only implementation; the engine's identity
+    // rules refuse an agent role name NO MATTER which surface sent it — the
+    // refusal travels verbatim (never a generic failure, never a UI check).
+    // The answer is the LEDGER read-back row, never the write's own claim;
+    // a success that the ledger cannot confirm is an explicit 502.
+    if (path === '/sandbar-executor-panel/api/certification/promote') {
+      if (method !== 'POST') return bad(405, 'promote face is POST-only (the signed promotion act, explicit trace)')
+      const parsed = parseJsonBody(bodyRaw)
+      if (!parsed.ok) return bad(400, parsed.error)
+      const body = parsed.body as Record<string, unknown>
+      const key = String(body.project ?? '')
+      if (!PROJECT_KEY_RE.test(key)) return bad(400, malformedProjectMessage(key))
+      const lineId = String(body.line ?? '')
+      const signer = String(body.signer ?? '').trim()
+      if (!lineId) return bad(400, 'the promotion names no line — refuse, never guess one')
+      if (!signer) return bad(400, 'the promotion names no signer — the recorded row must name the human who signed')
+      const write = await (deps.certPromoteWrite
+        ?? ((p: string, l: string, s: string) => spawnPromoteWrite(p, l, s, { env })))(key, lineId, signer)
+      if (!write.ok) {
+        return { status: 502, json: { ok: false, error: write.reason,
+          note: 'the engine refused the promotion — its own refusal, verbatim' } }
+      }
+      const readback = await (deps.certPromoteLatest
+        ?? ((p: string) => spawnPromoteLatest(p, { env })))(key)
+      if (!readback.ok) {
+        return { status: 502, json: { ok: false, error: `the write reported a row (${String((write.row as Record<string, unknown>).id ?? '?')}) but the ledger read-back failed: ${readback.reason}`,
+          wrote: write.row } }
+      }
+      const row = readback.promotion
+      if (!row || (write.row as Record<string, unknown>).id !== row.id) {
+        return { status: 502, json: { ok: false, error: 'the write reported a row the ledger does not confirm — the face refuses to guess',
+          wrote: write.row, read_back: row } }
+      }
+      return { status: 200, json: { ok: true, promotion: row,
+        note: 'read back from the delivery ledger — signer, certification and the revisions moved' } }
     }
     return bad(404, `未知面板路由：${path}`)
   }
