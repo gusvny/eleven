@@ -1,6 +1,6 @@
 {
   "generated_at": "2026-10-05T14:33:19+08:00",
-  "total": 28,
+  "total": 29,
   "categories": [
     "design",
     "content",
@@ -428,6 +428,20 @@
       ],
       "status": "active",
       "updated": "2026-10-21",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/metrics-token-face-delta.md",
+      "file": "metrics-token-face-delta.md",
+      "title": "metrics token face and population — delta rulings 261025",
+      "category": "design",
+      "tags": [
+        "metrics",
+        "tokens",
+        "contract"
+      ],
+      "status": "active",
+      "updated": "2026-10-25",
       "has_frontmatter": true
     }
   ],
