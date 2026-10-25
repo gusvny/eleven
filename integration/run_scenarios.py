@@ -4038,6 +4038,15 @@ FAST_SET_BUDGET_NOTE = (
 #: therefore cannot drift into a second membership list — membership itself
 #: lives only on the registry markers.
 FAST_SET_CATCH = {
+    # t261026-03: the entry's own membership declaration — the guard family
+    # (t261009-16 B / --print-fast-set) refuses a fast member without one.
+    "t261026-03-markdown-everywhere-doc-face":
+        "the markdown reviewer recognising only docs/ markdown again - a changed "
+        "integration/*.md, root CLAUDE.md or notes/**/*.md opening an EMPTY panel "
+        "because the diff calls it code (the 261025 host report: a click that "
+        "looks dead), or an unsupported shape crashing the diff face instead of "
+        "degrading named (caught offline in seconds instead of at the next reader "
+        "wondering why the file will not open)",
     # t261025-14: the ticket's own face - the loss-at-close journey.
     "t261025-14-token-loss-at-close":
         "a closed ticket losing its usage again - the archive fallback or the "
