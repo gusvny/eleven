@@ -157,11 +157,16 @@ export function metricsV2Of(j: unknown): Record<string, unknown> {
     rework_rate: mnum(k.rework_rate),
     throughput_per_day: mnum(k.throughput_per_day),
     median_lead_time: mnum(k.median_lead_time),
+    p90_lead_time: mnum(k.p90_lead_time),
     human_wait_share: mnum(k.human_wait_share),
     tokens_total: mnum(k.tokens_total),
     tokens_in_tickets: mnum(k.tokens_in_tickets),
     tokens_outside_tickets: mnum(k.tokens_outside_tickets),
     tokens_per_closed_ticket: mnum(k.tokens_per_closed_ticket),
+    // t261025-13 token-coverage inputs (workbench additive KPIs)
+    tokens_cache_read: mnum(k.tokens_cache_read),
+    tickets_with_usage: mnum(k.tickets_with_usage),
+    closed_with_usage: mnum(k.closed_with_usage),
   }
   // FIELD-COUPLED(t261021-06): workflows[] block (each entry re-guarded —
   // a null/junk row inside the array is malformed, never a crash).
@@ -282,20 +287,50 @@ export function kpiTilesOf(vm: Record<string, unknown>): Array<Record<string, st
   const k = (vm.kpis ?? {}) as Record<string, unknown>
   const inTok = mnum(k.tokens_in_tickets)
   const outTok = mnum(k.tokens_outside_tickets)
+  // t261025-13 item 2: a missing outside-tokens source (project_sessions null)
+  // NAMES the degrade on the sub-line — a bare dash is the control-shaped lie the
+  // host ruling bans. The split keeps rendering whenever both values exist.
   const tokenSub = (inTok !== null && outTok !== null)
     ? fmtTokensM(inTok) + ' in tickets · ' + fmtTokensM(outTok) + ' outside'
-    : DASH
+    : (inTok !== null
+      ? fmtTokensM(inTok) + ' in tickets · outside unavailable (no project sessions)'
+      : DASH)
   const closed = mnum(k.closed)
   const opened = mnum(k.tickets)
   const throughSub = (closed !== null && opened !== null)
     ? fmtInt(closed) + ' closed of ' + fmtInt(opened) + ' opened'
     : DASH
+  // t261025-13 token-coverage ruling: three honest token tiles, each carrying an
+  // over-N-of-M coverage line; the rework-rate tile is removed (the number is
+  // stage-run semantics, not a tile face). All inputs null-degrade — a missing
+  // source renders the dash or the named line, never a fabricated number.
+  const cacheRead = mnum(k.tokens_cache_read)
+  const covered = mnum(k.tickets_with_usage)
+  const covSub = (covered !== null && opened !== null)
+    ? fmtInt(covered) + ' of ' + fmtInt(opened) + ' tickets with usage'
+    : DASH
+  const fresh = mnum(k.tokens_in_tickets)
+  const actualTraffic = (mnum(k.tokens_total) !== null && cacheRead !== null)
+    ? (k.tokens_total as number) + cacheRead
+    : null
+  const tokensValue = fmtTokensM(actualTraffic)
+  const tokensSub = (tokenSub !== DASH && covSub !== DASH) ? tokenSub + ' · ' + covSub
+    : (tokenSub !== DASH ? tokenSub : covSub)
+  const freshPerCovered = (fresh !== null && covered !== null && covered > 0)
+    ? fresh / covered
+    : null
+  const cacheShare = (actualTraffic !== null && cacheRead !== null && actualTraffic > 0)
+    ? cacheRead / actualTraffic
+    : null
   return [
-    { title: 'REWORK RATE', value: fmtPct01(k.rework_rate), sub: 'tickets sent back at least once' },
     { title: 'THROUGHPUT', value: (mnum(k.throughput_per_day) !== null ? (mnum(k.throughput_per_day) as number).toFixed(1) + '/day' : DASH), sub: throughSub },
-    { title: 'MEDIAN LEAD TIME', value: fmtMs(k.median_lead_time), sub: 'P90 ' + DASH },
-    { title: 'TOKENS', value: fmtTokensM(k.tokens_total), sub: tokenSub },
-    { title: 'TOKENS PER CLOSED TICKET', value: fmtTokensM(k.tokens_per_closed_ticket), sub: 'closed tickets only' },
+    // t261025-13 item 3: the P90 sub renders the computed value when the payload
+    // carries one; a null P90 degrades to a NAMED face, never a hardcoded 'P90 —'.
+    { title: 'MEDIAN LEAD TIME', value: fmtMs(k.median_lead_time),
+      sub: (mnum(k.p90_lead_time) !== null ? 'P90 ' + fmtMs(k.p90_lead_time) : 'P90 unavailable (empty window)') },
+    { title: 'TOKENS', value: tokensValue, sub: tokensSub },
+    { title: 'FRESH TOKENS PER COVERED TICKET', value: fmtTokensM(freshPerCovered), sub: covSub },
+    { title: 'CACHE SHARE', value: fmtPct01(cacheShare), sub: covSub },
     { title: 'HUMAN WAIT', value: fmtPct01(k.human_wait_share), sub: 'of lead time, at gates' },
   ]
 }
@@ -318,7 +353,9 @@ export function workflowRowsOf(vm: Record<string, unknown>, selected: string[]):
     return {
       name: r.name,
       elapsed: fmtMs(r.elapsed_ms),
-      rounds: (rounds !== null ? '×' + rounds.toFixed(1) : DASH),
+      // t261025-13 NOT-A-BUG wording: the number is stage executions per ticket —
+      // name it so it is not read as rework loops.
+      rounds: (rounds !== null ? '×' + rounds.toFixed(1) + ' stage runs' : DASH),
       sub: fmtInt(r.tickets) + ' ' + 'tickets' + ' · ' + fmtInt(r.stage_runs) + ' ' + 'stage runs',
       bar: shareBarPct(r.elapsed_ms, max),
     }

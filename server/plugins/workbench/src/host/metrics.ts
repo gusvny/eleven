@@ -526,6 +526,22 @@ function isoMs(at: unknown): number {
   return Number.isFinite(ms) ? ms : NaN
 }
 
+/**
+ * The ticket-list row's machine modify time in ms. A list row carries BOTH `updated`
+ * (a DISPLAY string like "10-25 22:17" — handing it to `new Date` invents a year-2001
+ * timestamp, t261025-13) and `updated_ts` (epoch SECONDS; unit ruling in
+ * client/ticket-list-model.ts). Only the machine field may decide a timestamp: a
+ * finite positive number passes (seconds → ms); a numeric string is coerced then
+ * checked the same way (tolerant to string-typed sources, pinned by test); 0 /
+ * negative / missing / garbage → null. The display column `updated` is never read
+ * here.
+ */
+function rowUpdatedMs(row: unknown): number | null {
+  if (typeof row !== 'object' || row === null) return null
+  const n = Number((row as Record<string, unknown>).updated_ts)
+  return Number.isFinite(n) && n > 0 ? n * 1000 : null
+}
+
 /* ------------------------------------------------ 交付维 / token 维 */
 
 /** 单票交付维结果：frozen=true=归档口径（主仓回落成功或缓存存量降维保留），
@@ -914,7 +930,9 @@ async function v2Population(
       rec: e.rec, createdMs: e.createdMs, closedMs: e.closedMs,
       workflow: String(eligible[i]?.workflow ?? ''),
       epic: String(eligible[i]?.epic ?? ''),
-      updatedMs: Number.isFinite(isoMs(eligible[i]?.updated)) ? isoMs(eligible[i]?.updated) : null,
+      // t261025-13: the machine field only — the display column `updated` must never
+      // decide a timestamp (V8 parses "10-25 22:17" as year 2001).
+      updatedMs: rowUpdatedMs(eligible[i]),
     })
   }
   return { items, skips, unknownWf }
@@ -1125,6 +1143,10 @@ function respWorkflowsStagesKpis(
     .map((e) => e.closedMs! - e.createdMs!)
     .sort((a, b) => a - b)
   kpis.median_lead_time = leads.length > 0 ? Math.round(leads[Math.floor((leads.length - 1) / 2)]!) : null
+  // p90 lead time (t261025-13 item 3): same sorted window population as the median;
+  // rank index ceil(0.9*(n-1)) (nearest-rank over the 0-based sorted array); null when
+  // the window has no closed ticket with both anchors — never zero-filled.
+  kpis.p90_lead_time = leads.length > 0 ? Math.round(leads[Math.ceil(0.9 * (leads.length - 1))]!) : null
   // throughput: closed / window days; the all window (span=0) derives the span from the population's earliest created to now (the approximation declared in the contract), floored at 1 day
   if (kpis.closed > 0) {
     let days = span > 0 ? span / 86_400_000 : NaN
@@ -1163,6 +1185,15 @@ function respWorkflowsStagesKpis(
     ? round2(kpis.tokens_in_tickets / kpis.closed)
     : null
   kpis.cache_hit = (tIn + tOut + tCache) > 0 ? round4(tCache / (tIn + tOut + tCache)) : null
+  // token coverage inputs (t261025-13 token-coverage ruling): the panel's three token
+  // tiles carry an over-N-of-M coverage line, so the API exposes who is counted.
+  // Null when the window has no record with token data (named degrade upstream) —
+  // never zero-filled.
+  kpis.tokens_cache_read = withTok.length > 0 ? tCache : null
+  kpis.tickets_with_usage = withTok.length > 0 ? withTok.length : null
+  kpis.closed_with_usage = withTok.length > 0
+    ? withTok.filter((e) => !e.rec.open).length
+    : null
   return extraNotices
 }
 
@@ -1177,11 +1208,15 @@ function emptyKpis() {
     rework_rate: null as number | null,
     throughput_per_day: null as number | null,
     median_lead_time: null as number | null,
+    p90_lead_time: null as number | null,
     human_wait_share: null as number | null,
     tokens_in_tickets: null as number | null,
     tokens_outside_tickets: null as number | null,
     tokens_per_closed_ticket: null as number | null,
     cache_hit: null as number | null,
+    tokens_cache_read: null as number | null,
+    tickets_with_usage: null as number | null,
+    closed_with_usage: null as number | null,
   }
 }
 
@@ -1763,21 +1798,21 @@ async function healthView(
   const kpis = base.kpis as ReturnType<typeof emptyKpis>
   const running = rows.filter((r) => String(r?.stage_state ?? '') === 'running')
   const blocked = rows.filter((r) => String(r?.stage_state ?? '') === 'blocked')
-  // 归窗口径与三数据视图一致（closed 按闭单/未结按创建）；health 直查路径无缓存
-  // created/closed，KPI 分母取 list 行 updated 列为锚的近似不可取——直查 snapshot 太重，
-  // 故 health 的 tickets/closed 只在 window=all 时给全量计数，7d/30d 降级为
-  // 「updated 列落窗」的近似计数并附 reason（直查路径的已知近似，不静默）。
-  const anchorApprox = (r: any): number | null => {
-    const ms = isoMs(r?.updated)
-    return Number.isFinite(ms) ? ms : null
-  }
+  // Window anchoring matches the three data views (closed by close time, open by
+  // creation time); the health direct-query path has no cached created/closed, so the
+  // KPI denominators anchor on the list rows' updated_ts (epoch seconds, machine
+  // field) — before t261025-13 this misread the display column `updated` and invented
+  // a year-2001 anchor. window=all gives the exact full count; 7d/30d approximate by
+  // updated_ts window membership and name it in a reason (a known approximation of
+  // the direct-query path, never silent).
+  const anchorApprox = (r: any): number | null => rowUpdatedMs(r)
   for (const r of rows) {
     const a = from === -Infinity ? 0 : anchorApprox(r)
     if (from !== -Infinity && !inWindow(a, from, to)) continue
     kpis.tickets += 1
     if (String(r?.status ?? '') === 'closed') kpis.closed += 1
   }
-  if (from !== -Infinity) reasons.push('health 直查路径无 created/closed 时刻，窗口计数以 list.updated 列近似（window=all 为精确全量）')
+  if (from !== -Infinity) reasons.push('health direct-query path has no created/closed timestamps; bounded-window tickets/closed are approximated by the list rows\' updated_ts (epoch seconds, machine field); window=all is the exact full count')
   kpis.avg_delivery_min = 0.0
   kpis.tokens_total = 0
   reasons.push('token 维不在 health 直查路径（tokens_total 恒 0；接通归 M2c 修约）')
@@ -1799,8 +1834,10 @@ async function healthView(
   const silentCats: string[] = []
   const silentData: number[] = []
   for (const r of running) {
-    const ms = isoMs(r?.updated)
-    if (Number.isFinite(ms) && nowMs - ms > silentMin * 60_000) {
+    // t261025-13: silent-running is gated on the machine updated_ts, never the
+    // display `updated` column (a 2001-anchored gate never fired).
+    const ms = rowUpdatedMs(r)
+    if (ms !== null && nowMs - ms > silentMin * 60_000) {
       silentCats.push(String(r?.id ?? '?'))
       silentData.push(Math.round((nowMs - ms) / 60000))
     }

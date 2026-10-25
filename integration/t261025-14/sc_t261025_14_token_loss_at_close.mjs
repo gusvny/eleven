@@ -77,7 +77,11 @@ function closedTicketRow(id, closedAt) {
   return {
     id, project: 'demo', epic: 'metrics', title: id, workflow: 'dev-lane',
     stage: 'implement', stage_state: 'closed', status: 'closed', role: 'developer',
+    // t261025-13 contract: last_activity_ms anchors on the machine field only —
+    // the row carries updated_ts (epoch SECONDS) beside the display column,
+    // exactly as the engine's ticket list writes them.
     updated: new Date(closedAt).toISOString(),
+    updated_ts: Math.round(closedAt / 1000),
     worktree: `.worktrees/${id}`,
     timeline: [
       { at: new Date(closedAt - 3 * 3600e3).toISOString(), stage: 'plan', state: 'running' },

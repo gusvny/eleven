@@ -77,6 +77,9 @@ async function runAll() {
       stage: 'implement', stage_state: opts.status === 'closed' ? 'closed' : 'running',
       status: opts.status ?? 'closed', role: 'developer',
       updated: new Date(opts.updated ?? closedAt).toISOString(),
+      // engine row shape: updated_ts is epoch SECONDS (t261025-13: the only field the
+      // metrics read path may use as a timestamp; `updated` is a display string)
+      updated_ts: Math.round((opts.updatedTsMs ?? (opts.updated ?? closedAt)) / 1000),
       worktree: opts.worktree ?? `.worktrees/${id}`,
       ...(opts.noTimeline ? {} : { timeline: tl }),
     }
@@ -202,6 +205,9 @@ async function runAll() {
     ok(k.tokens_in_tickets === 110, 'tokens_in_tickets=110（t1 会话 in100+out10）', JSON.stringify(k.tokens_in_tickets))
     ok(k.tokens_per_closed_ticket === 55, 'tokens_per_closed_ticket=110/2', JSON.stringify(k.tokens_per_closed_ticket))
     ok(Math.abs(k.cache_hit - 5 / 115) < 1e-4, 'cache_hit=5/115（chunk 镜像未翻倍）', JSON.stringify(k.cache_hit))
+    // t261025-13 token-coverage inputs (panel's over-N-of-M lines)
+    ok(k.tokens_cache_read === 5 && k.tickets_with_usage === 1 && k.closed_with_usage === 1,
+      'coverage inputs: cacheRead=5, tickets_with_usage=1, closed_with_usage=1', JSON.stringify({ cr: k.tokens_cache_read, twu: k.tickets_with_usage, cwu: k.closed_with_usage }))
     ok(typeof r.reason === 'string' && r.reason.length > 0, '坏会话文件使响应带 reason（具名降级）', String(r.reason))
   }
 
@@ -221,7 +227,7 @@ async function runAll() {
   const ep = r.epics?.[0]
   ok(ep && ep.tickets === 3, 'epic tickets=3（窗口人口 t1/t2/t3）')
   if (HAS_ZSTD && haveSessions) ok(ep.tokens === 110, 'epic tokens=110（无 token 票不炸聚合）', JSON.stringify(ep?.tokens))
-  ok(ep && ep.last_activity_ms === Date.parse(t3.updated), 'last_activity_ms=最新 updated（t3）', JSON.stringify(ep?.last_activity_ms))
+  ok(ep && ep.last_activity_ms === t3.updated_ts * 1000, 'last_activity_ms=最新 updated_ts（t3，机器字段秒→ms）', JSON.stringify(ep?.last_activity_ms))
 
   section('E. 具名降级：无项目级会话 / 无 epic / health')
   {
@@ -232,6 +238,8 @@ async function runAll() {
     ok(r2.project_sessions === null, '无项目级会话：project_sessions=null', JSON.stringify(r2.project_sessions))
     ok(r2.kpis.tokens_outside_tickets === null, 'tokens_outside_tickets 跟随 null（不零填）')
     ok(Array.isArray(r2.epics) && r2.epics[0]?.tokens === null && typeof r2.epics[0]?.reason === 'string', '无 token 票的 epic：tokens=null+reason', JSON.stringify(r2.epics))
+    ok(r2.kpis.tokens_cache_read === null && r2.kpis.tickets_with_usage === null && r2.kpis.closed_with_usage === null,
+      'coverage inputs null on a no-token-data window (never 0-filled)', JSON.stringify({ cr: r2.kpis.tokens_cache_read, twu: r2.kpis.tickets_with_usage, cwu: r2.kpis.closed_with_usage }))
     const r3 = (await runMetrics(m, { ...env2, view: 'health' })).body
     ok(r3.workflows === null && r3.stages === null && r3.project_sessions === null && r3.epics === null, 'health：v2 块恒 null')
     ok(typeof r3.reason === 'string' && r3.reason.includes('not in the health direct-query path'), 'health 降级 reason 具名', r3.reason)
@@ -291,6 +299,72 @@ async function runAll() {
     ok(full.stages?.length > 0 && JSON.stringify(full.stages) === JSON.stringify(fast.stages), 'stages fast==full（非空比较）')
     ok(JSON.stringify(full.kpis) === JSON.stringify(fast.kpis), 'kpis fast==full')
   }
+
+  /* ------------------------------------------ G. t261025-13：展示列永不决定时间戳 */
+
+  {
+    // Regression for the fabricated year-2001 last_activity_ms: every row below
+    // carries a display-shaped `updated` ("10-25 22:17" — V8 parses it as 2001);
+    // only the machine field `updated_ts` (epoch seconds) may decide a timestamp.
+    const DISPLAY = '10-25 22:17'
+    const displayMs = new Date(DISPLAY).getTime() // the invented 2001 value
+    const gRepo = freshDir('v2-g-repo-')
+    mkdirSync(join(gRepo, '.worktrees'), { recursive: true })
+    const gStubDir = freshDir('v2-g-stub-')
+    const gCache = freshDir('v2-g-cache-')
+    const inWinSec = Math.round((NOW - 3600e3) / 1000) // inside the 7d window
+    const oldSec = Math.round((NOW - 10 * 86400e3) / 1000) // outside the 7d window
+    const rawRow = (id, extra) => {
+      const status = extra.status ?? 'closed'
+      return {
+      id, project: 'demo', epic: extra.epic ?? 'g', title: id, workflow: 'dev-lane',
+      stage: 'implement', stage_state: extra.stage_state ?? status,
+      status, role: 'developer',
+      updated: DISPLAY, updated_ts: extra.updated_ts,
+      worktree: `.worktrees/${id}`, ...(extra.noTimeline ? {} : { timeline: [
+        { at: new Date(NOW - 2 * H).toISOString(), stage: 'chore', state: 'running' },
+        { at: new Date(NOW - H).toISOString(), stage: 'chore', state: status === 'closed' ? 'closed' : 'running' },
+      ] }),
+      }
+    }
+    const gStub = baseStub({
+      tickets: [
+        rawRow('g1', { updated_ts: inWinSec }), // live-shaped: display + machine field
+        rawRow('g2', { updated_ts: 0, epic: 'g2', status: 'open', stage_state: 'running' }), // 0 = missing
+        rawRow('g3', { updated_ts: String(inWinSec), epic: 'g3' }), // numeric string coerces
+        rawRow('g4', { epic: 'g4', status: 'open', stage_state: 'running' }), // machine field absent
+        rawRow('g5', { updated_ts: oldSec, epic: 'g5', status: 'open', stage_state: 'running', noTimeline: true }), // stale running → silent list
+      ],
+      workflows: [{ id: 'dev-lane', name: 'dev-lane', lane: 'lane', stages: CHORE_STAGES }],
+    })
+    const gPath = writeStub(gStubDir, gStub)
+    const gm = await loadMetrics()
+    const gEnv = { SANDBAR_METRICS_STUB: gPath, SANDBAR_METRICS_DIR: gCache, repo: gRepo }
+
+    const gr = (await runMetrics(gm, gEnv)).body
+    const byEpic = new Map((gr.epics ?? []).map((e) => [e.epic, e]))
+    const g1 = byEpic.get('g')
+    ok(g1 && g1.last_activity_ms === inWinSec * 1000, 'G: last_activity_ms=updated_ts 秒→ms（机器字段）', JSON.stringify(g1))
+    ok(g1 && g1.last_activity_ms !== displayMs && g1.last_activity_ms > Date.parse('2020-01-01T00:00:00Z'), 'G: 2001 展示列解析值不出现', JSON.stringify({ displayMs, got: g1?.last_activity_ms }))
+    const g2 = byEpic.get('g2')
+    ok(g2 && g2.last_activity_ms === null && typeof g2.reason === 'string' && g2.reason.includes('unparseable'), 'G: updated_ts=0 → null+reason（不零填不编造）', JSON.stringify(g2))
+    const g3 = byEpic.get('g3')
+    ok(g3 && g3.last_activity_ms === inWinSec * 1000, 'G: 数字串 updated_ts 容错换算', JSON.stringify(g3))
+    const g4 = byEpic.get('g4')
+    ok(g4 && g4.last_activity_ms === null, 'G: 机器字段缺失 → null（display updated 顶不上）', JSON.stringify(g4))
+    ok(gr.kpis.p90_lead_time !== null && gr.kpis.p90_lead_time >= gr.kpis.median_lead_time, "G: p90_lead_time 在场且 >= median", JSON.stringify({ p90: gr.kpis.p90_lead_time, median: gr.kpis.median_lead_time }))
+
+    // health 直查路径：归窗锚 + 静默在制都吃 updated_ts（改前吃 2001 展示列）
+    const hr = (await runMetrics(gm, { ...gEnv, view: 'health' })).body
+    ok(hr.kpis.tickets === 2 && hr.kpis.closed === 2, 'G health: 7d 归窗按 updated_ts（g1/g3 在窗；g5 落窗外；tickets=closed=2）', JSON.stringify({ tickets: hr.kpis.tickets, closed: hr.kpis.closed }))
+    ok(typeof hr.reason === 'string' && hr.reason.includes('updated_ts'), 'G health: 归窗 reason 具名 updated_ts 机器字段', hr.reason)
+    // silent-running: g5 (running, stale updated_ts) enters the silent chart; g2
+    // (updated_ts=0 → no anchor) and g4 (display-only) do not — both the 2001 false
+    // positive and the never-firing gate are sealed.
+    const silent = (hr.charts?.secondaries ?? []).find((s) => String(s.title ?? '').startsWith('静默在制'))
+    ok(silent && JSON.stringify(silent.categories) === JSON.stringify(['g5']), 'G health: 静默榜只收 updated_ts 超阈的在制票（g5；g2/g4 不进）', JSON.stringify(silent))
+  }
+
 
 
 }

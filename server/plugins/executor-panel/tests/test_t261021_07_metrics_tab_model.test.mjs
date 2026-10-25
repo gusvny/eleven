@@ -45,9 +45,10 @@ function goodPayload() {
     cache: { status: 'hit', source_version: 'v3' },
     kpis: {
       tickets: 191, closed: 168, rework_rate: 0.38, throughput_per_day: 5.6,
-      median_lead_time: 3 * HOUR + 40 * 60_000, human_wait_share: 0.31,
+      median_lead_time: 3 * HOUR + 40 * 60_000, p90_lead_time: 9 * HOUR, human_wait_share: 0.31,
       tokens_total: 4.126e8, tokens_in_tickets: 3.5e8, tokens_outside_tickets: 6.26e7,
       tokens_per_closed_ticket: 2.08e6,
+      tokens_cache_read: 1.05e8, tickets_with_usage: 173, closed_with_usage: 152,
     },
     workflows: [
       { workflow: 'dev-lane', elapsed_ms: 26 * HOUR, rounds_per_ticket: 1.9, tickets: 48, stage_runs: 1284 },
@@ -76,20 +77,22 @@ function goodPayload() {
 const vm = metricsV2Of(goodPayload())
 assert(vm.ok === true, 'good payload normalizes ok')
 
-// KPI tiles: six, mock order, real values.
+// KPI tiles: six, real values (t261025-13: rework tile removed, three honest
+// token tiles with coverage lines, P90 sub computed).
 const tiles = kpiTilesOf(vm)
 assert(tiles.length === 6, 'six KPI tiles')
-assert(tiles[0].title === 'REWORK RATE' && tiles[0].value === '38%', 'tile 1 rework rate')
-assert(tiles[1].value === '5.6/day' && tiles[1].sub === '168 closed of 191 opened', 'tile 2 throughput + split sub-line')
-assert(tiles[2].value === '3h 40m', 'tile 3 median lead time')
-assert(tiles[3].value === '412.6M' && tiles[3].sub === '350.0M in tickets · 62.6M outside', 'tile 4 tokens split sub-line')
-assert(tiles[4].title === 'TOKENS PER CLOSED TICKET' && tiles[4].value === '2.1M', 'tile 5 tokens per closed ticket')
+assert(tiles[0].value === '5.6/day' && tiles[0].sub === '168 closed of 191 opened', 'tile 1 throughput + split sub-line')
+assert(tiles[1].value === '3h 40m' && tiles[1].sub === 'P90 9h 0m', 'tile 2 median + computed P90 sub')
+assert(tiles[2].title === 'TOKENS' && tiles[2].value === '517.6M', 'tile 3 tokens = actual traffic incl cache')
+assert(tiles[2].sub === '350.0M in tickets · 62.6M outside · 173 of 191 tickets with usage', 'tile 3 split + coverage sub-line')
+assert(tiles[3].title === 'FRESH TOKENS PER COVERED TICKET' && tiles[3].value === '2.0M' && tiles[3].sub === '173 of 191 tickets with usage', 'tile 4 fresh per covered + coverage')
+assert(tiles[4].title === 'CACHE SHARE' && tiles[4].value === '20%' && tiles[4].sub === '173 of 191 tickets with usage', 'tile 5 cache share + coverage')
 assert(tiles[5].value === '31%', 'tile 6 human wait')
 
 // Workflow rows: all when nothing selected; share bars against the max.
 const rows = workflowRowsOf(vm, [])
 assert(rows.length === 2 && rows[0].name === 'dev-lane' && rows[0].bar === 100 && rows[1].bar === 35, 'workflow rows + share bar pct')
-assert(rows[0].rounds === '×1.9' && rows[0].sub === '48 tickets · 1,284 stage runs', 'workflow row rounds face + sub-line')
+assert(rows[0].rounds === '×1.9 stage runs' && rows[0].sub === '48 tickets · 1,284 stage runs', 'workflow row rounds face + sub-line')
 const sel = workflowRowsOf(vm, ['light-lane'])
 assert(sel.length === 1 && sel[0].name === 'light-lane' && sel[0].bar === 100, 'selection filters rows, bar rescales')
 
@@ -183,7 +186,8 @@ for (const b of bad) {
 }
 assert(metricsV2Of({ kpis: {} }).kpis.tickets === null, 'missing kpi field -> null (dash downstream)')
 assert(kpiTilesOf({ kpis: {} }).every((t) => t.value === '—'), 'all-dash KPI row on empty kpis')
-assert(kpiTilesOf({ kpis: { tokens_in_tickets: 5e6 } })[3].sub === '—', 'half a split = dash, not a one-sided number')
+// t261025-13 item 2: a one-sided split NAMES the unavailable outside source — a bare dash is the banned defect
+assert(kpiTilesOf({ kpis: { tokens_in_tickets: 5e6 } })[2].sub.includes('outside unavailable'), 'half a split = named degrade, not a bare dash')
 assert(workflowRowsOf(metricsV2Of({ kpis: {} }), ['ghost']).length === 0, 'unknown chip name = no row')
 assert(epicCardsOf(metricsV2Of({ kpis: {} }), 'tokens', [], NOW).length === 0, 'no epics = no cards')
 assert(sessionRowsOf({ ok: true, sessions: null }).length === 1 && sessionRowsOf({ ok: true, sessions: null })[0].value === '—', 'null sessions = named empty, not zeros')

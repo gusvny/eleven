@@ -164,7 +164,7 @@ async function runScenario({ ticket, cacheRec, snapshot }) {
   const deps = defaultDeps('/stub-repo', () => NOW)
   const r = await buildMetricsResponse({ view: 'time', window: 'all' }, deps)
   const rec = JSON.parse(await readFile(join(cacheDir, 't09-p3.json'), 'utf8'))
-  ok2(r.status === 200 && rec.source_version === SOURCE_VERSION && SOURCE_VERSION === 'v2', 'v1 记录作废、按 v2 重算落盘', rec.source_version)
+  ok2(r.status === 200 && rec.source_version === SOURCE_VERSION && SOURCE_VERSION === 'v3', '旧版记录作废、按当前版本重算落盘（v3，t261021-06 bump 后的 stale pin 顺手修正）', rec.source_version)
   ok2(rec.delivery === null || rec.delivery.add !== 5783, '旧口径 5783 未存活（确实重算了）', JSON.stringify(rec.delivery))
 }
 

@@ -22,7 +22,9 @@ const { ok, done } = makeChecker()
 // entry (computeDurations), so the derived leads are the intended 3/1/2 days
 // (arbitrate gen2: the old fixture ran rework entries past the close, so the
 // derived leads were not the intended ones). `updated` is an ISO string (the row
-// parser is string-typed).
+// parser is string-typed). t261025-13 maintenance: last_activity_ms anchors on the
+// machine `updated_ts` (epoch SECONDS — the engine's real row shape), so the
+// fixture rows carry it; a display-only row degrades to null by contract.
 const tK = (id, leadDays, rework, epic) => {
   const created = NOW - 10 * DAY
   const closed = NOW - (10 - leadDays) * DAY
@@ -31,6 +33,7 @@ const tK = (id, leadDays, rework, epic) => {
     closedAt: closed,
     epic,
     updated: iso(closed),
+    extra: { updated_ts: Math.round(closed / 1000) },
     timeline: [
       { at: iso(created), stage: 'plan', state: 'running' },
       { at: iso(created + 3600e3), stage: 'plan', state: 'closed' },

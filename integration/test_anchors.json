@@ -5748,6 +5748,18 @@
       "note": "t261022-14: the markdown reviewer's lane comment store end to end over the real host store + client anchor modules - four block kinds persist to <lane>/.sandbar/review-comments.json, every schema field read back from disk (the lane agents' plain file-read path), and an edited block still places its threads (exact/neighbour/outdated, never dropped). behaviour anchor: it pins what the persistence does for the reader, not an internal contract form.",
       "sync_path": ""
     },
+    "integration/t261025-13/sc_metrics_machine_timestamps.mjs": {
+      "anchor": "behaviour",
+      "note": "t261025-13: last_activity_ms/health window anchor/silent-running gate all read the machine updated_ts; a display-shaped `updated` never invents a 2001 timestamp; broken machine fields degrade to named null"
+    },
+    "integration/t261025-13/sc_metrics_p90_lead_time.mjs": {
+      "anchor": "contract",
+      "note": "t261025-13: p90_lead_time = rank ceil(0.9*(n-1)) over the sorted closed-ticket leads, null on an empty window (same degrade family as the median)"
+    },
+    "integration/t261025-13/sc_metrics_panel_degrade_faces.mjs": {
+      "anchor": "behaviour",
+      "note": "t261025-13: a degraded Metrics tile names its degrade (no bare dash on TOKENS split, no hardcoded 'P90 -'); happy split keeps rendering (assertions via the public kpiTilesOf seam)"
+    },
     "integration/t261025-12/sc_t26102512_queue_round_journey.mjs": {
       "anchor": "behaviour",
       "sync_path": "",
