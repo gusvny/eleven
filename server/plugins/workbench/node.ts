@@ -175,6 +175,7 @@ import { readTicketTimeFile } from './src/host/ticket-time-file.ts'
 // integration/t261022-14/node-ts-registration.patch for the one-command
 // re-application if a settle drops this diff again).
 import { handleReviewComments } from './src/host/review-comments-routes.ts'
+import { backfillRowsFromArchive, readArchiveIndex } from './src/host/ticket-archive.ts'
 import { isTicketTimeMode } from './src/shared/ticket-time-model.ts'
 import { ticketShowErrorReply } from './src/host/ticket-error.ts'
 import { readInspectionArchive, readPeriodReport } from './src/host/inspection-archive.ts'
@@ -749,6 +750,14 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       // 行形状归一：close_ts 防御性补 0（键本恒在场，`?? 0` 只兜畸形引擎回执，
       // 不改语义）；其余键逐键透传不清洗（paused/paused_phase 等以引擎为真源）。
       const tickets = (t?.result?.tickets ?? []).map((r: any) => ({ ...r, close_ts: r.close_ts ?? 0 }))
+      // t261026-01: legacy-row backfill from the on-disk ticket archive. The
+      // engine's minimal-row projection drops workflow/created/updated/
+      // lane_version for archived tickets (no Temporal snapshot); the store
+      // (<root>/<key>/data/tickets) carries them. Existing row keys only,
+      // archive values verbatim, nothing invented; a missing/unreadable store
+      // is a named no-op here, never a 502 (readArchiveIndex never throws).
+      const arc = await readArchiveIndex(projectKey)
+      if (arc.index) backfillRowsFromArchive(tickets, arc.index)
       // workflow list 返回 {workflows:[...]}（M1 引擎结构），兼容裸数组。
       const workflows = w?.result?.workflows ?? (Array.isArray(w?.result) ? w.result : [])
       // t260904-17「主数据先行」（R5/场景 T2）：主响应窗口内零 show——逐票 show 只

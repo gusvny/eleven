@@ -51,6 +51,7 @@ import {
   stageWindowsFromTimeline,
   type StageWindow,
 } from './agent-usage.ts'
+import { backfillRowsFromArchive, readArchiveIndex, type ArchiveRead } from './ticket-archive.ts'
 
 const execFileP = promisify(execFile)
 
@@ -692,6 +693,9 @@ export interface RecordWithAnchor {
   /** open 标志无外部真源（F2，t260904-04）：show 回退合成行且 open=true——归档票
    *  收口终态不可达，closed 计数可能低计，进 notices 显式计数（不静默）。 */
   openUnverified?: boolean
+  /** t261026-01: anchor-only synthetic record for a chain-less row (no workflow
+   *  anywhere). Never persisted, never a cache hit; stableReasons skips it. */
+  synthetic?: boolean
 }
 
 async function ticketRecord(
@@ -835,6 +839,7 @@ function stableReasons(entries: RecordWithAnchor[], cacheDir: { dir: string; ena
   const out: string[] = []
   if (!cacheDir.enabled && cacheDir.reason) out.push(cacheDir.reason)
   for (const e of entries) {
+    if (e.synthetic === true) continue   // t261026-01: chain-less synthetic rows have no cache/duration/tokens face
     const id = e.rec.ticket_id
     if (!e.fromCache && !e.persisted) {
       out.push(`${id}: 记录未入缓存（缓存禁用/不可写），每次直算兜底`)
@@ -894,7 +899,8 @@ async function v2Population(
     const wf = String(row?.workflow ?? '')
     const stages = chains.get(wf) ?? []
     if (mode === 'fast') return fastCacheRecord(cacheDir, row, engineVersions.get(wf) ?? '')
-    return ticketRecord(deps, row, wf, stages, engineVersions.get(wf) ?? '', cacheDir)
+    const e = await ticketRecord(deps, row, wf, stages, engineVersions.get(wf) ?? '', cacheDir)
+    return applyRowAnchorFallback(e, row)
   })
   const items: V2Item[] = []
   const skips: string[] = []
@@ -1245,15 +1251,24 @@ export async function buildMetricsResponse(
   const listedIds = new Set(rows.map((r: any) => String(r?.id ?? '')))
   if (p.epic === 'none') rows = rows.filter((r: any) => String(r?.epic ?? '') === '' && (r?.__archived !== true))
   else if (p.epic !== 'all') rows = rows.filter((r: any) => String(r?.epic ?? '') === p.epic)
-  // 模板过滤（t260904-04，KI-043②）：被过滤的票不再静默缩宇宙——计数进 notices，
-  // 用户可在 reason 看到「list 有 N 票因 workflow 为空/不匹配被排除」。
-  const beforeTemplateFilter = rows.length
-  // The v2 aggregation universe (contract v2): all rows BEFORE the template
-  // filter — workflows/stages/epics span templates, chained by row.workflow, never
-  // mixed. The health view returns early below and never enters the v2 path.
+  // t261026-01: legacy-row backfill from the on-disk ticket archive, BEFORE any
+  // further filter or window decision. The engine's minimal-row projection
+  // drops workflow/created/updated/lane_version for archived tickets; the
+  // store carries them. Archive values verbatim, nothing invented; a missing
+  // store is a named no-op (readArchiveIndex never throws, reason unused here).
+  const archive: ArchiveRead = await readArchiveIndex(p.project)
+  if (archive.index) backfillRowsFromArchive(rows, archive.index)
+  // t261026-01 population semantics: the KPI population is PROJECT-LEVEL — the
+  // template cut no longer happens before the window (that cut was the defect:
+  // 339 legacy rows never entered any KPI, so window=7d/30d/all all counted 43).
+  // The selected template now filters ONLY the per-template charts population;
+  // the v2 chain blocks keep spanning templates, chained by row.workflow
+  // (contract v2 universe). NOTE: docs/design/metrics-api-contract-v2.md still
+  // records the old per-template KPI population (L53) — landing the contract
+  // delta is a named debt of t261026-01 (outside this ticket's write set).
   const v2Rows = rows
-  rows = rows.filter((r: any) => String(r?.workflow ?? '') === p.template)
-  const templateDropped = beforeTemplateFilter - rows.length
+  const chartRows = rows.filter((r: any) => String(r?.workflow ?? '') === p.template)
+  const templateDropped = rows.length - chartRows.length
 
   const nowMs = deps.now()
   const span = WINDOWS[p.window] ?? 0
@@ -1262,31 +1277,43 @@ export async function buildMetricsResponse(
 
   const cacheDir = resolveMetricsCacheDir(p.project)
 
-  // 宇宙补全（t260903-09 S5，audit 洞）：直并/收口终态票可能已从工单列表消失，
-  // 但度量缓存仍有其存量记录——从缓存目录并入（epic 不入缓存=存量票 epic 未知，
-  // 仅在 all 与对应窗口可见；template 筛选仍尊重，跨模板不混排契约不破）。
+  // Universe completion (t260903-09 S5, audit hole): terminal-merged/closed
+  // tickets may have left the live list while the metrics cache still holds
+  // their records — merge them from the cache dir (epic is not cached for
+  // legacy tickets = epic unknown, visible under all only).
+  // t261026-01: completion is no longer template-cut (the KPI universe is
+  // project-level); the rows carry their own template.
   // W3 红线：只并入度量聚合，绝不回写 ticket list API（dispatch 流不被污染）。
-  const archivedRows = cacheDir.enabled ? await collectArchivedRows(cacheDir.dir, p.template, listedIds) : []
+  const archivedRows = cacheDir.enabled ? await collectArchivedRows(cacheDir.dir, null, listedIds) : []
   const allRows: any[] = archivedRows.length > 0 ? [...rows, ...archivedRows] : rows
 
-  if (p.view === 'health') return healthView(deps, rows, p, stageIds, from, to, nowMs, reasons)
+  if (p.view === 'health') return healthView(deps, chartRows, p, stageIds, from, to, nowMs, reasons)
 
   /* -- 三数据视图：逐票惰性算/读缓存（t260902-05⑦：有界并发，保序落位，
       skipped/reason 顺序与原串行一致；锚点补齐也在任务内做，语义不变）。
       mode=fast（t260903-09 cache-first）：只读缓存聚合，缺票不现算——
       先吐缓存快照（cache.status='stale'），全量由客户端随后台请求补。 -- */
+  // Per-row chain lookup (t261026-01): the universe spans templates, so each row
+  // goes through ITS OWN chain/engineVersion — the selected template's chain is
+  // never imposed on another template's rows (chains are never mixed). Rows with
+  // no chain anywhere get a synthetic anchor-only record (see rowRecord).
+  const chains = new Map<string, any[]>()
+  for (const w of workflows) chains.set(String(w?.id ?? ''), Array.isArray(w?.stages) ? w.stages : [])
+  const engineVersions = new Map<string, string>()
+  for (const [wf, ch] of chains) engineVersions.set(wf, engineVersionOf(ch))
+
   let recordEntries: (RecordWithAnchor | null)[]
   const fastSkips: string[] = []
   if (p.mode === 'fast') {
     recordEntries = await mapPool<any, RecordWithAnchor | null>(allRows, TICKET_CONCURRENCY, async (row) => {
-      const e = await fastCacheRecord(cacheDir, row, engineVersion)
+      const e = await rowRecord(deps, row, chains, engineVersions, cacheDir, 'fast', nowMs)
       if (e === null) { fastSkips.push(`${String(row?.id ?? '?')}: fast 无可用缓存（未算过或引擎版本失配），跳过现算`); return e }
       if (row.__archived === true && e.rec.open === true) e.openUnverified = true
       return e
     })
   } else {
     recordEntries = await mapPool<any, RecordWithAnchor | null>(allRows, TICKET_CONCURRENCY, async (row) => {
-      const e = await ticketRecord(deps, row, p.template, stages, engineVersion, cacheDir)
+      const e = await rowRecord(deps, row, chains, engineVersions, cacheDir, 'full', nowMs)
       if (e === null) return null
       // F2 显式化（t260904-04）：归档票 open=true 恒无外部真源（列表/show 双不可达），
       // 命中与重算两拍一致标记 → notices 计数（不静默缩 closed 人口）。
@@ -1359,8 +1386,6 @@ export async function buildMetricsResponse(
   /* -- metrics v2 data layer (contract v2): cross-template aggregates +
       project_sessions + additive KPIs. Every degrade is named:
       null + reason/notice, never zero-filled. -- */
-  const chains = new Map<string, any[]>()
-  for (const w of workflows) chains.set(String(w?.id ?? ''), Array.isArray(w?.stages) ? w.stages : [])
   const v2 = await v2Population(deps, v2Rows, chains, cacheDir, p.mode)
   const v2Window = v2.items.filter((it) => {
     const anchor = it.rec.open ? it.createdMs : (it.closedMs ?? it.createdMs)
@@ -1371,7 +1396,10 @@ export async function buildMetricsResponse(
   const roleAgg = await computeRoleAggregate(deps.repo)
   const v2KpiNotices = respWorkflowsStagesKpis(kpis, keptEntries, projSess, nowMs, span)
 
-  const body = buildChartsBody(p.view, kept, stageIds, kpis)
+  // t261026-01: charts stay per-template (the selected template's chain is the
+  // charts' stage axis); the project-level population feeds kpis only.
+  const keptTemplate = kept.filter((r) => r.template === p.template)
+  const body = buildChartsBody(p.view, keptTemplate, stageIds, kpis)
   // cache.status 契约字面语义（t260901-20 回归字面；t260903-09
   // bump 增 'stale'）：'computed'=本响应含本次惰性生成（缓存 miss）的记录；'hit'=
   // 全部记录由缓存读命中；'stale'=fast 模式缓存快照（可能缺票，客户端随后台全量替换）。
@@ -1424,7 +1452,20 @@ export async function buildMetricsResponse(
     notices.push(`其中 ${approxCount} 票旧版缓存无归窗锚点，按缓存计算时刻近似归窗（全量重算后自动转精确）`)
   }
   if (templateDropped > 0) {
-    notices.push(`${templateDropped} 票模板不匹配（workflow 为空或非 ${p.template}）被过滤出聚合宇宙`)
+    notices.push(`${templateDropped} tickets of other or unknown templates are counted in the project totals but excluded from the per-template charts (${p.template})`)
+  }
+  // t261026-01 invariant (scoped: with epic != all the totals are that epic's
+  // rows): name the part of the on-disk ticket store the population does not
+  // reach, instead of absorbing it silently.
+  if (archive.index) {
+    const universeIds = new Set(allRows.map((r: any) => String(r?.id ?? '')))
+    let storeMissing = 0
+    for (const id of archive.index.metas.keys()) {
+      if (!universeIds.has(id)) storeMissing++
+    }
+    if (storeMissing > 0) {
+      notices.push(`${storeMissing} tickets in the ticket store (data/tickets) are absent from the metrics population (live list + metrics cache)`)
+    }
   }
   // F2 显式化（t260904-04）：归档票 open 无外部真源（registry 不暴露收口终态）——
   // 不静默缩 closed 人口，计数进 notices（registry 根修=KI-031 家族，写集外）。
@@ -1441,7 +1482,7 @@ export async function buildMetricsResponse(
 
 /** S5 宇宙补全：缓存目录里「不在工单列表」的票 → 合成聚合行。只读缓存文件，不 spawn、
  *  不回写任何 API；坏 JSON 跳过（不崩）；存量票 epic 不入缓存=未知（仅 all 可见，none 桶排除），template 尊重。 */
-async function collectArchivedRows(dir: string, template: string, listedIds: Set<string>): Promise<any[]> {
+async function collectArchivedRows(dir: string, template: string | null, listedIds: Set<string>): Promise<any[]> {
   let files: string[] = []
   try {
     files = (await readdir(dir)).filter((f) => f.endsWith('.json'))
@@ -1459,7 +1500,7 @@ async function collectArchivedRows(dir: string, template: string, listedIds: Set
       continue // 坏缓存跳过，不崩不静默混入
     }
     if (rec?.source_version !== SOURCE_VERSION) continue
-    if (String(rec?.template ?? '') !== template) continue
+    if (template !== null && String(rec?.template ?? '') !== template) continue
     out.push({
       id,
       workflow: String(rec.template),
@@ -1497,6 +1538,76 @@ async function fastCacheRecord(
   }
   if (createdMs === null && closedMs === null) return null
   return { rec: c.rec, createdMs, closedMs, fromCache: true, persisted: true, anchorApproximated }
+}
+
+/** t261026-01: per-row record for the project-level KPI universe. A row whose
+ *  own template has a registered chain goes through the normal record path with
+ *  ITS chain (never the selected template's — chains are never mixed). A row
+ *  with no workflow anywhere (after archive backfill) gets a synthetic
+ *  anchor-only record built from the row itself (`created`/`close_ts`, both
+ *  archive-backed after backfill): durations/delivery/tokens are structurally
+ *  null, the row is counted in the ticket totals and excluded from every
+ *  chain-based block (named degrade: the unknownWf notice counts it). A
+ *  chain-less row without any anchor returns null → counted as a named skip. */
+async function rowRecord(
+  deps: MetricsDeps, row: any,
+  chains: Map<string, any[]>, engineVersions: Map<string, string>,
+  cacheDir: { dir: string; settleDir: string; enabled: boolean; reason?: string },
+  mode: string, nowMs: number,
+): Promise<RecordWithAnchor | null> {
+  const rwf = String(row?.workflow ?? '')
+  const rowStages = chains.get(rwf)
+  if (rowStages !== undefined) {
+    if (mode === 'fast') return fastCacheRecord(cacheDir, row, engineVersions.get(rwf) ?? '')
+    const e = await ticketRecord(deps, row, rwf, rowStages, engineVersions.get(rwf) ?? '', cacheDir)
+    return applyRowAnchorFallback(e, row)
+  }
+  return chainlessRecordFromRow(row, nowMs)
+}
+
+/** t261026-01 anchor fallback, shared by the main loop and the v2 population:
+ *  a row with no timeline and no readable show still has its `created`/`close_ts`
+ *  (archive-backed after the backfill). In-memory only: never persisted into the
+ *  frozen cache record (same discipline as the approx anchors). */
+function applyRowAnchorFallback(e: RecordWithAnchor | null, row: any): RecordWithAnchor | null {
+  if (e === null || e.createdMs !== null) return e
+  const createdS = Number(row?.created)
+  if (!Number.isFinite(createdS) || createdS <= 0) return e
+  e.createdMs = createdS * 1000
+  const closeS = Number(row?.close_ts)
+  if (e.rec.open === false && Number.isFinite(closeS) && closeS > 0) e.closedMs = closeS * 1000
+  return e
+}
+
+/** Synthetic anchor-only record for a chain-less row. Never persisted, never a
+ *  cache hit (`fromCache=false` + `synthetic=true`; stableReasons skips it). */
+function chainlessRecordFromRow(row: any, nowMs: number): RecordWithAnchor | null {
+  const id = String(row?.id ?? '')
+  if (id === '') return null
+  const createdS = Number(row?.created)
+  if (!Number.isFinite(createdS) || createdS <= 0) return null   // no anchor → named skip
+  const open = String(row?.status ?? '') !== 'closed'
+  const closeS = Number(row?.close_ts)
+  const closedMs = !open && Number.isFinite(closeS) && closeS > 0 ? closeS * 1000 : null
+  const createdMs = createdS * 1000
+  const rec: MetricsCacheRecord = {
+    ticket_id: id,
+    template: '',
+    durations: { by_stage: {}, by_round: {}, human_wait: 0 },
+    stage_runs: {},
+    rounds_ok: false,
+    delivery: null,
+    tokens: null,
+    open,
+    delivery_frozen: false,
+    source_version: SOURCE_VERSION,
+    engine_version: 'chainless-v1',
+    updated_ts: new Date(nowMs).toISOString(),
+    computed_at: new Date(createdMs).toISOString(),
+    created_ms: createdMs,
+    closed_ms: closedMs,
+  }
+  return { rec, createdMs, closedMs, fromCache: false, persisted: false, synthetic: true }
 }
 
 function timelineCreatedMs(timeline: any): number | null {

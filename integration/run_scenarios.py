@@ -2107,6 +2107,55 @@ SCENARIOS = [
     ("t260907-05-naming-residue-fulltext",
      "命名迁移②收口：旧命名 token 全量残留清点（t260907-05 验收①独立机器重演，灰盒 L3）：七 token（六插件包名 suyou 前缀族＋tools 文件名旧形）在 server/+integration/ 全后缀零残留（无 include 白名单——方案 v1 白名单漏 tsx/py/cjs 的教训收编为本条设计依据；豁免列名仅历史验收记录 t260903-12/acceptance-walkthrough-gen0.md 与本票守卫场景族自身——针脚字面量写在断言里非产品面，活文档不豁免）；docs/ 命中封口在已声明遗留票清单内（Ticket Workflow Console Design/知识库设计/docs README/build_index.py——本票不改 docs 但清单外新命中=替换面外溢即红）；正名在位（六插件 package.json name 全 sandbar-*、五份 lock 双处 name 同步）；不动面原样在位（/sandbar-admin/ 前缀、project-registry.ts、dsh-profile-suyou 包名——机械替换「顺手多改」的对抗子用例，doc-guard G6 先例钉现状语义，后续票落地随其语义同步改）。与 sc_profile_farm_sandbar_links intent 不同面：本条守文本面收口，彼条守装载链结构一致性。Hermetic 纯文件读秒级；实现段落地前红属预期，arbitrate/merge 期必须绿",
      "python3 integration/t260907-05/sc_naming_residue_fulltext.py", "ro"),
+
+    # ---- t261026-01: the metrics population is a filter artifact, not a window count ----
+    # Host challenge 261025: 'sandbar had only 41 tickets in the last 31 days - are you
+    # sure?' The store holds 422 archives (293 inside 31d) while the face answered
+    # tickets=43 for 7d/30d/all alike: 339 legacy-era rows came back with workflow=''
+    # created=null, so the per-template KPI filter dropped them before the window ran.
+    ("t261026-01-archive-read-degrade",
+     "The legacy-era ticket data the row projection dropped is readable VERBATIM from the on-disk archive store "
+     "through the workbench's declared archive-read seam, and a damaged store degrades BY NAME - never by "
+     "invention, never by a crash (ticket t261026-01, grey-box L2, the REAL workbench ticket-archive module "
+     "imported directly over SANDBAR_TICKETS_DIR fixtures shaped like the live store "
+     "(<root>/<key>/data/tickets/<id>/archive.json with meta.created/workflow_id/lane_version; live store "
+     "measured 261025: 422 archives, 293 inside 31d, legacy tickets carry lane_version='legacy-v1' while recent "
+     "archives carry lane_version null/absent), offline seconds, zero docker/Temporal-server/browser, never "
+     "touches 3099/7233): A1 a legacy-v1 archive reads back verbatim (created number + workflow + lane_version, "
+     "not derived); A2 a recent archive with lane_version None/absent reads created and fabricates no "
+     "lane_version (lane_version is never an input to any decision); A3 an empty archive workflow_id stays "
+     "empty - the read invents no chain (the ticket's DO-NOT); A4 malformed archives (truncated JSON / non-JSON "
+     "bytes / missing meta) are named unreadable per id, healthy neighbours unaffected, the whole read never "
+     "throws; A5 a missing store root reads as a NAMED disabled state with a reason, never a silent empty "
+     "population; A6 an id with no archive appears nowhere. Intent split: the row-backfill wiring in the "
+     "/wf/tickets handler and the metrics population invariant belong to t261026-01-metrics-population-window "
+     "and developer L1; THIS entry uniquely owns the archive-read degrade contract at the gate level. "
+     "Pre-implement tree red on A1-A6 = the named TDD signal; green required at the integration gate / merge. "
+     "Workbench sources absent/unimportable = ENV_FAIL exit 2",
+     "node integration/t261026-01/sc_t261026_01_archive_read_degrade.mjs", "ro"),
+    ("t261026-01-metrics-population-window",
+     "The metrics ticket totals are a WINDOW count of the project, not a template-filter artifact: the user "
+     "moves the window and the number moves, every era of the store is counted, and a genuinely chain-less row "
+     "is degraded BY NAME - counted in totals, out of the chain blocks, exclusion counted on the face "
+     "(ticket t261026-01, host challenge 261025, grey-box L3, the REAL workbench metrics front door "
+     "buildMetricsResponse over the shared t260903-09 stub seam plus SANDBAR_TICKETS_DIR archive fixtures, "
+     "offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): B1 window=all totals "
+     "count EVERY listed row - legacy era, chain-less and other-template rows included (project-level totals, "
+     "the round-2 c2 redefinition); B2 the window moves the count (the 40d legacy row counted at 30d/all, not "
+     "at 7d; the three windows no longer answer one frozen number); B3 the chain-less exclusion is named in "
+     "the face notices; B4 the template filter lives only in the chain blocks (totals still count the "
+     "quickmanual-lane row under template=dev-lane); B5 the delta vs the on-disk archive store is named in "
+     "notices (ghost archive outside the list+cache universe); B6 the invariant is scoped - epic=<code> gives "
+     "that epic's subset, epic=all the whole project, never unconditional; B7 a malformed archive degrades the "
+     "population path by name (face answers, totals unchanged, no throw); B8 nothing invented - no chain block "
+     "grows an entry for chain-less rows. Intent split: the archive-read degrade contract belongs to "
+     "t261026-01-archive-read-degrade; the /wf/tickets row-face wiring unit faces belong to developer L1; the "
+     "existing t260903-09-kpi-invariants family owns fresh-data population self-consistency on the OLD "
+     "per-template semantics and does not own the era-inclusion/window-moves contract; THIS entry uniquely "
+     "owns the ticket's headline invariant (KPI population == store count for the window, or the difference "
+     "NAMED on the face). Pre-implement tree red on B1-B8 = the named TDD signal; green required at the "
+     "integration gate / merge. Workbench metrics sources absent/unimportable = ENV_FAIL exit 2",
+     "node integration/t261026-01/sc_t261026_01_metrics_population_window.mjs", "ro"),
     ("t260907-05-profile-farm-sandbar-links",
      "profile 软链农场重指一致性（t260907-05 验收③＋正文③④，灰盒 L3）：装载链每环同指新名——cordis.patch.yml id/name（装载声明）==node_modules 裸包名解析锚（软链名）==插件 package.json name（包真源），任一环留旧名=宿主重启边界上插件消失/重复/import 炸给用户看；tools 文件名旧形→新形四环同步（真身在位+内部注册名+两 profile 软链 realpath 命中+三处 import）；两 profile 农场五链（sandbar-{admin-ui,workbench,knowledge,providers,temporal-tools}）realpath 指对实际目录、旧 suyou-* 链零残留；headless/cordis.patch.yml 必须仍是指向 profile 真身的软链（被换独立文件=两 profile 声明可静默漂移，「两 profile 都改」机制保障被掏空）。对抗面=链指错层/拼写差一字/漏 headless/漏删旧链/mv 漏改 import——逐环独立断言不信任单点自检。与 developer L1（单插件行为）与 sc_naming_residue_fulltext（文本收口）intent 不同面：本条守软链结构三方一致。Hermetic 纯文件系统读秒级；实现段落地前（农场未建/软链未重建）红属预期，arbitrate/merge 期必须绿",
      "python3 integration/t260907-05/sc_profile_farm_sandbar_links.py", "ro"),

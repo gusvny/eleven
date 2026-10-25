@@ -73,7 +73,11 @@ function archivedRec(id, opts = {}) {
   // t260904-09 四桶：有变更 1（archived）+ 不可算（数据缺失）1（live 无 delivery），
   // 零变更/在制两桶为 0——互斥不混装
   ok('占比 donut 四桶：有变更 1 + 不可算 1（零变更/在制=0）', donut && donut.series[0].data[0] === 1 && donut.series[0].data[3] === 1 && donut.series[0].data[1] === 0 && donut.series[0].data[2] === 0, JSON.stringify(donut?.series))
-  ok('reason 计数=1（坏 JSON/跨模板/失配三票不混入）', String(r.body.reason ?? '').includes('度量宇宙补全：1 票'), String(r.body.reason ?? '').slice(0, 240))
+  // t261026-01: the completion universe is project-level — the cross-template
+  // archived ticket is now honestly counted in the completion notice (and stays
+  // out of the chain blocks: no other-lane chain is registered).
+  ok('reason 计数：宇宙补全=2（项目级宇宙，跨模板存量票诚实计入；坏 JSON/失配两票仍不混入）', String(r.body.reason ?? '').includes('度量宇宙补全：2 票'), String(r.body.reason ?? '').slice(0, 240))
+  ok('跨模板存量票不入链块（workflows 无 other-lane 条目）', !(r.body.workflows ?? []).some((w) => w.workflow === 'other-lane'), JSON.stringify(r.body.workflows))
   ok('W3：list 行集合不变（冻结数组+快照一致）', JSON.stringify(frozenRows) === snapshot && frozenRows.length === 1)
 
   console.log('A2. archived 票 open 语义取缓存 rec.open（closed）→ closed 计数')

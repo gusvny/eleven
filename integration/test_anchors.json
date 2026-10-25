@@ -3743,6 +3743,16 @@
       "note": "",
       "sync_path": ""
     },
+    "integration/t261026-01/sc_t261026_01_archive_read_degrade.mjs": {
+      "anchor": "behaviour",
+      "note": "t261026-01 L2: legacy-era archive data reads verbatim from the on-disk store via the SANDBAR_TICKETS_DIR seam; damaged archives degrade by name (unreadable per id, no throw), missing root reads as named disabled, no chain invented",
+      "sync_path": ""
+    },
+    "integration/t261026-01/sc_t261026_01_metrics_population_window.mjs": {
+      "anchor": "behaviour",
+      "note": "t261026-01 L3: metrics ticket totals are a project-level WINDOW count (moving the window moves the count), chain-less rows counted in totals / excluded from chain blocks with a named exclusion, store delta named, invariant scoped by the epic filter",
+      "sync_path": ""
+    },
     "integration/t260929-08/sc_watchdog_real_engine_probe.py": {
       "anchor": "behaviour",
       "note": "",
