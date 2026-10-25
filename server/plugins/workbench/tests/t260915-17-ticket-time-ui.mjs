@@ -106,10 +106,13 @@ ok(ticketTimeFailReason('lane-gone', 't260915-17').includes('t260915-17'), 'D3: 
     && !/contentEditable/i.test(viewerRender)
     && !/保存/.test(viewerRender),
     'F3: viewer 只读刚性——无编辑控件/保存路径（源码层，Esc guard 判定除外）')
-  ok(index.includes("onClick={() => setFileViewer({ ticketId: detail.id, path: f, mode: 'settle' })}")
-    && index.includes("onClick={() => setFileViewer({ ticketId: detail.id, path: f, mode: 'base' })}"), 'F4: 状态卡文件行=settle、背景引用行=base（接线锚）')
+  // t261022-14: all wiring sites funnel through the shared openChangedFile
+  // entry (markdown → the block-comment reviewer; everything else → this
+  // read-only viewer, unchanged).
+  ok(index.includes("onClick={() => openChangedFile(detail.id, f, 'settle')}")
+    && index.includes("onClick={() => openChangedFile(detail.id, f, 'base')}"), 'F4: 状态卡文件行=settle、背景引用行=base（接线锚）')
   ok(index.includes('data-testid="ticket-refs"'), 'F5: 背景引用行组契约锚在场')
-  ok(/onOpenFile=\{\(p, m\) => setFileViewer\(\{ ticketId: detail\.id, path: p, mode: m \}\)\}/.test(index), 'F6: ChangesTab 文件行回调接线')
+  ok(/onOpenFile=\{\(p, m\) => openChangedFile\(detail\.id, p, m\)\}/.test(index), 'F6: ChangesTab 文件行回调接线')
 }
 
 console.log(`SUMMARY pass=${PASS} skip=0 fail=${FAIL}`)

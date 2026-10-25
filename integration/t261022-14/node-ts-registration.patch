@@ -1,0 +1,85 @@
+diff --git a/server/plugins/workbench/node.ts b/server/plugins/workbench/node.ts
+index e0b460ea..92c75dc4 100644
+--- a/server/plugins/workbench/node.ts
++++ b/server/plugins/workbench/node.ts
+@@ -170,6 +170,11 @@ function projectRootsFor(projectKey: unknown): string[] {
+ 
+ import { computeTicketDiff, type TicketForDiff } from './src/host/changes.ts'
+ import { readTicketTimeFile } from './src/host/ticket-time-file.ts'
++// t261022-14: the lane-file comment store for the markdown reviewer. MINIMAL
++// REGISTRATION ONLY (CF1, lost by settles a21f4d00/6846bb14 — see
++// integration/t261022-14/node-ts-registration.patch for the one-command
++// re-application if a settle drops this diff again).
++import { handleReviewComments } from './src/host/review-comments-routes.ts'
+ import { isTicketTimeMode } from './src/shared/ticket-time-model.ts'
+ import { ticketShowErrorReply } from './src/host/ticket-error.ts'
+ import { readInspectionArchive, readPeriodReport } from './src/host/inspection-archive.ts'
+@@ -1321,6 +1326,33 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
+         sendJson(res, 200, { ok: true, result })
+         return
+       }
++      // t261022-14: lane-file comment store for the markdown reviewer.
++      // GET = read the document; PUT = merge threads (atomic). Any other
++      // method is a 405 — this channel has exactly those two shapes. Handler
++      // + all fault modes live in src/host/review-comments-routes.ts.
++      if (op === 'review-comments') {
++        if (req.method === 'GET' || req.method === 'PUT') {
++          await handleReviewComments({
++            repo,
++            ticketIdOk: (x) => TICKET_ID_RE.test(x),
++            callTicketShow: (x) => callTool('ticket', { op: 'show', id: x }),
++            sendTicketShowError: (r, s, x) => sendTicketShowError(r, s, x),
++            resolveAnchorKey: (queryKey, ticketProject) => {
++              const a = resolveProjectAnchor(
++                queryKey !== null && queryKey !== '' ? queryKey : (typeof ticketProject === 'string' ? ticketProject : ''),
++                repo)
++              return a.ok
++                ? { ok: true as const, root: a.root }
++                : { ok: false as const, status: a.status, error: a.error }
++            },
++            sendJson,
++            readJsonBody,
++          }, req, res, id, new URL(req.url ?? '/', 'http://x'))
++          return
++        }
++        sendJson(res, 405, { ok: false, error: 'review-comments 只支持 GET（读）/ PUT（合并落盘）' })
++        return
++      }
+       if (op === 'review') {
+         if (req.method === 'GET') {
+           await handleTicketReviewGet(req, res, id)
+diff --git a/server/plugins/workbench/tests/t260905-05-modal-role-dialog.mjs b/server/plugins/workbench/tests/t260905-05-modal-role-dialog.mjs
+index 549945cc..c3b8fc06 100644
+--- a/server/plugins/workbench/tests/t260905-05-modal-role-dialog.mjs
++++ b/server/plugins/workbench/tests/t260905-05-modal-role-dialog.mjs
+@@ -45,6 +45,9 @@ const MODALS = [
+   { label: 'Rework', anchor: 'aria-label="Rework"' },
+   { label: 'Dispatch prompt', anchor: 'aria-label="Dispatch prompt"' },
+   { label: 'Content preview', anchor: 'aria-label="Content preview"' },
++  // t261022-14: the markdown reviewer overlay joins the roster (a working
++  // surface, but still a wb-modal dialog — role/aria/label like the rest).
++  { label: 'Markdown review', anchor: 'aria-label="Markdown review"' },
+ ]
+ // 容器行形状：className="wb-modal" + role + aria-modal 同标签行内出现
+ const containerRe = /<div className="wb-modal" role="dialog" aria-modal="true" aria-label="([^"]+)">/g
+diff --git a/server/plugins/workbench/tests/t260915-17-ticket-time-ui.mjs b/server/plugins/workbench/tests/t260915-17-ticket-time-ui.mjs
+index d4612616..8cf2accb 100644
+--- a/server/plugins/workbench/tests/t260915-17-ticket-time-ui.mjs
++++ b/server/plugins/workbench/tests/t260915-17-ticket-time-ui.mjs
+@@ -106,10 +106,13 @@ ok(ticketTimeFailReason('lane-gone', 't260915-17').includes('t260915-17'), 'D3:
+     && !/contentEditable/i.test(viewerRender)
+     && !/保存/.test(viewerRender),
+     'F3: viewer 只读刚性——无编辑控件/保存路径（源码层，Esc guard 判定除外）')
+-  ok(index.includes("onClick={() => setFileViewer({ ticketId: detail.id, path: f, mode: 'settle' })}")
+-    && index.includes("onClick={() => setFileViewer({ ticketId: detail.id, path: f, mode: 'base' })}"), 'F4: 状态卡文件行=settle、背景引用行=base（接线锚）')
++  // t261022-14: all wiring sites funnel through the shared openChangedFile
++  // entry (markdown → the block-comment reviewer; everything else → this
++  // read-only viewer, unchanged).
++  ok(index.includes("onClick={() => openChangedFile(detail.id, f, 'settle')}")
++    && index.includes("onClick={() => openChangedFile(detail.id, f, 'base')}"), 'F4: 状态卡文件行=settle、背景引用行=base（接线锚）')
+   ok(index.includes('data-testid="ticket-refs"'), 'F5: 背景引用行组契约锚在场')
+-  ok(/onOpenFile=\{\(p, m\) => setFileViewer\(\{ ticketId: detail\.id, path: p, mode: m \}\)\}/.test(index), 'F6: ChangesTab 文件行回调接线')
++  ok(/onOpenFile=\{\(p, m\) => openChangedFile\(detail\.id, p, m\)\}/.test(index), 'F6: ChangesTab 文件行回调接线')
+ }
+ 
+ console.log(`SUMMARY pass=${PASS} skip=0 fail=${FAIL}`)

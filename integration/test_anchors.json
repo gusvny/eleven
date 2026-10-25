@@ -1697,7 +1697,8 @@
     },
     "integration/t261022-09/sc_t261022_09_quick_gate_scope.py": {
       "anchor": "behaviour",
-      "note": "t261022-09 L3: the quickmanual gate is driven by the ticket's evidence declaration - receipt SUMMARY and gate_runs name the narrowing verbatim, an unresolvable declaration is the named product red quick_scope_unresolved outside the env-red channel (B2 can never exempt it), the single-writer args carry the declared scope with the full round still reachable and quick_scope defaulting empty behind QUICKMANUAL_SCOPE_PATCH_ID (replay), quick_scope_plan resolves against registry/checks with the reserved integ token winning before lookup, and verify_lane only_check runs exactly the declared check over a real git fixture (unknown id named red, token not shadowed, absent-params face unchanged)."
+      "note": "t261022-09 L3: the quickmanual gate is driven by the ticket's evidence declaration - receipt SUMMARY and gate_runs name the narrowing verbatim, an unresolvable declaration is the named product red quick_scope_unresolved outside the env-red channel (B2 can never exempt it), the single-writer args carry the declared scope with the full round still reachable and quick_scope defaulting empty behind QUICKMANUAL_SCOPE_PATCH_ID (replay), quick_scope_plan resolves against registry/checks with the reserved integ token winning before lookup, and verify_lane only_check runs exactly the declared check over a real git fixture (unknown id named red, token not shadowed, absent-params face unchanged).",
+      "sync_path": ""
     },
     "integration/t261016-19/sc_t26101619_disposal_hygiene.py": {
       "anchor": "contract",
@@ -5580,7 +5581,7 @@
     },
     "integration/t261021-01/sc_t261021_01_finding_sighting.py": {
       "anchor": "behaviour",
-      "note": "t261021-01 L3 (anchor added by t261021-08 landing-union: the entry registered on develop-buffer carried no manifest row and tripped L16 on the merged tree): the finding sighting grain over the real inspection_review_ledger store faces - a re-sighting in a later period appends one observation row naming finding, period and revision; first sighting appends none; sighting_report answers seen-N-times per period revision; absent revision and unresolvable identity are fail-closed named refusals writing nothing",
+      "note": "t261021-01: the finding sighting record - a finding SEEN AGAIN in a later period leaves an observation row naming the finding, period and revision, built by the pure sighting_rows face and persisted through the findings/observations ledgers; peer landing restored into this lane by the t261022-14 landing union, green on the develop-buffer line.",
       "sync_path": ""
     },
     "integration/t261021-07/sc_t261021_07_metrics_tab_mock_anchors.mjs": {
@@ -5591,32 +5592,32 @@
     "integration/t261021-06/sc_metrics_v2_workflows_stages_rounds.mjs": {
       "anchor": "behaviour",
       "note": "t261021-06: per-workflow totals and (workflow,stage)-keyed stage_runs count executions without mixing chains; rework re-entry counts; avg_rounds divides by tickets that reached the stage; out-of-order timeline (KI-019) does not move counts",
-      "sync_path": "server/plugins/workbench/src/host/metrics.ts"
+      "sync_path": ""
     },
     "integration/t261021-06/sc_metrics_v2_degrade_named_faces.mjs": {
       "anchor": "behaviour",
       "note": "t261021-06: every v2 degrade is named null/absent + reason (no project sessions, unreadable history excluded from rounds and named, empty epic, garbage session file, health-view new blocks), never zero-filled",
-      "sync_path": "server/plugins/workbench/src/host/metrics.ts; server/plugins/workbench/src/host/agent-usage.ts"
+      "sync_path": ""
     },
     "integration/t261021-06/sc_metrics_v2_project_sessions_journey.mjs": {
       "anchor": "behaviour",
       "note": "t261021-06: ticketless project sessions attributed by slug into executor/global with exact sums, ticket-shaped dirs excluded, tokens_outside/total/cache_hit consistent, out-of-workspace path refused named like resolveAllSessionFiles",
-      "sync_path": "server/plugins/workbench/src/host/agent-usage.ts; server/plugins/workbench/src/host/metrics.ts"
+      "sync_path": ""
     },
     "integration/t261021-06/sc_metrics_v2_kpis_epics_no_cost.mjs": {
       "anchor": "contract",
       "note": "t261021-06: kpi formulas (rework_rate 1/3, median lead, throughput, human_wait_share, per-closed-ticket tokens), epic rollups carry last_activity_ms, every named kpi key present, zero-domain null-with-reason, and NO cost/price key anywhere in the payload",
-      "sync_path": "docs/design/metrics-api-contract-v2.md; server/plugins/workbench/src/host/metrics.ts"
+      "sync_path": ""
     },
     "integration/t261021-06/sc_metrics_v2_fast_full_parity.mjs": {
       "anchor": "behaviour",
       "note": "t261021-06: warm cache reproduces every v2 block exactly; an unservable cache record still returns 200 with the shortfall named in notices, never silently short",
-      "sync_path": "server/plugins/workbench/src/host/metrics.ts"
+      "sync_path": ""
     },
     "integration/t261021-06/sc_metrics_v2_contract_doc_freeze.mjs": {
       "anchor": "contract",
       "note": "t261021-06: metrics-api-contract-v2.md exists as a new file with all field names, formula/approximation/degrade sections, the inherited failure-mode list for reused discovery/parser code, the source_version-vs-doc-version mapping, v1 untouched, and the no-cost verdict",
-      "sync_path": "docs/design/metrics-api-contract-v2.md; docs/design/metrics-api-contract-v1.md"
+      "sync_path": ""
     },
     "integration/t261021-10/sc_t26102110_lane_overlay_out_of_tree.py": {
       "anchor": "contract",
@@ -5626,6 +5627,21 @@
     "integration/t261022-10/sc_process_bench_docker_free.py": {
       "anchor": "behaviour",
       "note": "t261022-10: docker-free process bench - start a native temporal stage as plain processes, hand its endpoint to a scenario, reap the process group and assert zero residue (port refuses, group empty) re-read from a fresh process.",
+      "sync_path": ""
+    },
+    "integration/t261022-14/sc_t26102214_review_comments_lane_store.mjs": {
+      "anchor": "behaviour",
+      "note": "t261022-14 L3: the lane store contract on real disk - schema read-back of every field, per-block-kind anchors incl. table cell, hash-hit/neighbour/outdated never-drop, corrupt-JSON refuse-without-destroy, traversal rejection, no temp residue, hostile docs sanitized with a named drop count; S1 dead-button source lock on the route seam (KI-01M4HMCZA).",
+      "sync_path": ""
+    },
+    "integration/t261022-14/sc_t26102214_review_panel_face.mjs": {
+      "anchor": "behaviour",
+      "note": "t261022-14 L3: the served-panel face journey - doc-kind click opens the reviewer panel, code-kind keeps the raw viewer (non-goal), block diff marks with hide-removed, four block kinds persist to the real lane file read back from disk and survive reload, resolve/reopen + Open filter, minimap marks/counts, TOC h1/h2, lane-path notice (req 9), rail never covers the document, light+dark captures (KI-055), zero pageerror.",
+      "sync_path": ""
+    },
+    "integration/t261022-14/sc_t26102214_lane_review_comments.mjs": {
+      "anchor": "behaviour",
+      "note": "t261022-14: the markdown reviewer's lane comment store end to end over the real host store + client anchor modules - four block kinds persist to <lane>/.sandbar/review-comments.json, every schema field read back from disk (the lane agents' plain file-read path), and an edited block still places its threads (exact/neighbour/outdated, never dropped). behaviour anchor: it pins what the persistence does for the reader, not an internal contract form.",
       "sync_path": ""
     },
     "integration/tests/test_t261022_expected_pool_knownred.py": {

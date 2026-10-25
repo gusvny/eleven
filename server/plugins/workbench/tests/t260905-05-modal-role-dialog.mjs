@@ -45,6 +45,9 @@ const MODALS = [
   { label: 'Rework', anchor: 'aria-label="Rework"' },
   { label: 'Dispatch prompt', anchor: 'aria-label="Dispatch prompt"' },
   { label: 'Content preview', anchor: 'aria-label="Content preview"' },
+  // t261022-14: the markdown reviewer overlay joins the roster (a working
+  // surface, but still a wb-modal dialog — role/aria/label like the rest).
+  { label: 'Markdown review', anchor: 'aria-label="Markdown review"' },
 ]
 // 容器行形状：className="wb-modal" + role + aria-modal 同标签行内出现
 const containerRe = /<div className="wb-modal" role="dialog" aria-modal="true" aria-label="([^"]+)">/g

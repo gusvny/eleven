@@ -699,7 +699,7 @@ def main():
                 "user_request": "integration e2e: a UI-surface change must run the ui_evidence stage before the gate",
                 "write_set": [UI_FILE],
                 "caller_project": PROJECT_KEY,
-            }, env_for(stage), timeout=300)
+            }, env_for(stage), timeout=300)  # SANCTIONED-WAIT: journey stage runs the real worker pipeline (minutes by design); bound is the stage-level 300s cap, asserted via accepted(out3)
             good3, why3 = accepted(out3, TID_UI)
             check(good3, "L2c UI 票受理（%s）" % why3)
             if good3:

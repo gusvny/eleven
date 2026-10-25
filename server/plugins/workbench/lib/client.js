@@ -301,7 +301,7 @@ function splitRow(line) {
 //#endregion
 //#region ../knowledge/src/shared/blocks.ts
 /** 表格行 → 单元格数组（client 做单元格级对齐也用）。 */
-function splitCells(line) {
+function splitCells$1(line) {
 	let s = line.trim();
 	if (s.startsWith("|")) s = s.slice(1);
 	if (s.endsWith("|")) s = s.slice(0, -1);
@@ -7456,7 +7456,7 @@ if (typeof document !== "undefined" && document.querySelector("style[data-plugin
 	tag.textContent = CSS$3;
 	document.head.appendChild(tag);
 }
-const API$1 = "/sandbar-providers/api";
+const API$2 = "/sandbar-providers/api";
 /** 多项目化（260823）：路由表两条 URL（/sandbar-admin/api/routes*，按项目主目录解析
 *  model-routes.yaml）统一拼 ?project=；provider 管理（/sandbar-providers/api/*）是
 *  dsh 全局设施，不分流。
@@ -7478,7 +7478,7 @@ async function apiPost$1(path, body) {
 		body: JSON.stringify(body ?? {})
 	})).json();
 }
-const KIND_LABEL$1 = {
+const KIND_LABEL$2 = {
 	"pi-ai": "llm-pi-ai 路由",
 	external: "官方 deepseek 适配器",
 	preset: "预置（未添加）"
@@ -7565,7 +7565,7 @@ function ProvidersSection({ projectKey }) {
 	const [curRe, setCurRe] = (0, react.useState)("");
 	async function reload() {
 		try {
-			const d = await apiGet$1(`${API$1}/state`);
+			const d = await apiGet$1(`${API$2}/state`);
 			if (d?.ok !== true) throw new Error(d?.error ?? "加载失败");
 			setData(d.result);
 			setError("");
@@ -7609,7 +7609,7 @@ function ProvidersSection({ projectKey }) {
 	}
 	async function submitAdd() {
 		const models = fModels.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
-		if (await post(`${API$1}/add-provider`, {
+		if (await post(`${API$2}/add-provider`, {
 			id: fId,
 			displayName: fDisplay,
 			api: fApi,
@@ -7637,7 +7637,7 @@ function ProvidersSection({ projectKey }) {
 	}
 	async function submitSetCurrent() {
 		if (!curId) return;
-		if (await post(`${API$1}/set-current`, {
+		if (await post(`${API$2}/set-current`, {
 			provider: curId,
 			model: curModel,
 			reasoningEffort: curRe
@@ -7645,7 +7645,7 @@ function ProvidersSection({ projectKey }) {
 	}
 	async function saveNote(p) {
 		const note = noteDraft[p.id] ?? p.note;
-		await post(`${API$1}/update-note`, {
+		await post(`${API$2}/update-note`, {
 			id: p.id,
 			note
 		}, `已保存「${p.id}」计费说明`);
@@ -7654,7 +7654,7 @@ function ProvidersSection({ projectKey }) {
 		setBusy(true);
 		setMsg("");
 		try {
-			const r = await apiPost$1(`${API$1}/reorder`, { order });
+			const r = await apiPost$1(`${API$2}/reorder`, { order });
 			if (r?.ok !== true) {
 				setMsg(`失败：${r?.error ?? "未知错误"}`);
 				return;
@@ -7898,7 +7898,7 @@ function ProvidersSection({ projectKey }) {
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: "syp-badge",
 											"data-kind": p.kind,
-											children: KIND_LABEL$1[p.kind] ?? p.kind
+											children: KIND_LABEL$2[p.kind] ?? p.kind
 										}),
 										p.isCurrent && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: "syp-badge",
@@ -8002,7 +8002,7 @@ function ProvidersSection({ projectKey }) {
 									className: "syp-btn syp-btn-danger",
 									disabled: busy,
 									onClick: () => {
-										if (window.confirm(`删除 provider「${p.id}」（从 llm-pi-ai.providers 移除）？`)) post(`${API$1}/delete-provider`, { id: p.id }, `已删除「${p.id}」`);
+										if (window.confirm(`删除 provider「${p.id}」（从 llm-pi-ai.providers 移除）？`)) post(`${API$2}/delete-provider`, { id: p.id }, `已删除「${p.id}」`);
 									},
 									children: "删除"
 								})
@@ -10253,6 +10253,957 @@ function WorkbenchSidebar(props) {
 						onClose: () => setModal(null)
 					})
 				]
+			})
+		]
+	});
+}
+//#endregion
+//#region src/shared/view-project.ts
+/**
+* sandbar-workbench · 中列当前项目 key 的模块单态（session-entry t260828-06 从
+* src/client/index.tsx 迁出为共享模块）。
+*
+* 为什么共享：hero 接管组件（client/hero.tsx → HeroSessionEntry）挂在
+* `conversation.hero.*` 槽上，scope=root——不在中列组件树内，拿不到 WorkbenchSection
+* 的 projectKey prop；只能读这份单态。index.tsx 的 apiGet/apiPost 拼 ?project=
+* 也走它（原语义不变：WorkbenchSection 挂载/切换时 setViewProject）。
+*
+* 空串 = 尚无中列视图激活过（首屏直落 hero 的场景）——hero 侧用
+* 「单项目注册表兜底」解析（见 HeroSessionEntry 的 projectKey 推导），多项目
+* 未选则新建禁用并提示，与侧栏「会话」区同口径（不造隐形缺省）。
+*/
+let viewProject = "";
+/** 当前中列视图的项目 key（空串=未选/未激活）。 */
+function getViewProject() {
+	return viewProject;
+}
+/** WorkbenchSection 挂载/切换项目时写入（index.tsx 唯一写入点）。 */
+function setViewProject(project) {
+	viewProject = typeof project === "string" ? project : "";
+}
+//#endregion
+//#region src/client/review-panel-model.ts
+/**
+* review-panel-model.ts — pure model for the changed-files markdown reviewer
+* (t261022-14). Zero React / DOM / node imports; unit-tested directly by
+* tests/t26102214-review-panel-model.mjs.
+*
+* Block model (ticket requirement 2): the document is split into blocks — one
+* heading, one paragraph, one list item, ONE TABLE CELL each. The diff face
+* (host changes.ts → knowledge blocks.ts) ships ROW-level blocks for tables,
+* so this model subdivides every table-head/table-row block into per-cell
+* child blocks; the cell becomes the unit of diff mark, comment anchor and
+* navigation (plan §0 — knowledge/ stays untouched, outside the write set).
+*
+* Anchoring (requirement 7): a thread records { index, hash, neighbour }.
+* Resolution: exact hash match first → index + neighbour fallback → outdated
+* at the end of the document. A thread is NEVER silently dropped.
+*
+* Malformed-input discipline (external data is untrusted, same family as
+* lane-map-model): nothing throws on hostile shapes; unusable entries are
+* skipped with a count the panel face surfaces.
+*/
+/** Tolerant string (everything else → ''). */
+function asStr$1(v, cap = 4e3) {
+	return typeof v === "string" ? v.slice(0, cap) : "";
+}
+function asNum(v) {
+	return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+/** djb2-style hex hash over the block text — the anchor hash on both write and resolve sides. */
+function blockHash(text) {
+	let h = 5381;
+	for (let i = 0; i < text.length; i++) h = (h * 33 ^ text.charCodeAt(i)) >>> 0;
+	return h.toString(16).padStart(8, "0");
+}
+/**
+* Word-level diff of a modified block's text (requirement 3: the exact changed
+* text carries word-level marks). Tokenize on whitespace-boundary words, align
+* with an LCS DP (documents are small, O(n·m) is fine), emit runs.
+*/
+function wordDiff(oldText, newText) {
+	const a = oldText.split(/(\s+)/).filter((t) => t !== "");
+	const b = newText.split(/(\s+)/).filter((t) => t !== "");
+	const n = a.length, m = b.length;
+	const dp = [];
+	for (let i = 0; i <= n; i++) dp.push(new Uint32Array(m + 1));
+	for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+	const ops = [];
+	let pendDel = "", pendAdd = "";
+	const flush = () => {
+		if (pendDel !== "" || pendAdd !== "") {
+			ops.push({
+				del: pendDel || void 0,
+				add: pendAdd || void 0
+			});
+			pendDel = "";
+			pendAdd = "";
+		}
+	};
+	let i = 0, j = 0;
+	while (i < n && j < m) {
+		if (a[i] === b[j]) {
+			flush();
+			ops.push({ add: b[j] });
+			i++;
+			j++;
+			continue;
+		}
+		if (dp[i + 1][j] >= dp[i][j + 1]) {
+			pendDel += a[i];
+			i++;
+		} else {
+			pendAdd += b[j];
+			j++;
+		}
+	}
+	while (i < n) pendDel += a[i++];
+	while (j < m) pendAdd += b[j++];
+	flush();
+	return ops;
+}
+const STATUSES = [
+	"added",
+	"removed",
+	"modified",
+	"unchanged"
+];
+function cleanStatus(v) {
+	return STATUSES.includes(v) ? v : "unchanged";
+}
+/** Split one markdown table row's text into cell texts (pipes trimmed; separator rows collapse to their head cell count). */
+function splitCells(text) {
+	let s = (text.split("\n")[0] ?? "").trim();
+	if (s.startsWith("|")) s = s.slice(1);
+	if (s.endsWith("|")) s = s.slice(0, -1);
+	return s.split("|").map((c) => c.trim());
+}
+/**
+* Build the panel blocks of one doc file from the diff face's blocks.
+* Table rows become per-cell blocks; a row whose cells differ between old and
+* new marks exactly the changed cells (unchanged cells stay unmarked), via the
+* same word-diff used for modified paragraphs.
+*/
+function buildBlocks(rawBlocks) {
+	if (!Array.isArray(rawBlocks)) return [];
+	const out = [];
+	let neighbour = "";
+	for (const raw of rawBlocks) {
+		if (raw === null || typeof raw !== "object") continue;
+		const r = raw;
+		const type = asStr$1(r.type, 40);
+		if (type === "") continue;
+		const status = cleanStatus(r.status);
+		const level = asNum(r.level) ?? (type === "heading" ? 1 : 0);
+		const oldText = asStr$1(r.oldText);
+		const newText = asStr$1(r.newText);
+		const text = status === "removed" ? oldText : newText;
+		if (type === "table-head" || type === "table-row") {
+			const oldCells = splitCells(oldText);
+			const newCells = splitCells(newText);
+			const cols = Math.max(oldCells.length, newCells.length);
+			for (let c = 0; c < cols; c++) {
+				const oc = oldCells[c] ?? "";
+				const nc = newCells[c] ?? "";
+				const cellStatus = status === "added" ? "added" : status === "removed" ? "removed" : oc !== nc ? "modified" : "unchanged";
+				out.push({
+					index: out.length,
+					type: "table-cell",
+					level: 0,
+					text: status === "removed" ? oc : nc,
+					status: cellStatus,
+					cell: {
+						row: out.length,
+						col: c
+					},
+					inlineOps: cellStatus === "modified" ? wordDiff(oc, nc) : void 0,
+					hash: blockHash(status === "removed" ? oc : nc),
+					neighbour
+				});
+			}
+		} else {
+			const ops = status === "modified" && oldText !== "" ? wordDiff(oldText, newText) : void 0;
+			out.push({
+				index: out.length,
+				type,
+				level,
+				text,
+				status,
+				inlineOps: ops,
+				hash: blockHash(text),
+				neighbour
+			});
+		}
+		const summary = asStr$1(r.summary, 200);
+		neighbour = summary !== "" ? summary : (out[out.length - 1]?.text ?? "").slice(0, 80);
+	}
+	return out;
+}
+/**
+* Normalize whatever the lane file (or the network) carried into threads.
+* Unusable entries are skipped and counted — the count is surfaced, not silent.
+*/
+function normalizeThreads(raw) {
+	const threads = [];
+	let dropped = 0;
+	const arr = Array.isArray(raw) ? raw : [];
+	const seen = /* @__PURE__ */ new Set();
+	for (const item of arr) {
+		if (item === null || typeof item !== "object") {
+			dropped++;
+			continue;
+		}
+		const r = item;
+		const id = asStr$1(r.id, 200);
+		const anchor = r.anchor ?? {};
+		const blockIndex = asNum(anchor.index);
+		if (id === "" || blockIndex === null || blockIndex < 0 || seen.has(id)) {
+			dropped++;
+			continue;
+		}
+		seen.add(id);
+		const replies = [];
+		if (Array.isArray(r.replies)) for (const rep of r.replies) {
+			if (rep === null || typeof rep !== "object") continue;
+			const rr = rep;
+			const text = asStr$1(rr.text);
+			if (text === "") continue;
+			replies.push({
+				author: asStr$1(rr.author, 200),
+				at: asNum(rr.at) ?? 0,
+				text
+			});
+		}
+		threads.push({
+			id,
+			parentId: r.parentId === null || r.parentId === void 0 ? null : asStr$1(r.parentId, 200) || null,
+			blockIndex: Math.trunc(blockIndex),
+			hash: asStr$1(anchor.hash, 200),
+			neighbour: asStr$1(anchor.neighbour, 400),
+			author: asStr$1(r.author, 200),
+			at: asNum(r.at) ?? 0,
+			text: asStr$1(r.text),
+			resolved: r.resolved === true,
+			replies
+		});
+	}
+	return {
+		threads,
+		dropped
+	};
+}
+/** Threads whose anchor points at this block (resolved ones included — the badge needs both counts). */
+function threadsForBlock(threads, blockIndex) {
+	return threads.filter((t) => t.blockIndex === blockIndex);
+}
+function openCount(threads, blockIndex) {
+	return threadsForBlock(threads, blockIndex).filter((t) => !t.resolved).length;
+}
+/** Badge-grey rule (requirement 5): commented but every thread resolved. */
+function hasOnlyResolved(threads, blockIndex) {
+	const ts = threadsForBlock(threads, blockIndex);
+	return ts.length > 0 && ts.every((t) => t.resolved);
+}
+function filterThreads(threads, f) {
+	if (f === "open") return threads.filter((t) => !t.resolved);
+	if (f === "resolved") return threads.filter((t) => t.resolved);
+	return threads;
+}
+/**
+* Requirement 7: exact hash match first; otherwise index + neighbour fallback;
+* otherwise outdated. Never drops the thread — the caller renders outdated
+* threads at the end of the document.
+*/
+function resolveAnchor(blocks, thread) {
+	for (const b of blocks) if (b.hash !== "" && b.hash === thread.hash) return {
+		kind: "exact",
+		index: b.index
+	};
+	const at = blocks[thread.blockIndex];
+	if (at !== void 0 && thread.neighbour !== "" && at.neighbour === thread.neighbour) return {
+		kind: "neighbour",
+		index: at.index
+	};
+	const prev = blocks[thread.blockIndex - 1];
+	const next = blocks[thread.blockIndex + 1];
+	if (prev !== void 0 && thread.neighbour !== "" && prev.neighbour === thread.neighbour) return {
+		kind: "neighbour",
+		index: prev.index
+	};
+	if (next !== void 0 && thread.neighbour !== "" && next.neighbour === thread.neighbour) return {
+		kind: "neighbour",
+		index: next.index
+	};
+	return { kind: "outdated" };
+}
+/** Resolve every thread against the current blocks; outdated ones go to the end, in order (requirement 7). */
+function placeThreads(blocks, threads) {
+	const placed = threads.map((thread) => ({
+		thread,
+		resolution: resolveAnchor(blocks, thread)
+	}));
+	const rank = (r) => r.kind === "exact" ? 0 : r.kind === "neighbour" ? 1 : 2;
+	return placed.map(({ thread, resolution }) => ({
+		index: resolution.kind === "outdated" ? blocks.length + rank(resolution) : resolution.index,
+		thread,
+		resolution
+	})).sort((a, b) => a.index - b.index || a.thread.at - b.thread.at);
+}
+/**
+* Serialize a model Thread into the STORE record shape the lane file carries
+* (arbitrate gen0 CF2: the panel must PUT `anchor:{index,hash,neighbour}` —
+* the model's flat `blockIndex/hash/neighbour` shape is model-internal and the
+* store's sanitizer rightly refuses it). This is the ONLY serialization seam:
+* persist() goes through it, so a panel write can never diverge from the
+* schema the lane agents read.
+*/
+function toStoreThread(t) {
+	return {
+		id: t.id,
+		parentId: t.parentId,
+		anchor: {
+			index: t.blockIndex,
+			hash: t.hash,
+			neighbour: t.neighbour
+		},
+		author: t.author,
+		at: t.at,
+		text: t.text,
+		resolved: t.resolved,
+		replies: t.replies.map((r) => ({
+			at: r.at,
+			author: r.author,
+			text: r.text
+		}))
+	};
+}
+/** h1/h2 entries in document order (requirement 1a / acceptance f). */
+function buildToc(blocks) {
+	return blocks.filter((b) => b.type === "heading" && (b.level === 1 || b.level === 2)).map((b) => ({
+		index: b.index,
+		level: b.level,
+		text: b.text.replace(/^#+\s*/, "").slice(0, 200)
+	}));
+}
+function buildMinimap(blocks, threads) {
+	const marks = [];
+	for (const b of blocks) {
+		const open = openCount(threads, b.index);
+		const commented = threadsForBlock(threads, b.index).length > 0;
+		if (b.status === "unchanged" && !commented) continue;
+		marks.push({
+			index: b.index,
+			status: b.status,
+			open,
+			onlyResolved: commented && open === 0
+		});
+	}
+	return marks;
+}
+//#endregion
+//#region src/client/review-panel.tsx
+/**
+* review-panel.tsx — the changed-files markdown reviewer panel (t261022-14).
+*
+* Layout (ticket requirement 1): a left rail (changed doc files → per-file TOC,
+* the comment list in document order with an Open/All/Resolved filter, the rail
+* collapses from its own control and never overlays the document) and the
+* rendered markdown on the right, split into blocks (requirement 2) with diff
+* marks (requirement 3), a minimap rail (requirement 4) and per-block comment
+* threads (requirement 5).
+*
+* Persistence (requirement 6): every thread lives in the ticket's lane file
+* `<lane>/.sandbar/review-comments.json` via the host's GET/PUT
+* `/wf/tickets/<id>/review-comments` route — this component holds the threads
+* in memory, PUTs the full list on every change, and reads it back on mount
+* (survives a panel reload). The header shows the lane file path and states
+* plainly that the lane agents read it (requirement 9).
+*
+* The visual baseline is the host-approved mock (~/Documents/markdown-reviewer-mock.html);
+* behaviour is reproduced, none of its code is copied. Product sources only —
+* no external code. All UI copy is English (host order 260925).
+*/
+const API$1 = "/sandbar-workbench/api/wf";
+/** Status badge text (same words the diff fold already uses). */
+const STATUS_LABEL$1 = {
+	added: "added",
+	removed: "removed",
+	modified: "modified",
+	unchanged: ""
+};
+const KIND_LABEL$1 = {
+	heading: "heading",
+	paragraph: "para",
+	"list-item": "list",
+	"table-cell": "cell",
+	code: "code",
+	quote: "quote",
+	image: "image",
+	hr: "hr",
+	frontmatter: "meta",
+	"table-head": "table",
+	"table-row": "row"
+};
+function withProject$1(path) {
+	const viewProject = getViewProject();
+	if (!viewProject) return path;
+	return path + (path.includes("?") ? "&" : "?") + "project=" + encodeURIComponent(viewProject);
+}
+function MarkdownReviewer({ target, onClose }) {
+	const { ticketId } = target;
+	const [path, setPath] = (0, react.useState)(target.path);
+	const [docFiles, setDocFiles] = (0, react.useState)([]);
+	const [rawBlocks, setRawBlocks] = (0, react.useState)([]);
+	const [lane, setLane] = (0, react.useState)("");
+	const [loadErr, setLoadErr] = (0, react.useState)("");
+	const [threads, setThreads] = (0, react.useState)([]);
+	const [dropped, setDropped] = (0, react.useState)(0);
+	const [filter, setFilter] = (0, react.useState)("open");
+	const [hideRemoved, setHideRemoved] = (0, react.useState)(false);
+	const [railOpen, setRailOpen] = (0, react.useState)(true);
+	const [composing, setComposing] = (0, react.useState)(null);
+	const [draft, setDraft] = (0, react.useState)("");
+	const [replying, setReplying] = (0, react.useState)(null);
+	const [replyDraft, setReplyDraft] = (0, react.useState)("");
+	const [openThread, setOpenThread] = (0, react.useState)(null);
+	const [viewportIndex, setViewportIndex] = (0, react.useState)(0);
+	const [saveState, setSaveState] = (0, react.useState)("");
+	const docRef = (0, react.useRef)(null);
+	const blocks = (0, react.useMemo)(() => buildBlocks(rawBlocks), [rawBlocks]);
+	const commentsEndpoint = `${API$1}/tickets/${encodeURIComponent(ticketId)}/review-comments?path=${encodeURIComponent(path)}`;
+	(0, react.useEffect)(() => {
+		let dead = false;
+		(async () => {
+			try {
+				const d = await fetch(withProject$1(`${API$1}/tickets/${encodeURIComponent(ticketId)}/diff`)).then((r) => r.json());
+				if (dead) return;
+				if (d?.ok !== true) throw new Error(d?.error ?? "diff read failed");
+				const face = d.result;
+				setLane(typeof face.worktree === "string" ? face.worktree : "");
+				const files = Array.isArray(face.files) ? face.files : [];
+				setDocFiles(files.filter((f) => f.kind === "doc" && typeof f.path === "string").map((f) => f.path));
+				const file = files.find((f) => typeof f?.path === "string" && f.path === path);
+				if (file === void 0) throw new Error(`file not in the ticket's changed set: ${path}`);
+				setRawBlocks(file.blocks ?? []);
+				const c = await fetch(withProject$1(commentsEndpoint)).then((r) => r.json());
+				if (dead) return;
+				if (c?.ok === true && c.result?.ok === true && c.result.doc !== null) {
+					const n = normalizeThreads(c.result.doc.threads);
+					setThreads(n.threads);
+					setDropped(n.dropped);
+				} else if (c?.ok === true && c.result?.ok === false) setLoadErr(`lane comments unreadable: ${String(c.result.reason ?? "")}`);
+			} catch (err) {
+				if (!dead) setLoadErr(String(err instanceof Error ? err.message : err));
+			}
+		})();
+		return () => {
+			dead = true;
+		};
+	}, [
+		ticketId,
+		path,
+		commentsEndpoint
+	]);
+	/**
+	* PUT the full thread list; the host merges by id (last write wins per
+	* thread). Serialized through toStoreThread (arbitrate gen0 CF2): the wire
+	* shape is the STORE record shape (anchor:{index,hash,neighbour}), not the
+	* model's internal flat shape — a raw model thread is dropped by the store's
+	* sanitizer, which is the exact defect this seam now prevents.
+	*/
+	async function persist(next) {
+		setSaveState("saving…");
+		try {
+			const r = await (await fetch(withProject$1(commentsEndpoint), {
+				method: "PUT",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ threads: next.map(toStoreThread) })
+			})).json();
+			if (r?.ok !== true) throw new Error(r?.error ?? "save failed");
+			setThreads(next);
+			setSaveState("");
+		} catch (err) {
+			setSaveState(`save failed: ${String(err instanceof Error ? err.message : err)}`);
+		}
+	}
+	function addComment(blockIndex) {
+		if (draft.trim() === "") return;
+		const b = blocks[blockIndex];
+		if (b === void 0) return;
+		const thread = {
+			id: `th-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+			parentId: null,
+			blockIndex,
+			hash: b.hash,
+			neighbour: b.neighbour,
+			author: "human",
+			at: Date.now(),
+			text: draft.trim(),
+			resolved: false,
+			replies: []
+		};
+		setDraft("");
+		setComposing(null);
+		persist([...threads, thread]);
+	}
+	function addReply(threadId) {
+		if (replyDraft.trim() === "") return;
+		persist(threads.map((t) => t.id === threadId ? {
+			...t,
+			replies: [...t.replies, {
+				author: "human",
+				at: Date.now(),
+				text: replyDraft.trim()
+			}]
+		} : t));
+		setReplyDraft("");
+		setReplying(null);
+	}
+	function setResolved(threadId, resolved) {
+		persist(threads.map((t) => t.id === threadId ? {
+			...t,
+			resolved
+		} : t));
+	}
+	function onScroll() {
+		const root = docRef.current;
+		if (root === null) return;
+		const top = root.getBoundingClientRect().top + 40;
+		const nodes = root.querySelectorAll("[data-block-index]");
+		for (const n of nodes) if (n.getBoundingClientRect().bottom >= top) {
+			setViewportIndex(Number(n.dataset.blockIndex));
+			return;
+		}
+	}
+	function jumpTo(index) {
+		const node = docRef.current?.querySelector(`[data-block-index="${index}"]`);
+		if (node !== null && node !== void 0) node.scrollIntoView({
+			block: "start",
+			behavior: "smooth"
+		});
+	}
+	const toc = (0, react.useMemo)(() => buildToc(blocks), [blocks]);
+	const minimap = (0, react.useMemo)(() => buildMinimap(blocks, threads), [blocks, threads]);
+	const visible = (0, react.useMemo)(() => blocks.filter((b) => !(hideRemoved && b.status === "removed")), [blocks, hideRemoved]);
+	const placed = (0, react.useMemo)(() => placeThreads(blocks, threads), [blocks, threads]);
+	const listed = (0, react.useMemo)(() => filterThreads(placed.map((p) => p.thread), filter), [placed, filter]);
+	if (loadErr !== "" && blocks.length === 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-rv-wrap",
+		"data-testid": "reviewer-panel",
+		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "wb-rv-head",
+			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+				className: "wb-rv-title",
+				children: ["Markdown review — ", path]
+			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				className: "wb-rv-close",
+				onClick: onClose,
+				"aria-label": "Close reviewer",
+				children: "×"
+			})]
+		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			className: "wb-rv-err",
+			children: loadErr
+		})]
+	});
+	const lastReplyOf = (t) => t.replies.length > 0 ? t.replies[t.replies.length - 1] : void 0;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-rv-wrap",
+		"data-testid": "reviewer-panel",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-rv-head",
+				children: [
+					railOpen ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "wb-rv-railtoggle",
+						"data-testid": "rail-toggle",
+						title: "Collapse the rail",
+						onClick: () => setRailOpen(false),
+						children: "◀ rail"
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "wb-rv-railtoggle",
+						"data-testid": "rail-toggle",
+						title: "Expand the rail",
+						onClick: () => setRailOpen(true),
+						children: "▶ rail"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-rv-title",
+						children: ["Markdown review — ", path]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+						className: "wb-rv-hideremoved",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							type: "checkbox",
+							checked: hideRemoved,
+							"data-testid": "hide-removed",
+							onChange: (e) => setHideRemoved(e.target.checked)
+						}), " hide removed"]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "wb-rv-close",
+						onClick: onClose,
+						"aria-label": "Close reviewer",
+						children: "×"
+					})
+				]
+			}),
+			loadErr !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-rv-err",
+				children: loadErr
+			}),
+			dropped > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-rv-note",
+				"data-testid": "dropped-note",
+				children: [
+					dropped,
+					" unreadable comment entr",
+					dropped === 1 ? "y was" : "ies were",
+					" skipped (named here, never silent)."
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: `wb-rv-body${railOpen ? "" : " rail-closed"}`,
+				children: [
+					railOpen && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-rv-rail",
+						"data-testid": "reviewer-rail",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "wb-rv-sec",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "wb-rv-secttl",
+									children: "Changed markdown files"
+								}), docFiles.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									className: `wb-rv-toc l1${f === path ? " on" : ""}`,
+									"data-testid": "rail-file",
+									title: "Open in the reviewer",
+									onClick: () => {
+										setPath(f);
+										setComposing(null);
+										setOpenThread(null);
+									},
+									children: [f === path ? "▸ " : "", f]
+								}, f))]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "wb-rv-sec",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "wb-rv-secttl",
+										children: "Table of contents"
+									}),
+									toc.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "wb-rv-empty",
+										children: "No h1/h2 headings."
+									}),
+									toc.map((e) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: `wb-rv-toc l${e.level}`,
+										"data-testid": "toc-entry",
+										onClick: () => jumpTo(e.index),
+										children: e.text
+									}, e.index))
+								]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "wb-rv-sec",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-rv-secttl",
+										children: ["Comments", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "wb-rv-filters",
+											"data-testid": "comment-filter",
+											children: [
+												"open",
+												"all",
+												"resolved"
+											].map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: `wb-rv-filter${filter === f ? " on" : ""}`,
+												onClick: () => setFilter(f),
+												children: f
+											}, f))
+										})]
+									}),
+									listed.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-rv-empty",
+										children: [
+											"No ",
+											filter === "all" ? "" : `${filter} `,
+											"comments."
+										]
+									}),
+									listed.map((t) => {
+										const b = blocks[t.blockIndex];
+										const last = lastReplyOf(t);
+										return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: `wb-rv-thread${t.resolved ? " resolved" : ""}`,
+											"data-testid": "rail-thread",
+											onClick: () => {
+												setOpenThread(t.id);
+												if (t.blockIndex < blocks.length) jumpTo(t.blockIndex);
+											},
+											children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+													className: `wb-d-badge${t.resolved ? "" : ""}`,
+													"data-s": t.resolved ? "unchanged" : "added",
+													children: b !== void 0 ? KIND_LABEL$1[b.type] ?? b.type : "outdated"
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+													className: "wb-rv-snippet",
+													children: t.text.slice(0, 80)
+												}),
+												last !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+													className: "wb-rv-lastreply",
+													children: ["↩ ", last.text.slice(0, 60)]
+												})
+											]
+										}, t.id);
+									})
+								]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "wb-rv-sec wb-rv-laneinfo",
+								"data-testid": "lane-info",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "wb-rv-secttl",
+										children: "Where this lives"
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", {
+										className: "wb-rv-lanepath",
+										children: lane !== "" ? `${lane}/.sandbar/review-comments.json` : "lane file"
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "wb-rv-lanenote",
+										children: "The lane's developer and integration agents read this file at their next turn and act on open threads. Resolving is yours; they leave thread state as they find it."
+									})
+								]
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-rv-minimap",
+						"data-testid": "minimap",
+						onScroll: void 0,
+						children: minimap.map((m) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+							className: "wb-rv-mmark",
+							"data-s": m.status,
+							"data-current": m.index === viewportIndex || void 0,
+							"data-testid": "minimap-mark",
+							title: `${STATUS_LABEL$1[m.status] || "block"} #${m.index}${m.open > 0 ? ` · ${m.open} open` : ""}${m.onlyResolved ? " · resolved" : ""}`,
+							onClick: () => {
+								jumpTo(m.index);
+								const ts = threadsForBlock(threads, m.index);
+								if (ts.length > 0) setOpenThread(ts[0].id);
+							},
+							children: [m.open > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "wb-rv-mcount",
+								children: m.open
+							}), m.open === 0 && m.onlyResolved && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "wb-rv-mcount grey",
+								children: "✓"
+							})]
+						}, m.index))
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-rv-doc wb-md",
+						ref: docRef,
+						onScroll,
+						"data-testid": "reviewer-doc",
+						children: [visible.map((b) => {
+							const open = openCount(threads, b.index);
+							const grey = hasOnlyResolved(threads, b.index);
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								"data-block-index": b.index,
+								className: `wb-rv-block s-${b.status}${b.type === "table-cell" ? " cell" : ""}`,
+								"data-testid": "reviewer-block",
+								"data-status": b.status,
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-rv-bhead",
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-d-badge",
+												"data-s": b.status,
+												children: STATUS_LABEL$1[b.status]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-rv-btype",
+												children: KIND_LABEL$1[b.type] ?? b.type
+											}),
+											(open > 0 || grey) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: `wb-rv-badge${grey ? " grey" : ""}`,
+												"data-testid": "block-badge",
+												onClick: () => {
+													const ts = threadsForBlock(threads, b.index);
+													if (ts.length > 0) setOpenThread(ts[0].id);
+												},
+												children: grey ? "✓ resolved" : `${open} open`
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: "wb-rv-addc",
+												title: "Comment on this block",
+												onClick: () => {
+													setComposing(composing === b.index ? null : b.index);
+													setDraft("");
+												},
+												children: "+ comment"
+											})
+										]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "wb-rv-btext",
+										children: b.inlineOps !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											"data-testid": "inline-marks",
+											children: b.inlineOps.map((op, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [op.del !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("del", {
+												className: "wb-rv-del",
+												children: op.del
+											}), op.add !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ins", {
+												className: "wb-rv-ins",
+												children: op.add
+											})] }, i))
+										}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { dangerouslySetInnerHTML: { __html: renderMarkdown(b.text) } })
+									}),
+									composing === b.index && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-rv-compose",
+										"data-testid": "composer",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+											value: draft,
+											autoFocus: true,
+											placeholder: "Comment on this block — saved to the lane file for the lane agents",
+											onChange: (e) => setDraft(e.target.value)
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "wb-rv-cbtns",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: "wb-rv-primary",
+												onClick: () => addComment(b.index),
+												children: "Comment"
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												onClick: () => {
+													setComposing(null);
+													setDraft("");
+												},
+												children: "Cancel"
+											})]
+										})]
+									}),
+									threadsForBlock(threads, b.index).map((t) => (openThread === t.id || t.resolved === false) && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: `wb-rv-threadbox${t.resolved ? " resolved" : ""}`,
+										"data-testid": "thread",
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												className: "wb-rv-threadhead",
+												children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: t.author }),
+													" ",
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+														className: "wb-rv-time",
+														children: new Date(t.at).toLocaleString()
+													}),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "wb-rv-spacer" }),
+													t.resolved ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+														"data-testid": "reopen",
+														onClick: () => setResolved(t.id, false),
+														children: "Reopen"
+													}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+														"data-testid": "resolve",
+														onClick: () => setResolved(t.id, true),
+														children: "Resolve"
+													})
+												]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "wb-rv-threadtext",
+												children: t.text
+											}),
+											t.replies.map((rep, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												className: "wb-rv-reply",
+												children: [
+													"↩ ",
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: rep.author }),
+													" ",
+													rep.text
+												]
+											}, i)),
+											replying === t.id ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												className: "wb-rv-compose",
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+													value: replyDraft,
+													autoFocus: true,
+													onChange: (e) => setReplyDraft(e.target.value)
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+													className: "wb-rv-cbtns",
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+														className: "wb-rv-primary",
+														onClick: () => addReply(t.id),
+														children: "Reply"
+													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+														onClick: () => {
+															setReplying(null);
+															setReplyDraft("");
+														},
+														children: "Cancel"
+													})]
+												})]
+											}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: "wb-rv-addc",
+												"data-testid": "reply-btn",
+												onClick: () => {
+													setReplying(t.id);
+													setReplyDraft("");
+												},
+												children: "Reply"
+											})
+										]
+									}, t.id))
+								]
+							}, b.index);
+						}), placed.filter((p) => p.resolution.kind === "outdated").map(({ thread }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-rv-threadbox outdated",
+							"data-testid": "outdated-thread",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "wb-rv-threadhead",
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: thread.author }),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "wb-rv-outdated-tag",
+											children: "outdated — the commented block has changed (hash and neighbour no longer match)"
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "wb-rv-spacer" }),
+										thread.resolved ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											"data-testid": "reopen",
+											onClick: () => setResolved(thread.id, false),
+											children: "Reopen"
+										}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											"data-testid": "resolve",
+											onClick: () => setResolved(thread.id, true),
+											children: "Resolve"
+										})
+									]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "wb-rv-threadtext",
+									children: thread.text
+								}),
+								thread.replies.map((rep, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "wb-rv-reply",
+									children: [
+										"↩ ",
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: rep.author }),
+										" ",
+										rep.text
+									]
+								}, i))
+							]
+						}, thread.id))]
+					})
+				]
+			}),
+			saveState !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-rv-savestate",
+				"data-testid": "save-state",
+				children: saveState
 			})
 		]
 	});
@@ -12629,30 +13580,6 @@ const INITIAL_POLL_STATE = {
 	degraded: false
 };
 //#endregion
-//#region src/shared/view-project.ts
-/**
-* sandbar-workbench · 中列当前项目 key 的模块单态（session-entry t260828-06 从
-* src/client/index.tsx 迁出为共享模块）。
-*
-* 为什么共享：hero 接管组件（client/hero.tsx → HeroSessionEntry）挂在
-* `conversation.hero.*` 槽上，scope=root——不在中列组件树内，拿不到 WorkbenchSection
-* 的 projectKey prop；只能读这份单态。index.tsx 的 apiGet/apiPost 拼 ?project=
-* 也走它（原语义不变：WorkbenchSection 挂载/切换时 setViewProject）。
-*
-* 空串 = 尚无中列视图激活过（首屏直落 hero 的场景）——hero 侧用
-* 「单项目注册表兜底」解析（见 HeroSessionEntry 的 projectKey 推导），多项目
-* 未选则新建禁用并提示，与侧栏「会话」区同口径（不造隐形缺省）。
-*/
-let viewProject = "";
-/** 当前中列视图的项目 key（空串=未选/未激活）。 */
-function getViewProject() {
-	return viewProject;
-}
-/** WorkbenchSection 挂载/切换项目时写入（index.tsx 唯一写入点）。 */
-function setViewProject(project) {
-	viewProject = typeof project === "string" ? project : "";
-}
-//#endregion
 //#region src/client/index.tsx
 /**
 * sandbar-workbench —— 工单工作流台 · 浏览器半（侧栏工单中心版）。
@@ -13268,6 +14195,101 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-d-cells{border-collapse:collapse;margin:6px 12px;font-size:12px;max-width:calc(100% - 24px);display:block;overflow-x:auto}
 .wb-d-cells th,.wb-d-cells td{border:1px solid var(--dsw-derive-border,#d0d7de);padding:4px 10px;text-align:left;white-space:pre-wrap;word-break:break-word}
 .wb-d-cells th{background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-muted,#57606a);font-weight:600}
+/* t261022-14: the markdown reviewer panel (block comments in the lane file).
+   Layout = flex row: [rail][minimap][document] — the rail is a flex sibling, so
+   it can never overlay the document (ticket requirement 1c). */
+.wb-rv-modalbox{width:min(1100px,94vw);height:min(82vh,820px);background:var(--dsw-derive-canvas,#fff);
+  border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+.wb-rv-wrap{display:flex;flex-direction:column;height:100%;min-height:0;font-size:13px;color:var(--dsw-derive-fg,#1f2328)}
+.wb-rv-head{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de)}
+.wb-rv-title{font-weight:600}
+.wb-rv-close{margin-left:auto;border:none;background:none;font-size:16px;cursor:pointer;color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-close:hover{color:var(--dsw-derive-fg,#1f2328)}
+.wb-rv-hideremoved{display:flex;align-items:center;gap:4px;color:var(--dsw-derive-muted,#57606a);font-size:12px}
+.wb-rv-railtoggle{border:1px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-surface,#f6f8fa);
+  border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-err{padding:6px 12px;color:var(--dsw-derive-danger,#cf222e)}
+.wb-rv-note{padding:4px 12px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5);font-size:12px}
+.wb-rv-savestate{padding:4px 12px;font-size:12px;color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-body{display:flex;flex:1;min-height:0}
+.wb-rv-rail{width:250px;flex:0 0 250px;overflow-y:auto;border-right:1px solid var(--dsw-derive-border,#d0d7de);
+  background:var(--dsw-derive-surface,#f6f8fa);padding:6px}
+.wb-rv-body.rail-closed .wb-rv-rail{display:none}
+.wb-rv-sec{margin-bottom:10px}
+.wb-rv-secttl{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--dsw-derive-muted,#57606a);
+  margin:4px 2px;display:flex;align-items:center;gap:6px}
+.wb-rv-filters{display:inline-flex;gap:2px;margin-left:auto}
+.wb-rv-filter{border:none;background:none;cursor:pointer;font-size:11px;padding:1px 6px;border-radius:6px;
+  color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-filter.on{background:var(--dsw-derive-accent-bg,#ddf4ff);color:var(--dsw-derive-accent,#0969da);font-weight:600}
+.wb-rv-toc{display:block;width:100%;text-align:left;border:none;background:none;cursor:pointer;
+  padding:2px 6px;border-radius:6px;font-size:12px;color:var(--dsw-derive-fg,#1f2328);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-rv-toc:hover{background:var(--dsw-derive-surface-2,#eaeef2)}
+.wb-rv-toc.l2{padding-left:18px}
+.wb-rv-toc.on{background:var(--dsw-derive-accent-bg,#ddf4ff);font-weight:600}
+.wb-rv-thread{display:flex;flex-direction:column;gap:1px;padding:4px 6px;border-radius:6px;cursor:pointer;font-size:12px}
+.wb-rv-thread:hover{background:var(--dsw-derive-surface-2,#eaeef2)}
+.wb-rv-thread.resolved{opacity:.55}
+.wb-rv-snippet{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-rv-lastreply{color:var(--dsw-derive-muted,#57606a);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-rv-empty{color:var(--dsw-derive-muted,#8c959f);font-size:12px;padding:2px 6px}
+.wb-rv-laneinfo{font-size:11px}
+.wb-rv-lanepath{display:block;word-break:break-all;background:var(--dsw-derive-surface-2,#eff1f3);
+  border-radius:4px;padding:2px 4px;margin:2px 0}
+.wb-rv-lanenote{color:var(--dsw-derive-muted,#57606a);line-height:1.45}
+.wb-rv-minimap{width:26px;flex:0 0 26px;overflow-y:auto;overflow-x:hidden;border-right:1px solid var(--dsw-derive-border,#d0d7de);
+  padding:4px 2px;display:flex;flex-direction:column;gap:2px;align-items:center}
+.wb-rv-mmark{position:relative;width:14px;height:10px;border:none;border-radius:3px;cursor:pointer;padding:0}
+.wb-rv-mmark[data-s=added]{background:var(--dsw-derive-success-bg,#dafbe1);border:1px solid var(--dsw-derive-success-deep,#116329)}
+.wb-rv-mmark[data-s=removed]{background:var(--dsw-derive-danger-bg,#ffebe9);border:1px solid var(--dsw-derive-danger,#cf222e)}
+.wb-rv-mmark[data-s=modified]{background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-rv-mmark[data-s=unchanged]{background:var(--dsw-derive-surface-2,#eaeef2);border:1px solid var(--dsw-derive-border,#d0d7de)}
+.wb-rv-mmark[data-current]{outline:2px solid var(--dsw-derive-accent,#0969da);outline-offset:1px}
+.wb-rv-mcount{position:absolute;top:-7px;right:-9px;font-size:9px;line-height:1;background:var(--dsw-derive-accent,#0969da);
+  color:var(--dsw-derive-canvas,#fff);border-radius:7px;padding:1px 3px;font-weight:700}
+.wb-rv-mcount.grey{background:var(--dsw-derive-muted,#8c959f)}
+.wb-rv-doc{flex:1;overflow-y:auto;padding:10px 16px 40px}
+.wb-rv-block{position:relative;border-top:1px solid transparent;padding:2px 4px;border-radius:4px}
+.wb-rv-block:hover{border-top-color:var(--dsw-derive-border,#d0d7de)}
+.wb-rv-block.s-added{background:var(--dsw-derive-success-bg,#dafbe1)}
+.wb-rv-block.s-removed{background:var(--dsw-derive-danger-bg,#ffebe9);text-decoration:line-through}
+.wb-rv-block.s-removed .wb-rv-btext *{text-decoration:line-through}
+.wb-rv-block.s-modified{background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-rv-block.cell{display:inline-block;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:4px;
+  padding:1px 6px;margin:1px 2px;background:var(--dsw-derive-canvas,#fff)}
+.wb-rv-block.cell.s-added{background:var(--dsw-derive-success-bg,#dafbe1)}
+.wb-rv-block.cell.s-removed{background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-rv-block.cell.s-modified{background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-rv-bhead{display:flex;align-items:center;gap:6px;font-size:11px;opacity:.85;margin:1px 0}
+.wb-rv-btype{color:var(--dsw-derive-muted,#8c959f)}
+.wb-rv-badge{border:1px solid var(--dsw-derive-accent,#0969da);color:var(--dsw-derive-accent,#0969da);
+  background:var(--dsw-derive-canvas,#fff);border-radius:8px;font-size:10px;padding:0 6px;cursor:pointer}
+.wb-rv-badge.grey{border-color:var(--dsw-derive-muted,#8c959f);color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-addc{border:none;background:none;color:var(--dsw-derive-muted,#8c959f);cursor:pointer;font-size:11px;opacity:0}
+.wb-rv-block:hover .wb-rv-addc{opacity:1}
+.wb-rv-del{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e);text-decoration:line-through}
+.wb-rv-ins{background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success-deep,#116329);text-decoration:none}
+.wb-rv-compose{margin:4px 0}
+.wb-rv-compose textarea{width:100%;min-height:52px;font-size:12px;border:1px solid var(--dsw-derive-border,#d0d7de);
+  border-radius:6px;padding:4px 6px;background:var(--dsw-derive-canvas,#fff);color:var(--dsw-derive-fg,#1f2328)}
+.wb-rv-cbtns{display:flex;gap:6px;margin-top:3px}
+.wb-rv-cbtns button{border:1px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-surface,#f6f8fa);
+  border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px}
+.wb-rv-cbtns .wb-rv-primary{background:var(--dsw-derive-accent,#0969da);border-color:var(--dsw-derive-accent,#0969da);color:var(--dsw-derive-canvas,#fff)}
+.wb-rv-threadbox{border:1px solid var(--dsw-derive-border,#d0d7de);border-left:3px solid var(--dsw-derive-accent,#0969da);
+  border-radius:6px;padding:4px 8px;margin:4px 0;background:var(--dsw-derive-canvas,#fff);font-size:12px}
+.wb-rv-threadbox.resolved{opacity:.55;border-left-color:var(--dsw-derive-muted,#8c959f)}
+.wb-rv-threadbox.outdated{border-left-color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-rv-outdated-tag{color:var(--dsw-derive-warn-deep,#7d4e00);font-size:11px;margin-left:6px}
+.wb-rv-threadhead{display:flex;align-items:center;gap:6px}
+.wb-rv-threadhead button{border:1px solid var(--dsw-derive-border,#d0d7de);background:none;border-radius:6px;
+  font-size:11px;padding:0 6px;cursor:pointer}
+.wb-rv-time{color:var(--dsw-derive-muted,#8c959f);font-size:11px}
+.wb-rv-spacer{flex:1}
+.wb-rv-threadtext{margin:2px 0;white-space:pre-wrap}
+.wb-rv-reply{color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-border,#d0d7de);
+  padding:2px 0 0;margin-top:2px}
 .wb-d-cell-old{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e);text-decoration:line-through}
 .wb-d-cell-new{background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success-deep,#116329);font-weight:600}
 /* 意见动作条 */
@@ -15101,8 +16123,8 @@ function DiffBlockBody({ b }) {
 		dangerouslySetInnerHTML: { __html: renderMarkdown(b.oldText ?? "") }
 	});
 	if (b.type === "table-row") {
-		const oc = splitCells(b.oldText ?? "");
-		const nc = splitCells(b.newText ?? "");
+		const oc = splitCells$1(b.oldText ?? "");
+		const nc = splitCells$1(b.newText ?? "");
 		const cols = Math.max(oc.length, nc.length);
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
 			className: "wb-d-cells",
@@ -16268,6 +17290,19 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 	const [copied, setCopied] = (0, react.useState)(false);
 	const [preview, setPreview] = (0, react.useState)(void 0);
 	const [fileViewer, setFileViewer] = (0, react.useState)(null);
+	const [reviewer, setReviewer] = (0, react.useState)(null);
+	/** Doc files go to the reviewer; everything else keeps the raw viewer. */
+	const openChangedFile = (ticketId, p, m) => {
+		if (/\.(md|markdown)$/i.test(p)) setReviewer({
+			ticketId,
+			path: p
+		});
+		else setFileViewer({
+			ticketId,
+			path: p,
+			mode: m
+		});
+	};
 	const [previewLoading, setPreviewLoading] = (0, react.useState)(false);
 	/** token 消耗聚合（t260828-07）：详情抽屉打开时拉一次，头部合计与阶段行内数字共用。 */
 	const usage = useAgentUsage(detail?.id ?? "", detail !== void 0);
@@ -16968,11 +18003,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 										children: [card.files.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 											className: "sc-file",
 											title: "Open read-only as of this ticket",
-											onClick: () => setFileViewer({
-												ticketId: detail.id,
-												path: f,
-												mode: "settle"
-											}),
+											onClick: () => openChangedFile(detail.id, f, "settle"),
 											children: f
 										}, f)), card.filesMore > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 											className: "sc-file-more",
@@ -17012,11 +18043,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 									children: refs.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 										className: "wb-ref-file",
 										title: "Open read-only at ticket-open baseline",
-										onClick: () => setFileViewer({
-											ticketId: detail.id,
-											path: f,
-											mode: "base"
-										}),
+										onClick: () => openChangedFile(detail.id, f, "base"),
 										children: f
 									}, f))
 								})]
@@ -17083,11 +18110,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 								detail,
 								operator,
 								onMsg: setOpMsg,
-								onOpenFile: (p, m) => setFileViewer({
-									ticketId: detail.id,
-									path: p,
-									mode: m
-								})
+								onOpenFile: (p, m) => openChangedFile(detail.id, p, m)
 							})
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(LazyFold, {
@@ -17347,6 +18370,19 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 				path: fileViewer.path,
 				initialMode: fileViewer.mode,
 				onClose: () => setFileViewer(null)
+			}),
+			reviewer !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-modal",
+				role: "dialog",
+				"aria-modal": "true",
+				"aria-label": "Markdown review",
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "wb-rv-modalbox",
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MarkdownReviewer, {
+						target: reviewer,
+						onClose: () => setReviewer(null)
+					})
+				})
 			})
 		]
 	});

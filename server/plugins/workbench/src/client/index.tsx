@@ -103,6 +103,8 @@ import type { DigestLine } from './inspection-report-model.ts'
 // the executor panel's Settings tab; executor-view.tsx is now the component's one
 // importer (one face, one home).
 import { WorkbenchSidebar } from './sidebar.tsx'
+// t261022-14: the changed-files markdown reviewer (block comments in the lane file).
+import { MarkdownReviewer, type ReviewerTarget } from './review-panel.tsx'
 // 立项单 Tier 3（t260904-17 保留）：中列第四视图 + 所属立项徽标（口径单点 ./epics-model.ts）。
 import { EpicBadge, EpicSection } from './epics.tsx'
 // UI-3 (t261005-04): ticket detail as a middle-column overlay — single-layer
@@ -706,6 +708,101 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-d-cells{border-collapse:collapse;margin:6px 12px;font-size:12px;max-width:calc(100% - 24px);display:block;overflow-x:auto}
 .wb-d-cells th,.wb-d-cells td{border:1px solid var(--dsw-derive-border,#d0d7de);padding:4px 10px;text-align:left;white-space:pre-wrap;word-break:break-word}
 .wb-d-cells th{background:var(--dsw-derive-surface,#f6f8fa);color:var(--dsw-derive-muted,#57606a);font-weight:600}
+/* t261022-14: the markdown reviewer panel (block comments in the lane file).
+   Layout = flex row: [rail][minimap][document] — the rail is a flex sibling, so
+   it can never overlay the document (ticket requirement 1c). */
+.wb-rv-modalbox{width:min(1100px,94vw);height:min(82vh,820px);background:var(--dsw-derive-canvas,#fff);
+  border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+.wb-rv-wrap{display:flex;flex-direction:column;height:100%;min-height:0;font-size:13px;color:var(--dsw-derive-fg,#1f2328)}
+.wb-rv-head{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--dsw-derive-border,#d0d7de)}
+.wb-rv-title{font-weight:600}
+.wb-rv-close{margin-left:auto;border:none;background:none;font-size:16px;cursor:pointer;color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-close:hover{color:var(--dsw-derive-fg,#1f2328)}
+.wb-rv-hideremoved{display:flex;align-items:center;gap:4px;color:var(--dsw-derive-muted,#57606a);font-size:12px}
+.wb-rv-railtoggle{border:1px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-surface,#f6f8fa);
+  border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-err{padding:6px 12px;color:var(--dsw-derive-danger,#cf222e)}
+.wb-rv-note{padding:4px 12px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5);font-size:12px}
+.wb-rv-savestate{padding:4px 12px;font-size:12px;color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-body{display:flex;flex:1;min-height:0}
+.wb-rv-rail{width:250px;flex:0 0 250px;overflow-y:auto;border-right:1px solid var(--dsw-derive-border,#d0d7de);
+  background:var(--dsw-derive-surface,#f6f8fa);padding:6px}
+.wb-rv-body.rail-closed .wb-rv-rail{display:none}
+.wb-rv-sec{margin-bottom:10px}
+.wb-rv-secttl{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--dsw-derive-muted,#57606a);
+  margin:4px 2px;display:flex;align-items:center;gap:6px}
+.wb-rv-filters{display:inline-flex;gap:2px;margin-left:auto}
+.wb-rv-filter{border:none;background:none;cursor:pointer;font-size:11px;padding:1px 6px;border-radius:6px;
+  color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-filter.on{background:var(--dsw-derive-accent-bg,#ddf4ff);color:var(--dsw-derive-accent,#0969da);font-weight:600}
+.wb-rv-toc{display:block;width:100%;text-align:left;border:none;background:none;cursor:pointer;
+  padding:2px 6px;border-radius:6px;font-size:12px;color:var(--dsw-derive-fg,#1f2328);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-rv-toc:hover{background:var(--dsw-derive-surface-2,#eaeef2)}
+.wb-rv-toc.l2{padding-left:18px}
+.wb-rv-toc.on{background:var(--dsw-derive-accent-bg,#ddf4ff);font-weight:600}
+.wb-rv-thread{display:flex;flex-direction:column;gap:1px;padding:4px 6px;border-radius:6px;cursor:pointer;font-size:12px}
+.wb-rv-thread:hover{background:var(--dsw-derive-surface-2,#eaeef2)}
+.wb-rv-thread.resolved{opacity:.55}
+.wb-rv-snippet{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-rv-lastreply{color:var(--dsw-derive-muted,#57606a);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-rv-empty{color:var(--dsw-derive-muted,#8c959f);font-size:12px;padding:2px 6px}
+.wb-rv-laneinfo{font-size:11px}
+.wb-rv-lanepath{display:block;word-break:break-all;background:var(--dsw-derive-surface-2,#eff1f3);
+  border-radius:4px;padding:2px 4px;margin:2px 0}
+.wb-rv-lanenote{color:var(--dsw-derive-muted,#57606a);line-height:1.45}
+.wb-rv-minimap{width:26px;flex:0 0 26px;overflow-y:auto;overflow-x:hidden;border-right:1px solid var(--dsw-derive-border,#d0d7de);
+  padding:4px 2px;display:flex;flex-direction:column;gap:2px;align-items:center}
+.wb-rv-mmark{position:relative;width:14px;height:10px;border:none;border-radius:3px;cursor:pointer;padding:0}
+.wb-rv-mmark[data-s=added]{background:var(--dsw-derive-success-bg,#dafbe1);border:1px solid var(--dsw-derive-success-deep,#116329)}
+.wb-rv-mmark[data-s=removed]{background:var(--dsw-derive-danger-bg,#ffebe9);border:1px solid var(--dsw-derive-danger,#cf222e)}
+.wb-rv-mmark[data-s=modified]{background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-rv-mmark[data-s=unchanged]{background:var(--dsw-derive-surface-2,#eaeef2);border:1px solid var(--dsw-derive-border,#d0d7de)}
+.wb-rv-mmark[data-current]{outline:2px solid var(--dsw-derive-accent,#0969da);outline-offset:1px}
+.wb-rv-mcount{position:absolute;top:-7px;right:-9px;font-size:9px;line-height:1;background:var(--dsw-derive-accent,#0969da);
+  color:var(--dsw-derive-canvas,#fff);border-radius:7px;padding:1px 3px;font-weight:700}
+.wb-rv-mcount.grey{background:var(--dsw-derive-muted,#8c959f)}
+.wb-rv-doc{flex:1;overflow-y:auto;padding:10px 16px 40px}
+.wb-rv-block{position:relative;border-top:1px solid transparent;padding:2px 4px;border-radius:4px}
+.wb-rv-block:hover{border-top-color:var(--dsw-derive-border,#d0d7de)}
+.wb-rv-block.s-added{background:var(--dsw-derive-success-bg,#dafbe1)}
+.wb-rv-block.s-removed{background:var(--dsw-derive-danger-bg,#ffebe9);text-decoration:line-through}
+.wb-rv-block.s-removed .wb-rv-btext *{text-decoration:line-through}
+.wb-rv-block.s-modified{background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-rv-block.cell{display:inline-block;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:4px;
+  padding:1px 6px;margin:1px 2px;background:var(--dsw-derive-canvas,#fff)}
+.wb-rv-block.cell.s-added{background:var(--dsw-derive-success-bg,#dafbe1)}
+.wb-rv-block.cell.s-removed{background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-rv-block.cell.s-modified{background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-rv-bhead{display:flex;align-items:center;gap:6px;font-size:11px;opacity:.85;margin:1px 0}
+.wb-rv-btype{color:var(--dsw-derive-muted,#8c959f)}
+.wb-rv-badge{border:1px solid var(--dsw-derive-accent,#0969da);color:var(--dsw-derive-accent,#0969da);
+  background:var(--dsw-derive-canvas,#fff);border-radius:8px;font-size:10px;padding:0 6px;cursor:pointer}
+.wb-rv-badge.grey{border-color:var(--dsw-derive-muted,#8c959f);color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-addc{border:none;background:none;color:var(--dsw-derive-muted,#8c959f);cursor:pointer;font-size:11px;opacity:0}
+.wb-rv-block:hover .wb-rv-addc{opacity:1}
+.wb-rv-del{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e);text-decoration:line-through}
+.wb-rv-ins{background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success-deep,#116329);text-decoration:none}
+.wb-rv-compose{margin:4px 0}
+.wb-rv-compose textarea{width:100%;min-height:52px;font-size:12px;border:1px solid var(--dsw-derive-border,#d0d7de);
+  border-radius:6px;padding:4px 6px;background:var(--dsw-derive-canvas,#fff);color:var(--dsw-derive-fg,#1f2328)}
+.wb-rv-cbtns{display:flex;gap:6px;margin-top:3px}
+.wb-rv-cbtns button{border:1px solid var(--dsw-derive-border,#d0d7de);background:var(--dsw-derive-surface,#f6f8fa);
+  border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px}
+.wb-rv-cbtns .wb-rv-primary{background:var(--dsw-derive-accent,#0969da);border-color:var(--dsw-derive-accent,#0969da);color:var(--dsw-derive-canvas,#fff)}
+.wb-rv-threadbox{border:1px solid var(--dsw-derive-border,#d0d7de);border-left:3px solid var(--dsw-derive-accent,#0969da);
+  border-radius:6px;padding:4px 8px;margin:4px 0;background:var(--dsw-derive-canvas,#fff);font-size:12px}
+.wb-rv-threadbox.resolved{opacity:.55;border-left-color:var(--dsw-derive-muted,#8c959f)}
+.wb-rv-threadbox.outdated{border-left-color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5)}
+.wb-rv-outdated-tag{color:var(--dsw-derive-warn-deep,#7d4e00);font-size:11px;margin-left:6px}
+.wb-rv-threadhead{display:flex;align-items:center;gap:6px}
+.wb-rv-threadhead button{border:1px solid var(--dsw-derive-border,#d0d7de);background:none;border-radius:6px;
+  font-size:11px;padding:0 6px;cursor:pointer}
+.wb-rv-time{color:var(--dsw-derive-muted,#8c959f);font-size:11px}
+.wb-rv-spacer{flex:1}
+.wb-rv-threadtext{margin:2px 0;white-space:pre-wrap}
+.wb-rv-reply{color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-border,#d0d7de);
+  padding:2px 0 0;margin-top:2px}
 .wb-d-cell-old{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger,#cf222e);text-decoration:line-through}
 .wb-d-cell-new{background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success-deep,#116329);font-weight:600}
 /* 意见动作条 */
@@ -3554,6 +3651,14 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
   // 「本票时刻」查看器打开态（t260915-17）：文件行链接的落点。ticketId 随打开时快照
   // （切工单不清除，查看器自洽读打开时那张票；遮罩/Esc 关闭即回收）。
   const [fileViewer, setFileViewer] = useState<{ ticketId: string; path: string; mode: TicketTimeMode } | null>(null)
+  // t261022-14: markdown files open the block-comment reviewer instead of the
+  // raw viewer; JSON/code keep the raw view (ticket non-goal).
+  const [reviewer, setReviewer] = useState<ReviewerTarget | null>(null)
+  /** Doc files go to the reviewer; everything else keeps the raw viewer. */
+  const openChangedFile = (ticketId: string, p: string, m: TicketTimeMode) => {
+    if (/\.(md|markdown)$/i.test(p)) setReviewer({ ticketId, path: p })
+    else setFileViewer({ ticketId, path: p, mode: m })
+  }
   const [previewLoading, setPreviewLoading] = useState(false)
   /** token 消耗聚合（t260828-07）：详情抽屉打开时拉一次，头部合计与阶段行内数字共用。 */
   const usage = useAgentUsage(detail?.id ?? '', detail !== undefined)
@@ -4332,7 +4437,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
                             打开；在飞票收口版不可得 → 查看器人话点名（fail-closed 预期）。 */}
                         {card.files.map((f) => (
                           <button className="sc-file" key={f} title="Open read-only as of this ticket"
-                            onClick={() => setFileViewer({ ticketId: detail.id, path: f, mode: 'settle' })}>{f}</button>
+                            onClick={() => openChangedFile(detail.id, f, 'settle')}>{f}</button>
                         ))}
                         {card.filesMore > 0 && <span className="sc-file-more">+{card.filesMore} more</span>}
                       </div>
@@ -4360,7 +4465,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
                     <div className="wb-refs-files">
                       {refs.map((f) => (
                         <button className="wb-ref-file" key={f} title="Open read-only at ticket-open baseline"
-                          onClick={() => setFileViewer({ ticketId: detail.id, path: f, mode: 'base' })}>{f}</button>
+                          onClick={() => openChangedFile(detail.id, f, 'base')}>{f}</button>
                       ))}
                     </div>
                   </div>
@@ -4433,7 +4538,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
               {detail.kind !== 'inspection' && (
                 <LazyFold label="Changes (full diff and review)" testid="fold-changes">
                   <ChangesTab detail={detail} operator={operator} onMsg={setOpMsg}
-                    onOpenFile={(p, m) => setFileViewer({ ticketId: detail.id, path: p, mode: m })} />
+                    onOpenFile={(p, m) => openChangedFile(detail.id, p, m)} />
                 </LazyFold>
               )}
               <LazyFold label="Agent log" testid="fold-agent-log">
@@ -4545,6 +4650,15 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
           initialMode={fileViewer.mode}
           onClose={() => setFileViewer(null)}
         />
+      )}
+      {/* t261022-14: the markdown reviewer overlay (doc files only; Esc via its
+          own close control — it is a working surface, not a read-only modal). */}
+      {reviewer !== null && (
+        <div className="wb-modal" role="dialog" aria-modal="true" aria-label="Markdown review">
+          <div className="wb-rv-modalbox">
+            <MarkdownReviewer target={reviewer} onClose={() => setReviewer(null)} />
+          </div>
+        </div>
       )}
     </div>
   )

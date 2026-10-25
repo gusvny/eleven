@@ -170,6 +170,11 @@ function projectRootsFor(projectKey: unknown): string[] {
 
 import { computeTicketDiff, type TicketForDiff } from './src/host/changes.ts'
 import { readTicketTimeFile } from './src/host/ticket-time-file.ts'
+// t261022-14: the lane-file comment store for the markdown reviewer. MINIMAL
+// REGISTRATION ONLY (CF1, lost by settles a21f4d00/6846bb14 — see
+// integration/t261022-14/node-ts-registration.patch for the one-command
+// re-application if a settle drops this diff again).
+import { handleReviewComments } from './src/host/review-comments-routes.ts'
 import { isTicketTimeMode } from './src/shared/ticket-time-model.ts'
 import { ticketShowErrorReply } from './src/host/ticket-error.ts'
 import { readInspectionArchive, readPeriodReport } from './src/host/inspection-archive.ts'
@@ -1328,6 +1333,33 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         const url = new URL(req.url ?? '/', 'http://x')
         const result = await readInspectionReportFile(repo, url.searchParams.get('path'))
         sendJson(res, 200, { ok: true, result })
+        return
+      }
+      // t261022-14: lane-file comment store for the markdown reviewer.
+      // GET = read the document; PUT = merge threads (atomic). Any other
+      // method is a 405 — this channel has exactly those two shapes. Handler
+      // + all fault modes live in src/host/review-comments-routes.ts.
+      if (op === 'review-comments') {
+        if (req.method === 'GET' || req.method === 'PUT') {
+          await handleReviewComments({
+            repo,
+            ticketIdOk: (x) => TICKET_ID_RE.test(x),
+            callTicketShow: (x) => callTool('ticket', { op: 'show', id: x }),
+            sendTicketShowError: (r, s, x) => sendTicketShowError(r, s, x),
+            resolveAnchorKey: (queryKey, ticketProject) => {
+              const a = resolveProjectAnchor(
+                queryKey !== null && queryKey !== '' ? queryKey : (typeof ticketProject === 'string' ? ticketProject : ''),
+                repo)
+              return a.ok
+                ? { ok: true as const, root: a.root }
+                : { ok: false as const, status: a.status, error: a.error }
+            },
+            sendJson,
+            readJsonBody,
+          }, req, res, id, new URL(req.url ?? '/', 'http://x'))
+          return
+        }
+        sendJson(res, 405, { ok: false, error: 'review-comments 只支持 GET（读）/ PUT（合并落盘）' })
         return
       }
       if (op === 'review') {
