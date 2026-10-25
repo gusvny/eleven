@@ -194,3 +194,23 @@ main `4135c3f8`; 46 landings; 74 certifications; known-red book 104 rows; KI 345
 (11 entries, each with the measured evidence and the reproduction path). Six fix tickets
 landed across the day: KI-350 anchor refresh, the inspection sign chain, the Epics renderer,
 KI-352 single record, the zero-run gate (two attempts), and the runner/env regression.
+
+## 261025 08:20-09:20 — the peel is fixed, the anchor is the last link
+
+`t261025-02` (the pool-exclusion-side fix) is live and it works: both witnesses now run
+their OWN scenarios inside the gate. t261022-12's receipt names `quickmanual-handback-faces`
+and `quickmanual-main-sync-handback-e2e` (both pass); t261022-14's receipt reads
+`ran=3 passed=3 failed=0`.
+
+They still cannot land, and the reason is one link further on (KI-356): the landing anchor
+(`meta.last_green_run`) is not refreshed by a TARGETED green round, so both lanes still carry
+a stale sha (t261022-14: 5fe50423 vs its HEAD 77d52623; t261022-12: 43c5d2f2, ran=0) and the
+landing refuses "proven revision does not contain current main". KI-350's fix (t261024-12,
+live since the 00:00 handover) evidently covers only the full-round path.
+
+Also fixed tonight, both found by the round itself:
+- the D3 assertion in `t261024-70-line-round-env-inherit` scanned every ledger row as a
+  string and tripped on a promotion NOTE that mentioned "runner_missing"; it now judges
+  structured fields only (state/reason/error/verdict/kind).
+- two engine stalls, cleared: the stale round guard (held since 00:51 with no owner pid) and
+  the `line_env` regression that answered `runner_missing` (ticket t261024-70).
