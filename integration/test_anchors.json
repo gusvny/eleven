@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 331,
-      "scenarios": 794
+      "engine_tests": 340,
+      "scenarios": 813
     },
     "vocab": [
       "behaviour",
@@ -3721,6 +3721,11 @@
     "integration/t260929-04/sc_wake_real_session_bench.py": {
       "anchor": "behaviour",
       "note": "",
+      "sync_path": ""
+    },
+    "integration/t261026-03/sc_t261026_03_markdown_everywhere_doc_face.mjs": {
+      "anchor": "behaviour",
+      "note": "t261026-03 L3: the diff face renders a document for EVERY changed markdown shape (docs/**, integration/**, root files, notes/**, .MD/.markdown spellings) via the real computeTicketDiff over a throwaway git fixture - the incident witness (integration/NOTES-*.md) carries kind=doc + non-empty blocks, json/code classifications untouched (recon/unified, no blocks), no filename special-casing, frontmatter-less CRLF markdown still renders, temp repo reclaimed.",
       "sync_path": ""
     },
     "integration/t260929-04/sc_wake_self_wake_loop.py": {

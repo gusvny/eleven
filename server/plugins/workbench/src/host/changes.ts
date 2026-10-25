@@ -147,9 +147,12 @@ function fnv1a(s: string): string {
   return (h >>> 0).toString(16).padStart(8, '0')
 }
 
-/** 文件归类：docs 下 .md = doc；app/public/data 下 .json = data；其余 = code。 */
+/** File classification (t261026-03): any .md/.markdown path is a doc, docs/
+ *  or not — the classifier must agree with the reviewer entry rule in
+ *  client/index.tsx (extension-based) and design §1; app/public/data .json =
+ *  data; everything else = code. */
 export function classifyPath(p: string): FileKind {
-  if (/^docs\/.+\.md$/.test(p)) return 'doc'
+  if (/\.(md|markdown)$/i.test(p)) return 'doc'
   if (/^app\/public\/data\/.+\.json$/.test(p)) return 'data'
   return 'code'
 }

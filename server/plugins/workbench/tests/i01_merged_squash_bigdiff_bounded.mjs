@@ -153,14 +153,15 @@ try {
   const guide = byPath.get('docs/guide.md')
   ok(guide && guide.kind === 'doc', 'docs/guide.md = doc 道')
   ok(guide && guide.unifiedTruncated === true, '>256KB 文档条目带截断标记')
-  ok(guide && typeof guide.note === 'string' && guide.note.includes('已截断显示'),
-    '截断文案 UI 可见（note 带「已截断显示」）')
+  // t261026-03: source note copy migrated to English (CLAUDE.md rule 3) — pin the live string.
+  ok(guide && typeof guide.note === 'string' && guide.note.includes('shown truncated'),
+    '截断文案 UI 可见（note 带 "shown truncated"）')
   const blockTexts = (guide?.blocks ?? []).flatMap(b => [b.oldText, b.newText]).filter(t => typeof t === 'string')
   ok(blockTexts.length > 0 && blockTexts.every(t => t.length <= TEXT_CAP),
     `doc 道每块文本 ≤ ${TEXT_CAP}B（最大实际 ${blockTexts.length ? Math.max(...blockTexts.map(t => t.length)) : '无块'}）`)
 
   const seed = byPath.get('app/public/data/seed.json')
-  ok(seed && typeof seed.unified === 'string' && seed.unified.includes('JSON 解析失败'),
+  ok(seed && typeof seed.unified === 'string' && seed.unified.includes('JSON parse failed'),
     '非法 JSON 走显式退化（文案不静默）')
   ok(seed && seed.unified.length <= SYNTH_CAP,
     `data 道退化 unified ≤ ${SYNTH_CAP}B（实际 ${seed?.unified?.length ?? '无'}）`)
