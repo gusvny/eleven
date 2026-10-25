@@ -660,6 +660,14 @@ MAIN_SYNC_RECOVERY_PATCH_ID = "t260929-main-sync-abort-on-failed-resolve"
 #: replay the old shape verbatim (the counter resets and the text changes are
 #: replay-safe state/wording; only the new activity call needs the gate).
 MAIN_SYNC_SETTLE_FIRST_PATCH_ID = "t261006-07-main-sync-settle-first"
+#: t261022-12: main-sync conflict handback for lanes WITHOUT an agent resolution
+#: stage (quickmanual). The shared conflict loop hard-codes the implement agent
+#: step; a lane whose STAGES have no implement (QuickmanualLaneWorkflow) wedged
+#: with ValueError: unknown step 'implement'. The gate guards a NEW branch (a
+#: handback to the lane's own working stage instead of the implement activity
+#: call), so an in-flight history that already recorded the old command sequence
+#: replays the old shape verbatim.
+MAIN_SYNC_CONFLICT_HANDBACK_PATCH_ID = "t261022-12-main-sync-conflict-handback-v1"
 #: t261009-20: re-guard of 7993697a (t261009-17). The settle-rerun early branch
 #: (`settle_shape_needs_rerun`) changes WHICH command the workflow schedules at a
 #: position an in-flight history may already have passed (rework / merge_check
@@ -1512,6 +1520,25 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
     #: （light_lane.LightLaneWorkflow）覆写为自己的补述表（正文 import 复用同一批条文，
     #: 只在前缀加一段轻道契约说明）。
     FLOW_BRIEF_SET: Dict[str, str] = FLOW_BRIEF
+
+    #: t261022-12: main-sync conflict routing vocabulary. MAIN_SYNC_RESOLVE_STEP is
+    #: the agent step the shared resolution loop runs (dev-lane's own implement;
+    #: light-lane inherits it unchanged). MAIN_SYNC_WORK_STAGE is the lane's OWN
+    #: working stage to hand a conflict back to when the lane has NO agent step
+    #: (quickmanual = "work"); None = use the agent step. No agent stage is ever
+    #: invented for a lane that has none.
+    MAIN_SYNC_RESOLVE_STEP = "implement"
+    MAIN_SYNC_WORK_STAGE: Optional[str] = None
+
+    #: t261022-12: pending main-sync handback state. Set ONLY inside the
+    #: MAIN_SYNC_CONFLICT_HANDBACK_PATCH_ID branch (a lane with MAIN_SYNC_WORK_STAGE);
+    #: consumed by that lane's work phase to route the post-work_done settle through
+    #: settle_conflict_resolution (the merge is left OPEN on purpose). Default False
+    #: = the ordinary settle path, unchanged everywhere else.
+    _main_sync_settle_pending = False
+    _main_sync_handback_sha = ""
+    _main_sync_handback_wt = ""
+    _main_sync_handback_branch = ""
     # Display/derivation metadata (the real orchestration lives in run(); same order
     # as run). parts = declaration of the executor mix (agent🤖/script⚙️/human👤,
     # static, feeds workbench badges): implement = agent + worker settle-on-behalf +
@@ -3994,6 +4021,78 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     _sync_stop = "blocked"
                     break
                 self._prev_conflict_files = files_sig
+                # t261022-12: a lane with NO agent resolution stage (quickmanual)
+                # hands the conflict back to its OWN working stage — the owning
+                # session resolves the markers in the worktree and signals
+                # work_done again. No agent stage is invented for a lane that has
+                # none. The merge is left OPEN on purpose (prep left MERGE_HEAD in
+                # place): that IS the resolution surface, the same stance as the
+                # agent loop below.
+                # Fault-mode take-over list (from the dev-lane loop, kept / drop-
+                # ped): cap + same-batch guard KEPT (counters still advance, a
+                # spinning session-driven lane still stops); settle residue
+                # judgement KEPT (the work-phase conflict-settle scans markers);
+                # the do-NOT-commit instruction KEPT (the worker settles the
+                # merge commit); _main_sync_abort NOT carried over (there is no
+                # agent delivery to fail here); the write-set path gate is NOT
+                # applied to the conflict settle (merge files are main's content
+                # — same stance as the dev-lane loop, flagged for acceptance).
+                # Patch-gated (replay safety: the gate replaces the implement
+                # activity call with this handback on fresh histories only).
+                if (workflow.patched(MAIN_SYNC_CONFLICT_HANDBACK_PATCH_ID)
+                        and self.MAIN_SYNC_WORK_STAGE):
+                    _hb_stage = self.MAIN_SYNC_WORK_STAGE
+                    _hb_files = (", ".join(prep.conflict_files)
+                                 or "(no conflicting files named — malformed "
+                                    "sync receipt)")
+                    _hb_reason = (
+                        "Main-sync conflict, handed back to the session that owns "
+                        "this lane: `git merge main` (%s, repo %s) hit conflicts "
+                        "in: %s. The merge is still open (MERGE_HEAD present). "
+                        "Resolve the conflict markers in the lane worktree (%s), "
+                        "do NOT git commit (the worker settles the merge commit), "
+                        "then signal work_done again with your session id "
+                        "(mandatory) and role."
+                        % ((prep.target_sha or "main")[:7], _tag, _hb_files,
+                           _st_wt))
+                    self._log("main sync detected merge conflict (%s, round %d/%d)"
+                              " — no agent resolution stage on this lane, handing "
+                              "back to %s: %s"
+                              % (_tag, self._conflict_rounds, MAX_CONFLICT_ROUNDS,
+                                 _hb_stage, _hb_files[:200]))
+                    self._handoff(step_id,
+                                  "main-sync conflict (round %d, repo %s) handed "
+                                  "back to %s: %s"
+                                  % (self._conflict_rounds, _tag, _hb_stage,
+                                     _hb_files[:200]))
+                    # The landing mirrors _consume_quick_rework field-for-field
+                    # ("work" is not in PHASE_MAIN_CHAIN, so _auto_rework would
+                    # refuse it — that guard is for the dev-lane vocabulary).
+                    self.meta["stage"] = _hb_stage
+                    self.meta["role"] = self._step(_hb_stage).role
+                    self.meta["status"] = "rework"
+                    self.meta["stage_state"] = "awaiting"
+                    self.meta["last_rework_note"] = _hb_reason
+                    # The blocked face (req 2): pin the reason top-level, the same
+                    # face every real blocked uses; the work phase clears it on
+                    # wake. The lane is awaiting its session, not faulted — the
+                    # tier/kind stay whatever the reason text classifies to (pinned
+                    # by test).
+                    self.meta["blocked_reason"] = _hb_reason
+                    _hb_tier, _hb_kind = classify_stop_tier(_hb_reason)
+                    self.meta["blocked_tier"] = _hb_tier
+                    self.meta["blocked_evidence"] = {"kind": _hb_kind,
+                                                     "cited_row_id": ""}
+                    self._main_sync_settle_pending = True
+                    self._main_sync_handback_sha = str(prep.target_sha or "")
+                    self._main_sync_handback_wt = _st_wt
+                    self._main_sync_handback_branch = _st["branch"]
+                    self._touch()
+                    self._mark(_hb_stage, "rework", _hb_reason)
+                    self._persist_stage_memo(_hb_stage, "rework")
+                    _sync_phase = _hb_stage
+                    _sync_stop = "rework"
+                    break
                 self._log("main sync detected merge conflict (%s, round %d/%d), "
                           "entering the existing resolution loop: %s"
                           % (_tag, self._conflict_rounds, MAX_CONFLICT_ROUNDS,
@@ -7702,6 +7801,11 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
     #: No agent stages -> no stage flow briefs to inject into prompts.
     FLOW_BRIEF_SET: Dict[str, str] = {}
 
+    #: t261022-12: this lane has NO agent resolution stage, so a main-sync
+    #: conflict is handed back to the lane's own working stage — the owning
+    #: session resolves it in the worktree and signals work_done again.
+    MAIN_SYNC_WORK_STAGE = "work"
+
     #: Blocked-face discipline (same family as light-lane): the ticket face is a
     #: human-readable digest; the full machine lists stay in blocked_detail / the
     #: receipt / the report files. The caps are mechanical criteria (UT-pinned).
@@ -7937,6 +8041,89 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
         self._mark(target, "rework", "%s (%s)" % (note, who))
         self._persist_stage_memo(target, "rework")
         return target, ""
+
+    async def _quick_conflict_settle_after_handback(self) -> Optional[SettleLaneResult]:
+        """t261022-12: the work_done settle after a main-sync conflict handback.
+
+        The handback left the main-sync merge OPEN (prep left MERGE_HEAD in place),
+        so the settle goes through the conflict-settle core (settle_conflict_
+        resolution: add-before-judge, marker scan, commits the merge commit) —
+        never the ordinary settle_lane, which would face unmerged index entries.
+        The pending flag is consumed first: a retry (work_done again / rework /
+        retry_qc) re-enters the work phase clean.
+
+        Returns the synthetic work-stage settle receipt on success (the caller
+        falls through to the shared _finish/_handoff flow), or None after turning
+        the ticket blocked (residue left, infra failure). No write-set path gate
+        here — merge files are main's content (the same stance as the dev-lane
+        conflict loop; flagged for acceptance)."""
+        self._main_sync_settle_pending = False
+        try:
+            craw = await workflow.execute_activity(
+                settle_conflict_resolution,
+                ConflictSettleArgs(
+                    ticket_id=self.ticket_id,
+                    worktree=(self._main_sync_handback_wt
+                              or str(self.meta.get("worktree") or "")),
+                    branch=(self._main_sync_handback_branch
+                            or str(self.meta.get("branch") or "")),
+                    base_ref="main",
+                    round_no=int(self._conflict_rounds or 0)),
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+        except Exception as e:  # noqa: BLE001 - the merge state stays open
+            await self._blocked(
+                "work",
+                "The conflict-settle after the handed-back main-sync merge failed "
+                "(%s: %s). The merge is still open and the resolution is in the "
+                "worktree, nothing is lost; signal work_done again to settle, or "
+                "send retry_qc." % (type(e).__name__, str(e)[:400]))
+            return None
+        def _fld(k, d=""):
+            """Dict and object transports read the same (the activity seam may
+            hand back either shape, mirroring the main-sync loop's fallbacks)."""
+            return (craw.get(k, d) if isinstance(craw, dict)
+                    else getattr(craw, k, d))
+        c = craw if isinstance(craw, ConflictSettleResult) else \
+            ConflictSettleResult(
+                ok=bool(_fld("ok", False)),
+                commit=str(_fld("commit", "")),
+                remaining_files=[str(x) for x in (_fld("remaining_files", []) or [])],
+                error=str(_fld("error", "")),
+                already_settled=bool(_fld("already_settled", False)))
+        if not c.ok and not getattr(c, "already_settled", False):
+            _why = ("unresolved conflict-marker residue remains after the "
+                    "session's resolution (the merge is still open): %s"
+                    % "、".join(c.remaining_files[:10])
+                    ) if c.remaining_files else (c.error or "unknown")
+            await self._blocked(
+                "work",
+                "The handed-back main-sync conflict did not settle: %s | Ways "
+                "out: resolve the remaining markers in the lane worktree and "
+                "signal work_done again (do NOT git commit), or as the operator "
+                "reset the half-merged lane with `python3 server/tools/"
+                "engine_ops.py sync %s --abort` (engine venv, operator side), "
+                "then send retry_qc." % (_why[:600], self.ticket_id))
+            return None
+        # Progress = reset (R2): a session-settled merge is real progress; the
+        # cap counts non-progressing rounds only.
+        _hb_round = self._conflict_rounds
+        self._conflict_rounds = 0
+        self._prev_conflict_files = []
+        self.meta["main_sync"] = {
+            "mode": "merged",
+            "main_sha": (self._main_sync_handback_sha
+                         or str((self.meta.get("main_sync") or {})
+                                .get("main_sha") or "")),
+            "lane_head": c.commit, "scope": "handback-settle",
+            "detail": "session-settled after the work-stage handback",
+            "note": "main-sync conflict handed back to the owning session and "
+                    "settled (t261022-12)"}
+        self._log("main-sync conflict handed back to the session and settled "
+                  "(round %d), merge commit %s" % (_hb_round, c.commit))
+        return SettleLaneResult(
+            note="conflict-settle: merge commit %s (session-settled handed-back "
+                 "main-sync conflict)" % c.commit,
+            lane_commits=-1, error="")
 
     def _quick_gate_verdict(self, ir: Any) -> str:
         """Verdict for a FULL-registry round (pure w.r.t. the receipt + the parent's
@@ -8175,6 +8362,9 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
         # names as the parent's conflict-resolution loop).
         self._conflict_rounds = 0
         self._prev_conflict_files: List[str] = []
+        # t261022-12: the handback pending flag starts every run clean (the class
+        # default covers a fresh instance; this resets a resumed shell too).
+        self._main_sync_settle_pending = False
 
         while phase != "done":
             await self._concurrency_release_if_paused()
@@ -8261,6 +8451,14 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                     continue  # consumed at the loop top
                 done = dict(self._quick_work_done or {})
                 self._quick_work_done = None
+                # t261022-12: wake convergence (same discipline as _blocked's wake
+                # path) — a wake clears the pinned blocked face, whatever parked
+                # the lane (a main-sync conflict handback included).
+                self.meta["blocked_reason"] = ""
+                self.meta["blocked_tier"] = ""
+                self.meta["blocked_evidence"] = None
+                if getattr(self, "_detail_face_on", False):
+                    self.meta["blocked_detail"] = None
                 # Identity face (guardrail: who worked, never a borrowed role name).
                 self.meta["worked_by"] = {"session": done.get("session", ""),
                                           "role": done.get("role", ""),
@@ -8270,30 +8468,44 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                           % (done.get("session", ""), done.get("role", "")))
                 self.meta["stage_state"] = "running"
                 self._touch()
-                try:
-                    sraw = await workflow.execute_activity(
-                        settle_lane,
-                        SettleLaneArgs(ticket_id=self.ticket_id,
-                                       worktree=str(self.meta.get("worktree") or ""),
-                                       stage_id="work", gen=self._gen("work"),
-                                       write_set=self._effective_write_set(),
-                                       base_ref=str(self.meta.get("base_ref") or ""),
-                                       path_gate=bool(self.meta.get("path_gate")),
-                                       path_gate_rules=dict(
-                                           self.meta.get("path_gate_rules") or {}),
-                                       authorizations=self._protected_authz_records()),
-                        start_to_close_timeout=SHORT, retry_policy=RETRY)
-                except Exception as e:  # noqa: BLE001 - the work stays in the tree
-                    await self._blocked(
-                        "work",
-                        "The worker settle failed (%s: %s). The change is still in "
-                        "the worktree, nothing is lost; send retry_qc to settle "
-                        "again." % (type(e).__name__, str(e)[:400]))
-                    continue
-                s = sraw if isinstance(sraw, SettleLaneResult) else SettleLaneResult(
-                    note=str(sraw.get("note") or ""),
-                    lane_commits=int(sraw.get("lane_commits") or -1),
-                    error=str(sraw.get("error") or ""))
+                if (workflow.patched(MAIN_SYNC_CONFLICT_HANDBACK_PATCH_ID)
+                        and self._main_sync_settle_pending):
+                    # t261022-12: the handback left the main-sync merge OPEN
+                    # (MERGE_HEAD present); the session resolved the markers, so
+                    # the settle must commit the MERGE COMMIT through the
+                    # conflict-settle core — the ordinary settle_lane would face
+                    # unmerged index entries. Gate + flag together (review note
+                    # 4): the flag is only ever set inside the gated handback
+                    # branch, the pair makes replay divergence impossible even if
+                    # the set-site is later refactored.
+                    s = await self._quick_conflict_settle_after_handback()
+                    if s is None:
+                        continue  # blocked inside the helper
+                else:
+                    try:
+                        sraw = await workflow.execute_activity(
+                            settle_lane,
+                            SettleLaneArgs(ticket_id=self.ticket_id,
+                                           worktree=str(self.meta.get("worktree") or ""),
+                                           stage_id="work", gen=self._gen("work"),
+                                           write_set=self._effective_write_set(),
+                                           base_ref=str(self.meta.get("base_ref") or ""),
+                                           path_gate=bool(self.meta.get("path_gate")),
+                                           path_gate_rules=dict(
+                                               self.meta.get("path_gate_rules") or {}),
+                                           authorizations=self._protected_authz_records()),
+                            start_to_close_timeout=SHORT, retry_policy=RETRY)
+                    except Exception as e:  # noqa: BLE001 - the work stays in the tree
+                        await self._blocked(
+                            "work",
+                            "The worker settle failed (%s: %s). The change is still in "
+                            "the worktree, nothing is lost; send retry_qc to settle "
+                            "again." % (type(e).__name__, str(e)[:400]))
+                        continue
+                    s = sraw if isinstance(sraw, SettleLaneResult) else SettleLaneResult(
+                        note=str(sraw.get("note") or ""),
+                        lane_commits=int(sraw.get("lane_commits") or -1),
+                        error=str(sraw.get("error") or ""))
                 self._record_authz_uses(s.note, "work")
                 if self._quick_settle_refused(s.error):
                     # The write-set gate refused: named blocked, never a silent

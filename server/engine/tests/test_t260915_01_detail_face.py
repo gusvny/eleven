@@ -474,7 +474,10 @@ def test_source_wiring_locks_dev_lane_consumers():
     assert "self._detail_face_on = workflow.patched(DETAIL_FACE_PATCH_ID)" in src  # 唯一求值点（契约锚形状）
     assert src.count("workflow.patched(DETAIL_FACE_PATCH_ID)") == 1
     assert 'self.meta["blocked_detail"] = None' in src   # 清点①②
-    assert src.count('self.meta["blocked_detail"] = None') == 2
+    # t261022-12: +1 = the quickmanual work phase's wake convergence (the
+    # work_done wake after a main-sync conflict handback clears the pinned
+    # blocked face, same discipline as _blocked's wake path).
+    assert src.count('self.meta["blocked_detail"] = None') == 3
 
 
 def test_source_a4_pins_adjacent_to_blocked():

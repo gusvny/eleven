@@ -1649,6 +1649,10 @@
       "anchor": "contract",
       "note": "t261022-08: every quickmanual stage (open/work/run_integration_tests/merge_check/merge) has a declared path-gate face; open=result_files, work=write_set; measured defect = settle refused every write with path_gate_reason=unknown_stage."
     },
+    "server/engine/tests/test_t261022_12_main_sync_handback.py": {
+      "anchor": "behaviour",
+      "note": "t261022-12 L1: the main-sync conflict handback - quickmanual lane conflict lands on work awaiting the session with no implement requested and the reason surviving a malformed sync receipt; per-lane vocabulary attributes (dev/light keep implement, quickmanual hands back to work); gate off replays the old implement path verbatim; the session work_done settle routes through the conflict settle and a residue blocks named."
+    },
     "server/engine/tests/test_t261022_foreign_repair_split.py": {
       "anchor": "behaviour",
       "note": "t261022-10 (KI-332): foreign_file_repair splits conflict-resolution pollution (repaired) from the ticket's own out-of-write-set write (never repaired, RED naming file+commits); ambiguous authorship is RED. Patch id t261022-foreign-repair-split-v1."
@@ -5579,14 +5583,23 @@
       "note": "t261019-41 L3: the two-repo develop-line journey end to end - a proven map covering the declared set lands BOTH repos (one landing row naming both, each repo realises its own declared branch), a map missing a repo refuses by name with nothing moved, the certification names the same repo set, a promotion with one not-fast-forwardable repo refuses with the OTHER main unmoved and no row, then fast-forwards both mains with per-repo main_before/after, and the single-repo line stays byte-identical",
       "sync_path": ""
     },
-    "integration/t261021-01/sc_t261021_01_finding_sighting.py": {
+    "integration/t261022-12/sc_t261022_12_main_sync_handback.py": {
       "anchor": "behaviour",
-      "note": "t261021-01: the finding sighting record - a finding SEEN AGAIN in a later period leaves an observation row naming the finding, period and revision, built by the pure sighting_rows face and persisted through the findings/observations ledgers; peer landing restored into this lane by the t261022-14 landing union, green on the develop-buffer line.",
+      "note": "t261022-12 L3: the real-Temporal conflict handback journey - a parked-at-work quickmanual ticket whose gate main sync merges a now-conflicting main lands back on work awaiting its session (no wedge, no agent: empty stub-brain ledger and no implement on the timeline); the blocked reason names the conflicting file, the failed merge and the work_done way out; the owning session resolves the markers in the lane worktree without git commit, signals work_done again, and the lane settles the open merge (public main_sync face shows merged) and reaches the human merge gate.",
       "sync_path": ""
     },
-    "integration/t261021-07/sc_t261021_07_metrics_tab_mock_anchors.mjs": {
+    "integration/t261022-12/sc_t261022_12_handback_faces.py": {
+      "anchor": "contract",
+      "note": "t261022-12 L2: the per-lane conflict vocabulary on the live classes - the quickmanual chain stays open/work/run_integration_tests/merge_check/merge with no implement; MAIN_SYNC_WORK_STAGE=work on the quickmanual lane, absent (agent step implement kept) on dev and light lanes; the handback patch id is declared (replay gate)."
+    },
+    "integration/t261022-10/sc_process_bench_docker_free.py": {
       "anchor": "behaviour",
-      "note": "t261021-07: rebuilt Metrics tab vs the approved 261021 mock — seven sections, six KPI tiles, fixed-height workflow card with in-card stage drill, certification, five epics + sort, both ECharts canvases, no-prose and no-mock-numbers negatives, malformed-payload degradation, light+dark captures",
+      "note": "t261022-10: docker-free process bench - start a native temporal stage as plain processes, hand its endpoint to a scenario, reap the process group and assert zero residue (port refuses, group empty) re-read from a fresh process.",
+      "sync_path": ""
+    },
+    "integration/tests/test_t261022_expected_pool_knownred.py": {
+      "anchor": "behaviour",
+      "note": "261022 regression on the round's expected count: the pure expected_entries face keeps 'full table minus excluded pools minus the known-red entries that survive that exclusion' - all pools excluded is 0 and never negative (the live -49), a roster entry inside an excluded pool is not deducted twice, no exclusion keeps the old number, ghost roster names are harmless; plus a source lock that main() uses the pure face and keeps no inline subtraction",
       "sync_path": ""
     },
     "integration/t261021-06/sc_metrics_v2_workflows_stages_rounds.mjs": {
@@ -5619,34 +5632,14 @@
       "note": "t261021-06: metrics-api-contract-v2.md exists as a new file with all field names, formula/approximation/degrade sections, the inherited failure-mode list for reused discovery/parser code, the source_version-vs-doc-version mapping, v1 untouched, and the no-cost verdict",
       "sync_path": ""
     },
-    "integration/t261021-10/sc_t26102110_lane_overlay_out_of_tree.py": {
-      "anchor": "contract",
-      "note": "t261021-10: the lane sandbox overlay home lives OUTSIDE the tree the stage path gate measures (incident t261021-05 unauthorized_path on integration/<ticket>/overlay), the one predicate admits only the out-of-tree root and refuses both the incident shape and a hand-written file next to it, dispose reclaims from disk, and the real lint brake reds on a planted in-tree overlay dir naming the helper as the lawful home",
-      "sync_path": "integration/lib_lane_overlay.py"
-    },
-    "integration/t261022-10/sc_process_bench_docker_free.py": {
+    "integration/t261021-01/sc_t261021_01_finding_sighting.py": {
       "anchor": "behaviour",
-      "note": "t261022-10: docker-free process bench - start a native temporal stage as plain processes, hand its endpoint to a scenario, reap the process group and assert zero residue (port refuses, group empty) re-read from a fresh process.",
+      "note": "t261021-01 (carried in from the develop line's own registration during the t261022-12 landing-union resolution; the line's registry entry arrives without an anchor key): a finding SEEN AGAIN in a later period leaves an observation row naming the finding, the seeing period and the revision, over the real inspection_review_ledger store faces and on-disk findings/observations rows - grain, re-observation, sighting_report counts, fail-closed batch/identity, malformed-input refusals, cross-face collapse and idempotent re-recording.",
       "sync_path": ""
     },
-    "integration/t261022-14/sc_t26102214_review_comments_lane_store.mjs": {
+    "integration/t261021-07/sc_t261021_07_metrics_tab_mock_anchors.mjs": {
       "anchor": "behaviour",
-      "note": "t261022-14 L3: the lane store contract on real disk - schema read-back of every field, per-block-kind anchors incl. table cell, hash-hit/neighbour/outdated never-drop, corrupt-JSON refuse-without-destroy, traversal rejection, no temp residue, hostile docs sanitized with a named drop count; S1 dead-button source lock on the route seam (KI-01M4HMCZA).",
-      "sync_path": ""
-    },
-    "integration/t261022-14/sc_t26102214_review_panel_face.mjs": {
-      "anchor": "behaviour",
-      "note": "t261022-14 L3: the served-panel face journey - doc-kind click opens the reviewer panel, code-kind keeps the raw viewer (non-goal), block diff marks with hide-removed, four block kinds persist to the real lane file read back from disk and survive reload, resolve/reopen + Open filter, minimap marks/counts, TOC h1/h2, lane-path notice (req 9), rail never covers the document, light+dark captures (KI-055), zero pageerror.",
-      "sync_path": ""
-    },
-    "integration/t261022-14/sc_t26102214_lane_review_comments.mjs": {
-      "anchor": "behaviour",
-      "note": "t261022-14: the markdown reviewer's lane comment store end to end over the real host store + client anchor modules - four block kinds persist to <lane>/.sandbar/review-comments.json, every schema field read back from disk (the lane agents' plain file-read path), and an edited block still places its threads (exact/neighbour/outdated, never dropped). behaviour anchor: it pins what the persistence does for the reader, not an internal contract form.",
-      "sync_path": ""
-    },
-    "integration/tests/test_t261022_expected_pool_knownred.py": {
-      "anchor": "behaviour",
-      "note": "261022 regression on the round's expected count: the pure expected_entries face keeps 'full table minus excluded pools minus the known-red entries that survive that exclusion' - all pools excluded is 0 and never negative (the live -49), a roster entry inside an excluded pool is not deducted twice, no exclusion keeps the old number, ghost roster names are harmless; plus a source lock that main() uses the pure face and keeps no inline subtraction",
+      "note": "t261021-07: rebuilt Metrics tab vs the approved 261021 mock — seven sections, six KPI tiles, fixed-height workflow card with in-card stage drill, certification, five epics + sort, both ECharts canvases, no-prose and no-mock-numbers negatives, malformed-payload degradation, light+dark captures",
       "sync_path": ""
     },
     "integration/t261024-12/sc_t26102412_narrowed_green_landing.py": {
@@ -5698,6 +5691,11 @@
       "note": "t261021-15 grey-box L3: a lane that passed its own targeted faces must not carry a HALF landing union - every scenario cmd naming a repo file finds it on disk, every anchor manifest path key exists, the engine import chain (dev_lane/agent_activities/shared) imports whole in a fresh process, and a fabricated registry with one missing file fails by name (the guard is not vacuous)",
       "sync_path": "integration/run_scenarios.py; integration/test_anchors.json"
     },
+    "integration/t261021-10/sc_t26102110_lane_overlay_out_of_tree.py": {
+      "anchor": "contract",
+      "note": "t261021-10: the lane sandbox overlay home lives OUTSIDE the tree the stage path gate measures (incident t261021-05 unauthorized_path on integration/<ticket>/overlay), the one predicate admits only the out-of-tree root and refuses both the incident shape and a hand-written file next to it, dispose reclaims from disk, and the real lint brake reds on a planted in-tree overlay dir naming the helper as the lawful home",
+      "sync_path": "integration/lib_lane_overlay.py"
+    },
     "integration/t261025-02/sc_t261025_02_own_never_peeled.py": {
       "anchor": "behaviour"
     },
@@ -5705,6 +5703,21 @@
       "anchor": "behaviour",
       "note": "t261025-08 KI-356 grey-box L3 (offline, no docker/Temporal server/browser): a memo-poisoned in-flight lane (patched() reads False) that received the enable event records an honest narrowed face on the current lane HEAD judged green by name at merge_check; the inert control without the event stays byte-silent; idempotence and malformed payload never crash or phantom-arm; fail-closed under enable (zero-run/red/sha-failure record nothing, full round unmarked).",
       "sync_path": "server/engine/dev_lane.py; server/engine/client.py"
+    },
+    "integration/t261022-14/sc_t26102214_review_comments_lane_store.mjs": {
+      "anchor": "behaviour",
+      "note": "t261022-14 L3: the lane store contract on real disk - schema read-back of every field, per-block-kind anchors incl. table cell, hash-hit/neighbour/outdated never-drop, corrupt-JSON refuse-without-destroy, traversal rejection, no temp residue, hostile docs sanitized with a named drop count; S1 dead-button source lock on the route seam (KI-01M4HMCZA).",
+      "sync_path": ""
+    },
+    "integration/t261022-14/sc_t26102214_review_panel_face.mjs": {
+      "anchor": "behaviour",
+      "note": "t261022-14 L3: the served-panel face journey - doc-kind click opens the reviewer panel, code-kind keeps the raw viewer (non-goal), block diff marks with hide-removed, four block kinds persist to the real lane file read back from disk and survive reload, resolve/reopen + Open filter, minimap marks/counts, TOC h1/h2, lane-path notice (req 9), rail never covers the document, light+dark captures (KI-055), zero pageerror.",
+      "sync_path": ""
+    },
+    "integration/t261022-14/sc_t26102214_lane_review_comments.mjs": {
+      "anchor": "behaviour",
+      "note": "t261022-14: the markdown reviewer's lane comment store end to end over the real host store + client anchor modules - four block kinds persist to <lane>/.sandbar/review-comments.json, every schema field read back from disk (the lane agents' plain file-read path), and an edited block still places its threads (exact/neighbour/outdated, never dropped). behaviour anchor: it pins what the persistence does for the reader, not an internal contract form.",
+      "sync_path": ""
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

@@ -277,6 +277,23 @@ def build_fixture(fail):
     if os.path.isdir(target) and not os.path.exists(link):
         os.symlink(target, link)
     build_lane(fixture, [(n, "ro", True) for n in GATE_NAMES])
+    # t261022-12 (acceptance gen14 defect 2): the quickmanual fixture ticket's
+    # evidence declaration is an l1_battery named "test_quickmanual_lane.py",
+    # and the evidence-scope resolution (QUICKMANUAL_SCOPE_PATCH_ID) requires
+    # that battery to exist as a file in the LANE (quick_scope_plan's
+    # path_exists face). Both quickmanual fixture worlds build their lane
+    # through this one seam, so the battery stub is written here once: a
+    # passing, pytest-addressable target, green by construction.
+    with open(os.path.join(fixture, "test_quickmanual_lane.py"), "w",
+              encoding="utf-8") as f:
+        f.write(
+            '"""Fixture battery face (t261022-12): the quickmanual fixture\n'
+            'ticket\'s evidence declaration names this battery; the evidence-scope\n'
+            'resolution requires it to exist as a file in the lane. Passing by\n'
+            'construction - the fixture world asserts the scope/plumbing faces,\n'
+            'not this file."""\n'
+            'def test_fixture_battery_face_is_present():\n'
+            '    assert True\n')
     mini_dir = os.path.join(fixture, "integration", "mini")
     for n in GATE_NAMES:
         with open(os.path.join(mini_dir, "%s.py" % n), "w", encoding="utf-8") as f:
