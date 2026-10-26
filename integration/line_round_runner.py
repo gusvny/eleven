@@ -473,6 +473,56 @@ def unverified_names(log_path):
     return sorted(out)
 
 
+def fail_receipts(log_path):
+    """The per-case receipt of this suite run's reds (t261026-19): for every
+    scenario whose row reads fail/not-checked, its OWN result row's reason /
+    evidence / output tail, keyed by case name — the same per-scenario result
+    lines failed_names/unverified_names read, one source of truth. The
+    engine's freeze judge reads this map to tell a content red (a receipt
+    that names a failing assertion) from a round-only flake (a receipt that
+    names none). Fault-mode dispositions (review comment 1):
+    - unreadable log       -> {} (an absent map fails closed content-side)
+    - malformed JSON line  -> skipped
+    - non-dict row         -> skipped
+    - missing / blank name -> skipped
+    - duplicate names      -> LAST occurrence wins (the suite's final verdict
+                              for that case, e.g. after a retry)
+    the lifted receipt always carries the row's ``status`` verbatim (the
+    protocol's three-state word), plus whatever string receipt fields exist
+    - non-string reason /  -> the field is dropped, the row is judged by
+      evidence values         whatever string fields remain
+    Only fail/not-checked rows are lifted: a passed case carries no receipt
+    the judge needs."""
+    try:
+        text = Path(log_path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    out = {}
+    for line in text.splitlines():
+        s = line.strip()
+        if not s.startswith('{"name"'):
+            continue
+        try:
+            row = json.loads(s)
+        except ValueError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        if row.get("status") not in ("fail", "not-checked"):
+            continue
+        name = row.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        receipt = {"status": row.get("status")}
+        for field in ("reason", "fail_reason", "FAIL_REASON",
+                      "evidence", "output_tail"):
+            value = row.get(field)
+            if isinstance(value, str) and value.strip():
+                receipt[field] = value
+        out[name.strip()] = receipt
+    return out
+
+
 def tail(text, n=300):
     return (text or "").strip()[-n:]
 
@@ -674,6 +724,9 @@ def run(env=None):
                 header["failed_names"] = failed_names(log_path)
                 # published, never swallowed: the environment face of this round
                 header["unverified_names"] = unverified_names(log_path)
+                # t261026-19: each red's OWN receipt, so the engine's freeze
+                # judge can tell a content red from a round-only flake
+                header["fail_receipts"] = fail_receipts(log_path)
         # 261023: the engine persists this header and mints the certification in ONE
         # block; when that block does not run, a green round leaves NO row in the
         # project ledger and can never be certified - measured twice today (face

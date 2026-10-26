@@ -85,6 +85,7 @@ R1 — the pattern is integration/scenario_ledger.py and its ULID mint):
 import fcntl
 import json
 import os
+import re
 import sys
 import secrets
 import time
@@ -1421,6 +1422,119 @@ def should_freeze(attribution_value):
     return bool(attribution_value)
 
 
+# ---- the receipt classification (t261026-19) --------------------------------
+# t261026-19: the freeze judge read only the relative new-regression COUNT,
+# so a round-only flake (a red whose own receipt names no failing assertion,
+# green on a re-run of the same tree) froze the whole line exactly like a
+# real regression — five such freezes on the develop-buffer line in one day
+# (2026-10-26), each thawed by hand. The distinguishing evidence is the
+# case's OWN receipt (its per-case canonical result row: reason / evidence /
+# output tail), which the run header already carries next to the fail name
+# set. The rule, fail-closed (spec items 1-3):
+#
+#   receipt names a failing assertion (non-empty FAIL_REASON / reason code,
+#   or an assertion line in the suite's own vocabulary) -> CONTENT_GUILT
+#   receipt present but names no assertion              -> ROUND_ONLY
+#     (recorded BY NAME on the round's face; opens no freeze; NEVER green)
+#   receipt absent for the name / unparseable shape     -> CONTENT_GUILT
+#     (the old behaviour: an unjudgeable red freezes)
+#   whole receipts field missing (legacy run record)    -> CONTENT_GUILT
+#
+# The class never widens to green. A genuinely sick case is caught by the
+# escalation rule below instead of the freeze itself.
+
+ROUND_ONLY = "round_only"
+CONTENT_GUILT = "content_guilt"
+
+#: three consecutive round-only reds of the SAME case escalate to a freeze:
+#: the case is sick, not the revision (spec item 2).
+ROUND_ONLY_ESCALATION_THRESHOLD = 3
+
+#: the receipt fields the judge reads. ``reason`` is the canonical line's
+#: reason code (failure-classification protocol v1); the remaining names are
+#: the legacy/suite-own spellings of FAIL_REASON and the output tail.
+_RECEIPT_TEXT_FIELDS = ("reason", "fail_reason", "FAIL_REASON",
+                        "evidence", "output_tail")
+
+#: the suite's own assertion vocabulary, case-insensitive: a pytest/scenario
+#: traceback, an AssertionError, an assert_mismatch-style reason code. An
+#: environment reason code (connect_refused, missing_asset) matches none of
+#: these — that is the point.
+_ASSERTION_VOCABULARY_RE = re.compile(
+    r"assert|assertionerror|traceback|exception|expected|mismatch",
+    re.IGNORECASE)
+
+
+def classify_red_case(receipt):
+    """One receipt -> one class. ``receipt`` is the per-case canonical result
+    row (a dict of reason/evidence strings) or whatever stood in for it.
+    Fail-closed by construction: only a PRESENT, parseable receipt that
+    names no assertion reads round-only; everything unjudgeable reads
+    content guilt (the old freeze behaviour)."""
+    if not isinstance(receipt, dict):
+        return CONTENT_GUILT
+    texts = []
+    present = False
+    for field in _RECEIPT_TEXT_FIELDS:
+        value = receipt.get(field)
+        if value is None:
+            continue
+        present = True
+        if isinstance(value, str) and value.strip():
+            texts.append(value)
+    if not texts:
+        # fields present but none readable as text: the receipt cannot be
+        # parsed at all -> content guilt (the old behaviour). A receipt with
+        # no such field at all is the honest "names nothing" shape ->
+        # round-only, never green.
+        return CONTENT_GUILT if present else ROUND_ONLY
+    if _ASSERTION_VOCABULARY_RE.search(" ".join(texts)):
+        return CONTENT_GUILT
+    return ROUND_ONLY
+
+
+def classify_new_regressions(header, names):
+    """The round's new-regression names -> {name: class}. The receipts ride
+    the run header as ``fail_receipts`` (written by the line-round runner
+    from the same per-case result lines the fail name set comes from). A
+    header without that field (legacy record, or a runner older than the
+    field) fails closed: every name content guilt, the judge behaves exactly
+    as before."""
+    receipts = header.get("fail_receipts") if isinstance(header, dict) \
+        else None
+    if not isinstance(receipts, dict):
+        return {str(n): CONTENT_GUILT for n in names}
+    return {str(n): classify_red_case(receipts.get(n)) for n in names}
+
+
+def round_only_escalation(classifications, case,
+                          threshold=ROUND_ONLY_ESCALATION_THRESHOLD):
+    """How many consecutive rounds have judged ``case`` ROUND-ONLY, newest
+    first — the escalation streak (spec item 2: three in a row means the
+    case is sick, not the revision). ``classifications`` is a newest-first
+    list of per-round {name: class} maps. An entry that is not a dict (a
+    round that could not be classified at all — a legacy header, a missing
+    run record) is UNCOUNTABLE: the scan stops there, and the short streak
+    is reported with its uncountable count so a silently short streak is
+    visible on the face, never just shorter. A classified round WITHOUT the
+    case means the case was not red that round — the consecutive run is
+    genuinely broken. Returns
+    (streak, uncountable)."""
+    streak = uncountable = 0
+    for cls in classifications:
+        if isinstance(cls, dict) and cls.get(case) == ROUND_ONLY:
+            streak += 1
+            continue
+        if not isinstance(cls, dict):
+            # the round cannot be classified at all (legacy header, missing
+            # run record): the streak cannot be continued honestly
+            uncountable += 1
+        # a classified round without the case means the case was NOT red
+        # that round — the consecutive run is genuinely broken
+        break
+    return streak, uncountable
+
+
 # ---- the waiting faces (t261009-21: goals 8 / 14 / 15 / 16) ----------------
 # Projections of the delivery ledger, same discipline as derive_range: the
 # records' order is authoritative, nothing here writes a field onto any row
@@ -2226,6 +2340,20 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                     # content guilt IS the new-regression set (carried debt is
                     # folded into green, so it never reaches the freeze branch)
                     _content_failed = len(rel_new)
+                    # t261026-19: judge each regression by its OWN receipt. A
+                    # name whose receipt names no failing assertion is
+                    # ROUND-ONLY: recorded by name on the face, never green,
+                    # and never a freeze by itself (the escalation rule below
+                    # is its net). MUST ride the header BEFORE the runs-store
+                    # append further down, or the escalation projection would
+                    # read back headers without the judgment it needs.
+                    red_class = classify_new_regressions(header, rel_new) \
+                        if verdict == "red" else {}
+                    header["red_classification"] = red_class
+                    _content_names = sorted(n for n, c in red_class.items()
+                                            if c == CONTENT_GUILT)
+                    _round_only_names = sorted(n for n, c in red_class.items()
+                                               if c == ROUND_ONLY)
                     header["verdict"] = verdict
                     header["relative"] = rel
                     # t261024-30: the record must SAY WHICH RULE it used — the
@@ -2243,11 +2371,19 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                     header["verdict_rule"] = "absolute-content-v1"
                     header["unverified_count"] = int(
                         header["cases"].get("env_failed", 0) or 0)
+                    # legacy (no project) path: no receipts in play, the old
+                    # rule stands verbatim (spec item 4)
+                    red_class = {}
+                    _content_names = []
+                    _round_only_names = []
                 else:
                     # could-not-run (header absent/malformed): no verdict here —
                     # build_certification raises CouldNotRun, which is the
                     # range-growth path, never a red (design goal 24)
                     verdict, rel, _content_failed = "no_proof", None, 0
+                    red_class = {}
+                    _content_names = []
+                    _round_only_names = []
                 # 261013: persist the cited run header to the durable
                 # per-project runs store BEFORE building the cert. The runner's
                 # suite wrote it into the round's OWN scoped ledger dir (deleted
@@ -2278,7 +2414,14 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                 # env-only red (failed == 0, env_failed > 0) means part of the
                 # suite was unavailable, not that the revision is guilty.
                 # should_freeze's written intent is wired (it was dead code).
-                if verdict == "red" and should_freeze(_content_failed > 0):
+                # t261026-19: under the relative caliber, content guilt is now
+                # judged per receipt — only the CONTENT_GUILT names warrant a
+                # freeze; a round-only red stays red, named, freezeless.
+                if rel is not None:
+                    _freeze_warrant = bool(_content_names)
+                else:
+                    _freeze_warrant = _content_failed > 0
+                if verdict == "red" and should_freeze(_freeze_warrant):
                     batch += open_freeze_rows(cert, at_ms=now_ms)
                 res = append_rows(batch)
                 if res["written"] != len(batch):
@@ -2295,6 +2438,12 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                     # round's record must be able to say "green carrying N of
                     # main's debt" and a red must name the regressions
                     entry["relative"] = rel
+                if verdict == "red" and _round_only_names:
+                    # t261026-19 spec item 2: a round-only red is VISIBLE and
+                    # COUNTED — "N round-only reds, named" on the round's
+                    # face; never swallowed, never green.
+                    entry["round_only"] = _round_only_names
+                    entry["round_only_count"] = len(_round_only_names)
                 if verdict == "red":
                     # Re-read: the ladder is judged from the records' order
                     # (seq), which only exists after the append.
@@ -2309,10 +2458,25 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                         # red opens no freeze, so there is no culprit to derive
                         # — the ladder exists to isolate content guilt. Named,
                         # never silent: the entry says why no freeze is open.
-                        entry["next"] = "env_red_no_freeze"
-                        entry["note"] = ("env-only red (failed=0, env_failed>0)"
-                                         " — range grew, no freeze (design "
-                                         "goal 24: freeze keys on content red)")
+                        if _round_only_names:
+                            # t261026-19: the receipts named no assertion, so
+                            # the red is round-only — no freeze, the case is
+                            # named above; the escalation rule below is the
+                            # net for a genuinely sick case.
+                            entry["next"] = "round_only_no_freeze"
+                            entry["note"] = (
+                                "round-only red: %d receipt(s) name no "
+                                "failing assertion — no freeze; escalation "
+                                "at %d consecutive round-only rounds of the "
+                                "same case"
+                                % (len(_round_only_names),
+                                   ROUND_ONLY_ESCALATION_THRESHOLD))
+                        else:
+                            entry["next"] = "env_red_no_freeze"
+                            entry["note"] = (
+                                "env-only red (failed=0, env_failed>0)"
+                                " — range grew, no freeze (design "
+                                "goal 24: freeze keys on content red)")
                     if freezes:
                         frz = freezes[-1]
                         entry["freeze"] = frz["id"]
@@ -2329,6 +2493,54 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                                 "red ladder isolated the culprit",
                                 value=target["id"], at_ms=now_ms, line=line)])
                             entry["attribution"] = target["id"]
+                    if verdict == "red" and _round_only_names:
+                        # t261026-19 escalation: N consecutive round-only
+                        # rounds of the SAME case — the streak is judged from
+                        # the records' order plus the cited runs' persisted
+                        # classifications (derived, never stored); a prior
+                        # round whose classification cannot be read back is
+                        # UNCOUNTABLE and stops the streak, named on the face.
+                        _runs_rows = []
+                        if runs_store:
+                            _runs_rows, _runs_bad = _read_rows_path(
+                                Path(runs_store))
+                        _by_id = {}
+                        for _rr in _runs_rows:
+                            if isinstance(_rr, dict) \
+                                    and isinstance(_rr.get("id"), str):
+                                _by_id[_rr["id"]] = _rr  # last write wins
+                        _prior = []
+                        for _c in reversed(_of_kind(rows2, KIND_CERT,
+                                                    line)[:-1]):
+                            _run_row = _by_id.get(_c.get("run"))
+                            _prior.append(
+                                _run_row.get("red_classification")
+                                if isinstance(_run_row, dict) else None)
+                        for _case in _round_only_names:
+                            _streak, _uncountable = round_only_escalation(
+                                [red_class] + _prior, _case)
+                            if _streak < ROUND_ONLY_ESCALATION_THRESHOLD:
+                                continue
+                            _frz_rows = open_freeze_rows(red_cert,
+                                                         at_ms=now_ms)
+                            _frz_rows.append(freeze_change_row(
+                                _frz_rows[0]["id"], CHANGE_ATTRIBUTION,
+                                judged_by,
+                                "round_only_escalation:%d consecutive "
+                                "round-only rounds" % _streak,
+                                value=_case, at_ms=now_ms, line=line))
+                            _res2 = append_rows(_frz_rows)
+                            if not isinstance(_res2, dict) \
+                                    or _res2.get("written") != len(_frz_rows):
+                                raise CertifyError(
+                                    "escalation_append_rejected:%r"
+                                    % (_res2.get("rejected")
+                                       if isinstance(_res2, dict) else _res2,))
+                            entry["escalation"] = {
+                                "case": _case, "streak": _streak,
+                                "uncountable": _uncountable,
+                                "freeze": _frz_rows[0]["id"]}
+                            break
                 rounds.append(entry)
             except CouldNotRun as e:
                 _append_settle_row(append_rows, line, str(e), now_ms,
@@ -3124,7 +3336,22 @@ def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
                     "reconciled:%s" % rid, at_ms=now_ms, line=line)
                 batch = [cert]
                 failed = int(cases.get("failed", 0) or 0)
-                if run.get("verdict") == "red" and should_freeze(failed > 0):
+                # t261026-19: the heal obeys the same receipt rule. A healed
+                # run that carries a regression name set is classified per
+                # receipt (classify_new_regressions fails closed to content
+                # guilt when the run carries no receipts — the old behaviour);
+                # a legacy run with neither names nor receipts keeps the old
+                # absolute rule verbatim.
+                _heal_names = run.get("new_regressions") \
+                    or run.get("failed_names")
+                if isinstance(_heal_names, list) and _heal_names:
+                    _heal_class = classify_new_regressions(run, _heal_names)
+                    _heal_warrant = any(c == CONTENT_GUILT
+                                        for c in _heal_class.values())
+                else:
+                    _heal_warrant = failed > 0
+                if run.get("verdict") == "red" \
+                        and should_freeze(_heal_warrant):
                     batch += open_freeze_rows(cert, at_ms=now_ms)
                 what = "cert:%s" % cert["id"]
             else:

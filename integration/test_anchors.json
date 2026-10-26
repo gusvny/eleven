@@ -1702,6 +1702,10 @@
       "anchor": "behaviour",
       "note": "t261025-11 developer L1: the one-record contract on the healing paths - _append_settle_row checks the writer's answer (rejected batch retries once, then names the unrecorded round on the tick-refusal face, never silent zero rows, never masking the caller's exception); reconcile_unrecorded_rounds heals a completed runner row that no delivery row cites into exactly ONE certification (judged_by=reconciled:<run_id>) or ONE range-growth row naming the run id, idempotent by replay; content red heals cert+freeze; guard held and line-ambiguous write nothing (named entry); append failure is a named entry; the full tick heals then idles without a round; malformed runs-store lines are named, never guessed."
     },
+    "server/engine/tests/test_t261026_19_round_only_red.py": {
+      "anchor": "contract",
+      "note": "t261026-19 developer L1: the classifier truth table (assertion receipt = content guilt, empty receipt = round-only, unparseable/absent = content guilt), the legacy-header fail-closed matrix, the settle/heal call-site wiring, and the escalation streak counting (per-case, interleaved reset, uncountable-header named)"
+    },
     "server/engine/tests/test_t261026_06_request_sweep_reader.py": {
       "anchor": "contract",
       "note": "t261026-06 L1: default_ticket_status_fn resolves the reader through shared.ADMIN_PY (server/admin.py), a working stub reader resolves a ticket_closed head with the source named in the evidence, and a missing/unreachable reader produces a named reader failure carrying the resolved path instead of a silent None (developer-owned unit battery; the channel-level journey belongs to sc_t261026_06_reader_path_loudness)",
@@ -5850,6 +5854,10 @@
     "integration/t261025-14/sc_t261025_14_token_loss_at_close.mjs": {
       "anchor": "behaviour",
       "note": "t261025-14: the loss-at-close journey as the user sees it - a closed ticket whose lane is gone keeps its token usage via the archive, a cached tokens=null record heals once the archive appears, the lane source wins while alive (byte-identical with/without archive), a corrupt archive file never zeroes the face and is named, a measured zero outside tickets stays 0 while a missing block stays null with the named tickets-only caliber, and out-of-window archived events never inflate the total."
+    },
+    "integration/t261026-19/sc_t26102619_round_only_red_judged.py": {
+      "anchor": "contract",
+      "note": "t261026-19: the composed round freeze judgement - a round-only red (a receipt naming no failing assertion) ends red, names the case, opens NO freeze; a real assertion red still opens exactly one freeze; missing/unparseable/absent receipts fail closed to content guilt; three consecutive round-only reds of the SAME case escalate to a freeze naming the case, an interleaved different case resets the streak; env-only still never freezes; line_round_runner lifts per-case receipts into the header and an unreadable log degrades to an absent map"
     },
     "integration/t261026-11/degrade_inspection_coverage.mjs": {
       "anchor": "behaviour",
