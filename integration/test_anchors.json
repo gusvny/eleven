@@ -863,6 +863,10 @@
       "note": "",
       "sync_path": ""
     },
+    "server/engine/tests/test_t261026_15_failed_detail.py": {
+      "anchor": "contract",
+      "note": "t261026-15: the run header's additive failed_detail field - store-side validation truth tables (shape matrix one refusal per fact, the reserved __truncated__ marker guard, failed_detail_on_green refusal, absence stays valid with no version bump) plus one persistence leg through the real append_run_header/read_runs faces."
+    },
     "server/engine/tests/test_t260927_close_out_entry.py": {
       "anchor": "behaviour",
       "note": "",
@@ -3781,6 +3785,15 @@
       "anchor": "behaviour",
       "note": "",
       "sync_path": ""
+    },
+    "integration/t261026-15/sc_t26102615_failed_detail_evidence.py": {
+      "anchor": "behaviour",
+      "note": "t261026-15: a red round persists per-case failure evidence (the planted assertion line and observed value verbatim, bounded) readable back from the ledger file, while a green round persists no per-case tails and a megabyte-printing red contributes only a bounded tail",
+      "sync_path": "integration/run_scenarios.py; integration/scenario_ledger.py"
+    },
+    "integration/t261026-15/sc_t26102615_failed_detail_record.py": {
+      "anchor": "behaviour",
+      "note": "t261026-15: the persisted run record carries a red case's own bounded evidence (assertion line + observed value verbatim), a green round carries no failed_detail key, a megabyte tail contributes its bound, and green-with-tails is refused by name at the write face - all read back from the ledger file."
     },
     "integration/t260929-09/sc_l10_launch_gate_mechanism.py": {
       "anchor": "behaviour",

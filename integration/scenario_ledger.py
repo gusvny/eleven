@@ -94,6 +94,25 @@ RUN_HEADER_FIELDS = ("v", "id", "repos", "suite", "source", "env_fp",
 #: the honest shape of an unmeasured path (never a fabricated 0). ``prelude_legs``
 #: is a flat name->seconds map (strings only), validated with the same bound.
 RUN_HEADER_OPTIONAL_NUMBER_FIELDS = ("prelude_s",)
+#: t261026-15: ADDITIVE OPTIONAL header field (same run-ledger-v1 shape — no
+#: version bump; a header without it is exactly as valid as before). A header
+#: carrying ``failed_detail`` must MEASURE it: one entry per content-red case,
+#: each entry exactly {"evidence", "dur_s"} with the evidence tail bounded by
+#: DETAIL_TAIL_CHARS. Absence stays the honest shape of a run with nothing to
+#: report (a green round, or a writer predating the field) — never a fabricated
+#: empty map. The reserved marker key DETAIL_TRUNCATED_KEY carries the counted
+#: truncation note when more red cases than DETAIL_MAX_CASES went red.
+RUN_HEADER_OPTIONAL_DETAIL_FIELDS = ("failed_detail",)
+#: Per-case evidence bound: a case that prints megabytes contributes its tail,
+#: never its whole log (the same bound the suite's timings face already uses).
+DETAIL_TAIL_CHARS = 1200
+#: How many failing cases may ride the header before the counted truncation
+#: marker replaces the rest (a red storm must not unbound the record).
+DETAIL_MAX_CASES = 20
+#: Reserved marker key: a real scenario must never use it (the store refuses a
+#: case entry under this exact name; the builder reroutes such a case's detail
+#: into the counted truncation note instead — collision guard, review comment 2).
+DETAIL_TRUNCATED_KEY = "__truncated__"
 RUN_CASE_FIELDS = ("ran", "passed", "failed", "env_failed")
 
 
@@ -499,7 +518,8 @@ def validate_run_header(hdr):
     if not isinstance(hdr, dict):
         return None, "header_not_dict"
     extra = sorted(set(hdr) - set(RUN_HEADER_FIELDS)
-                   - set(RUN_HEADER_OPTIONAL_NUMBER_FIELDS) - {"prelude_legs"})
+                   - set(RUN_HEADER_OPTIONAL_NUMBER_FIELDS)
+                   - set(RUN_HEADER_OPTIONAL_DETAIL_FIELDS) - {"prelude_legs"})
     if extra:
         return None, "unknown_fields:%s" % ",".join(extra)
     missing = [f for f in RUN_HEADER_FIELDS if f not in hdr]
@@ -563,9 +583,50 @@ def validate_run_header(hdr):
     want = run_verdict(cases)
     if hdr["verdict"] != want:
         return None, "verdict_not_rollup:%s!=%s" % (hdr["verdict"], want)
+    # t261026-15: the additive per-case evidence detail, when present, must be
+    # well-formed AND consistent with the counts — a green round carrying
+    # per-case tails is exactly the fake the absence discipline refuses.
+    if "failed_detail" in hdr:
+        why = _check_failed_detail(hdr["failed_detail"])
+        if why:
+            return None, why
+        if cases["failed"] == 0:
+            return None, "failed_detail_on_green"
     return dict(hdr,
                 cases=dict(cases),
                 repos=[dict(r) for r in repos]), None
+
+
+def _check_failed_detail(fd):
+    """Shape check over one ``failed_detail`` header value (t261026-15).
+    Returns None when well-formed, else a named reason. The marker key
+    DETAIL_TRUNCATED_KEY obeys the SAME entry shape (a counted note in
+    ``evidence``, ``dur_s`` None) — no special case, no second shape."""
+    if not isinstance(fd, dict) or not fd:
+        return "failed_detail_not_object"
+    for k, v in fd.items():
+        if not isinstance(k, str) or not k.strip():
+            return "failed_detail_key_invalid"
+        if k == DETAIL_TRUNCATED_KEY:
+            # the reserved key is lawful ONLY as the builder's counted
+            # truncation marker — a real scenario riding this name would be
+            # indistinguishable from the marker, so anything else refuses
+            e = v.get("evidence") if isinstance(v, dict) else None
+            if not (isinstance(e, str)
+                    and "more failing case tails omitted" in e):
+                return "failed_detail_reserved_key:%s" % k
+            continue
+        if not isinstance(v, dict) or set(v) != {"evidence", "dur_s"}:
+            return "failed_detail_entry_invalid:%s" % k
+        e = v["evidence"]
+        if not isinstance(e, str) or not e.strip() \
+                or len(e) > DETAIL_TAIL_CHARS:
+            return "failed_detail_evidence_invalid:%s" % k
+        d = v["dur_s"]
+        if d is not None and (isinstance(d, bool)
+                              or not isinstance(d, (int, float)) or d < 0):
+            return "failed_detail_dur_s_invalid:%s" % k
+    return None
 
 
 def _check_header_counts_writable(clean):

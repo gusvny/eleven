@@ -252,6 +252,15 @@ SCENARIOS = [
     ("t261013-04-line-round-run-record",
      "A round driven the way a line round drives the suite books a proof the runner can relay, and every deviation stays honestly record-less (ticket t261013-04, the carrier ride that lands main's run-record fixes on the develop line; incident = the rounds at 01:00Z and 02:4xZ completed inside budget yet booked nothing, each as runner_failed_exit_2:run_id_missing_from_summary, because the round pins SANDBAR_LEDGER_REUSE=0, the reuse plan's early return left git_head empty, the run record was skipped, the summary carried no run id and the runner refused; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a private real git fixture tree with an injected one-entry registry, the run-scoped ledger projected through SANDBAR_SCENARIO_LEDGER_DIR, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE INCIDENT CHAIN, POSITIVE - a round with the line round's own shape (source lane:line-round, SANDBAR_LEDGER_REUSE=0, the declared pool exclusion exclusive, a run-scoped ledger) ends with a summary that carries a run id, exactly ONE header in the run-scoped ledger whose commit is the round's HEAD, the run's own case rows, and the REAL line_round_runner.read_header ACCEPTS that summary - never run_id_missing_from_summary, so the proof is relayable; B the diagnostic control - the same round with --only carries no run id and lands no header, and the skip is named on stderr (a narrowed round is not a proof); C the scope control - the same exclusion under another source carries no run id (the caliber exception belongs to the line round, not to an exclusion as such); D the honesty control - with no resolvable commit identity (a tree without a repository) the round writes no run id and no invented header, and it names the missing identity. Intent split (no intent-level duplication): the store and CLI contract (minting, refusals, legacy rows, interrupted runs) belongs to t261009-11-run-record-store; the drivers journey (executor as top driver, gate-owned round, legacy rows, gate face) belongs to t261009-11-run-record-drivers; the reuse keys and the kill-switch face belong to t260930-01-ledger-reuse-round; the runner-to-header contract, red-is-a-proof, timeout and process-group reclaim belong to t261009-77-line-round-runner; the conflict plan and the landing decision belong to the t261009-30 / t261009-28 families. The fixture technique is shared with those entries; shared steps are not shared intent. Green on the landed tree is required at the integration gate; git or the suite modules missing = ENV_FAIL exit 2",
      "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261013-04/sc_t26101304_line_round_run_record.py", "ro"),
+    # ---- t261026-15: a red run's persisted record carries the failing
+    # cases' own evidence (bounded tails), a green round carries none ----
+    ("t261026-15-failed-detail-record",
+     "A red run's persisted record carries the failing cases' own evidence, a green round carries none (ticket t261026-15, incident = two reds in one night froze the line twice for 30+ minutes each while the only honest answer was 'I cannot tell you': the run record named the failing case and nothing else, so 'load-coupled' had to be inferred from re-running a 20-minute suite; measured 261026: ~/.sandbar/projects/sandbar/ledger/scenario-runs.jsonl holds 2969 records and ZERO carry per-case detail, the failing assertion text and observed value are discarded with the temp tree; grey-box L3, the REAL run-record write path (run_scenarios.build_failed_detail / write_run_record) over a REAL scenario_ledger store on a tmp dir via SANDBAR_SCENARIO_LEDGER_DIR, every assertion read back FROM THE LEDGER FILE (reader-side, never the writer's return value), fixed stub spec rows so the evidence is deterministic (no external source, no re-run, no suite subprocess), offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): R1 THE ACCEPTANCE LINE - a run with a planted red case leaves, in the persisted run header read back from scenario-runs.jsonl, the failing case's assertion line and observed value VERBATIM plus its duration; R2 GREEN ABSENCE - a run whose cases all pass persists a header with NO failed_detail key at all (absence, never an empty map); R3 THE SIZE BOUND - a red case whose tail is megabytes contributes its last DETAIL_TAIL_CHARS characters, never its whole log, the assertion surviving at the tail's end; R4 GREEN-WITH-TAILS REFUSES - a green header handed a failed_detail is refused by name at the store write face (failed_detail_on_green) and the refused header never lands. Intent split (no duplication): the store's additive-field validation truth tables belong to developer L1 (server/engine/tests/test_t261026_15_failed_detail.py); the builder truth tables (provenance, bounds, marker collision, malformed rows) belong to developer L1 (integration/tests/test_t261026_15_failed_detail_build.py); the run-record store contract (minting, counts recount, refusals) belongs to t261009-11; the relay faces (failed_names/unverified_names attach) belong to the line-round family. Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. run_scenarios or scenario_ledger unimportable = ENV_FAIL exit 2",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261026-15/sc_t26102615_failed_detail_record.py", "ro"),
+    # ---- t261026-15: a red round must leave its evidence in the record ----
+    ("t261026-15-failed-detail-evidence",
+     "A red round leaves its evidence in the persisted run record and a green round leaves none (ticket t261026-15, incident 261026: two red rounds in one night could only be answered 'flaky, evidence: none' because the record carried the failing case NAME and nothing else - the assertion text and the observed value died with the temp tree and two tickets stayed frozen on a red nobody could characterise; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a private real git fixture tree with an injected one-entry mode-switchable registry, the run-scoped ledger projected through SANDBAR_SCENARIO_LEDGER_DIR, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE INCIDENT CHAIN, POSITIVE - a round whose single case FAILS with a planted assertion line and an observed value persists a header whose per-case detail carries that line and that value VERBATIM, read back from the ledger FILE (reader side, never the writer's return value), with an honest duration, and the REAL header validator accepts the red header with the detail; B THE GREEN CONTROL - the same round with a passing case persists a header with NO per-case tails at all (absence, never an empty map), validator-clean; C THE SIZE BOUND - a failing case that prints megabytes contributes a bounded tail (0 < len <= 1200, the bound the timings face already uses): the end marker present, the megabyte head marker ABSENT - a tail, not the log. Intent split (no intent-level duplication): the builder/validator truth tables (malformed shapes, oversized evidence, bad dur_s, bool exclusion, >20-case truncation, malformed-input battery) belong to developer L1; the round-shape chain (run id minting, relay acceptance, narrowed-round honesty) belongs to t261013-04-line-round-run-record and its family - the fixture technique is shared, shared steps are not shared intent; THIS entry uniquely owns the operator-facing promise: the persisted record answers 'why was it red' for a planted red, stays silent for green, and stays bounded for a loud red. Pre-implement tree: A/C red = the named TDD signal; green required at the integration gate/merge; git or the suite modules missing = ENV_FAIL exit 2; tier: the write-persist-relay seam no single-component contract can express - only an end-to-end round proves the evidence survives to the ledger file the operator reads; cost: seconds",
+     "PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || PY=python3; \"$PY\" -B integration/t261026-15/sc_t26102615_failed_detail_evidence.py", "ro"),
     # ---- t261012-02: a hung case must not eat the round — the per-case
     # budget is real (group kill, no inherited pipe) and a twice-hung
     # entry is skipped by name ----
@@ -5501,6 +5510,92 @@ def run_record_skip_reason(narrowed, commit, env_fp, source):
     return None
 
 
+def _detail_bounds():
+    """The detail bounds from the ledger store (single truth, t261026-15);
+    a store that predates the field falls back to the same literal values."""
+    try:
+        mod = _reuse_ledger_module()
+        return (mod.DETAIL_TAIL_CHARS, mod.DETAIL_MAX_CASES,
+                mod.DETAIL_TRUNCATED_KEY)
+    except Exception:  # noqa: BLE001 — bounds degrade to the documented values
+        return 1200, 20, "__truncated__"
+
+
+def build_failed_detail(spec_cases, timings, tail_chars=None, max_cases=None,
+                        truncated_key=None):
+    """Pure: spec rows + timings rows -> the header's ``failed_detail`` value
+    (t261026-15). One bounded entry per CONTENT-RED case (``status == "fail"``;
+    env-fail cases already publish their tails through the env-red face and
+    never masquerade as content reds here). Evidence source, in order: the
+    case's timings tail (what the case itself printed last — the failing
+    assertion line and the observed value live there), else the spec row's own
+    ``evidence``; ``dur_s`` comes from the timings row when it carries a real
+    number, else the spec row's ``dur_s``, else None — never a guessed 0
+    (absence is honest, review comment 3).
+
+    Bounds enforced at this single point: the evidence tail is the LAST
+    ``tail_chars`` characters (a megabyte-printing case contributes its tail,
+    never its log); more than ``max_cases`` reds truncate to the first
+    ``max_cases`` names in sorted order plus a counted ``__truncated__``
+    marker entry. A case actually NAMED with the reserved marker key is
+    rerouted into the truncation note (the store would refuse it as a case
+    key — collision guard, review comment 2). Deterministic: sorted names.
+    Malformed rows (non-dict, missing/empty name, non-str tails) are skipped
+    by name, never raise. Returns {} when nothing qualifies — the caller
+    omits the key entirely for a green round (absence, never an empty map)."""
+    d_tail, d_max, d_key = _detail_bounds()
+    tail_chars = d_tail if tail_chars is None else int(tail_chars)
+    max_cases = d_max if max_cases is None else int(max_cases)
+    truncated_key = truncated_key or d_key
+    trows = {}
+    for t in timings or ():
+        if isinstance(t, dict) and isinstance(t.get("name"), str) \
+                and t["name"].strip():
+            trows[t["name"].strip()] = t
+    out = {}
+    reserved = 0
+    for c in spec_cases or ():
+        if not isinstance(c, dict):
+            continue
+        name = c.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if c.get("status") != "fail":
+            continue
+        key = name.strip()
+        trow = trows.get(key) or {}
+        tl = trow.get("tail")
+        if not isinstance(tl, str) or not tl.strip():
+            tl = c.get("evidence")
+        evidence = tl.strip()[-tail_chars:] if isinstance(tl, str) else ""
+        if not evidence:
+            continue   # nothing measured to publish: honest absence per case
+        dur = trow.get("dur_s")
+        if isinstance(dur, bool) or not isinstance(dur, (int, float)):
+            dur = c.get("dur_s")
+        if isinstance(dur, bool) or not isinstance(dur, (int, float)):
+            dur = None
+        if key == truncated_key:
+            reserved += 1   # real red, unlawful key: counted, never emitted
+            continue
+        out[key] = {"evidence": evidence, "dur_s": dur}
+    out = dict(sorted(out.items()))   # deterministic order, always
+    if len(out) > max_cases:
+        kept = sorted(out)[:max_cases]
+        omitted = len(out) - max_cases + reserved
+        out = {k: out[k] for k in kept}
+        out[truncated_key] = {
+            "evidence": "%d more failing case tails omitted (bound %d)"
+                        % (omitted, max_cases),
+            "dur_s": None}
+    elif reserved:
+        out[truncated_key] = {
+            "evidence": "%d more failing case tails omitted (bound %d)"
+                        % (reserved, max_cases),
+            "dur_s": None}
+    return out
+
+
 def build_run_rows(spec_cases, run_id, commit, env_fp, conc_width, source):
     """Pure: spec rows -> ledger case rows stamped with the run id. verdict
     mapping matches the gate's (`pass`/`fail` verbatim, anything else =
@@ -5530,7 +5625,7 @@ def build_run_rows(spec_cases, run_id, commit, env_fp, conc_width, source):
 
 def build_run_header(run_id, commit, env_fp, conc_width, pool_config, source,
                      started_at_ms, duration_s, counts, suite="full",
-                     prelude_s=None, prelude_legs=None):
+                     prelude_s=None, prelude_legs=None, failed_detail=None):
     """Pure: assemble one run header (shape version run-ledger-v1). The verdict
     is computed by the store's mechanical roll-up — never written by hand.
 
@@ -5565,12 +5660,17 @@ def build_run_header(run_id, commit, env_fp, conc_width, pool_config, source,
             str(k): round(float(v), 3) for k, v in legs.items()
             if isinstance(v, (int, float)) and not isinstance(v, bool)
             and v >= 0}
+    # t261026-15: the per-case evidence detail rides ONLY when measured —
+    # a green round (or an empty build) omits the key entirely: absence is
+    # the honest shape, never a fabricated empty map.
+    if failed_detail:
+        hdr["failed_detail"] = failed_detail
     return hdr
 
 
 def write_run_record(spec_cases, counts, wall_s, started_at_ms, commit,
                      env_fp, conc_width, pool_config, narrowed,
-                     prelude_s=None, prelude_legs=None):
+                     prelude_s=None, prelude_legs=None, failed_detail=None):
     """The executor-side driver write: mint a run id, append the case rows,
     then the header. Every skip is named on stderr; any store refusal is loud
     but never flips a verdict — bookkeeping is not judging. Returns the run id
@@ -5603,7 +5703,8 @@ def write_run_record(spec_cases, counts, wall_s, started_at_ms, commit,
             return run_id, face
         hdr = build_run_header(run_id, commit, env_fp, conc_width, pool_config,
                                source, started_at_ms, wall_s, counts,
-                               prelude_s=prelude_s, prelude_legs=prelude_legs)
+                               prelude_s=prelude_s, prelude_legs=prelude_legs,
+                               failed_detail=failed_detail)
         hr = mod.append_run_header(hdr)
         face["header_written"] = hr.get("written", 0)
         if hr.get("rejected"):
@@ -8072,7 +8173,10 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
             env_fp=_fpv["value"], conc_width=conc_width,
             pool_config=_summary["pool_config"],
             narrowed=_narrowed,
-            prelude_s=_prelude_s, prelude_legs=_prelude_leg_s)
+            prelude_s=_prelude_s, prelude_legs=_prelude_leg_s,
+            # t261026-15: the failing cases' own bounded tails ride the header
+            # ({} on a green round -> the key is omitted, never fabricated).
+            failed_detail=build_failed_detail(spec_cases, timings))
         if _run_id:
             _summary["run_id"] = _run_id   # additive: the consumer face
         _report_run_face = _run_face
