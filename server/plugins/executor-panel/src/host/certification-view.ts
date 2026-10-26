@@ -21,6 +21,12 @@
  */
 
 /** The face row vocabulary, fixed here once (the mock's column words). */
+// t261026-11: the placeholder word comes from THE FUNNEL (shared face-value
+// module) — no placeholder literal may live in this module. The empty-table
+// rows keep rendering the same dash; the funnel guarantees that if a reason
+// is ever attached, it must travel through absent(reason).
+import { FACE_DASH } from '../../../workbench/src/shared/face-value.ts'
+
 export const CERT_COPIES = {
   waiting: 'waiting',
   certified: 'certified',
@@ -83,7 +89,7 @@ export const ROUND_COPIES = {
   noProof: 'no proof',
   couldNotRun: 'could not run',
   unreadableOutcome: 'unreadable outcome',
-  noCell: '—',
+  noCell: FACE_DASH,
   older: 'older rounds not shown',
   sectionError: 'The rounds faces are not readable',
   noSection: 'The receipt carries no round-faces section',
@@ -324,7 +330,7 @@ export function buildRoundsRows(rf: unknown, runs: unknown, engineRunning?: bool
       rows.push(row(id, null, str(e.reason) || 'face unreadable (reason absent)'))
     }
   }
-  const body = rows.join('') || '<tr><td colspan="6" class="k">—</td></tr>'
+  const body = rows.join('') || `<tr><td colspan="6" class="k">${FACE_DASH}</td></tr>`
   const older = typeof section.older === 'number' && section.older > 0
     ? `<div class="who" id="certRoundsOlder">${section.older} ${ROUND_COPIES.older}</div>` : ''
   return body + older
@@ -401,12 +407,12 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
   }
   const waitRows = waiting.map((w) =>
     `<tr>${cell(w.ticket, w.title)}<td class="mono k">${esc(str(w.epic))}</td><td class="mono k">${esc(str(w.landedAt))}</td></tr>`
-  ).join('') || '<tr><td colspan="3" class="k">—</td></tr>'
+  ).join('') || `<tr><td colspan="3" class="k">${FACE_DASH}</td></tr>`
   const certRows = certified.map((c) =>
     `<tr>${cell(c.ticket, c.title)}<td class="mono k">${esc(str(c.epic))}</td><td><span class="link mono" title="open the round's record">${esc(str(c.certifiedBy))}</span></td>`
       + `<td class="mono k">${esc(str(c.landedAt))}</td>`
       + `<td>${c.delivered === true ? `<span class="pill" data-k="none">${CERT_COPIES.deliveredMark}</span>` : ''}</td></tr>`
-  ).join('') || '<tr><td colspan="5" class="k">—</td></tr>'
+  ).join('') || `<tr><td colspan="5" class="k">${FACE_DASH}</td></tr>`
   // t261012-03: the Rounds table reads the runner's published faces (the
   // receipt's round_faces section), not a headers-derived projection. The
   // headers still feed the trigger column (raw.runs) — nothing else.
@@ -522,7 +528,7 @@ export function buildRoundDialogCore(d: Record<string, unknown>): string {
   const failuresBody = failuresAbsent
     ? `<div class="k" id="roundFailuresAbsent">${esc(failuresAbsent)}</div>`
     : `<table><thead><tr><th>${ROUND_COPIES.scenario}</th><th>${ROUND_COPIES.status}</th><th>${ROUND_COPIES.duration}</th></tr></thead><tbody id="roundFailureRows">`
-      + (failureRows || more || '<tr><td colspan="3" class="k">—</td></tr>') + more + '</tbody></table>'
+      + (failureRows || more || `<tr><td colspan="3" class="k">${FACE_DASH}</td></tr>`) + more + '</tbody></table>'
   // The ONE Wrote line: running names the absence of a write; a terminal
   // failed round with no ledger row names its could-not-run reason; a
   // terminal round with no citing record names that absence. Several facts

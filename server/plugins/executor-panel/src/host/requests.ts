@@ -358,6 +358,11 @@ export interface RequestsRead {
   file: string
   rows: RequestView[]
   malformed_rows: number
+  /** t261026-11 (degrade matrix): when the ledger could not be read as rows —
+   *  missing file, unreadable file, or malformed lines — the answer NAMES what
+   *  happened (a sentence a person can act on), never a bare empty list.
+   *  Absent when the read was clean. */
+  degrade?: string
 }
 
 
@@ -400,9 +405,13 @@ export function dismissRequest(
 export function readRequests(io: LedgerIo, env: NodeJS.ProcessEnv, key: string): RequestsRead {
   const file = requestsLedgerFile(key, env)
   const out: RequestsRead = { file, rows: [], malformed_rows: 0 }
-  if (!io.existsSync(file)) return out
+  // t261026-11 (degrade matrix): every could-not-read answer names itself.
+  if (!io.existsSync(file)) return { ...out, degrade: 'the requests ledger does not exist yet for this project: ' + file }
   let raw = ''
-  try { raw = io.readFileSync(file) } catch { out.malformed_rows += 1; return out }
+  try { raw = io.readFileSync(file) } catch {
+    // A file-level read failure is NOT a malformed row — name it as the file's degrade.
+    return { ...out, degrade: 'the requests ledger exists but could not be read (io error): ' + file }
+  }
   const lines = raw.split('\n').filter(l => l.trim() !== '')
   const requests = new Map<string, RequestView>()
   const answers: AnswerRow[] = []
@@ -472,6 +481,13 @@ export function readRequests(io: LedgerIo, env: NodeJS.ProcessEnv, key: string):
     if (l.from && !requests.has(l.from)) out.malformed_rows += 1 // a dangling from is recorded as malformed
   }
   out.rows = [...requests.values()].sort((a, b) => b.at - a.at) // 新的在前；旧的永不丢
+  // t261026-11 (degrade matrix): an answer with no rows and no words is the
+  // control-shaped lie — name the empty ledger, and name skipped lines.
+  if (out.malformed_rows > 0) {
+    out.degrade = out.malformed_rows + ' malformed ledger line(s) were skipped — counted here, never silently dropped'
+  } else if (out.rows.length === 0) {
+    out.degrade = 'the requests ledger is empty — no request has been raised yet: ' + file
+  }
   return out
 }
 

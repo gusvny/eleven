@@ -40,6 +40,22 @@ import {
   ok as libOk, summary,
 } from '../../server/plugins/workbench/tests/lib.mjs'
 
+// t261026-11 funnel tie-in: the spec faces now answer as FaceValue
+// ({kind:'value',v} | {kind:'absent',reason}) — unwrap for the raw-shape
+// assertions below, and demand a reason whenever the face says absent (the
+// funnel makes a reasonless dash unwritable; a named empty is a STRONGER
+// contract than the old bare null, never a weaker one).
+const unwrap = (r) => {
+  if (r && typeof r === 'object' && ('kind' in r)) {
+    if (r.kind === 'absent') {
+      if (typeof r.reason !== 'string' || r.reason.trim() === '') throw new Error('absent without a reason - the funnel refuses this')
+      return null
+    }
+    return r.v
+  }
+  return r
+}
+
 const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..')
 const PANEL_MODEL = join(ROOT, 'server', 'plugins', 'executor-panel', 'src', 'host', 'metrics-tab-model.ts')
 
@@ -151,7 +167,7 @@ async function runAll() {
   ok(day1Idx >= 0 && day2Idx >= 0 && Number(openedSeries?.data?.[day1Idx]) >= 2 && Number(openedSeries?.data?.[day2Idx]) >= 1,
     'A4 opened buckets follow the created anchor (two opens on day1, one on day2)',
     JSON.stringify({ days, opened: openedSeries?.data }))
-  const spec = panel.throughputSpecOf(bodyA)
+  const spec = unwrap(panel.throughputSpecOf(bodyA))
   ok(spec && Array.isArray(spec.days) && spec.days.length === p.categories.length,
     'A5 the panel throughputSpecOf renders the real response (the two sides agree — the card can load)',
     JSON.stringify(spec)?.slice(0, 160))
@@ -204,7 +220,7 @@ async function runAll() {
     'E1 an empty window is a well-formed chart (empty or all-zero buckets), never a null primary', JSON.stringify(pE)?.slice(0, 160))
   ok(/anchor/i.test(JSON.stringify(bodyE?.reason ?? '')),
     'E1b the empty window names why the series carry nothing (not zero activity)', JSON.stringify(bodyE?.reason ?? '').slice(0, 240))
-  ok(panel.throughputSpecOf(bodyE) === null || Array.isArray(panel.throughputSpecOf(bodyE)?.days),
+  ok(unwrap(panel.throughputSpecOf(bodyE)) === null || Array.isArray(unwrap(panel.throughputSpecOf(bodyE))?.days),
     'E2 the panel face over an empty window stays a named empty state (no crash, no fabricated days)', '')
 
   const green = summary('sc_t261026_05_throughput_daily_contract')

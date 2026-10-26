@@ -1,0 +1,76 @@
+{
+  "_rule": "L28 face-dash exemptions (t261026-11): per-file:line sites that predate the funnel. ONLY SHRINKS — a new literal is a red, a stale entry is a red; regenerate same-size in the same change when an edit shifts line numbers.",
+  "_generated_by": "integration/face_dash_exemptions.json via lint_face_dash.py --write-baseline",
+  "server/plugins/executor-panel/src/host/page-logic.ts": [
+    83,
+    94,
+    163,
+    191
+  ],
+  "server/plugins/executor-panel/src/host/panel-page.ts": [
+    118,
+    1694,
+    1717,
+    1719,
+    1720,
+    1741,
+    1922
+  ],
+  "server/plugins/knowledge/src/client/index.tsx": [
+    553,
+    560
+  ],
+  "server/plugins/providers/src/client/index.tsx": [
+    483
+  ],
+  "server/plugins/providers/src/host/routes-edit.ts": [
+    87
+  ],
+  "server/plugins/workbench/src/client/docs.tsx": [
+    275,
+    277,
+    278
+  ],
+  "server/plugins/workbench/src/client/epics.tsx": [
+    412,
+    413,
+    414,
+    415
+  ],
+  "server/plugins/workbench/src/client/index.tsx": [
+    1436,
+    1440,
+    1471,
+    1508,
+    1696,
+    1769,
+    1778,
+    2046,
+    2186,
+    2443,
+    2445,
+    2461,
+    2481,
+    2490,
+    2491,
+    2784,
+    2791,
+    2838,
+    2839,
+    3549,
+    3551
+  ],
+  "server/plugins/workbench/src/client/inspection-report-model.ts": [
+    76,
+    77
+  ],
+  "server/plugins/workbench/src/client/lane-durations.ts": [
+    253
+  ],
+  "server/plugins/workbench/src/shared/parts.ts": [
+    33
+  ],
+  "server/plugins/workbench/node.ts": [
+    285
+  ]
+}

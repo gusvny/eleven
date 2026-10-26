@@ -30,8 +30,14 @@
  */
 
 /** The tab's fixed copy (labels and the named-empty-state words). */
+// t261026-11: the funnel (shared with workbench — ONE dash constructor for both
+// plugins). value/absent/renderFace stay closure-free and import-free, so the
+// page's String(fn) embeds of the functions below stay legal.
+import { FACE_DASH, absent, renderFace, value } from '../../../workbench/src/shared/face-value.ts'
+import type { FaceValue } from '../../../workbench/src/shared/face-value.ts'
+
 export const METRICS_TAB_COPIES = {
-  dash: '—',
+  dash: FACE_DASH,
   allProjects: 'all projects',
   windowWord: 'window',
   projectWord: 'project',
@@ -62,8 +68,18 @@ export const METRICS_TAB_COPIES = {
   reasonNoCert: 'the certification face could not be read',
 } as const
 
-/** The honest dash — exported because the page embed reads it from the JSON table. */
-export const DASH = '—'
+/** The honest dash — exported because the page embed reads it from the JSON table.
+ *  t261026-11: it is now a re-export of the funnel's ONE literal (face-value.ts). */
+export const DASH = FACE_DASH
+
+// t261026-11 (host ruling 261026): EVERY dash this module produces is built by
+// the shared funnel (workbench/src/shared/face-value.ts) — value() for a real
+// value, absent(REASON) for a could-not-read answer, renderFace() to render.
+// No placeholder literal may appear in this module. The funnel module is
+// import-free and closure-free, so the String(fn) embeds below stay legal.
+const NO_VALUE_REASON = 'the metrics value this field reads is missing or malformed'
+/** Exported for the page embed: the embedded bodies reference this identifier. */
+export { NO_VALUE_REASON }
 
 /** A finite number or null. Booleans, strings and NaN are malformed here. */
 export function mnum(v: unknown): number | null {
@@ -76,38 +92,56 @@ export function mstr(v: unknown): string | null {
   return s.length > 0 ? s : null
 }
 
-/** Value or the honest dash. */
+/** Value or the honest dash (built through the funnel — t261026-11). */
 export function mdash(v: unknown): string {
   const n = mnum(v)
-  if (n !== null) return String(n)
-  return mstr(v) ?? DASH
+  if (n !== null) return renderFace(value(n))
+  const s = mstr(v)
+  if (s !== null) return renderFace(value(s))
+  return renderFace(absent(NO_VALUE_REASON))
 }
 
-/** Integer with thousands separators; malformed → dash. */
+/** Integer with thousands separators; malformed → the funnel's absent face. */
 export function fmtInt(v: unknown): string {
   const n = mnum(v)
-  if (n === null) return DASH
+  if (n === null) return renderFace(absent(NO_VALUE_REASON))
+  return renderFace(value(n), fmtIntFromNumber)
+}
+
+export function fmtIntFromNumber(n: number): string {
   return n.toLocaleString('en-US')
 }
 
-/** 0..1 share → whole percent, one decimal dropped; malformed → dash. */
+/** 0..1 share → whole percent, one decimal dropped; malformed → absent face. */
 export function fmtPct01(v: unknown): string {
   const n = mnum(v)
-  if (n === null || n < 0) return DASH
+  if (n === null || n < 0) return renderFace(absent(NO_VALUE_REASON))
+  return renderFace(value(n), fmtPct01FromNumber)
+}
+
+export function fmtPct01FromNumber(n: number): string {
   return Math.round(n * 100) + '%'
 }
 
-/** Token count → the mock's M scale ('412.6M', '2.1M'); malformed → dash. */
+/** Token count → the mock's M scale ('412.6M', '2.1M'); malformed → absent face. */
 export function fmtTokensM(v: unknown): string {
   const n = mnum(v)
-  if (n === null || n < 0) return DASH
+  if (n === null || n < 0) return renderFace(absent(NO_VALUE_REASON))
+  return renderFace(value(n), fmtTokensMFromNumber)
+}
+
+export function fmtTokensMFromNumber(n: number): string {
   return (n / 1e6).toFixed(1) + 'M'
 }
 
-/** Milliseconds → '3h 40m' / '26m' / '2d 3h'; malformed → dash. */
+/** Milliseconds → '3h 40m' / '26m' / '2d 3h'; malformed → absent face. */
 export function fmtMs(v: unknown): string {
   const n = mnum(v)
-  if (n === null || n < 0) return DASH
+  if (n === null || n < 0) return renderFace(absent(NO_VALUE_REASON))
+  return renderFace(value(n), fmtMsFromNumber)
+}
+
+export function fmtMsFromNumber(n: number): string {
   const min = Math.round(n / 60000)
   const d = Math.floor(min / 1440)
   const h = Math.floor((min % 1440) / 60)
@@ -118,11 +152,15 @@ export function fmtMs(v: unknown): string {
 }
 
 /** Epoch ms → the mock's relative words ('18m ago', '1h 05m ago', '1d 2h ago');
- *  malformed or future → dash. nowMs is injected (pure, testable). */
+ *  malformed or future → absent face. nowMs is injected (pure, testable). */
 export function fmtAgo(v: unknown, nowMs: number): string {
   const n = mnum(v)
-  if (n === null || n <= 0 || !(nowMs > n)) return DASH
-  const min = Math.floor((nowMs - n) / 60000)
+  if (n === null || n <= 0 || !(nowMs > n)) return renderFace(absent(NO_VALUE_REASON))
+  return renderFace(value(nowMs - n), fmtAgoFromNumber)
+}
+
+export function fmtAgoFromNumber(deltaMs: number): string {
+  const min = Math.floor(deltaMs / 60000)
   if (min < 1) return 'just now'
   const d = Math.floor(min / 1440)
   const h = Math.floor((min % 1440) / 60)
@@ -496,13 +534,13 @@ export function certSummaryOf(j: unknown): Record<string, unknown> {
  * here (a name containing 'clos' is closed, the first other series is
  * opened). Not derivable → null (the chart's named empty state).
  */
-export function throughputSpecOf(j: unknown): Record<string, unknown> | null {
+export function throughputSpecOf(j: unknown): FaceValue<Record<string, unknown>> {
   const o = (j && typeof j === 'object') ? j as Record<string, unknown> : null
   const charts = o && typeof o.charts === 'object' ? o.charts as Record<string, unknown> : null
   const p = charts && typeof charts.primary === 'object' ? charts.primary as Record<string, unknown> : null
   const cats = p && Array.isArray(p.categories) ? p.categories : null
   const series = p && Array.isArray(p.series) ? p.series as Array<Record<string, unknown>> : null
-  if (!cats || !series) return null
+  if (!cats || !series) return absent(CHART_ABSENT_REASON)
   let opened: unknown[] | null = null
   let closed: unknown[] | null = null
   for (const s of series) {
@@ -510,31 +548,39 @@ export function throughputSpecOf(j: unknown): Record<string, unknown> | null {
     if (name.toLowerCase().indexOf('clos') >= 0) { closed = Array.isArray(s.data) ? s.data : null; continue }
     if (opened === null) opened = Array.isArray(s.data) ? s.data : null
   }
-  if (!opened && !closed) return null
-  return { days: cats.map(function (d) { return mstr(d) ?? DASH }), opened: opened ?? [], closed: closed ?? [] }
+  if (!opened && !closed) return absent(CHART_ABSENT_REASON)
+  return value({ days: cats.map(function (d) { return mstr(d) ?? DASH }), opened: opened ?? [], closed: closed ?? [] })
 }
+
+/** t261026-11: the model face NAMES what it could not read (the degrade matrix
+ *  rule: a placeholder only with a reason a person can act on). The page keeps
+ *  rendering its own copy words (no behaviour change); the reason travels in
+ *  the answer for every reader that asks. */
+const CHART_ABSENT_REASON = 'the metrics response carries no daily chart face'
+export { CHART_ABSENT_REASON }
 
 /**
  * The tokens stack from the token view's charts.primary — the payload's OWN
  * spec, rendered verbatim (t261026-05: the doc winner is the server; today
  * that is the per-stage token bar, not the daily-by-model series an older
  * docstring claimed). The spec's title travels with the shape so the card
- * can say what it draws; not derivable → null.
+ * can say what it draws. Not derivable → the funnel's absent face
+ * (t261026-11: the reason travels in the answer).
  */
-export function tokensStackOf(j: unknown): Record<string, unknown> | null {
+export function tokensStackOf(j: unknown): FaceValue<Record<string, unknown>> {
   const o = (j && typeof j === 'object') ? j as Record<string, unknown> : null
   const charts = o && typeof o.charts === 'object' ? o.charts as Record<string, unknown> : null
   const p = charts && typeof charts.primary === 'object' ? charts.primary as Record<string, unknown> : null
   const cats = p && Array.isArray(p.categories) ? p.categories : null
   const series = p && Array.isArray(p.series) ? p.series as Array<Record<string, unknown>> : null
-  if (!cats || !series || series.length === 0) return null
-  return {
+  if (!cats || !series || series.length === 0) return absent(CHART_ABSENT_REASON)
+  return value({
     title: mstr(p.title),
     categories: cats.map(function (d) { return mstr(d) ?? DASH }),
     series: series.map(function (s) {
       return { name: mstr(s.name) ?? DASH, data: Array.isArray(s.data) ? s.data : [] }
     }),
-  }
+  })
 }
 
 /**

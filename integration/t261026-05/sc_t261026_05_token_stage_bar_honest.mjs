@@ -38,6 +38,22 @@ import {
   ok as libOk, summary,
 } from '../../server/plugins/workbench/tests/lib.mjs'
 
+// t261026-11 funnel tie-in: the spec faces now answer as FaceValue
+// ({kind:'value',v} | {kind:'absent',reason}) — unwrap for the raw-shape
+// assertions below, and demand a reason whenever the face says absent (the
+// funnel makes a reasonless dash unwritable; a named empty is a STRONGER
+// contract than the old bare null, never a weaker one).
+const unwrap = (r) => {
+  if (r && typeof r === 'object' && ('kind' in r)) {
+    if (r.kind === 'absent') {
+      if (typeof r.reason !== 'string' || r.reason.trim() === '') throw new Error('absent without a reason - the funnel refuses this')
+      return null
+    }
+    return r.v
+  }
+  return r
+}
+
 const ROOT = join(new URL('.', import.meta.url).pathname, '..', '..')
 const PANEL_MODEL = join(ROOT, 'server', 'plugins', 'executor-panel', 'src', 'host', 'metrics-tab-model.ts')
 
@@ -125,7 +141,7 @@ async function runAll() {
   section('A. token primary rendered verbatim by the panel card')
   ok(primary && Array.isArray(primary.categories) && Array.isArray(primary.series),
     'A1 the token view carries a primary spec with categories+series', JSON.stringify(primary)?.slice(0, 160))
-  const rendered = panel.tokensStackOf(body1)
+  const rendered = unwrap(panel.tokensStackOf(body1))
   ok(rendered && Array.isArray(rendered.categories) && Array.isArray(rendered.series),
     'A2 the panel renders the real response (the card can load)', JSON.stringify(rendered)?.slice(0, 160))
   ok(JSON.stringify(rendered?.categories) === JSON.stringify(primary?.categories),
@@ -165,13 +181,13 @@ async function runAll() {
 
   // ---- C. malformed payloads degrade to the named empty state ----
   section('C. malformed payloads never crash the card')
-  ok(panel.tokensStackOf(null) === null, 'C1 null payload → null (named empty)')
-  ok(panel.tokensStackOf({}) === null, 'C2 missing charts → null')
-  ok(panel.tokensStackOf({ charts: { primary: { categories: 'nope', series: [] } } }) === null,
+  ok(unwrap(panel.tokensStackOf(null)) === null, 'C1 null payload → null (named empty)')
+  ok(unwrap(panel.tokensStackOf({})) === null, 'C2 missing charts → null')
+  ok(unwrap(panel.tokensStackOf({ charts: { primary: { categories: 'nope', series: [] } } })) === null,
     'C3 non-array categories → null')
-  ok(panel.tokensStackOf({ charts: { primary: { categories: [], series: 'nope' } } }) === null,
+  ok(unwrap(panel.tokensStackOf({ charts: { primary: { categories: [], series: 'nope' } } })) === null,
     'C4 non-array series → null')
-  const weird = panel.tokensStackOf({ charts: { primary: { categories: [1, null], series: [{ name: 5, data: 'x' }, { data: [] }] } } })
+  const weird = unwrap(panel.tokensStackOf({ charts: { primary: { categories: [1, null], series: [{ name: 5, data: 'x' }, { data: [] }] } } }))
   ok(weird && Array.isArray(weird.series) && weird.series.every((s) => typeof s.name === 'string' && Array.isArray(s.data)),
     'C5 non-string names / non-array data coerce to the declared shape, never throw', JSON.stringify(weird))
 

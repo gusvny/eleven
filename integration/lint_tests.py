@@ -2035,6 +2035,16 @@ def main():
         # and classification rules: integration/lib_engine_face_language.py.
         from lint_engine_face_language import lint_engine_face_language as _l27
         _l27(errors)
+        # L28 face-dash funnel (t261026-11, host ruling 261026): the ONE narrow
+        # check — outside server/plugins/workbench/src/shared/face-value.ts a
+        # bare placeholder literal ('—' / "—") in a host face module is an
+        # error, against integration/face_dash_exemptions.json, which ONLY
+        # SHRINKS (a stale exemption is itself an error). NOT a shape scan.
+        from lint_face_dash import lint_face_dash as _l28
+        try:
+            _l28(errors)
+        except ValueError as e:
+            err("L28 face-dash funnel: %s" % e)
         # L26 lane-overlay location (t261021-10): a lane sandbox overlay must
         # live OUTSIDE the measured tree (lib_lane_overlay.overlay_root); an
         # overlay directory under integration/ is the t261021-05 arbitrate

@@ -46,7 +46,10 @@ import { buildPeriodViewCore, EMPTY_COPIES, INSTANCE_LABELS } from './inspection
 // like buildPeriodViewCore; recordsToAttempts turns the untrusted disposition/trigger
 // rows into the per (instance/period) attempts map; the page renders the named
 // 'produced nothing' block verbatim.
-import { buildCoverageCore, COVERAGE_COPIES, recordsToAttempts } from './inspection-coverage.ts'
+// t261026-10 (defect C): ticketRowsToAttempts turns the inspection TICKET BOARD rows
+// (the already-served /wf/inspection/tickets route) into the same attempts map, so a
+// scheduled period with a real ticket reads failed-with-evidence instead of not_run.
+import { buildCoverageCore, COVERAGE_COPIES, recordsToAttempts, ticketRowsToAttempts } from './inspection-coverage.ts'
 // t261005-05 (UI-4): project identity badge single source, imported across plugins
 // from workbench shared (both plugins load as raw TS via node native type-stripping;
 // the relative path stays inside the repo). The function sources are embedded into
@@ -86,12 +89,21 @@ import { buildCertificationCore, buildRoundDialogCore, buildPromoteDialogCore, c
 // embeds; DASH/GRID_LINE/LABEL ride the JSON table; METRICS_SERIES_COLORS is
 // aliased from the same table below.
 import {
-  mnum, mstr, mdash, shareBarPct, DASH,
+  mnum, mstr, mdash, shareBarPct, DASH, NO_VALUE_REASON as METRICS_NO_VALUE_REASON,
 } from './metrics-tab-model.ts'
 import {
   colorAt, commonAxes, commonGrid, GRID_LINE, LABEL,
 } from './metrics-tab-charts.ts'
 import { METRICS_SERIES_COLORS, throughputOption, tokensOption } from './metrics-tab-charts.ts'
+// t261026-11 (host ruling 261026): the embedded model bodies now build every
+// dash through THE FUNNEL (shared face-value module — ONE dash constructor for
+// panel and workbench). Its three helpers embed verbatim (import-free,
+// closure-free); the factored formatter bodies + the reason constant ride
+// along per the transitive-closure law (the t261021-07 arbitrate lesson).
+import { value as faceValue, absent as faceAbsent, renderFace, FACE_DASH } from '../../../workbench/src/shared/face-value.ts'
+import {
+  fmtIntFromNumber, fmtPct01FromNumber, fmtTokensMFromNumber, fmtMsFromNumber, fmtAgoFromNumber,
+} from './metrics-tab-model.ts'
 
 /** 纯函数源码嵌入（strip 后即等价 JS；单测直接测这些函数本体）。 */
 
@@ -230,7 +242,7 @@ const EMBEDDED = EMBED_CONSTS + [
   String(buildPeriodViewCore),
   // t261009-49: coverage core + attempts-map builder (both closure-free; tables via
   // INSP_COVERAGE_TABLES — COVERAGE_COPIES stays the single copy source).
-  String(buildCoverageCore), String(recordsToAttempts),
+  String(buildCoverageCore), String(recordsToAttempts), String(ticketRowsToAttempts),
   // t261006-17 (CL-2): concurrency knob + chip classifier (same single implementation).
   String(limitStep), String(concChipState),
   // t261008-19: docs tree page count + the mock's two entry rows (same single implementation).
@@ -256,6 +268,11 @@ const EMBEDDED = EMBED_CONSTS + [
   // arbitrate family sweep — each of these is referenced inside an embedded
   // body above; leaving one out is a ReferenceError at first render).
   String(mnum), String(mstr), String(mdash), String(shareBarPct),
+  // t261026-11: the funnel helpers + the factored formatter bodies (transitive
+  // closure of the embedded metrics model cores).
+  String(faceValue), String(faceAbsent), String(renderFace),
+  String(fmtIntFromNumber), String(fmtPct01FromNumber), String(fmtTokensMFromNumber),
+  String(fmtMsFromNumber), String(fmtAgoFromNumber),
   String(colorAt), String(commonAxes), String(commonGrid),
   String(throughputOption), String(tokensOption),
 ].join('\n')
@@ -268,6 +285,8 @@ const EMBEDDED = EMBED_CONSTS + [
 const METRICS_TABLES = JSON.stringify({
   COPIES: METRICS_TAB_COPIES, COLORS: METRICS_SERIES_COLORS,
   DASH, GRID_LINE, LABEL,
+  // t261026-11: the funnel's one literal + the embedded bodies' reason constant.
+  FACE_DASH, NO_VALUE_REASON: METRICS_NO_VALUE_REASON,
 })
 
 /** t261009-44 + t261012-03: the Certification tab's copy tables as JSON — the
@@ -285,9 +304,12 @@ const INSP_TABLES = JSON.stringify({
   RUN_COPIES: { produced: COVERAGE_COPIES.produced, blocked: COVERAGE_COPIES.blocked },
 })
 
-/** t261009-49: coverage tables (copy single source COVERAGE_COPIES; no declared-face
- *  map on this surface — every face id reads the named 'decl-unreadable' marker, and
- *  the marker is defined in one place, never rewritten here). */
+/** t261009-49: coverage tables (copy single source COVERAGE_COPIES). t261026-10: the
+ *  FACES map is no longer hardcoded empty on this surface — the served archive payload
+ *  carries the DECLARATION faces (scan_face per declared instance) and inspLoad swaps
+ *  them in (defect B of host report 261026). The empty map here is only the pre-fetch
+ *  default; a genuinely unknown instance still reads the named 'decl-unreadable'
+ *  marker, defined in one place, never rewritten here. */
 const INSP_COVERAGE_TABLES = JSON.stringify({
   COPIES: COVERAGE_COPIES, FACES: {}, ATTEMPT_CAP: 5,
 })
@@ -964,6 +986,10 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   // t261021-07 rework: the embedded model/chart bodies reference these as
   // identifiers — each must exist at page scope (the transitive closure).
   var DASH = METRICS_RUNTIME.DASH;
+  // t261026-11: the funnel's one literal + the absent-reason sentence, aliased
+  // for the embedded model bodies (the transitive closure again).
+  var FACE_DASH = METRICS_RUNTIME.FACE_DASH;
+  var NO_VALUE_REASON = METRICS_RUNTIME.NO_VALUE_REASON;
   var GRID_LINE = METRICS_RUNTIME.GRID_LINE;
   var LABEL = METRICS_RUNTIME.LABEL;
   var METRICS_SERIES_COLORS = METRICS_COLORS;
@@ -2293,19 +2319,23 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   function renderThroughput() {
     var e = el('mtThroughput')
     if (!e) return
-    if (!MT.throughput) { e.innerHTML = '<div class="empty">' + esc(METRICS_COPIES.noData) + '</div>'; return }
+    // t261026-11: the spec face answers as a funnel value — absent carries the
+    // reason, and the page keeps rendering ITS OWN copy word (no word change).
+    var sp = MT.throughput
+    if (!sp || sp.kind === 'absent') { e.innerHTML = '<div class="empty">' + esc(METRICS_COPIES.noData) + '</div>'; return }
     e.innerHTML = ''
-    mtDraw('mtThroughput', throughputOption(MT.throughput))
+    mtDraw('mtThroughput', throughputOption(sp.v))
   }
   function renderTokens() {
     var e = el('mtTokens')
     if (!e) return
-    if (!MT.tokens) {
+    var st = MT.tokens
+    if (!st || st.kind === 'absent') {
       e.innerHTML = '<div class="empty">' + esc(METRICS_COPIES.reasonNoDailyTokens) + '</div>'
       return
     }
     e.innerHTML = ''
-    mtDraw('mtTokens', tokensOption(MT.tokens))
+    mtDraw('mtTokens', tokensOption(st.v))
   }
 
   // ---- t261005-10 (UI-2): Docs tab (read-only tree + markdown reader) ----
@@ -2654,6 +2684,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     loadedFor: '',        // project the faces were loaded for (lazy-load gate, inspEnsureLoaded)
     tables: ${INSP_TABLES},
     coverageTables: ${INSP_COVERAGE_TABLES},
+    ticketRows: null,     // t261026-10: the inspection ticket board rows (attempt source)
     dispositions: null,   // retired fetch face (t261009-49 rework, gate round 1 Red 2)
   };
   // t261006-15 rework (404 fix): the Inspection faces load LAZILY — on first open of
@@ -2683,13 +2714,31 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     return latest;
   }
   function inspLoad(){
-    if(!state.project){ INSP.archive=null; INSP.records=null; inspRender(); return; }
+    if(!state.project){ INSP.archive=null; INSP.records=null; INSP.ticketRows=null; INSP.coverageTables = JSON.parse(${JSON.stringify(INSP_COVERAGE_TABLES)}); inspRender(); return; }
     var key = encodeURIComponent(state.project);
     fetch('/sandbar-workbench/api/wf/inspection-archive?project='+key).then(function(r){return r.json();}).then(function(j){
       INSP.archive = (j && j.result && j.result.ok === true) ? j.result : null;
       INSP.archiveReason = (j && j.result && j.result.reason) || 'The period archive is not available.';
+      // t261026-10 (defect B): the faces map is the DECLARATION's scan_face per
+      // declared instance, served on the archive payload. Swapped in before render;
+      // an absent/malformed map degrades to the empty default (decl-unreadable).
+      // t261026-10 rework (arbitration round 3): COPIES comes from the ALREADY-
+      // INTERPOLATED default tables, never a bare module binding — inspLoad runs
+      // inside the SERVED page script where module imports do not exist (the
+      // ReferenceError that blanked the whole period row in the merged-tree red).
+      var faces = (INSP.archive && INSP.archive.faces !== null && typeof INSP.archive.faces === 'object') ? INSP.archive.faces : {};
+      INSP.coverageTables = { COPIES: INSP.coverageTables.COPIES, FACES: faces, ATTEMPT_CAP: 5 };
       inspRenderPeriods();
     }).catch(function(){ INSP.archive=null; INSP.archiveReason='The period archive could not be loaded.'; inspRenderPeriods(); });
+    fetch('/sandbar-workbench/api/wf/inspection/tickets?project='+key).then(function(r){return r.json();}).then(function(j){
+      // t261026-10 (defect C): the attempt source is the inspection TICKET BOARD (an
+      // already-served route, not a new fetch face — t261008-19 E1 pins NEW endpoints
+      // only). A failed board read keeps ticketRows null = the named attempts-
+      // unavailable degrade; a readable board lights failed/not_run evidence up.
+      var res = (j && j.result) || null;
+      INSP.ticketRows = (res && Array.isArray(res.tickets)) ? res.tickets : null;
+      inspRenderRecords();
+    }).catch(function(){ INSP.ticketRows = null; inspRenderRecords(); });
     fetch('/sandbar-executor-panel/api/inspection/trigger-records?project='+key).then(function(r){return r.json();}).then(function(j){
       INSP.records = j || null;
       inspRenderRecords();
@@ -2741,15 +2790,30 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     }
   }
   // t261009-49 rework (gate round 1, Red 2): the attempts map comes ONLY from
-  // payloads already served on this surface. Trigger rows carry no period, so on
-  // today's payloads this reads null = attempts-unavailable (named in the block);
-  // recordsToAttempts stays the single wiring point — a period-keyed rows source
-  // (a future archive-payload field) lights the attempt evidence up with no other
-  // change. Never a new endpoint fetch (t261008-19 E1 pinned anchor).
+  // payloads already served on this surface. t261026-10 (defect C): the ticket board
+  // rows are the second source — merged with the trigger-record attempts at this one
+  // wiring point; BOTH sources unavailable = null = the named attempts-unavailable
+  // degrade. The board rows are project-filtered inside ticketRowsToAttempts (review
+  // C1: a same-named instance from another project must not light up these cells).
   function inspAttempts(){
+    var map = null;
     var t = INSP.records && INSP.records.rows;
-    if(Array.isArray(t)) return recordsToAttempts(t);
-    return null;
+    if(Array.isArray(t)) map = recordsToAttempts(t);
+    var tk = INSP.ticketRows;
+    if(Array.isArray(tk)){
+      var tmap = ticketRowsToAttempts(tk, state.project);
+      if(tmap){
+        if(map === null){ map = tmap; }
+        else {
+          for(var k in tmap){
+            if(Object.prototype.hasOwnProperty.call(tmap, k)){
+              map[k] = (Array.isArray(map[k]) ? map[k] : []).concat(tmap[k]);
+            }
+          }
+        }
+      }
+    }
+    return map;
   }
   // t261009-49: the named 'produced nothing' block — one line per (period x face)
   // that produced nothing, with period, face id, last success (or never) and the
@@ -2821,10 +2885,10 @@ th{color:var(--muted);font-weight:600;font-size:11px}
         return;
       }
       html += '<div class="inspNums">'+
-        '<div class="kv"><span>Findings</span><b>'+(c.counts?c.counts.total:'—')+'</b><span>'+esc(c.counts_copy)+'</span></div>'+
+        '<div class="kv"><span>Findings</span><b>'+(c.counts?c.counts.total:FACE_DASH)+'</b><span>'+esc(c.counts_copy)+'</span></div>'+
         '<div class="kv"><span>Named items</span><b>'+c.named.length+'</b><span>'+esc(c.named_copy)+'</span></div>'+
-        '<div class="kv"><span>High</span><b>'+(c.counts?c.counts.high:'—')+'</b><span>severity: high</span></div>'+
-        '<div class="kv"><span>Med · low</span><b>'+(c.counts?(c.counts.med+' · '+c.counts.low):'—')+'</b><span>severity: med, low</span></div>'+
+        '<div class="kv"><span>High</span><b>'+(c.counts?c.counts.high:FACE_DASH)+'</b><span>severity: high</span></div>'+
+        '<div class="kv"><span>Med · low</span><b>'+(c.counts?(c.counts.med+' · '+c.counts.low):FACE_DASH)+'</b><span>severity: med, low</span></div>'+
         '</div>';
       if(c.findings_copy) html += '<div class="pad inspNote" style="padding-left:var(--igx,14px)">'+esc(c.findings_copy)+'</div>';
       if(c.named.length){
@@ -2856,7 +2920,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       var st = r.spawn && r.spawn.ok === true
         ? '<span style="color:var(--green)">started</span>'
         : '<span style="color:var(--red)">failed</span>';
-      var res = r.spawn ? (r.spawn.ok === true ? (r.spawn.ticket_id || 'workflow started') : (r.spawn.error || 'failed')) : '—';
+      var res = r.spawn ? (r.spawn.ok === true ? (r.spawn.ticket_id || 'workflow started') : (r.spawn.error || 'failed')) : FACE_DASH;
       // state+result live in ONE right-aligned last column: the table's right text
       // edge must sit on the shared right line (P6; arbitrate gen1 L1-right fix).
       return '<tr><td>'+esc(new Date(r.at).toLocaleString())+'</td><td>'+esc(r.by)+

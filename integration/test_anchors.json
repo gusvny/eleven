@@ -5838,6 +5838,22 @@
       "anchor": "behaviour",
       "note": "t261025-14: the loss-at-close journey as the user sees it - a closed ticket whose lane is gone keeps its token usage via the archive, a cached tokens=null record heals once the archive appears, the lane source wins while alive (byte-identical with/without archive), a corrupt archive file never zeroes the face and is named, a measured zero outside tickets stays 0 while a missing block stays null with the named tickets-only caliber, and out-of-window archived events never inflate the total."
     },
+    "integration/t261026-11/degrade_inspection_coverage.mjs": {
+      "anchor": "behaviour",
+      "note": "t261026-11: the degrade matrix on the inspection-coverage read face - five payload shapes (missing/unreadable/empty/garbage/real archive payload) through the REAL buildCoverageCore+recordsToAttempts; each broken shape no-throw and names a reason (copy words, not a dash); the real payload renders period-x-instance rows with produced and unreadable copy words."
+    },
+    "integration/t261026-11/degrade_requests_list.mjs": {
+      "anchor": "behaviour",
+      "note": "t261026-11: the degrade matrix on the requests ledger read face - five payload shapes over the ledger bytes through the REAL readRequests (missing/unreadable/empty/garbage name a reason, the real appendRequest-produced ledger renders the row and question wording)."
+    },
+    "integration/t261026-11/degrade_metrics_charts.mjs": {
+      "anchor": "behaviour",
+      "note": "t261026-11: the degrade matrix on the Metrics tab's secondary chart faces - five payload shapes through the REAL throughputSpecOf/tokensStackOf funnel-value chain and the two option builders over the producer's own buildMetricsResponse payload (broken shapes name a reason, the real payload renders days, two throughput series and the token stack)."
+    },
+    "integration/t261026-11/narrow_dash_check.mjs": {
+      "anchor": "contract",
+      "note": "t261026-11 piece 3: the one narrow check - bare dash literals outside the funnel module are errors under an only-shrink per-file:line exemption table (dash-exemptions.json); stale exemptions are errors; comment mentions never match."
+    },
     "integration/t261026-06/sc_t261026_06_reader_path_loudness.py": {
       "anchor": "contract",
       "note": "t261026-06: the sweep's ticket_closed condition is evaluated through the real admin entry channel, not always skipped - a working reader resolves the closed-ticket head with evidence naming the ticket-list-projection source (read back from the requests ledger), a MISSING reader entry is loud (the receipt names the exact missing path, per-head skip reason stays ticket_reader_unavailable:<ticket>, nothing resolves, ok stays true), a reader answering ok:false never fabricates a resolution, and the real CLI face over a sandbox registry fabricates nothing",

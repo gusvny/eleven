@@ -126,6 +126,20 @@ import tempfile
 import time
 
 SCENARIOS = [
+    # ---- t261026-11: the degrade matrix on every read face ----
+    ("t261026-11-inspection-coverage-degrade",
+     "The inspection-coverage read face must SPEAK on bad data and must render the producer's own payload (ticket t261026-11, host ruling 261026: feed a read face the five payload shapes - missing / unreadable / empty / garbage / the producer's REAL payload - and one rule: a placeholder is allowed only with a reason a person can act on, and the real payload must render what the face promises; grey-box L3, the REAL buildCoverageCore + recordsToAttempts over the archive payload chain, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): the degrade matrix (integration/lib_degrade_matrix.mjs) runs all five shapes - each broken shape must no-throw AND name a reason (the copy words, not a dash), and the real archive payload must render period-x-instance rows with their produced and unreadable copy words. Registered GREEN before the line (ran=12 pass=12); any future red on this face fails the round. Intent split: this entry uniquely owns the coverage face's degrade contract; the five-state copy truth table belongs to t261009-49 (L1/L3 precedent); the funnel/union migration of this face belongs to this ticket's implement stage and may not change the rendered words. matrix lib missing or face module unimportable = FAIL named; node missing = ENV_FAIL exit 2. fast-catch: the coverage read face degrading to a dash or a silent zero on bad archive data (the 261026 host-report class: READER disagrees with WRITER) is caught here in offline seconds instead of at the next human look at the panel",
+     "node integration/t261026-11/degrade_inspection_coverage.mjs", "ro", "fast"),
+    ("t261026-11-requests-list-degrade",
+     "The requests ledger read face must SPEAK on bad data and must render the producer's own payload (ticket t261026-11, host ruling 261026 five-shape degrade matrix; grey-box L3, the REAL readRequests over the face's own LedgerIo seam with the real ledger produced by the REAL appendRequest writer, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): the degrade matrix (integration/lib_degrade_matrix.mjs) runs all five shapes over the ledger bytes - missing / unreadable / empty / garbage ledgers must no-throw AND name a reason a person can act on, and the real ledger must render the written request row and its question wording. Registered GREEN (ran=11 pass=11, on the funnel-migrated reader; re-verify at the gate). Intent split: this entry uniquely owns the requests read face's degrade contract; the ledger merge-order truth table belongs to the requests unit tests (L1); the funnel/union adoption belongs to this ticket's implement stage. matrix lib missing or face module unimportable = FAIL named; node missing = ENV_FAIL exit 2. fast-catch: the requests read face answering a missing, unreadable, empty or garbage ledger with an unnamed empty row list instead of a named reason is caught here in offline seconds instead of at the next merge",
+     "node integration/t261026-11/degrade_requests_list.mjs", "ro", "fast"),
+    ("t261026-11-metrics-secondary-charts-degrade",
+     "The Metrics tab's secondary charts must SPEAK on bad data and must render the producer's own payload (ticket t261026-11, host ruling 261026, the origin incident: the panel expected a daily opened/closed series and the API sent a blocked leaderboard - the chart went silently empty; grey-box L3, the REAL throughputSpecOf/tokensStackOf funnel-value chain plus the two option builders over the REAL buildMetricsResponse payload regenerated at run time over the stub harness, offline seconds, needs zstd, zero docker/Temporal-server/browser, never touches 3099/7233): the degrade matrix (integration/lib_degrade_matrix.mjs) runs all five shapes - each broken shape must no-throw AND name a reason (since this ticket the spec faces answer as funnel values whose reason travels), and the real payload must render days, two throughput series and the token stack. Registered GREEN before the line (ran=12 pass=12); any future red on this face fails the round. Intent split: this entry uniquely owns the chart faces' degrade contract; the KPI strip's degrade belongs to the kpi-tiles harness (UNREGISTERED while red - the 'FRESH TOKENS PER COVERED TICKET' caliber is t261026-05's fix). zstd missing or the producer refusing = ENV_FAIL exit 2. fast-catch: the origin incident itself - the panel expecting a daily series, the API sending a different shape, the chart going silently empty - is caught here in offline seconds by the five-shape matrix over the producer's own payload instead of at the next host report",
+     "node integration/t261026-11/degrade_metrics_charts.mjs", "ro", "fast"),
+    ("t261026-11-narrow-dash-check",
+     "THE ONE NARROW CHECK: outside the funnel's own module, a bare placeholder literal ('—') in a host face module is an error, under a per-file:line exemption table that must only shrink (ticket t261026-11 piece 3, host ruling 261026 'a code-shape lint is rejected as brittle' - this is not a shape scan: exactly one rule, no heuristics; grey-box L3, the REAL host-face trees scanned with comment-stripping so a dash MENTIONED in prose never matches, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A every bare dash literal outside server/plugins/workbench/src/shared/face-value.ts must sit in integration/face_dash_exemptions.json (seeded from the sites that existed when the funnel landed; this scenario DRIVES the one implementation integration/lint_face_dash.py - battery rule L28 - never a second table); B a stale exemption (line no longer holds a bare dash) is itself an error - the table must only shrink, same discipline as the known-red roster; C the funnel module itself is exempt (it owns the ONE literal). Verified: stale entries and foreign rows are both named FAIL (self-tested at seed time). Face trees or exemption table missing = ENV_FAIL exit 2. fast-catch: the hand-built dash class - a host face module constructing a placeholder OUTSIDE the funnel (a bare '—' literal in strings, embeds, or tests-grown code the type system cannot see) is caught here in offline seconds instead of at the next host report about an unnamed dash",
+     "node integration/t261026-11/narrow_dash_check.mjs", "ro", "fast"),
+
     # ---- t261026-06: the sweep's ticket reader must READ, and a dead reader must be LOUD ----
     ("t261026-06-reader-path-loudness",
      "The request sweep's ticket_closed condition is EVALUATED through the engine's real admin entry, and a dead reader is named once at the top level instead of 65 silent per-head skips under a bare ok:true (ticket t261026-06; incident = host 261026, measured: the sweep resolved 0, skipped 65 heads with ticket_reader_unavailable including tickets closed hours before, because default_ticket_status_fn built its reader command from server/tools/admin.py which does not exist - the engine entry is server/admin.py (shared.ADMIN_PY); grey-box L3, the REAL default_ticket_status_fn subprocess channel pointed at a fixture stub admin entry via the declared shared.ADMIN_PY seam, the REAL request_thread.py CLI for filing, and the REAL request_sweep.py CLI entry over isolated tmp ledgers (KI-161), offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A a working reader resolves the closed-ticket head with evidence naming the ticket-list-projection source, readable from the LEDGER, and the open-ticket head is untouched; B a MISSING reader entry is loud - the receipt names the exact missing path, per-head skips keep the stable ticket_reader_unavailable prefix, nothing resolves, ok stays true (named outcome, per the module contract); C a reader answering ok:false never fabricates a resolution; D the real CLI face over the sandbox registry fabricates nothing. Intent split: the t261019-44 entry owns the declarative resolution semantics with an INJECTED ticket fn; THIS entry uniquely owns the real reader channel resolution and the loud-dead-reader receipt. Pre-implement tree red on A/B = the named TDD signal; green required at the integration gate.",
@@ -4086,6 +4100,28 @@ FAST_SET_BUDGET_NOTE = (
 #: therefore cannot drift into a second membership list — membership itself
 #: lives only on the registry markers.
 FAST_SET_CATCH = {
+    # t261026-11: the degrade matrix's membership declarations - what each fast
+    # member catches early, per the guard family (t261009-16 B).
+    "t261026-11-inspection-coverage-degrade":
+        "the coverage read face degrading to a dash or a silent zero on bad "
+        "archive data (the 261026 host-report class: READER disagrees with "
+        "WRITER) - caught here in offline seconds instead of at the next "
+        "human look at the panel",
+    "t261026-11-requests-list-degrade":
+        "the requests read face answering a missing, unreadable, empty or "
+        "garbage ledger with an unnamed empty row list instead of a named "
+        "reason - caught here in offline seconds instead of at the next merge",
+    "t261026-11-metrics-secondary-charts-degrade":
+        "the origin incident itself - the panel expecting a daily series, the "
+        "API sending a different shape, the chart going silently empty - "
+        "caught here in offline seconds by the five-shape matrix over the "
+        "producer's own payload instead of at the next host report",
+    "t261026-11-narrow-dash-check":
+        "the hand-built dash class - a host face module constructing a "
+        "placeholder OUTSIDE the funnel (a bare dash literal in strings, "
+        "embeds, or tests-grown code the type system cannot see) - caught "
+        "here in offline seconds instead of at the next host report about "
+        "an unnamed dash",
     # t261026-05: the ticket's own membership declarations — the guard family
     # (t261009-16 B / --print-fast-set) refuses a fast member without one.
     "t261026-05-throughput-daily-contract":
@@ -4704,7 +4740,7 @@ def fast_set_wall_estimate(entries, costs, width=3):
 
 
 def fast_set_cost_stats(rows, names):
-    """Pure: ({name: {mean_s, max_s, runs} | None}, bad_rows) from scenario-
+    """Pure: ({name: {mean_s, max_s, runs} | None,
     ledger rows. No usable row -> None: the caller names the no-measurement
     case, never fabricates a 0. Malformed rows are counted, never dropped
     silently. fast_set_costs() delegates here for its mean."""

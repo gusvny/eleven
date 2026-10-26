@@ -1,0 +1,25 @@
+{
+ "_provenance": "Archive record rows in the recordsToAttempts contract ({instance, period, reason?, spawn?{ticket_id,error?}}); the scenario runs them through the REAL recordsToAttempts, never a hand-built view model. Row shape per server/plugins/executor-panel/src/host/inspection-coverage.ts (recordsToAttempts) and the t261009-49 archive contract. Re-capture from a live store with fixtures/regen_coverage_rows.py.",
+ "instances": ["integration-tests", "simplify"],
+ "rows": [
+  {"instance": "integration-tests", "period": "20261020", "reason": "", "spawn": {"ticket_id": "t261020-03"}},
+  {"instance": "integration-tests", "period": "20261021", "reason": "", "spawn": {"ticket_id": "t261021-07"}},
+  {"instance": "integration-tests", "period": "20261022", "reason": "inspect stage refused the report: findings.json unparseable", "spawn": {"ticket_id": "t261022-15", "error": ""}},
+  {"instance": "simplify", "period": "20261021", "reason": "worktree absent at read time", "spawn": {"ticket_id": "", "error": "spawn failed: no worktree for simplify"}},
+  {"instance": "simplify", "period": "20261022", "reason": "", "spawn": {"ticket_id": "t261022-18"}}
+ ],
+ "periods": [
+  {"period": "20261020", "reports": {
+    "integration-tests": {"ok": true, "report": {"findings": {"high": 0, "med": 1, "low": 2}, "named": ["unused export in api.ts"]}},
+    "simplify": {"ok": false, "reason": "decl-unreadable: archive shard 0412 not readable"}
+  }},
+  {"period": "20261021", "reports": {
+    "integration-tests": {"ok": true, "report": {"findings": [], "named": []}},
+    "simplify": {"ok": false, "reason": "not run in this period (no spawn row)"}
+  }},
+  {"period": "20261022", "reports": {
+    "integration-tests": {"ok": false, "reason": "inspect stage refused the report: findings.json unparseable"},
+    "simplify": {"ok": true, "report": {"findings": {"high": 1, "med": 0, "low": 0}, "named": ["naming: regen_coverage_rows"]}}
+  }}
+ ]
+}
