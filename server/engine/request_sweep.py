@@ -248,33 +248,85 @@ def make_runs_green_fn(runs_path: str) -> Callable[[str], Optional[bool]]:
     return is_green
 
 
+# Reader liveness, for the receipt: default_ticket_status_fn records WHY the
+# channel is unavailable on its first failure (t261026-06: a dead reader used
+# to look like 65 ordinary per-head skips with an ok:true receipt).
+_READER_LAST_ERROR: Optional[str] = None
+_TICKET_READER_TIMEOUT_S = 120  # carried from the pre-t261026-06 reader
+
+
+def ticket_reader_path() -> str:
+    """The reader entry point, resolved the way the rest of the engine does it
+    (shared.ADMIN_PY -> <repo_root>/server/admin.py, the same file the gate
+    activities call). No fallback: the stale <repo_root>/server/tools/admin.py
+    path that caused t261026-06 is gone for good."""
+    admin = getattr(shared_module(), "ADMIN_PY", None)
+    return str(admin) if admin else ""
+
+
+def ticket_reader_probe() -> Dict[str, Any]:
+    """Cheap existence check on the reader entry, for the receipt's top-level
+    `reader` block. A missing entry is loud even when no ticket_closed head is
+    evaluated."""
+    path = ticket_reader_path()
+    if not path or not os.path.exists(path):
+        return {"available": False, "path": path,
+                "error": "reader_entry_missing:%s" % path}
+    return {"available": True, "path": path, "error": ""}
+
+
+def _note_reader_error(reason: str) -> None:
+    global _READER_LAST_ERROR
+    if _READER_LAST_ERROR is None:
+        _READER_LAST_ERROR = reason
+
+
 def default_ticket_status_fn(ticket: str
                              ) -> Optional[Tuple[str, str]]:
     """The engine's default `ticket_closed` reader: the ticket list projection
     the scan activities already use (admin ticket list). Returns
-    (status, source) or None when the channel is unavailable. The source name
-    travels into the resolved row's evidence, so a reader can check WHERE the
-    "closed" was read from (a projection, per ledger-record-models-v1 --
-    named as such, never presented as the ticket ledger itself)."""
+    (status, source) or None when the channel is unavailable -- with the
+    unavailability reason recorded for the receipt (`_READER_LAST_ERROR`,
+    surfaced by sweep_project). The source name travels into the resolved
+    row's evidence, so a reader can check WHERE the "closed" was read from (a
+    projection, per ledger-record-models-v1 -- named as such, never presented
+    as the ticket ledger itself)."""
     import subprocess
+    admin_py = ticket_reader_path()
     repo_root = str(getattr(shared_module(), "REPO_ROOT", "") or "")
-    admin_py = os.path.join(repo_root, "server", "tools", "admin.py")
-    if not repo_root or not os.path.exists(admin_py):
+    if not admin_py or not os.path.exists(admin_py):
+        _note_reader_error("reader_entry_missing:%s" % admin_py)
         return None
     cmd = [sys.executable, admin_py, "call", "ticket",
            json.dumps({"op": "list"}, ensure_ascii=False)]
     try:
         proc = subprocess.run(cmd, cwd=repo_root, capture_output=True,
-                              text=True, timeout=120)
-    except (OSError, subprocess.SubprocessError):
+                              text=True, timeout=_TICKET_READER_TIMEOUT_S)
+    except (OSError, subprocess.SubprocessError) as e:
+        # TimeoutExpired is a SubprocessError: a slow reader is an unavailable
+        # reader, named -- never a fabricated empty list.
+        _note_reader_error("reader_spawn_failed:%s:%s"
+                           % (type(e).__name__, admin_py))
         return None
     if proc.returncode != 0:
+        _note_reader_error("reader_exit_%d:%s" % (proc.returncode, admin_py))
         return None
     parsed = None
     try:
         import shared
         parsed = shared.gate_receipt_parse(proc.stdout)
     except Exception:  # noqa: BLE001 — parse failure is an unavailable channel
+        _note_reader_error("reader_output_unparseable:%s" % admin_py)
+        return None
+    if "ok" not in parsed:
+        # nothing parseable in the output stream at all: an unavailable
+        # channel, NOT an honestly empty ticket list
+        _note_reader_error("reader_output_unparseable:%s" % admin_py)
+        return None
+    if not parsed.get("ok"):
+        # a receipt-level refusal (unknown project, tool error, ...) is an
+        # unavailable channel, NOT an honestly empty ticket list
+        _note_reader_error("reader_refused:%s" % admin_py)
         return None
     tickets = ((parsed.get("result") or {}).get("tickets")) or []
     for t in tickets:
@@ -426,6 +478,15 @@ def sweep_project(project_key: str, now_ms: int, seq: int,
         is_green = make_runs_green_fn(runs_store_path(key, env))
     if ticket_status_fn is None:
         ticket_status_fn = default_ticket_status_fn
+    uses_default_reader = ticket_status_fn is default_ticket_status_fn
+    if uses_default_reader:
+        # t261026-06: a dead reader is louder than 65 identical per-head skips
+        # -- the receipt names the channel once, at the top level. ok stays
+        # true (a skip is a named outcome, per the module contract), pinned by
+        # the reader regression test.
+        global _READER_LAST_ERROR
+        _READER_LAST_ERROR = None
+        receipt["reader"] = ticket_reader_probe()
     if not os.path.exists(path):
         receipt["unchanged"] = 0
         receipt["note"] = "no_requests_ledger"
@@ -471,6 +532,11 @@ def sweep_project(project_key: str, now_ms: int, seq: int,
             seq += 1
             receipt["resolved"].append({"id": hid, "evidence": evidence,
                                         "note": note, "row_id": row["id"]})
+    if uses_default_reader and "reader" in receipt and _READER_LAST_ERROR:
+        # the probe passed but the channel failed at runtime (spawn / exit /
+        # parse / receipt-level refusal): the receipt says so, named
+        receipt["reader"]["available"] = False
+        receipt["reader"]["error"] = _READER_LAST_ERROR
     return receipt
 
 

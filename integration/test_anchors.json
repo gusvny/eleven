@@ -1692,6 +1692,11 @@
     "server/engine/tests/test_t261025_11_one_record_reconcile.py": {
       "anchor": "behaviour",
       "note": "t261025-11 developer L1: the one-record contract on the healing paths - _append_settle_row checks the writer's answer (rejected batch retries once, then names the unrecorded round on the tick-refusal face, never silent zero rows, never masking the caller's exception); reconcile_unrecorded_rounds heals a completed runner row that no delivery row cites into exactly ONE certification (judged_by=reconciled:<run_id>) or ONE range-growth row naming the run id, idempotent by replay; content red heals cert+freeze; guard held and line-ambiguous write nothing (named entry); append failure is a named entry; the full tick heals then idles without a round; malformed runs-store lines are named, never guessed."
+    },
+    "server/engine/tests/test_t261026_06_request_sweep_reader.py": {
+      "anchor": "contract",
+      "note": "t261026-06 L1: default_ticket_status_fn resolves the reader through shared.ADMIN_PY (server/admin.py), a working stub reader resolves a ticket_closed head with the source named in the evidence, and a missing/unreachable reader produces a named reader failure carrying the resolved path instead of a silent None (developer-owned unit battery; the channel-level journey belongs to sc_t261026_06_reader_path_loudness)",
+      "sync_path": "server/engine/request_sweep.py"
     }
   },
   "scenarios": {
@@ -5783,6 +5788,11 @@
     "integration/t261025-14/sc_t261025_14_token_loss_at_close.mjs": {
       "anchor": "behaviour",
       "note": "t261025-14: the loss-at-close journey as the user sees it - a closed ticket whose lane is gone keeps its token usage via the archive, a cached tokens=null record heals once the archive appears, the lane source wins while alive (byte-identical with/without archive), a corrupt archive file never zeroes the face and is named, a measured zero outside tickets stays 0 while a missing block stays null with the named tickets-only caliber, and out-of-window archived events never inflate the total."
+    },
+    "integration/t261026-06/sc_t261026_06_reader_path_loudness.py": {
+      "anchor": "contract",
+      "note": "t261026-06: the sweep's ticket_closed condition is evaluated through the real admin entry channel, not always skipped - a working reader resolves the closed-ticket head with evidence naming the ticket-list-projection source (read back from the requests ledger), a MISSING reader entry is loud (the receipt names the exact missing path, per-head skip reason stays ticket_reader_unavailable:<ticket>, nothing resolves, ok stays true), a reader answering ok:false never fabricates a resolution, and the real CLI face over a sandbox registry fabricates nothing",
+      "sync_path": "server/engine/request_sweep.py"
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {
