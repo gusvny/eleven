@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 340,
+      "engine_tests": 341,
       "scenarios": 813
     },
     "vocab": [
@@ -14,6 +14,11 @@
     "what": "anchor label per engine test and per registered scenario (vocabulary: behaviour | contract | production-snapshot | source-text); enforced by integration/lint_tests.py L16 (coverage/vocabulary/sync) and L18 (production-snapshot marker discipline); added by t261004-20"
   },
   "engine_tests": {
+    "server/engine/tests/test_t261026_37_fork_selfheal.py": {
+      "anchor": "behaviour",
+      "note": "t261026-37 KI-376: the lane-dsh missing-profile self-heal journey driven through the real dev_lane main loop with a stubbed activity seam (all live gates on): B-heal fork re-run -> join settle -> mechanical tests -> arb_acc fork double precheck refusal -> blocked(arbitrate) -> host retry -> arbitrate re-run (verdict=pass) -> gate-5 consumes the stranded FAILED walkthrough receipt -> blocked(acceptance_walkthrough) -> host retry -> walkthrough re-runs ok -> verdict consumes the ok receipt -> merge_check; pins edge call counts (implement/design/arbitrate/acceptance each exactly one real spawn) and the blocked stage order, plus malformed-refusal predicate matrix and a malformed walkthrough receipt taking the send-back path without a hang.",
+      "sync_path": "server/engine/dev_lane.py"
+    },
     "server/engine/tests/test_quickmanual_lane.py": {
       "anchor": "contract",
       "note": "t261019-32 L1: the quickmanual lane contract - stage chain open/work/run_integration_tests/merge_check/merge with no plan/review/test-design/arbitrate/walkthrough stage and no agent stage; rework vocabulary refusals; reuse source-locks (parent helpers, settle_lane, main-sync single implementation); evidence validator malformed matrix; work_done blank-session refusals; no-self-sign sign gate; gate verdict truth table; blocked digest caps; registration deliberately absent from every face until the atomic step-0 amendment (never names-only - arbitrate gen0 item 1) pinned xfail; SDK definition isolation (parent and light-lane definitions unchanged)."
@@ -3165,7 +3170,7 @@
       "note": "",
       "sync_path": ""
     },
-    "integration/t260916-28/sc_t260916_28_lane_dsh_missing_profile.py": {
+    "integration/t261026-37/sc_t260916_28_lane_dsh_missing_profile.py": {
       "anchor": "behaviour",
       "note": "",
       "sync_path": ""

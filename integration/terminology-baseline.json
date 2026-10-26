@@ -283,7 +283,7 @@
     "integration/t260916-26/sc_console_boot_no_plugin_banner.mjs": 0,
     "integration/t260916-26/sc_plugin_inject_contract.mjs": 0,
     "integration/t260916-26/sc_stage_plugins_selfcheck.py": 0,
-    "integration/t260916-28/sc_t260916_28_lane_dsh_missing_profile.py": 0,
+    "integration/t261026-37/sc_t260916_28_lane_dsh_missing_profile.py": 0,
     "integration/t260916-29/acceptance_report.md": 0,
     "integration/t260916-29/lib_t26091629.py": 0,
     "integration/t260916-29/sc_console_crash_graceful_stop.py": 0,
