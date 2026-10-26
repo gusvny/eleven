@@ -2956,8 +2956,8 @@ SCENARIOS = [
      "node integration/t260916-23/sc_session_dualname_ts_faces.mjs", "ro"),
     # ---- t260916-28: 泳道 .dsh 缺 headless profile 的静默失效（spawn 前预检 + 六站分流 + 补件自愈）----
     ("t260916-28-lane-dsh-missing-profile",
-     "泳道 .dsh 缺 headless profile 的静默失效全链（t260916-26 实报形态的端到端回归，灰盒 L3，真 docker 台+票专属 worker+假 dsh 桩）：SANDBAR_AGENT_CMD='dsh --profile sandbar-headless'（首词 dsh=预检触发条件本体）+PATH 前置假 dsh 桩（control 分行为：默认写合法回执、arbitrate 带 verdict=pass 防格式纠正混入；prune 列表 stage=删候选链源 profile 与泳道 .dsh profile 两处——host 形态泳道 profile 跨段持久、prep 有 exists 守卫，只删一处无法使泳道面缺件）+worker DSH_HOME=源 home/HOME=空 tmp home（候选链全空前提，不靠宿主真 home 运气）——一票串三子用例：子用例A 开票即源无 profile→create_plan blocked 点名（blocked_reason 含「泳道 .dsh 缺」「sandbar-headless」、绝不含「agent 活动故障」；blocked_detail.reason_code=lane_dsh_profile_missing；桩账本零 create_plan 记录=预检拦在 spawn 前）→补源+retry_qc 自愈（create_plan 真跑通过、账本有记录）；子用例B review_plan 桩两处删→impl fork 两边均撞预检→blocked 点名（含「agent 报失败」+「泳道 .dsh 缺」；timeline 无 rework、handoffs 无「实现完成/集成测试集就绪」假交接——failed 回执绝不被汇合边吞成完成）→补源+retry 两边重跑（implement/design 账本各恰 1 条）；子用例C design 重跑桩再删→arb_acc fork 双拦→blocked(arbitrate) 点名且绝无「缺 verdict= 标记」虚报、无「格式纠正」账→补源+retry→arbitrate verdict=pass 恰重跑 1 次→滞留 failed 的 acceptance 回执被门消费 blocked(acceptance) 点名、绝无「验收走查打回」假叙事、全程零 rework→补源+retry→acceptance 重跑 ok→票到达 merge_check（全链自愈终点；其后终态不判，t260912-03 同口径）。轮次判定用 snapshot.retry_count 阈值防旧 blocked 串台。实现未落地=产品红（TDD 信号），arbitrate/merge 期必须绿；docker/镜像/temporal CLI 缺席=ENV_FAIL exit 2 点名；审计钩子禁生产端口（终局账本空断言）。分工：t260905-10-host-ruling-injection 守 blocked 态注入面、t260908-01 守 KI-061 超限复活面，本条守缺件预检与 failed 回执分流面，不互替 — tier: lane-dsh missing-profile self-heal journey end to end over a real docker stage; cost: minutes (~450s journey, exclusive pool)",
-     "sh integration/py_interp.sh integration/t261026-37/sc_t260916_28_lane_dsh_missing_profile.py", "exclusive"),
+     "泳道 .dsh 缺 headless profile 的静默失效全链（t260916-26 实报形态的端到端回归，灰盒 L3，真 docker 台+票专属 worker+假 dsh 桩）：SANDBAR_AGENT_CMD='dsh --profile sandbar-headless'（首词 dsh=预检触发条件本体）+PATH 前置假 dsh 桩（control 分行为：默认写合法回执、arbitrate 带 verdict=pass 防格式纠正混入；prune 列表 stage=删候选链源 profile 与泳道 .dsh profile 两处——host 形态泳道 profile 跨段持久、prep 有 exists 守卫，只删一处无法使泳道面缺件）+worker DSH_HOME=源 home/HOME=空 tmp home（候选链全空前提，不靠宿主真 home 运气）——一票串三子用例：子用例A 开票即源无 profile→create_plan blocked 点名（blocked_reason 含「泳道 .dsh 缺」「sandbar-headless」、绝不含「agent 活动故障」；blocked_detail.reason_code=lane_dsh_profile_missing；桩账本零 create_plan 记录=预检拦在 spawn 前）→补源+retry_qc 自愈（create_plan 真跑通过、账本有记录）；子用例B review_plan 桩两处删→impl fork 两边均撞预检→blocked 点名（含「agent 报失败」+「泳道 .dsh 缺」；timeline 无 rework、handoffs 无「实现完成/集成测试集就绪」假交接——failed 回执绝不被汇合边吞成完成）→补源+retry 两边重跑（implement/design 账本各恰 1 条）；子用例C design 重跑桩再删→arb_acc fork 双拦→blocked(arbitrate) 点名且绝无「缺 verdict= 标记」虚报、无「格式纠正」账→补源+retry→arbitrate verdict=pass 恰重跑 1 次→滞留 failed 的 acceptance 回执被门消费 blocked(acceptance) 点名、绝无「验收走查打回」假叙事、全程零 rework→补源+retry→acceptance 重跑 ok→票到达 merge_check（全链自愈终点；其后终态不判，t260912-03 同口径）。轮次判定用 snapshot.retry_count 阈值防旧 blocked 串台。实现未落地=产品红（TDD 信号），arbitrate/merge 期必须绿；docker/镜像/temporal CLI 缺席=ENV_FAIL exit 2 点名；审计钩子禁生产端口（终局账本空断言）。分工：t260905-10-host-ruling-injection 守 blocked 态注入面、t260908-01 守 KI-061 超限复活面，本条守缺件预检与 failed 回执分流面，不互替",
+     "sh integration/py_interp.sh integration/t260916-28/sc_t260916_28_lane_dsh_missing_profile.py", "exclusive"),
 
     # ---- t260916-29: worker 停机 grace 契约（引擎 P1：优雅停实为立即取消）----
     # 与 developer 引擎侧 selfcheck（进程内桩 activity：grace 对在飞活动的收尾效果/
@@ -4140,6 +4140,18 @@ FAST_SET_CATCH = {
         "develop-buffer line and blocking every landing - caught here in "
         "offline seconds at the freeze judge instead of at the next day of "
         "hand-thawed freezes",
+    # t261026-35: the ticket's own membership declarations (the guard family
+    # t261009-16 B refuses a fast member without one - that refusal is exactly
+    # what the round measured before this entry landed).
+    "t261026-35-interp-resolution-journey":
+        "the next line-round clone or worktree lane silently falling back to a "
+        "system python3 without temporalio (the t261011-21 incident class), "
+        "caught here in offline seconds as a chronic ENV_FAIL instead of at "
+        "every round's env-red count",
+    "t261026-35-interp-lint-gate":
+        "an interpreter lint rule that exists but never fires, or a static "
+        "gate that still passes a registry carrying the chronic bare-python3 "
+        "shape - caught here in offline seconds instead of the next round",
     # t261026-11: the degrade matrix's membership declarations - what each fast
     # member catches early, per the guard family (t261009-16 B).
     "t261026-11-inspection-coverage-degrade":
