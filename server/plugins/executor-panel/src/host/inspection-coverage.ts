@@ -38,7 +38,7 @@ export const COVERAGE_COPIES = {
   not_run: 'No attempt recorded for this period.',
   unreadable: 'The ledger file exists but is unreadable — named here, never read as fine and never read as missing.',
   attempts_unavailable:
-    'Attempt records are unavailable on this surface; "no attempt" below is this surface\'s limit, not a verified fact.',
+    'Attempt records (the inspection ticket board, /sandbar-workbench/api/wf/inspection/tickets) are unavailable on this surface; "no attempt" below is this surface\'s limit, not a verified fact.',
   last_ok_prefix: 'Last successful period for this face: ',
   last_ok_suffix: '.',
   last_never: 'This face never produced a result in the shown window.',
@@ -125,6 +125,53 @@ export function recordsToAttempts(rows: unknown): Record<string, unknown> | null
   return kept > 0 ? out : null
 }
 
+/** t261026-10 (defect C): build the attempts map from the inspection TICKET BOARD rows
+ *  (GET /sandbar-workbench/api/wf/inspection/tickets — the route already exists; this
+ *  is not a new fetch face). One ticket row = one attempt record: ticket_id = the row
+ *  id, state = the engine's status/stage words verbatim (never re-derived here — the
+ *  five-state single point owns terminal states), blocked_reason = the row's named
+ *  reason. UNTRUSTED input: the same guards as recordsToAttempts — rows without both
+ *  instance and period are not attributable to a coverage cell and are dropped; a row
+ *  without an id still counts as an attempt with the named unknown-state copy.
+ *
+ *  Project scope (review C1, named choice): the board route serves inspection rows
+ *  across projects. A row whose `project` field is a non-empty string that differs
+ *  from `project` is DROPPED — a same-named instance id from another project must not
+ *  light up this project's cells. Rows with an empty/absent project (the pre-t260915-20
+ *  historical shape) are KEPT: the rendered instances come from THIS project's
+ *  declaration (the archive's declared-instance filter), so a kept legacy row can only
+ *  ever land on a declared cell of the project being viewed.
+ *  Returns null when nothing attributable survives (records unavailable). */
+export function ticketRowsToAttempts(rows: unknown, project: string): Record<string, unknown> | null {
+  // Local string helper: embedded into the page via String(fn) — no outer closure.
+  function s(v: unknown): string {
+    return typeof v === 'string' ? v.trim() : ''
+  }
+  if (!Array.isArray(rows) || rows.length === 0) return null
+  const want = s(project)
+  const out: Record<string, unknown> = {}
+  let kept = 0
+  for (const r of rows) {
+    if (r === null || typeof r !== 'object') continue
+    const d = r as Record<string, unknown>
+    const rowProject = s(d.project)
+    if (rowProject !== '' && want !== '' && rowProject !== want) continue
+    const inst = s(d.instance ?? d.instance_id)
+    const period = s(d.period)
+    if (!inst || !period) continue
+    kept += 1
+    const key = `${inst}/${period}`
+    const arr = Array.isArray(out[key]) ? (out[key] as CoverageAttempt[]) : []
+    arr.push({
+      ticket_id: s(d.id ?? d.ticket_id),
+      state: s(d.stage_state) || s(d.status),
+      blocked_reason: s(d.blocked_reason),
+    })
+    out[key] = arr
+  }
+  return kept > 0 ? out : null
+}
+
 /** The period-x-face coverage view (closure-free; tables passed in — embedded via
  *  String(fn) with the JSON-serialised tables). Periods are consumed in ascending
  *  numeric order; `last_ok_period` is the newest strictly-earlier period whose face
@@ -144,9 +191,11 @@ export function buildCoverageCore(
   function attemptsFor(attempts: Record<string, unknown> | null, key: string): CoverageAttempt[] {
     if (!attempts) return []
     const raw = attempts[key]
-    if (!Array.isArray(raw)) return []
+    // A key carries a LIST of attempt rows, or (t261026-10, integration-scenario
+    // tolerance) a single attempt record object — both read; anything else is none.
+    const list = Array.isArray(raw) ? raw : (raw !== null && typeof raw === 'object' ? [raw] : [])
     const out: CoverageAttempt[] = []
-    for (const e of raw) {
+    for (const e of list) {
       if (e !== null && typeof e === 'object') {
         const d = e as Record<string, unknown>
         out.push({ ticket_id: s(d.ticket_id), state: s(d.state), blocked_reason: s(d.blocked_reason) })

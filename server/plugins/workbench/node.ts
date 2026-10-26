@@ -179,6 +179,9 @@ import { backfillRowsFromArchive, readArchiveIndex } from './src/host/ticket-arc
 import { isTicketTimeMode } from './src/shared/ticket-time-model.ts'
 import { ticketShowErrorReply } from './src/host/ticket-error.ts'
 import { readInspectionArchive, readPeriodReport } from './src/host/inspection-archive.ts'
+// t261026-10: the declaration read (declared instance ids + scan_face per instance)
+// feeds the archive's declared-instance filter and the served faces map.
+import { readInspectionDeclaration } from './src/host/inspection-decl.ts'
 // t261021-14: the inspection ledger directory is resolved ONCE through the
 // engine's own resolver (shared.INSPECTION_DIR via a bounded subprocess) — the
 // previous join(root, 'out', 'inspection') literal here had drifted from the
@@ -1553,7 +1556,13 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     const a = anchorGuard(res, anchorOf(url))
     if (a === null) return
     try {
-      const r = await resolveInspectionDir(repo)
+      // t261026-10: the declaration read rides alongside the ledger-dir resolution —
+      // the instance set is the declaration, not the filename whitelist (defect A of
+      // host report 261026); a failed declaration read degrades named on the payload.
+      const [r, decl] = await Promise.all([
+        resolveInspectionDir(repo),
+        readInspectionDeclaration(repo, a.key),
+      ])
       if (!r.ok) {
         sendJson(res, 200, { ok: false, error: r.error })
         return
@@ -1569,7 +1578,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         sendJson(res, 200, { ok: true, result: await readPeriodReport(dir, instance, period) })
         return
       }
-      sendJson(res, 200, { ok: true, result: await readInspectionArchive(dir) })
+      sendJson(res, 200, { ok: true, result: await readInspectionArchive(dir, decl) })
     } catch (err) {
       sendJson(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) })
     }

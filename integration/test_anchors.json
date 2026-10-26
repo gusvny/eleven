@@ -5805,6 +5805,16 @@
       "note": "t261025-11: the tick-level healing journey over real files on disk - witness replay (complete runner row, no citing row) heals into exactly ONE certification citing the run id, replay writes nothing; unjudgable header becomes exactly ONE range-growth row naming the run id; guard held heals nothing; line-ambiguous refuses by name on the tick-refusal face; garbage in either store is named, never guessed; a rejected settle append retries and names the face.",
       "sync_path": ""
     },
+    "integration/t261026-10/sc_t261026_10_archive_declared_instances.mjs": {
+      "anchor": "behaviour",
+      "note": "t261026-10 defect A: the declared-instances journey on the archive read face - a directory seeded with shard-shaped doc-face files next to a real report lists exactly the declared instances, the excluded shards are counted and named (never silently dropped), a declared-but-unarchived instance still renders, an unreadable declaration degrades named with the filename-derived fallback, and the real report stays reachable.",
+      "sync_path": ""
+    },
+    "integration/t261026-10/sc_t261026_10_panel_declared_face_attempts.mjs": {
+      "anchor": "behaviour",
+      "note": "t261026-10 defects B/C: the declared-face and attempts journey on the panel coverage face - a served faces map renders the declared scan_face per row while unknown instances keep the named decl-unreadable marker, ticket-board rows adapt to attempts keyed instance/period with verbatim evidence, malformed rows drop without throwing, attempted slots lose the bare not_run wall, and the unavailable copy names the inspection ticket board as the source it could not read.",
+      "sync_path": ""
+    },
     "integration/t261025-14/sc_t261025_14_token_loss_at_close.mjs": {
       "anchor": "behaviour",
       "note": "t261025-14: the loss-at-close journey as the user sees it - a closed ticket whose lane is gone keeps its token usage via the archive, a cached tokens=null record heals once the archive appears, the lane source wins while alive (byte-identical with/without archive), a corrupt archive file never zeroes the face and is named, a measured zero outside tickets stays 0 while a missing block stays null with the named tickets-only caliber, and out-of-window archived events never inflate the total."

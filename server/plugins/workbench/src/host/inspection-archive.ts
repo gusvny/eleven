@@ -27,6 +27,20 @@
  *  - absent directory -> ok:false + human reason (no inspection has run; not a 5xx);
  *  - filename whitelist inspection-<instance>-<YYYYMMDD>.json (instance shape = the
  *    project key whitelist family);
+ *  - t261026-10 (host report 261026, defect A): the whitelist alone is NOT the instance
+ *    set any more. When a declaration table is supplied, only DECLARED instances become
+ *    instances; a whitelist-matching file whose instance is not declared is counted in
+ *    excluded (exact count + the first EXCLUDED_NAMES_CAP names — the name list is
+ *    truncated, the count never is, so count > names.length names the cut). This is the
+ *    rule that won on the face: historical doc-face shard files
+ *    (inspection-doc-face-<hash>-<period>) stay in the ledger directory but never render
+ *    as instances — named, not silently dropped (the producer-side shard-subdirectory
+ *    reroute is unavailable: the shard writer no longer exists in the engine and
+ *    server/engine/ is outside this ticket's write set). `instances` lists EVERY
+ *    declared instance even with zero archived reports, so a declared face renders its
+ *    (not_run) rows instead of vanishing. A declaration that could not be read degrades
+ *    NAMED (declaration ok:false): instances fall back to the filename-derived set and
+ *    every face id reads decl-unreadable — the defect-B marker stays truthful there;
  *  - a file over 256 KB is not parsed (truncated text can break mid-JSON); the slot
  *    carries a per-file reason; parse failure same — the file contributes "present but
  *    unreadable" to the period list, never report content;
@@ -37,6 +51,7 @@
 
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { InspectionDeclRead } from './inspection-decl.ts'
 
 /** Period key shape (YYYYMMDD; same shape as the engine period_key). */
 export const PERIOD_RE = /^\d{8}$/
@@ -44,6 +59,19 @@ export const PERIOD_RE = /^\d{8}$/
 export const ARCHIVE_FILE_RE = /^inspection-([a-z0-9][a-z0-9-]{0,40})-(\d{8})\.json$/
 /** Per-report byte cap: an over-cap file is not JSON.parsed. */
 export const ARCHIVE_MAX_BYTES = 256 * 1024
+/** t261026-10: how many excluded-file NAMES ride on the payload (review C3). The
+ *  count is always exact; the name list is capped so a 40+-shard period cannot flood
+ *  the payload — count > names.length names the truncation to the reader. */
+export const EXCLUDED_NAMES_CAP = 10
+
+/** Declared instance table the caller resolved from the project declaration
+ *  (inspection-decl.ts) — or the plain table shape the integration scenarios
+ *  pin (instances: id list + faces: id->scan_face), or null for the named
+ *  declaration-unreadable degrade. `undefined` = legacy filename-derived behaviour. */
+export type ArchiveDeclParam =
+  | InspectionDeclRead
+  | { instances: string[]; faces: Record<string, string> }
+  | null
 
 export interface ArchiveEntry {
   instance: string
@@ -79,6 +107,13 @@ export type ArchiveRead =
       unreadable_files: number
       /** Whitelist-external files counted, never read. */
       hidden_files: number
+      /** t261026-10: whitelist-matching files whose instance is NOT declared —
+       *  counted exactly, first EXCLUDED_NAMES_CAP names listed. */
+      excluded_files: { count: number; names: string[] }
+      /** instance id -> declared scan_face (empty map when no declaration table). */
+      faces: Record<string, string>
+      /** t261026-10: the declaration read this archive filtered by (named degrade). */
+      declaration_state: { ok: boolean; file: string; reason: string }
       reason: ''
     }
   | { ok: false; dir: string; reason: string }
@@ -124,11 +159,48 @@ export function buildArchiveItems(periods: PeriodEntry[]): ArchiveItem[] {
 }
 
 /**
- * Archive reader: readdir -> whitelist -> try-read+parse per file (over-cap / bad JSON
- * = a fail-closed slot reason) -> period entries -> explicit descending order -> merge.
- * An absent directory = ok:false (nothing has run yet).
+ * Archive reader: readdir -> whitelist -> declared-instance filter (t261026-10) ->
+ * try-read+parse per file (over-cap / bad JSON = a fail-closed slot reason) ->
+ * period entries -> explicit descending order -> merge. An absent directory =
+ * ok:false (nothing has run yet). `decl === undefined` keeps the legacy
+ * filename-derived behaviour (existing tests / direct readers); the route always
+ * supplies a table or an explicit null (named declaration degrade).
  */
-export async function readInspectionArchive(dir: string): Promise<ArchiveRead> {
+export async function readInspectionArchive(
+  dir: string, decl?: ArchiveDeclParam,
+): Promise<ArchiveRead> {
+  // Normalize the accepted shapes: the engine reader read (ok/file/instances[]),
+  // the plain scenario table (instances: ids + faces), null (named degrade),
+  // undefined (legacy). Nothing else — an unusable shape reads as the named degrade.
+  let declaredIds: string[] = []
+  let faces: Record<string, string> = {}
+  let declOk = false
+  let declFile = ''
+  let declReason = ''
+  if (decl === null) {
+    declOk = false
+    declReason = 'inspection declaration unreadable on this surface — the caller carried no readable table'
+  } else if (decl !== undefined && 'ok' in decl) {
+    declOk = decl.ok
+    declFile = decl.file
+    if (decl.ok) {
+      declaredIds = decl.instances.map((i) => i.id)
+      for (const i of decl.instances) faces[i.id] = i.scan_face
+    } else {
+      declReason = decl.reason
+    }
+  } else if (decl !== undefined && Array.isArray(decl.instances)) {
+    declOk = true
+    declaredIds = decl.instances.filter((i) => typeof i === 'string')
+    faces = { ...(decl.faces ?? {}) }
+  } else if (decl !== undefined) {
+    declOk = false
+    declReason = 'inspection declaration table shape is unusable (neither a reader result nor an id list)'
+  }
+  const declaration = decl === undefined
+    ? { ok: true, file: '', reason: 'no declaration table supplied (legacy filename-derived instances)' }
+    : { ok: declOk, file: declFile, reason: declReason }
+  const declaredFilterOn = decl !== undefined && decl !== null && declOk
   let names: string[]
   try {
     names = await readdir(dir)
@@ -136,17 +208,23 @@ export async function readInspectionArchive(dir: string): Promise<ArchiveRead> {
     return { ok: false, dir, reason: 'inspection archive directory does not exist (no inspection has run for this project yet)' }
   }
   const entries: ArchiveEntry[] = []
+  const excludedNames: string[] = []
   let hidden = 0
   for (const n of names) {
     const m = ARCHIVE_FILE_RE.exec(n)
     if (!m) { hidden += 1; continue }
+    if (declaredFilterOn && !declaredIds.includes(m[1])) {
+      // Whitelist-matched but not declared (the doc-face shard family): counted
+      // exactly, first EXCLUDED_NAMES_CAP names carried — never silently dropped.
+      if (excludedNames.length < EXCLUDED_NAMES_CAP) excludedNames.push(n)
+      continue
+    }
     entries.push({ instance: m[1], period: m[2], file: join(dir, n) })
   }
-  if (entries.length === 0) {
+  if (entries.length === 0 && declaredIds.length === 0) {
     return { ok: false, dir, reason: 'no inspection report in the archive (whitelist inspection-<instance>-<YYYYMMDD>.json matched nothing)' }
   }
 
-  const instances = [...new Set(entries.map((e) => e.instance))].sort()
   const byPeriod = new Map<string, Record<string, ReportSlot>>()
   let unreadable = 0
   for (const e of entries) {
@@ -175,10 +253,32 @@ export async function readInspectionArchive(dir: string): Promise<ArchiveRead> {
     const anyReport = Object.values(reports).some((s) => s.ok)
     return { period: p, reports, any_report: anyReport }
   })
+  // t261026-10: with a readable declaration the instance set IS the declaration (a
+  // declared instance with zero archived reports still lists, rendering not_run rows);
+  // without one, the filename-derived set (legacy behaviour).
+  const instances = declaredFilterOn
+    ? [...declaredIds].sort()
+    : [...new Set(entries.map((e) => e.instance))].sort()
   return {
     ok: true, dir, instances, periods, items: buildArchiveItems(periods),
     unreadable_files: unreadable, hidden_files: hidden, reason: '',
+    excluded_files: declaredFilterOn
+      ? { count: countExcluded(names, declaredIds), names: excludedNames }
+      : { count: 0, names: [] },
+    faces,
+    declaration_state: declaration,
   }
+}
+
+/** Exact excluded count over the full readdir listing (review C3: the count never
+ *  truncates even when the name list does). */
+function countExcluded(names: string[], declaredIds: string[]): number {
+  let n = 0
+  for (const name of names) {
+    const m = ARCHIVE_FILE_RE.exec(name)
+    if (m && !declaredIds.includes(m[1])) n += 1
+  }
+  return n
 }
 
 /** Single period+instance report fetch (a period-row click drills into one card):
