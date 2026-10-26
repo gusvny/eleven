@@ -319,7 +319,11 @@ async function main() {
       // anchor-wait on the first KPI label, never sleep-then-read (KI-051)
       const pane = page.locator('#paneMetrics')
       const ok = await page.waitForFunction(
-        () => { const e = document.querySelector('#paneMetrics'); return !!e && /throughput/i.test(e.textContent || '') },
+        // The readiness wait must key on DATA, not on a static section heading:
+        // 'Throughput' is painted by the page's own markup before any fetch, so keying on it
+        // cleared the wait ~80 ms early and let the snapshot race the payload (measured 261026).
+        // 'median lead time' is a KPI tile title and exists only after the time-view data lands.
+        () => { const e = document.querySelector('#paneMetrics'); return !!e && /median lead time/i.test(e.textContent || '') },
         null, { timeout: 8000 }).then(() => true).catch(() => false)
       const paneText0 = (await pane.innerText().catch(() => '')) || ''
       C.case(T('S0-metrics-pane-renders'), ok, 'no rebuilt Metrics content appeared — pane=' +
