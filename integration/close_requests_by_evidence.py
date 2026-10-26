@@ -61,6 +61,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="attach and sweep (default: dry run)")
     ap.add_argument("--dry-run", action="store_true", help="print what would happen")
+    ap.add_argument("--session", default="",
+                    help="the caller session id (default: DSH_SESSION_ID / DSH_HEADLESS_SESSION)")
     args = ap.parse_args()
     apply = bool(args.apply) and not args.dry_run
 
@@ -75,6 +77,32 @@ def main():
 
     env = dict(os.environ)
     env.setdefault("SANDBAR_CALLER_PROJECT", PROJECT)
+    session = (args.session or "").strip() or env.get("DSH_SESSION_ID", "") \
+        or env.get("DSH_HEADLESS_SESSION", "")
+    if not session:
+        print("no caller session id. The engine records WHO attached a condition, so it refuses a")
+        print("row with no session (session-absent). Pass one explicitly:\n")
+        print("    python3 integration/close_requests_by_evidence.py --apply --session session-<yours>\n")
+        print("Registered sessions for this project (most recently opened first):")
+        try:
+            import json as _json
+            reg = _json.load(open(os.path.expanduser(
+                "~/.sandbar/projects/%s/sessions.json" % PROJECT), encoding="utf-8"))
+            rows = sorted((reg.get("sessions") or []),
+                          key=lambda r: r.get("last_opened_at") or 0, reverse=True)
+            for r in rows[:8]:
+                import datetime as _dt
+                ts = r.get("last_opened_at") or 0
+                when = _dt.datetime.fromtimestamp(ts / 1000).strftime("%m-%d %H:%M") if ts else "-"
+                print("  %s  handle=%s  last=%s  cwd=%s" % (
+                    r.get("session_id"), r.get("handle") or "-", when, r.get("cwd") or "-"))
+        except Exception as exc:                                   # noqa: BLE001
+            print("  (could not read sessions.json: %s)" % exc)
+        print("\nA session that is not named in executor-grants.json and not registered above is")
+        print("refused by name - that is the engine behaving correctly.")
+        return 2
+    env["DSH_SESSION_ID"] = session
+    print("caller session: %s" % session)
     failures = 0
     for head, ticket in pairs:
         cond = {"kind": "ticket_closed", "ticket": ticket}
