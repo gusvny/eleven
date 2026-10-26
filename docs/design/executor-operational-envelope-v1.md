@@ -62,6 +62,35 @@ A request carries `audience` (`host` | `executor` | `any`) and, when the records
 naming the observed row; the executor answers the ones addressed to it with evidence; the host keeps
 the judgement questions. A request without a condition and without an audience stays a human item.
 
+## 3b. The executor closes what the records settle (host order 261026)
+
+A request that the records have already answered must not wait for a person. The host put it plainly:
+the executor should close the ones it can close. Two mechanisms, and the second is where the work is:
+
+* **Declared conditions (built, was broken).** A head may carry `resolves_when`; the sweep evaluates it
+  against the delivery ledger once per watch cycle. Measured 261026: the sweep could close nothing
+  because its ticket reader pointed at a path that no longer exists (65 heads skipped, receipt still
+  `ok:true`). Fixed under t261026-06, with the missing reader made a named receipt error.
+* **Class conditions (the gap).** After the sweep worked, 49 heads stayed open and NOT ONE of them
+  carried a condition — because nobody declared what would close them. Every request class the
+  executor files must therefore declare its own closing condition when it is filed, from a table the
+  design keeps:
+
+  | Class | Closes when |
+  |---|---|
+  | run-silent | any certification row exists on that line after the head (the silence ended) |
+  | run-stalled | a round row exists after the head |
+  | blocker (ticket-shaped) | the ticket it names is closed, or its landing exists |
+  | finding | never auto-closed: a finding is a claim, and a claim needs a human accept or a fix ticket |
+  | question | only a person answers a question; the executor may close it when a later record answers it in substance, naming that record |
+
+  A class missing from this table is a design gap to be fixed here, not a puzzle handed to the host.
+
+* **Resolve with evidence.** For a head whose subject has ended but no condition was declared, the doer
+  resolves with evidence naming the row that ended it. The engine refuses a *project* session (a worker
+  cannot close its own question) and refuses dismissal to everyone but the host's panel — so the
+  executor session is the actor that closes these, and its evidence must name the row.
+
 ## 4. What integration stops doing
 
 Integration keeps: design documents, the adversarial test estate (L2/L3), audits, the known-issue
