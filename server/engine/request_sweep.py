@@ -79,16 +79,47 @@ COND_GREEN_CERT_AFTER = "green_cert_after"
 COND_LANDING_ON_LINE = "landing_on_line"
 COND_TICKET_CLOSED = "ticket_closed"
 COND_FREEZE_CLOSED = "freeze_closed"
+# t261026-07: a ROUND row after the head — a round ends by writing a
+# certification row on its line (green or red), so "a certification row on
+# the line whose `at` is strictly after the head's filing time" IS the
+# record-shaped "a round happened again". This is the class condition the
+# executor files for run-stalled and run-silent heads.
+COND_ROUND_AFTER = "round_after"
 CONDITION_KINDS = (COND_GREEN_CERT_AFTER, COND_LANDING_ON_LINE,
-                   COND_TICKET_CLOSED, COND_FREEZE_CLOSED)
+                   COND_TICKET_CLOSED, COND_FREEZE_CLOSED, COND_ROUND_AFTER)
 # each kind carries EXACTLY one param, under its own name
 CONDITION_PARAM = {COND_GREEN_CERT_AFTER: "cert",
                    COND_LANDING_ON_LINE: "ticket",
                    COND_TICKET_CLOSED: "ticket",
-                   COND_FREEZE_CLOSED: "freeze"}
+                   COND_FREEZE_CLOSED: "freeze",
+                   COND_ROUND_AFTER: "line"}
+
+LINE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+# scanning shape (NOT anchored): a ticket id inside prose — the residue pass
+# parses a blocker's subject out of free text with this, and cites nothing
+# when no id is present
+TICKET_ID_SCAN_RE = re.compile(r"t\d{6}-\d+")
+
+# t261026-07: the request-class -> closing-condition table (the executor's
+# own vocabulary). A class listed here files with the matching `resolves_when`
+# so the sweep can close it; a class in NOT_AUTO_CLOSABLE is the human's word
+# by design — it files with the not-auto-closable face stamp so nobody waits
+# for a machine.
+CLASS_CONDITION_TABLE = {
+    "run-silent": {"kind": COND_ROUND_AFTER, "param": "line",
+                   "source": "the head's own line"},
+    "run-stalled": {"kind": COND_ROUND_AFTER, "param": "line",
+                    "source": "the head's own line"},
+    "blocker": {"kind": COND_TICKET_CLOSED, "param": "ticket",
+                "source": "the head's subject ticket (or its landing)"},
+}
+NOT_AUTO_CLOSABLE = ("finding", "question")
 
 SWEEP_BY = "engine:request-sweep"
 SWEEP_SURFACE = executor_requests.SURFACE_ENGINE
+# t261026-07: the residue writer — the executor-side close of a legacy head
+# whose condition can never exist, citing the row that ended its subject.
+RESIDUE_BY = "executor:request-sweep-residue"
 
 CERT_ID_RE = re.compile(r"^cert-[0-9A-Za-z]+$")
 FREEZE_ID_RE = re.compile(r"^frz-[0-9A-Za-z]+$")
@@ -147,6 +178,10 @@ def validate_resolves_when(raw: Any) -> Dict[str, Any]:
         return _refuse("resolves_when",
                        "resolves_when.ticket %r does not look like a ticket id "
                        "(tMMDDNN-N)" % param[:64])
+    if kind == COND_ROUND_AFTER and not LINE_ID_RE.match(param):
+        return _refuse("resolves_when",
+                       "resolves_when.line %r does not look like a line id "
+                       "(letters/digits/dots/underscores/dashes)" % param[:64])
     return {"ok": True, "condition": {"kind": kind, param_name: param}}
 
 
@@ -410,6 +445,27 @@ def eval_ticket_closed(ticket: str,
     return VERDICT_FALSE, "", ""
 
 
+def eval_round_after(line: str, rows: List[Dict[str, Any]],
+                     head_at: Optional[int]
+                     ) -> Tuple[Optional[bool], str, str]:
+    """A round row after the head: ANY certification row on the line (green
+    or red — a round ends by writing its cert) whose `at` is strictly after
+    the head's filing time. `at` must be readable on BOTH sides; an unusable
+    order is a skip, never a guess (the same fail direction as
+    eval_green_cert_after's seq rule)."""
+    if not isinstance(head_at, int):
+        return VERDICT_SKIP, "", "head_at_unreadable:%s" % line[:40]
+    for r in rows:
+        if r.get("kind") == develop_certify.KIND_CERT \
+                and r.get("line") == line:
+            at = r.get("at")
+            if isinstance(at, int) and at > head_at:
+                return VERDICT_TRUE, str(r.get("id") or ""), \
+                    "round_after:%s round row %s at=%s" % (line[:40],
+                                                           r.get("id"), at)
+    return VERDICT_FALSE, "", ""
+
+
 def eval_freeze_closed(freeze_id: str, rows: List[Dict[str, Any]]
                        ) -> Tuple[Optional[bool], str, str]:
     """The closing change row mints no id (record models: freeze_change rows
@@ -436,11 +492,122 @@ def eval_freeze_closed(freeze_id: str, rows: List[Dict[str, Any]]
     return VERDICT_FALSE, "", ""
 
 
-# ---------- the sweep --------------------------------------------------------
+# ---------- legacy-residue helpers (t261026-07) ------------------------------
+
+def head_line(head_row: Dict[str, Any]) -> Optional[str]:
+    """The line a run-silent / run-stalled head is about: the detail's parsed
+    `line` key first (the watch files detail as JSON with `line`), then the
+    question's `on line <id>` phrasing. None when neither shape holds — an
+    unparsable head is never guessed onto a line."""
+    detail = head_row.get("detail")
+    if isinstance(detail, str) and detail.strip():
+        try:
+            obj = json.loads(detail)
+        except ValueError:
+            obj = None
+        if isinstance(obj, dict) and isinstance(obj.get("line"), str) \
+                and LINE_ID_RE.match(obj["line"].strip()):
+            return obj["line"].strip()
+    question = str(head_row.get("question") or "")
+    m = re.search(r"on line ([A-Za-z0-9][A-Za-z0-9._-]*)", question)
+    if m and LINE_ID_RE.match(m.group(1)):
+        return m.group(1)
+    return None
+
+
+def head_subject_ticket(head_row: Dict[str, Any]) -> Optional[str]:
+    """A blocker head's subject ticket: the FIRST strict ticket id in the
+    head's source_ticket, detail or question. Prose-only references stay
+    unparsed (None) — the residue pass never closes on a guess."""
+    for field in ("source_ticket", "detail", "question"):
+        val = head_row.get(field)
+        if not isinstance(val, str):
+            continue
+        m = TICKET_ID_SCAN_RE.search(val)
+        if m:
+            return m.group(0)
+    return None
+
+
+def close_legacy_residue(head_rows: Dict[str, Dict[str, Any]], states: Dict[str, str],
+                         conditions: Dict[str, Dict[str, Any]],
+                         ledger_rows: List[Dict[str, Any]],
+                         ticket_status_fn: Callable[[str], Optional[Tuple[str, str]]],
+                         now_ms: int, seq: int, append_fn: Callable[[Dict[str, Any]], None]
+                         ) -> List[Dict[str, Any]]:
+    """t261026-07 build C+D: close OPEN heads with NO declared condition whose
+    subject row can be CITED. Bound D is absolute:
+      - `finding` / `question` are NEVER machine-closed (bucket `human_word`);
+      - a blocker whose ticket reads not-listed is NOT closable (a nonexistent
+        row cannot be cited — bucket `not_listed`);
+      - anything without a citable ending row stays open (bucket `uncited`).
+    Each close appends ONE resolved state row whose evidence names the exact
+    observed row. Returns the receipt entries (one per evaluated head)."""
+    out: List[Dict[str, Any]] = []
+    for hid, state in states.items():
+        if state != request_thread.STATE_OPEN:
+            continue
+        if conditions.get(hid) is not None:
+            continue  # the condition pass owns conditioned heads
+        head_row = head_rows.get(hid) or {}
+        kind = str(head_row.get("kind") or "")
+        entry: Dict[str, Any] = {"id": hid, "class": kind}
+        if kind in NOT_AUTO_CLOSABLE:
+            entry["bucket"] = "human_word"
+            out.append(entry)
+            continue
+        head_at = head_row.get("at") if isinstance(head_row.get("at"), int) else None
+        verdict: Optional[bool] = VERDICT_FALSE
+        evidence = note = ""
+        if kind in ("run-silent", "run-stalled"):
+            line = head_line(head_row)
+            if line is None:
+                verdict, evidence, note = VERDICT_SKIP, "", "residue_line_unparsable"
+            else:
+                verdict, evidence, note = eval_round_after(line, ledger_rows, head_at)
+        elif kind == "blocker":
+            ticket = head_subject_ticket(head_row)
+            if ticket is None:
+                verdict, evidence, note = VERDICT_SKIP, "", "residue_subject_unparsable"
+            else:
+                entry["ticket"] = ticket
+                # a landing naming the ticket ends the subject too
+                verdict, evidence, note = eval_landing_on_line(ticket, ledger_rows)
+                if verdict is VERDICT_FALSE:
+                    verdict, evidence, note = eval_ticket_closed(ticket, ticket_status_fn)
+                    if verdict is VERDICT_FALSE:
+                        read = ticket_status_fn(ticket)
+                        if read is not None and read[0] == "not-listed":
+                            entry["bucket"] = "not_listed"
+                            out.append(entry)
+                            continue
+        else:
+            verdict, evidence, note = VERDICT_SKIP, "", "residue_class_unhandled:%s" % kind
+        if verdict is not VERDICT_TRUE:
+            if "bucket" not in entry:
+                entry["bucket"] = "uncited"
+                if note:
+                    entry["reason"] = note
+            out.append(entry)
+            continue
+        row = {"type": "state", "id": "st-%d-%04d" % (now_ms, seq),
+               "state_for": hid, "state": request_thread.STATE_RESOLVED,
+               "at": now_ms, "by": RESIDUE_BY, "evidence": evidence,
+               "note": "legacy_residue:%s" % note, "surface": SWEEP_SURFACE}
+        append_fn(row)
+        seq += 1
+        entry.update({"bucket": "closed", "evidence": evidence, "note": note,
+                      "row_id": row["id"]})
+        out.append(entry)
+    return out
+
+
+
 
 def evaluate(condition: Dict[str, Any], rows: List[Dict[str, Any]],
              is_green: Callable[[str], Optional[bool]],
-             ticket_status_fn: Callable[[str], Optional[Tuple[str, str]]]
+             ticket_status_fn: Callable[[str], Optional[Tuple[str, str]]],
+             head_at: Optional[int] = None
              ) -> Tuple[Optional[bool], str, str]:
     kind = condition.get("kind")
     if kind == COND_GREEN_CERT_AFTER:
@@ -451,7 +618,43 @@ def evaluate(condition: Dict[str, Any], rows: List[Dict[str, Any]],
         return eval_ticket_closed(str(condition.get("ticket") or ""), ticket_status_fn)
     if kind == COND_FREEZE_CLOSED:
         return eval_freeze_closed(str(condition.get("freeze") or ""), rows)
+    if kind == COND_ROUND_AFTER:
+        return eval_round_after(str(condition.get("line") or ""), rows, head_at)
     return VERDICT_SKIP, "", "condition_kind_unknown:%r" % (kind,)
+
+
+# ---------- the sweep --------------------------------------------------------
+
+def close_legacy_residue_locked(path: str, ledger_rows: List[Dict[str, Any]],
+                                ticket_status_fn: Callable[[str], Optional[Tuple[str, str]]],
+                                now_ms: int, seq: int
+                                ) -> Tuple[List[Dict[str, Any]], int]:
+    """The residue pass as its OWN flock pass over the requests ledger
+    (t261026-07): re-reads the rows (the condition pass may have appended
+    resolved rows in its pass — those heads are now terminal and skipped), so
+    the condition pass's body stays byte-shape-compatible with the merge base
+    and the residue insert never collides with another side's tail insert.
+    Idempotent by the same terminal-head skip. Returns (entries, next_seq) —
+    the seq is threaded back to the caller so the passes can never mint two
+    state rows carrying the same id in one sweep (acceptance gen7 finding)."""
+    with request_thread._locked_append(path) as fd:
+        req_rows, _mal = request_thread._read_rows_unlocked(fd)
+        states = request_thread.head_states(req_rows)
+        conditions = effective_conditions(req_rows)
+        head_rows = {r.get("id"): r for r in req_rows
+                     if isinstance(r, dict) and r.get("type") == "request"
+                     and isinstance(r.get("id"), str)}
+        entries: List[Dict[str, Any]] = []
+        counter = {"seq": seq}
+
+        def append_row(row: Dict[str, Any]) -> None:
+            request_thread._append_line_unlocked(fd, row)
+            counter["seq"] += 1
+
+        entries = close_legacy_residue(
+            head_rows, states, conditions, ledger_rows, ticket_status_fn,
+            now_ms, counter["seq"], append_row)
+        return entries, counter["seq"]
 
 
 def sweep_project(project_key: str, now_ms: int, seq: int,
@@ -463,14 +666,16 @@ def sweep_project(project_key: str, now_ms: int, seq: int,
     """One project's sweep: inside the requests ledger's flock, evaluate every
     open head's effective condition against the delivery ledger and append one
     resolved state row per head whose condition now reads true. Skips are
-    named in the receipt; terminal heads and heads without a condition are
-    untouched. The ledger/runs/ticket readers are injectable for tests."""
+    named in the receipt; terminal heads are untouched. Heads WITHOUT a
+    declared condition go through the legacy-residue pass (t261026-07): they
+    close only on a CITED subject row, and `finding`/`question` never close.
+    The ledger/runs/ticket readers are injectable for tests."""
     env = dict(os.environ if env is None else env)
     key = str(project_key)
     path = str(executor_requests.ledger_file(key, env))
     receipt: Dict[str, Any] = {"ok": True, "project": key, "file": path,
                                "resolved": [], "skipped": [], "unchanged": 0,
-                               "malformed_lines": 0}
+                               "residue": [], "malformed_lines": 0}
     if ledger_rows_fn is None:
         def ledger_rows_fn(_key=key, _env=env):
             return load_delivery_ledger(_key, _env)
@@ -499,25 +704,40 @@ def sweep_project(project_key: str, now_ms: int, seq: int,
         receipt["skipped_all"] = ledger_error or "ledger_unreadable"
         return receipt
     receipt["malformed_lines"] = ledger_malformed
+    # t261026-07: the legacy residue FIRST, as its own flock pass — open heads
+    # with no declared condition, closed ONLY on a cited subject row (bound D:
+    # a `finding`/`question` never; a not-listed ticket never). Heads it
+    # closes read terminal in the condition pass below, and it never touches
+    # conditioned heads, so the two passes are independent and idempotent.
+    # The seq is threaded back (acceptance gen7 finding): the condition pass
+    # starts AFTER the residue's rows, so one sweep can never mint two state
+    # rows with the same id.
+    receipt["residue"], seq = close_legacy_residue_locked(
+        path, ledger_rows, ticket_status_fn, now_ms, seq)
     with request_thread._locked_append(path) as fd:
         req_rows, req_malformed = request_thread._read_rows_unlocked(fd)
         receipt["malformed_lines"] += req_malformed
         states = request_thread.head_states(req_rows)
         conditions = effective_conditions(req_rows)
+        head_rows = {r.get("id"): r for r in req_rows
+                     if isinstance(r, dict) and r.get("type") == "request"
+                     and isinstance(r.get("id"), str)}
         for hid, state in states.items():
             if state != request_thread.STATE_OPEN:
                 continue  # terminal OR answered: never touched, never double-resolved
             cond = conditions.get(hid)
             if cond is None:
-                receipt["unchanged"] += 1
-                continue  # no declared condition: exactly as today
+                continue  # the residue pass below owns unconditioned heads
             checked = validate_resolves_when(cond)
             if not checked.get("ok"):
                 receipt["skipped"].append({"id": hid, "reason":
                                            "condition_invalid:%s" % checked.get("error")})
                 continue
+            head_at = head_rows.get(hid, {}).get("at") \
+                if isinstance(head_rows.get(hid, {}).get("at"), int) else None
             verdict, evidence, note = evaluate(checked["condition"], ledger_rows,
-                                               is_green, ticket_status_fn)
+                                               is_green, ticket_status_fn,
+                                               head_at=head_at)
             if verdict is VERDICT_SKIP:
                 receipt["skipped"].append({"id": hid, "reason": note})
                 continue

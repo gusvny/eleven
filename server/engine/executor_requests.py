@@ -19,7 +19,9 @@ legacy head rows are valid history and readers tolerate them.
 CLI（与其他引擎条目同形：一个 JSON argv）：
     python3 server/engine/executor_requests.py '<json>'
   输入体：{op:"file", project:<key>, kind, question, detail?, options?,
-           default_action?, expires_at?, raised_by?, caller_project?}
+           default_action?, expires_at?, raised_by?, caller_project?,
+           resolves_when?, subject_ticket?}   (t261026-07: the class ->
+           condition table face — see append_request)
   输出：stdout 一行 JSON 回执；ok=true 带 row，拒收带 field（失败字段名）+ error。
   退出码：0=落账；2=拒收（含 argv 非 JSON/非对象——field=body）。
 
@@ -330,6 +332,34 @@ def append_request(body: Dict[str, Any], now_ms: int, seq: int = 1,
     if not checked.get("ok"):
         return checked
     fields = checked["fields"]
+    # t261026-07: the class -> condition table face.
+    #  - an explicit `resolves_when` is validated against the CLOSED
+    #    vocabulary; malformed = named refusal, never stored for a sweep to
+    #    trip over later;
+    #  - a `blocker` with a `subject_ticket` and no explicit condition gets
+    #    the table's ticket_closed condition derived (the filing site names
+    #    its subject; the engine never invents one);
+    #  - `finding` / `question` are stamped not-auto-closable on the face so
+    #    nobody waits for a machine (they close on a human answer only).
+    import request_sweep
+    import request_thread
+    checked_cond: Optional[Dict[str, Any]] = None
+    raw_cond = body.get("resolves_when")
+    if raw_cond is not None:
+        checked_cond = request_sweep.validate_resolves_when(raw_cond)
+        if not checked_cond.get("ok"):
+            return checked_cond
+    subject_ticket = body.get("subject_ticket")
+    if subject_ticket is not None:
+        if not isinstance(subject_ticket, str) \
+                or not request_thread.TICKET_ID_RE.match(subject_ticket.strip()):
+            return _refuse("subject_ticket",
+                           "subject_ticket must be a ticket id (tMMDDNN-N)")
+        subject_ticket = subject_ticket.strip()
+    if checked_cond is None and fields["kind"] == "blocker" \
+            and subject_ticket is not None:
+        checked_cond = {"condition": {"kind": request_sweep.COND_TICKET_CLOSED,
+                                      "ticket": subject_ticket}}
     row: Dict[str, Any] = {
         "type": "request",
         "id": make_request_id(now_ms, seq),
@@ -343,6 +373,15 @@ def append_request(body: Dict[str, Any], now_ms: int, seq: int = 1,
         "raised_by": session,
         "surface": SURFACE_ENGINE,
     }
+    if subject_ticket is not None:
+        row["subject_ticket"] = subject_ticket
+    if checked_cond is not None:
+        row["resolves_when"] = checked_cond["condition"]
+    if fields["kind"] in request_sweep.NOT_AUTO_CLOSABLE:
+        row["auto_closable"] = False
+        row["auto_closable_note"] = (
+            "not auto-closable: this class closes on a human answer only; "
+            "no machine condition will ever resolve it")
     if fields["options"] is not None:
         row["options"] = fields["options"]
     if delivered_via:

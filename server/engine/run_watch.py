@@ -404,6 +404,9 @@ def decide(rows: List[dict], line: str, headers: List[dict],
                                  "last_round_verdict": last_verdict,
                                  "line": line},
                     "request_kind": REQUEST_KIND_STALLED,
+                    # t261026-07 class table: the head closes itself when a
+                    # round row lands on this line again
+                    "resolves_when": {"kind": "round_after", "line": line},
                     # <= 60 chars (the request card limit, executor_requests
                     # QUESTION_MAX) even for long line ids; the detail carries
                     # the round id, its verdict and the pending range
@@ -436,6 +439,9 @@ def decide(rows: List[dict], line: str, headers: List[dict],
                 "kind": REQUEST_KIND_SILENT,
                 "evidence": evidence,
                 "request_kind": REQUEST_KIND_SILENT,
+                # t261026-07 class table: same round_after condition — any
+                # certification row on the line after this head ends it
+                "resolves_when": {"kind": "round_after", "line": line},
                 "question": "run-silent on line %s: no run row" % line,
                 "detail": {"round": rid, "reason": face.get("reason"),
                            "state": face.get("state"), "line": line,
@@ -641,14 +647,23 @@ def _executor_request_env(project: str) -> Tuple[Optional[Dict[str, str]], str]:
 
 def append_request_row(project: str, kind: str, question: str,
                        detail: Dict[str, Any], now_ms: int,
-                       env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+                       env: Optional[Dict[str, str]] = None,
+                       resolves_when: Optional[Dict[str, Any]] = None
+                       ) -> Dict[str, Any]:
     """One request row through executor_requests.append_request (the module's
-    own writer — the watch is not a second writer). Returns the receipt or
-    refusal verbatim; a refusal writes nothing."""
+    own writer — the watch is not a second writer). `resolves_when`
+    (t261026-07): the class condition from request_sweep's
+    CLASS_CONDITION_TABLE — a run-stalled / run-silent head files with the
+    round_after condition on its own line, so the sweep closes it the moment
+    a round row lands on that line again. Returns the receipt or refusal
+    verbatim; a refusal writes nothing."""
     import executor_requests
-    body = {"kind": kind, "question": question[:400],
-            "detail": json.dumps(detail, ensure_ascii=False, sort_keys=True)[:800],
-            "default_action": "run-watch re-checks the records next tick"}
+    body: Dict[str, Any] = {"kind": kind, "question": question[:400],
+                            "detail": json.dumps(detail, ensure_ascii=False,
+                                                 sort_keys=True)[:800],
+                            "default_action": "run-watch re-checks the records next tick"}
+    if resolves_when is not None:
+        body["resolves_when"] = resolves_when
     ident, note = _executor_request_env(project)
     if ident is None:
         return {"ok": False, "field": "identity", "error": note}
@@ -899,7 +914,8 @@ def _perform_request(project: str, action: Dict[str, Any], now_ms: int,
         return {"ok": True, "reused": True, "request_id": str(known)}
     res = append_request_row(project, action.get("request_kind") or "",
                              action.get("question") or "",
-                             action.get("detail") or {}, now_ms, env=env)
+                             action.get("detail") or {}, now_ms, env=env,
+                             resolves_when=action.get("resolves_when"))
     if isinstance(res, dict) and res.get("ok"):
         row = res.get("row") or res.get("request") or {}
         res["request_id"] = str(row.get("id") or key)
@@ -914,15 +930,42 @@ def run_watch_tick_engine(now_ms: Optional[int] = None) -> Dict[str, Any]:
     """The engine-level tick body: one pass per line-declaring project (the
     same enumeration the line-round tick uses). One project's failure is an
     entry, never the pass's death. This is what the scan tick's activity
-    calls."""
+    calls.
+
+    t261026-07: the request sweep runs once per tick, BEFORE the run-watch
+    decisions, and its receipt travels on the tick result (`request_sweep`)
+    so the board shows how many heads were evaluated / closed / skipped and
+    why — a silent sweep is the defect that once left 65 conditioned heads
+    skipped under ok:true. Fault modes and their carried-over handling:
+      - requests ledger unreadable / missing  -> carried: a named per-project
+        entry (`ok:false` or `skipped_all`), decisions still run;
+      - a malformed ledger or ledger ROW      -> carried: counted on the
+        receipt (`malformed_lines`), never fatal;
+      - the sweep itself throws               -> carried: caught here into a
+        named error entry, the tick never dies on the sweep;
+      - a PARTIAL close mid-sweep             -> not carried beyond the
+        ledger's own guarantee: rows are appended one locked line at a time
+        inside the flock, terminal heads are skipped next tick, so a partial
+        sweep self-heals on the next tick instead of double-closing.
+    """
     import develop_certify
+    import request_sweep
     out: Dict[str, Any] = {}
     try:
         projects = develop_certify.declared_line_projects()
     except Exception as e:  # noqa: BLE001
         return {"projects": {}, "summary": "run_watch: %s: %s"
                 % (type(e).__name__, e)}
+    receipts: Dict[str, Any] = {}
     for project_key in projects:
+        try:
+            receipts[project_key] = request_sweep.sweep_project(
+                project_key, int(now_ms if now_ms is not None
+                                 else time.time() * 1000), 1)
+        except Exception as e:  # noqa: BLE001 — named entry, never the tick's death
+            receipts[project_key] = {"ok": False, "project": project_key,
+                                     "error": "request_sweep_failed:%s:%s"
+                                              % (type(e).__name__, e)}
         try:
             out[project_key] = run_watch_tick(project_key, now_ms=now_ms)
         except Exception as e:  # noqa: BLE001
@@ -930,8 +973,16 @@ def run_watch_tick_engine(now_ms: Optional[int] = None) -> Dict[str, Any]:
                                 "run_watch: project pass failed (%s: %s)"
                                 % (type(e).__name__, e)}
     total = sum(len(r.get("lines") or []) for r in out.values())
+    closed = 0
+    for r in receipts.values():
+        closed += len(r.get("resolved") or [])
+        closed += len([e for e in (r.get("residue") or [])
+                       if e.get("bucket") == "closed"])
     return {"projects": out,
-            "summary": "run_watch: %d projects, %d lines" % (len(out), total)}
+            "request_sweep": receipts,
+            "request_sweep_closed_total": closed,
+            "summary": "run_watch: %d projects, %d lines, sweep closed %s"
+                       % (len(out), total, closed)}
 
 
 def run_watch_now(project: Optional[str] = None) -> Dict[str, Any]:

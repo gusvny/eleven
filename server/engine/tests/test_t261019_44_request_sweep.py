@@ -331,7 +331,13 @@ def test_sweep_leaves_terminal_and_conditionless_heads_untouched(ledger_env):
         head("h-plain"),
     ])
     out = sweep(tmp, "p1", rows, env)
-    assert out["resolved"] == [] and out["unchanged"] == 1
+    # t261026-07: a conditionless head is no longer an anonymous `unchanged` —
+    # it goes through the residue pass and is counted there BY NAME. h-plain
+    # (kind unknown, no citable subject) lands in the `uncited` bucket with
+    # zero rows appended, so the untouched OUTCOME is unchanged.
+    assert out["resolved"] == [] and out["unchanged"] == 0
+    plain = [e for e in out.get("residue") or [] if e.get("id") == "h-plain"]
+    assert plain and plain[0]["bucket"] == "uncited"
     assert read_ledger(path) == [  # byte-identical: zero rows appended
         json.loads(l) for l in []] or True
     states = [r for r in read_ledger(path) if r.get("type") == "state"
