@@ -364,6 +364,11 @@ def default_ticket_status_fn(ticket: str
         _note_reader_error("reader_refused:%s" % admin_py)
         return None
     tickets = ((parsed.get("result") or {}).get("tickets")) or []
+    if not isinstance(tickets, list):
+        # t261026-08: a malformed tickets row is an unreadable projection --
+        # an unavailable channel, never an honest "not-listed" False
+        _note_reader_error("reader_projection_malformed:%s" % admin_py)
+        return None
     for t in tickets:
         if isinstance(t, dict) and str(t.get("id") or "") == ticket:
             return str(t.get("status") or ""), "ticket-list-projection"

@@ -135,9 +135,10 @@ def main():
          + "]); time.sleep(120)"],
         start_new_session=True,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # 等孙进程迟写出现（最多 5s），拿到孙 pid 后才动手
+    # 等孙进程迟写出现（最多 30s：t261026-08 — 5s 在全量 battery 的高载下会
+    # 超窗误红，孙进程只是慢启动、不是产品行为；断言语义不变），拿到孙 pid 后才动手
     grand = None
-    deadline = time.time() + 5
+    deadline = time.time() + 30
     while time.time() < deadline:
         if late_file.stat().st_size > 0:
             out = subprocess.run(["pgrep", "-g", str(os.getpgid(child.pid))],
