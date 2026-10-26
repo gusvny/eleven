@@ -140,3 +140,39 @@ def test_last_entry_without_trailing_start_is_mapped():
     text = reg_file(E1, E2)
     diff = diff_for(mod.REGISTRY_REL, '     "python3 y.py", "ro"),', start=7)
     assert mod.changed_entry_names(text, diff) == {"sc-b"}
+
+
+# ---- mechanical interpreter swap is NOT a change (t261026-35) --------------
+
+def _replace_diff(path, old, new, old_start=7):
+    """A unified diff hunk with a real -/+ replacement pair at one position."""
+    return ("--- a/%s\n+++ b/%s\n@@ -%d,1 +%d,1 @@\n-%s\n+%s\n"
+            % (path, path, old_start, old_start, old, new))
+
+
+def test_interpreter_only_swap_is_not_a_change():
+    # t261026-35: migrating the launch prefix to the shared helper does not
+    # make the entry tier-relevant — the script, pool and intent are the same
+    text = reg_file(E1, E2)
+    diff = _replace_diff(mod.REGISTRY_REL,
+                         '     "python3 y.py", "ro"),',
+                         '     "sh integration/py_interp.sh y.py", "ro"),')
+    assert mod.changed_entry_names(text, diff) == set()
+
+def test_strip_launch_prefix_normalizes_known_shapes():
+    old = ('"PY=server/engine/.venv/bin/python; [ -x \\"$PY\\" ] || PY=python3; '
+           '\\"$PY\\" -B integration/x/sc.py", "ro"),')
+    new = '"sh integration/py_interp.sh integration/x/sc.py", "ro"),'
+    assert mod.strip_launch_prefix(old) == mod.strip_launch_prefix(new)
+    assert mod.strip_launch_prefix(old) != ""
+
+
+def test_pool_change_on_cmd_line_still_reds():
+    # the gate keeps its tooth: a pool move IS an admission-relevant change
+    # (file_text carries the NEW line, as a real working tree would)
+    text = reg_file(E1, E2.replace('"python3 y.py", "ro"),',
+                                   '"python3 y.py", "engine"),'))
+    diff = _replace_diff(mod.REGISTRY_REL,
+                         '     "python3 y.py", "ro"),',
+                         '     "python3 y.py", "engine"),')
+    assert mod.changed_entry_names(text, diff) == {"sc-b"}

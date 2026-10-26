@@ -76,6 +76,17 @@ practice:
         never a silent pass. (Numbered L21 after the main-sync merge: main took
         L19 runtime-state location and L20 grants-write parity first; the rule
         is unchanged, only the label moved.)
+  L29 suite-python interpreter (t261026-35, Integration finding 261026): a
+        registry cmd that launches a python scenario script with a BARE
+        interpreter (python3/python) while that script imports an engine module
+        (top module temporalio, or client/shared/dev_lane resolved against the
+        real server/engine/*.py files; a scenario-local module of the same name
+        is NOT a hit) is an error — in a line-round clone the bare interpreter
+        has no venv and the import dies with "No module named temporalio".
+        Engine-importing legs must launch through integration/py_interp.sh (the
+        ONE resolution rule: env pointer > tree venv > main-checkout venv >
+        python3, named on stderr). Malformed cmd / missing / unparseable script
+        = named red (fail-closed).
   L23 registry serialization (t261009-51, incident KI-01M4HD396VNTTAY20CH0681N0Q):
         every declared JSON registry under integration/ (the list lives in
         integration/lib_registry.py DECLARED_REGISTRIES) must be on the canonical
@@ -122,6 +133,7 @@ Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
        grandfather list (existing debt; only new debt may turn L8 yellow)
 """
 import atexit
+import ast
 import json
 import os
 import py_compile
@@ -1610,6 +1622,89 @@ def lint_wait_bounds(base=None):
            "(base %s)" % (SCOPE_PREFIX, base_ref[:12]))
 
 
+# ---- L29 suite-python interpreter (t261026-35) -------------------------------
+
+#: The engine module names that force the venv. `temporalio` is judged by name
+#: (a third-party package); the others are judged against the REAL files under
+#: server/engine/ so a scenario-local module of the same name is never a hit.
+ENGINE_INTERP_MODULES = ("temporalio", "client", "shared", "dev_lane")
+BARE_INTERPRETERS = ("python3", "python")
+
+
+def lint_interp_entries(entries, repo=REPO, engine_dir=None):
+    """L29 core judge: pure over (name, intent, cmd) tuples. Returns error
+    strings (empty = green). Kept pure so the unit battery can inject
+    registries without importing the real one (test_lint_interp.py)."""
+    engine_dir = Path(engine_dir) if engine_dir else (repo / "server" / "engine")
+    engine_files = {p.stem for p in engine_dir.glob("*.py")} \
+        if engine_dir.is_dir() else set()
+    errors = []
+    for entry in entries:
+        name, cmd = entry[0], entry[2]
+        tokens = str(cmd).split()
+        argv0 = tokens[0] if tokens else ""
+        candidates = [p for p in tokens if p.startswith("integration/")]
+        # this rule judges PYTHON legs only: the scenario script is the first
+        # .py token (a helper launch carries its launcher as a sibling token;
+        # node/sh legs are other rules' faces, never this one's)
+        script = next((p for p in candidates if p.endswith(".py")), None)
+        if script is None:
+            if argv0 in BARE_INTERPRETERS:
+                errors.append("L29 %s: bare %s cmd with no integration/*.py "
+                              "script token" % (name, argv0))
+            continue
+        path = repo / script
+        if not path.exists():
+            errors.append("L29 %s: cmd script missing: %s" % (name, script))
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8",
+                                            errors="replace"))
+        except SyntaxError as e:
+            errors.append("L29 %s: cmd script unparseable: %s (%s)"
+                          % (name, script, e))
+            continue
+        mods = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                mods.update(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                mods.add(node.module)
+        hits = set()
+        for mod in mods:
+            top = mod.split(".")[0]
+            if top not in ENGINE_INTERP_MODULES:
+                continue
+            if top != "temporalio" and top not in engine_files:
+                continue
+            # a scenario-local module shadowing the engine name resolves to
+            # itself, not the engine — not an interpreter requirement
+            if (path.parent / (top + ".py")).exists() \
+                    or (repo / "integration" / (top + ".py")).exists():
+                continue
+            hits.add(mod)
+        if not hits:
+            continue
+        if argv0 in BARE_INTERPRETERS:
+            errors.append("L29 %s: bare %s over %s which imports engine "
+                          "module(s) %s — launch through "
+                          "integration/py_interp.sh (the ONE resolution rule)"
+                          % (name, argv0, script, ",".join(sorted(hits))))
+    return errors
+
+
+def lint_interp():
+    """L29 (t261026-35): judge the real registry (same import face as L4/L21)."""
+    sys.path.insert(0, str(INTEG))
+    import run_scenarios as rs  # noqa: E402
+    found = lint_interp_entries(rs.SCENARIOS)
+    for e in found:
+        err(e)
+    if not found:
+        ok("L29 suite-python interpreter: every engine-importing python leg "
+           "launches through integration/py_interp.sh")
+
+
 #: The subset selector's dispatch table (t261011-22 host refinement: a
 #: mechanism test runs the rule(s) it plants for, never the whole battery).
 #: Every entry takes (base, scope): scope = --scope-files paths or None
@@ -1622,6 +1717,7 @@ RULES = {
     "L18": lambda base, scope=None: lint_snapshot_discipline(scope),
     "L25": lint_wait_bounds,
     "L26": lambda base, scope=None: lint_lane_overlay_location(),
+    "L29": lambda base, scope=None: lint_interp(),
 }
 
 #: Rules whose walk can be pruned to --scope-files paths (t261011-22). L25 is
@@ -2050,6 +2146,11 @@ def main():
         # overlay directory under integration/ is the t261021-05 arbitrate
         # quarantine incident and is refused here by name.
         lint_lane_overlay_location()
+        # L29 suite-python interpreter (t261026-35): a bare-interpreter cmd
+        # over an engine-importing scenario script is the chronic
+        # "No module named temporalio" ENV_FAIL of finding 261026 — every
+        # engine-importing python leg goes through integration/py_interp.sh.
+        lint_interp()
     n_e, n_w = len(errors), len(warns)
     # t261009-12 Defect B: the verdict line names any unstable-input condition
     # that fired, so two different verdicts for the same inputs can never print

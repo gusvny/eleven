@@ -5893,6 +5893,21 @@
       "note": "t261026-24 L2: writer/reader agreement of the batch-stage exception manifest - the on-disk manifest is byte-identical to what gen_batch_stage_exceptions emits today (same sort, same serialization), so a lockstep-edit miss cannot silently resurrect removed rows or lose corrected reasons on the next generator run; duplicates and empty schema keys named",
       "sync_path": "integration/batch_stage_exceptions.json"
     },
+    "integration/t261026-35/sc_t261026_35_interp_resolution_journey.py": {
+      "anchor": "contract",
+      "note": "t261026-35 grey-box L3: the suite python leg resolves through one rule and names its choice on stderr every launch - tree-under-test venv wins over the main-checkout venv reached through the git common directory, SANDBAR_POC_PYTHON honored verbatim when usable and named never silently used when unusable, plain python3 fallback named, and the real engine-importing probe (the chronic ENV_FAIL shape) green under the launcher from the repo root while red under the bare system python3",
+      "sync_path": "integration/py_interp.sh"
+    },
+    "integration/t261026-35/sc_t261026_35_interp_lint_gate.py": {
+      "anchor": "contract",
+      "note": "t261026-35 grey-box L3: the interpreter lint is reachable through the real static gate command and is not vacuous - the real gate exits 0 on the fixed tree, an injected bare-python3 cmd over an engine-importing probe in a real git clone copy turns the gate red naming L29 and the offender, and the same entry through py_interp.sh is green again",
+      "sync_path": "integration/lint_tests.py; integration/run_scenarios.py"
+    },
+    "integration/py_interp.sh": {
+      "anchor": "contract",
+      "note": "t261026-35: the ONE resolution rule of the suite python leg (SANDBAR_POC_PYTHON if usable, else the tree under test venv, else the main checkout venv via the git common dir, else plain python3), naming the chosen interpreter on stderr every launch; registered entries launch engine-importing scripts through it under the L29 rule",
+      "sync_path": "integration/lint_tests.py"
+    },
     "integration/t261026-25/sc_t261026_25_docker_carveout_guard.py": {
       "anchor": "behaviour",
       "note": "t261026-25: the docker-carveout disposition holds and the t260905-02 family still runs green on docker - the exception table keeps the three rows with reasons naming the teardown-residue face, each scenario file still carries its own-stage residue+port-release assertions (not migrated; a fork-ruling lift fails here by name on purpose), and each of the three cases runs as its registry cmd to exit 0 with SUMMARY pass>0 fail=0 env_fail=0; child exit 2 is named env_fail per child, any other exit or a missing SUMMARY line is a named failure."

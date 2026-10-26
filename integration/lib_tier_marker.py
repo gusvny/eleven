@@ -61,39 +61,90 @@ def marker_defects(intent):
 
 
 def added_lines_in_path(diff_text, rel_path):
-    """Set of new-file line numbers added in one path (unified diff input)."""
-    added = set()
-    for path, lineno, _text in _added_lines(diff_text):
-        if path == rel_path:
-            added.add(lineno)
-    return added
-
-
-def _added_lines(diff_text):
-    # Local copy of the shared parser shape (kept dependency-free so this
-    # module stays pure; lint_copy_language owns the lib_lint_diff import).
+    """Map of new-file line numbers added in one path (unified diff input) to
+    the REMOVED text each replaced (None = a pure addition). Removed and added
+    runs inside a hunk are paired index-wise, so a -/+ pair at the same
+    position counts as a replacement and carries its old text."""
+    out = {}
     path = None
+    old_lineno = 0
     new_lineno = 0
+    removed = []          # [(old_lineno, text)] buffered run
+    added = []            # [(new_lineno, text)] buffered run
+
+    def flush():
+        if path == rel_path:
+            for i, (nl, ntext) in enumerate(added):
+                out[nl] = removed[i][1] if i < len(removed) else None
+        del removed[:], added[:]
+
     for line in diff_text.splitlines():
         if line.startswith("+++ b/"):
+            flush()
             path = line[6:]
             continue
         if line.startswith("+++ "):
+            flush()
             path = None
             continue
         if line.startswith("@@"):
-            m = re.search(r"\+(\d+)", line)
-            new_lineno = int(m.group(1)) - 1 if m else 0
+            flush()
+            m = re.search(r"-(\d+)", line)
+            old_lineno = int(m.group(1)) - 1 if m else 0
+            m2 = re.search(r"\+(\d+)", line)
+            new_lineno = int(m2.group(1)) - 1 if m2 else 0
             continue
         if path is None:
             continue
-        if line.startswith("+") and not line.startswith("+++"):
+        if line.startswith("-") and not line.startswith("---"):
+            old_lineno += 1
+            removed.append((old_lineno, line[1:]))
+        elif line.startswith("+") and not line.startswith("+++"):
             new_lineno += 1
-            yield path, new_lineno, line[1:]
-        elif line.startswith("-") or line.startswith("\\"):
+            added.append((new_lineno, line[1:]))
+        elif line.startswith("\\"):
             continue
         else:
+            flush()
+            old_lineno += 1
             new_lineno += 1
+    flush()
+    return out
+
+
+#: Launch-prefix tokens whose change is a MECHANICAL interpreter swap, never a
+#: tier-relevant change (t261026-35: migrating the registry's python legs to
+#: integration/py_interp.sh must not demand tier markers from ~50 legacy
+#: expensive entries — the tier page: cleanup is its own ticket). A -/+ line
+#: pair that differs ONLY in these tokens is not a "changed entry"; a changed
+#: script path, pool token or intent still is.
+_LAUNCH_TOKENS = [
+    r'PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || ',
+    r'PY=../../server/engine/.venv/bin/python; [ -x \"$PY\" ] || ',
+    r'PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || ',
+    'PY=python3; ',
+    r'\"$PY\" -B ',
+    r'\"$PY\" ',
+    'sh integration/py_interp.sh ',
+    'PYTHONPYCACHEPREFIX=out/pycache ',
+    'python3 -B ',
+    'python3 ',
+    '-B ',
+]
+
+
+def strip_launch_prefix(line):
+    """The line with every known interpreter launch token removed (repeatedly,
+    any order). Equality of two stripped lines = the swap was mechanical."""
+    s = line
+    again = True
+    while again:
+        again = False
+        for tok in _LAUNCH_TOKENS:
+            if tok in s:
+                s = s.replace(tok, "")
+                again = True
+    return s.strip()
 
 
 def changed_entry_names(file_text, diff_text, rel_path=REGISTRY_REL):
@@ -101,8 +152,10 @@ def changed_entry_names(file_text, diff_text, rel_path=REGISTRY_REL):
 
     Entries are the 4-space-indented `("name",` tuples of SCENARIOS; an entry
     counts as changed when ANY of its lines (start line up to the next entry
-    start) is an added line in the diff. Garbage diff text yields an empty set
-    (no crash, nothing invented)."""
+    start) is an added line in the diff whose content really changed — a -/+
+    pair differing only in interpreter launch tokens (strip_launch_prefix) is
+    a mechanical swap, not a change (t261026-35). Garbage diff text yields an
+    empty set (no crash, nothing invented)."""
     added = added_lines_in_path(diff_text, rel_path)
     if not added:
         return set()
@@ -112,8 +165,16 @@ def changed_entry_names(file_text, diff_text, rel_path=REGISTRY_REL):
     for idx, i in enumerate(starts):
         m = re.match(r'^ {4}\("([^"]+)",', lines[i])
         end = starts[idx + 1] if idx + 1 < len(starts) else len(lines)
-        if any((n + 1) in added for n in range(i, end)):
+        for n in range(i, end):
+            if (n + 1) not in added:
+                continue
+            old_text = added[n + 1]          # None = a pure addition
+            if old_text is not None and \
+                    strip_launch_prefix(old_text) == \
+                    strip_launch_prefix(lines[n]):
+                continue
             changed.add(m.group(1))
+            break
     return changed
 
 
