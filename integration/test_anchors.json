@@ -5892,6 +5892,10 @@
       "anchor": "contract",
       "note": "t261026-24 L2: writer/reader agreement of the batch-stage exception manifest - the on-disk manifest is byte-identical to what gen_batch_stage_exceptions emits today (same sort, same serialization), so a lockstep-edit miss cannot silently resurrect removed rows or lose corrected reasons on the next generator run; duplicates and empty schema keys named",
       "sync_path": "integration/batch_stage_exceptions.json"
+    },
+    "integration/t261026-25/sc_t261026_25_docker_carveout_guard.py": {
+      "anchor": "behaviour",
+      "note": "t261026-25: the docker-carveout disposition holds and the t260905-02 family still runs green on docker - the exception table keeps the three rows with reasons naming the teardown-residue face, each scenario file still carries its own-stage residue+port-release assertions (not migrated; a fork-ruling lift fails here by name on purpose), and each of the three cases runs as its registry cmd to exit 0 with SUMMARY pass>0 fail=0 env_fail=0; child exit 2 is named env_fail per child, any other exit or a missing SUMMARY line is a named failure."
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {
