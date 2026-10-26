@@ -182,12 +182,24 @@ def wait_blocked(py, env, tid, worker, wlog, fail, timeout_s, marker=""):
     """
     t0 = time.time()
 
+    # 261026: the marker is judged on the FACE FIELDS it is supposed to land in
+    # (blocked_reason + blocked_detail), never on a dump of the whole snapshot.
+    # Measured: the whole-snapshot test matched a marker that a LATER timeline /
+    # log string carried, the wait returned while blocked_reason was still empty,
+    # and the caller's face assertion then failed with '' - a wait that reports
+    # success but proves nothing (the round-in-red / alone-in-green witness).
+    def _marker_hit(s):
+        if not marker:
+            return True
+        face = json.dumps({k: s.get(k) for k in ("blocked_reason", "blocked_detail")},
+                          ensure_ascii=False)
+        return marker in face
+
     def _hit():
         if worker.poll() is not None:
             wait_worker_alive(fail, worker, wlog)
         s = _observe(query_snapshot(py, env, tid))
-        if (s or {}).get("stage_state") == "blocked" \
-                and (marker in json.dumps(s, ensure_ascii=False) if marker else True):
+        if (s or {}).get("stage_state") == "blocked" and _marker_hit(s or {}):
             return s
         return None
 
@@ -197,7 +209,7 @@ def wait_blocked(py, env, tid, worker, wlog, fail, timeout_s, marker=""):
         s = query_snapshot(py, env, tid)
         if (s or {}).get("stage_state") != "blocked":
             return None
-        if marker in json.dumps(s, ensure_ascii=False):
+        if _marker_hit(s or {}):
             return None
         return s
 
