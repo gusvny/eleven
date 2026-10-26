@@ -51,3 +51,9 @@ integration/*/out/
 integration/*/evidence/*
 !integration/t261004-25/evidence/*
 !integration/t261004-28/evidence/*
+
+# t261026-23 的内容 stamp 是**构建产物**（每次跑 build-client.sh 都会重写），
+# 不是源码：落包根而非 lib/（lib 有字节守卫会把它当漂移）。它必须被忽略，
+# 否则任何跑过构建的泳道都会带着一个写集之外的未被跟踪文件，merge_check
+# 的 foreign-file 面直接判红（实测 t261026-26 因此连续两次落不了地）。
+server/plugins/workbench/.build-stamp.json
