@@ -46,7 +46,12 @@ async function withConcurrency(n, fn) {
   }
 }
 
-const strip = (body) => JSON.stringify({ ...body, generated_at: '', cache: { ...body.cache, computed_at: '' } })
+// t261026-05: perf.ms_total is wall-clock — strip it like the other response-side
+// clocks (same rule golden.mjs applies), or serial-vs-concurrent compare self-reds.
+const strip = (body) => {
+  const perf = (body.perf && typeof body.perf === 'object') ? { ...body.perf, ms_total: 0 } : body.perf
+  return JSON.stringify({ ...body, generated_at: '', cache: { ...body.cache, computed_at: '' }, perf })
+}
 const runAll = async (deps) => {
   const out = {}
   for (const view of ['time', 'delivery', 'token', 'health'])
@@ -58,7 +63,10 @@ const runAll = async (deps) => {
     }
   return out
 }
-const stubDeps = (repo) => defaultDeps(repo) // SANDBAR_METRICS_STUB 由 withStub 注入
+// t261026-05: pin the response clock (same discipline as golden.mjs G1) — the open
+// window of a running ticket grows with the wall clock, so a late parallel batch
+// self-reds the serial-vs-concurrent compare by a few ms of `elapsed_ms`.
+const stubDeps = (repo) => defaultDeps(repo, () => now) // SANDBAR_METRICS_STUB 由 withStub 注入
 
 async function withStub(stub, fn) {
   const p = join(tmp, `stub-${Math.random().toString(36).slice(2)}.json`)

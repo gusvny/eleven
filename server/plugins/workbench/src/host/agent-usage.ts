@@ -27,7 +27,8 @@
  * 文件照样浮出，绝不静默）。
  */
 
-import { readdir, stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { readdir, realpath, stat } from 'node:fs/promises'
 import { dirname, join, resolve, sep } from 'node:path'
 import {
   SessionError, decompressSession, judgeSessionLines, sessionFaceS1Text,
@@ -424,6 +425,8 @@ export interface ProjectSessionRef {
   paths: string[]
   /** The sessions root this discovery searched (t261026-02 shape (b): the face names where it looked). */
   searched?: string
+  /** Both declared roots this discovery searched (Rule 5, t261026-05): repo root first, DSH home second. */
+  searchedRoots?: string[]
   /** Human-readable degrade reason; present when nothing was found or a slug dir was unreadable. */
   reason?: string
   /** A resolved path escaped the workspace root: refuse the whole block (same discipline as resolveAllSessionFiles). */
@@ -439,66 +442,206 @@ function isTicketSessionName(name: string, listedTicketIds: readonly string[]): 
   return /^t\d+-\d+/.test(name)
 }
 
+/* ---------------------------------- declared roots (metrics-token-face-delta.md Rule 5, t261026-05) */
+
 /**
- * Discover sessions under the PROJECT ROOT's .dsh/sessions that carry no ticket id
- * (metrics contract v2). Same traversal and refusal discipline as
- * resolveAllSessionFiles: the final resolved path must stay inside the workspace
- * root, otherwise the whole discovery is refused (refused=true + reason) and the
- * consumer degrades the block to null + reason. Parsing is NOT done here — the
- * caller feeds the paths into aggregateTicketUsage (same parser as the per-ticket
- * path). Malformed input (missing dir, unreadable subdir, non-directory entries)
- * degrades with a reason and never throws.
+ * The DSH session home for one project: `<home>/.dsh/sessions/<repo slug>` where
+ * the slug is the repo path munged the way dsh munges it ('/'-separated segments
+ * joined by '-' inside '--' guards, e.g. /Users/x/a b -> --Users-x-a-b--). One
+ * implementation on purpose: the metrics face's home-candidate line and this
+ * reader must never drift apart.
+ */
+export function dshSessionHomeRoot(repoRoot: string): string {
+  const slug = '--' + resolve(repoRoot).split('/').filter(Boolean).join('-') + '--'
+  // SANDBAR_DSH_HOME: declared test seam (same discipline as SANDBAR_METRICS_DIR) —
+  // hermetic fixtures never touch the real ~/.dsh.
+  const home = process.env.SANDBAR_DSH_HOME ?? homedir()
+  return join(home, '.dsh', 'sessions', slug)
+}
+
+/** One declared root: where the sessions tree sits, what a picked path must
+ *  stay inside (the repo root for the repo root; the project slug dir for the
+ *  DSH home — tighter than the home, per Rule 5's slug bound), and the real
+ *  layout: 'slug-then-dir' = repo root, `sessions/<slug>/<sessionDir>/file`
+ *  (two levels); 'dir' = DSH home, the project slug dir IS the sessions root,
+ *  session dirs sit DIRECTLY under it (`<slugDir>/<sessionDir>/file`, one
+ *  level — the real home layout, gen1 arbitration: one UUID dir per session). */
+interface DeclaredRoot { sessRoot: string; bound: string; tag: string; layout: 'slug-then-dir' | 'dir' }
+
+/** The two declared roots, in order: the repository root first, then the DSH
+ *  session home for the project. Nothing else is ever read (Rule 5). */
+function declaredSessionRoots(repoRoot: string): DeclaredRoot[] {
+  const root = resolve(repoRoot)
+  const homeSlug = dshSessionHomeRoot(root)
+  return [
+    { sessRoot: join(root, '.dsh', 'sessions'), bound: root, tag: 'repo', layout: 'slug-then-dir' },
+    { sessRoot: homeSlug, bound: homeSlug, tag: 'dsh home', layout: 'dir' },
+  ]
+}
+
+/** True when a listing entry is a directory — real ones directly, symlinks via a
+ *  stat (a symlink to a directory must ENTER the list so the realpath containment
+ *  guard can name its refusal; skipping it silently would hide the escape). */
+async function isDirEntry(base: string, e: { name: string; isDirectory(): boolean; isSymbolicLink(): boolean }): Promise<boolean> {
+  if (e.isDirectory()) return true
+  if (!e.isSymbolicLink()) return false
+  try {
+    return (await stat(join(base, e.name))).isDirectory()
+  } catch {
+    return false // dangling symlink: nothing to read, nothing to refuse
+  }
+}
+
+/** Newest session file in one session dir: the dual-name contract first
+ *  (t260916-23), then — for trees written by other dsh generations — ANY
+ *  `*.jsonl.zstd` file, newest mtime (gen1 arbitration, scenario F: a stale
+ *  sibling never double-counts). Null when the dir holds neither. */
+async function pickNewestSessionFileLoose(dir: string): Promise<string | null> {
+  const canon = await existingSessionFilesIn(dir)
+  if (canon.length > 0) return pickNewestSessionFile(canon)
+  let best: string | null = null
+  let bestMtime = -Infinity
+  let entries: Awaited<ReturnType<typeof readdir>> = []
+  try { entries = await readdir(dir, { withFileTypes: true }) } catch { return null }
+  for (const e of entries) {
+    if (!e.isFile() || !/\.jsonl\.zstd$/.test(e.name)) continue
+    const fp = join(dir, e.name)
+    let mtime: number
+    try { mtime = (await stat(fp)).mtimeMs } catch { continue }
+    if (mtime > bestMtime) { best = fp; bestMtime = mtime }
+  }
+  return best
+}
+
+/**
+ * Walk the declared roots (read-only: readdir/stat only, never create/move/delete)
+ * and pick, per kept session directory, the newest session file. One entry per
+ * picked file, carrying its root/slug/session-dir so each consumer can bucket its
+ * own way. Refusal, traversal and unreadable-dir handling keep the existing
+ * vocabulary verbatim; an unreadable or missing root degrades with a named reason
+ * and never throws.
+ */
+async function scanDeclaredRoots(
+  roots: readonly DeclaredRoot[],
+  keep: (dirName: string) => boolean,
+): Promise<{ entries: Array<{ root: DeclaredRoot; slug: string; dir: string; picked: string }>; reasons: string[]; refusedReason?: string }> {
+  const entries: Array<{ root: DeclaredRoot; slug: string; dir: string; picked: string }> = []
+  const reasons: string[] = []
+  for (const r of roots) {
+    try {
+      await stat(r.sessRoot)
+    } catch {
+      reasons.push(`${r.tag}: sessions directory does not exist: ${r.sessRoot}`)
+      continue
+    }
+    // C3 (review_plan): containment is judged on the REAL path, not the lexical
+    // one — a symlink inside the slug dir pointing at another project's slug dir
+    // under the same home must refuse. Both the bound and the picked file go
+    // through realpath; a path that cannot be realpath'd falls back to its
+    // lexical form (same as the pre-Rule-5 guard).
+    let bound = r.bound
+    try { bound = await realpath(r.bound) } catch { /* lexical fallback */ }
+    // Per-root layout (gen1 arbitration: the REAL home is one level — the
+    // project slug dir IS the sessions root; the repo tree stays two levels —
+    // `sessions/<slug>/<sessionDir>/file`. A root's own first-level dir is
+    // ALSO tried as a session dir, so a shallow tree (`sessions/<dir>/file`)
+    // still counts: an over-deep demand re-creates the empty-room defect the
+    // other way around (KI-055 family).
+    const sessionDirs: Array<{ bucket: string; dir: string; path: string }> = []
+    try {
+      for (const e of await readdir(r.sessRoot, { withFileTypes: true })) {
+        if (!(await isDirEntry(r.sessRoot, e))) continue
+        const childPath = join(r.sessRoot, e.name)
+        if (r.layout === 'dir') {
+          sessionDirs.push({ bucket: e.name, dir: e.name, path: childPath })
+          continue
+        }
+        // Repo layout: the child is a potential session dir AND a slug level.
+        sessionDirs.push({ bucket: e.name, dir: e.name, path: childPath })
+        let subs: string[] = []
+        try {
+          for (const s of await readdir(childPath, { withFileTypes: true })) {
+            if (await isDirEntry(childPath, s)) subs.push(s.name)
+          }
+        } catch (err: any) {
+          reasons.push(`${r.tag}: slug ${e.name} unreadable: ${String(err?.message ?? err)}`)
+          continue
+        }
+        for (const s of subs) sessionDirs.push({ bucket: e.name, dir: s, path: join(childPath, s) })
+      }
+    } catch (err: any) {
+      reasons.push(`${r.tag}: sessions directory unreadable: ${r.sessRoot} (${String(err?.message ?? err)})`)
+      continue
+    }
+    for (const sd of sessionDirs) {
+      if (!keep(sd.dir)) continue
+      // Readability first: an unreadable session dir is a NAMED degrade, never a
+      // silent skip (the silent skip was the gen1 empty-room defect in disguise).
+      try { await readdir(sd.path) } catch (err: any) {
+        reasons.push(`${r.tag}: session dir ${sd.dir} unreadable: ${String(err?.message ?? err)}`)
+        continue
+      }
+      // Bound guard at DIRECTORY level (real path): a symlinked session dir
+      // pointing out of (or across slugs inside) the home is refused BY NAME
+      // and skipped — path-scoped, per the gen1 gate (an honest sibling keeps
+      // counting; the escaped content is never read).
+      let realDir = resolve(sd.path)
+      try { realDir = await realpath(sd.path) } catch { /* lexical fallback */ }
+      if (!(realDir === bound || realDir.startsWith(bound + sep))) {
+        reasons.push(`session path outside the workspace root (refused to read): ${sd.path}`)
+        continue
+      }
+      const picked = await pickNewestSessionFileLoose(sd.path)
+      if (picked === null) continue
+      // Double guard: the REAL landing spot must stay inside ITS OWN root's
+      // bound (path-traversal hard rule, same as resolveAllSessionFiles).
+      let real = resolve(picked)
+      try { real = await realpath(picked) } catch { /* lexical fallback */ }
+      if (!(real === bound || real.startsWith(bound + sep))) {
+        reasons.push(`session path outside the workspace root (refused to read): ${picked}`)
+        continue
+      }
+      entries.push({ root: r, slug: sd.bucket, dir: sd.dir, picked })
+    }
+  }
+  return { entries, reasons }
+}
+
+/**
+ * Discover sessions under the two DECLARED roots (repo `.dsh/sessions` + the DSH
+ * session home for the project, metrics-token-face-delta.md Rule 5) that carry no
+ * ticket id (metrics contract v2). Read-only, bounded to the project slug under
+ * the home, one newest session file per session dir, same file cap as before.
+ * Same traversal and refusal discipline as resolveAllSessionFiles: a final
+ * resolved path escaping its root's bound refuses the whole discovery
+ * (refused=true + reason, same vocabulary) and the consumer degrades the block
+ * to null + reason. Parsing is NOT done here — the caller feeds the paths into
+ * aggregateTicketUsage (same parser as the per-ticket path). Malformed input
+ * (missing dir, unreadable subdir, non-directory entries) degrades with a reason
+ * and never throws.
  */
 export async function resolveProjectSessionFiles(
   repoRoot: string,
   listedTicketIds: readonly string[] = [],
 ): Promise<ProjectSessionRef> {
   const out: ProjectSessionRef = { buckets: {}, paths: [] }
-  const root = resolve(repoRoot)
-  const sessRoot = join(root, '.dsh', 'sessions')
-  out.searched = sessRoot
-  try {
-    await stat(sessRoot)
-  } catch {
-    out.reason = `project sessions directory does not exist: ${sessRoot}`
-    return out
+  const roots = declaredSessionRoots(repoRoot)
+  out.searched = roots[0].sessRoot
+  out.searchedRoots = roots.map(r => r.sessRoot)
+  const scanned = await scanDeclaredRoots(roots, (s) => !isTicketSessionName(s, listedTicketIds))
+  if (scanned.refusedReason !== undefined) {
+    return { buckets: {}, paths: [], searched: out.searched, searchedRoots: out.searchedRoots, refused: true, reason: scanned.refusedReason }
   }
-  let slugs: string[] = []
-  try {
-    slugs = (await readdir(sessRoot, { withFileTypes: true }))
-      .filter(e => e.isDirectory()).map(e => e.name)
-  } catch (err: any) {
-    out.reason = `project sessions directory unreadable: ${sessRoot} (${String(err?.message ?? err)})`
-    return out
+  for (const e of scanned.entries) {
+    ;(out.buckets[e.slug] ??= []).push(e.picked)
+    out.paths.push(e.picked)
   }
-  const reasons: string[] = []
-  for (const slug of slugs) {
-    let subs: string[] = []
-    try {
-      subs = (await readdir(join(sessRoot, slug), { withFileTypes: true }))
-        .filter(e => e.isDirectory()).map(e => e.name)
-    } catch (err: any) {
-      reasons.push(`slug ${slug} unreadable: ${String(err?.message ?? err)}`)
-      continue
-    }
-    for (const s of subs) {
-      if (isTicketSessionName(s, listedTicketIds)) continue
-      const picked = await pickNewestSessionFile(await existingSessionFilesIn(join(sessRoot, slug, s)))
-      if (picked === null) continue
-      // Double guard: the final landing spot must stay inside the workspace root
-      // (path-traversal hard rule, same as resolveAllSessionFiles).
-      if (!(resolve(picked) === root || resolve(picked).startsWith(root + sep))) {
-        return { buckets: {}, paths: [], refused: true, reason: `session path outside the workspace root (refused to read): ${picked}` }
-      }
-      ;(out.buckets[slug] ??= []).push(picked)
-      out.paths.push(picked)
-    }
-  }
+  const searchedNames = roots.map(r => r.sessRoot).join(' or ')
   if (out.paths.length === 0) {
-    out.reason = `no ticket-free project session files under ${sessRoot}`
-      + (reasons.length > 0 ? `; ${reasons.join('; ')}` : '')
-  } else if (reasons.length > 0) {
-    out.reason = reasons.join('; ')
+    out.reason = `no ticket-free project session files under ${searchedNames}`
+      + (scanned.reasons.length > 0 ? `; ${scanned.reasons.join('; ')}` : '')
+  } else if (scanned.reasons.length > 0) {
+    out.reason = scanned.reasons.join('; ')
   }
   return out
 }
@@ -530,6 +673,8 @@ export interface RoleSessionRef {
   paths: string[]
   /** The sessions root this discovery searched (shape (b): the face names where it looked). */
   searched?: string
+  /** Both declared roots this discovery searched (Rule 5, t261026-05): repo root first, DSH home second. */
+  searchedRoots?: string[]
   /** Human-readable degrade reason; present when nothing was found or a slug dir was unreadable. */
   reason?: string
   /** Ticket-shaped dirs with no parseable role (named skips, review carried item). */
@@ -539,71 +684,47 @@ export interface RoleSessionRef {
 }
 
 /**
- * Discover TICKET-SHAPED session dirs (`<ticket>-<role>`) under the PROJECT
- * ROOT's .dsh/sessions — exactly the names resolveProjectSessionFiles excludes,
- * same tree, same traversal and refusal discipline (final resolved path must
- * stay inside the workspace root, else refused=true; never throws; missing or
- * unreadable dirs degrade with a named reason). Parsing is NOT done here — the
- * caller feeds the paths into aggregateTicketUsage (same parser as everywhere).
- * The guard is NOT widened by this ticket: only the repo-local tree is read.
+ * Discover TICKET-SHAPED session dirs (`<ticket>-<role>`) under the two DECLARED
+ * roots (repo `.dsh/sessions` + the DSH session home for the project,
+ * metrics-token-face-delta.md Rule 5) — exactly the names
+ * resolveProjectSessionFiles excludes, same trees, same traversal and refusal
+ * discipline (a final resolved path escaping its root's bound refuses the whole
+ * discovery; never throws; missing or unreadable dirs degrade with a named
+ * reason). Read-only, bounded to the project slug under the home, one newest
+ * session file per session dir. Parsing is NOT done here — the caller feeds the
+ * paths into aggregateTicketUsage (same parser as everywhere).
  */
 export async function resolveTicketRoleSessionFiles(repoRoot: string): Promise<RoleSessionRef> {
   const out: RoleSessionRef = { roles: {}, paths: [], skips: [] }
-  const root = resolve(repoRoot)
-  const sessRoot = join(root, '.dsh', 'sessions')
-  out.searched = sessRoot
-  try {
-    await stat(sessRoot)
-  } catch {
-    out.reason = `sessions directory does not exist: ${sessRoot}`
-    return out
+  const roots = declaredSessionRoots(repoRoot)
+  out.searched = roots[0].sessRoot
+  out.searchedRoots = roots.map(r => r.sessRoot)
+  const scanned = await scanDeclaredRoots(roots, (s) => {
+    const role = ticketRoleOf(s)
+    if (role !== null) return true
+    // Ticket-shaped but role-less dirs are named, never folded into an
+    // empty role; non-ticket-shaped dirs belong to project sessions and
+    // are out of scope here.
+    if (/^t\d+-\d+/.test(s)) out.skips.push(`${s} (ticket-shaped, no role parsed)`)
+    return false
+  })
+  if (scanned.refusedReason !== undefined) {
+    return { roles: {}, paths: [], skips: out.skips, searched: out.searched, searchedRoots: out.searchedRoots, refused: true, reason: scanned.refusedReason }
   }
-  let slugs: string[] = []
-  try {
-    slugs = (await readdir(sessRoot, { withFileTypes: true }))
-      .filter(e => e.isDirectory()).map(e => e.name)
-  } catch (err: any) {
-    out.reason = `sessions directory unreadable: ${sessRoot} (${String(err?.message ?? err)})`
-    return out
+  for (const e of scanned.entries) {
+    const role = ticketRoleOf(e.dir) ?? 'unknown'
+    const ticketId = /^t\d+-\d+/.exec(e.dir)?.[0] ?? e.dir
+    const bucket = (out.roles[role] ??= { tickets: [], paths: [] })
+    if (!bucket.tickets.includes(ticketId)) bucket.tickets.push(ticketId)
+    bucket.paths.push(e.picked)
+    out.paths.push(e.picked)
   }
-  const reasons: string[] = []
-  for (const slug of slugs) {
-    let subs: string[] = []
-    try {
-      subs = (await readdir(join(sessRoot, slug), { withFileTypes: true }))
-        .filter(e => e.isDirectory()).map(e => e.name)
-    } catch (err: any) {
-      reasons.push(`slug ${slug} unreadable: ${String(err?.message ?? err)}`)
-      continue
-    }
-    for (const s of subs) {
-      const role = ticketRoleOf(s)
-      if (role === null) {
-        // Ticket-shaped but role-less dirs are named, never folded into an
-        // empty role; non-ticket-shaped dirs belong to project sessions and
-        // are out of scope here.
-        if (/^t\d+-\d+/.test(s)) out.skips.push(`${slug}/${s} (ticket-shaped, no role parsed)`)
-        continue
-      }
-      const picked = await pickNewestSessionFile(await existingSessionFilesIn(join(sessRoot, slug, s)))
-      if (picked === null) continue
-      // Double guard: the final landing spot must stay inside the workspace
-      // root (path-traversal hard rule, same as resolveAllSessionFiles).
-      if (!(resolve(picked) === root || resolve(picked).startsWith(root + sep))) {
-        return { roles: {}, paths: [], skips: out.skips, refused: true, reason: `session path outside the workspace root (refused to read): ${picked}` }
-      }
-      const ticketId = /^t\d+-\d+/.exec(s)?.[0] ?? s
-      const bucket = (out.roles[role] ??= { tickets: [], paths: [] })
-      if (!bucket.tickets.includes(ticketId)) bucket.tickets.push(ticketId)
-      bucket.paths.push(picked)
-      out.paths.push(picked)
-    }
-  }
+  const searchedNames = roots.map(r => r.sessRoot).join(' or ')
   if (out.paths.length === 0) {
-    out.reason = `no ticket-shaped per-role session files under ${sessRoot}`
-      + (reasons.length > 0 ? `; ${reasons.join('; ')}` : '')
-  } else if (reasons.length > 0) {
-    out.reason = reasons.join('; ')
+    out.reason = `no ticket-shaped per-role session files under ${searchedNames}`
+      + (scanned.reasons.length > 0 ? `; ${scanned.reasons.join('; ')}` : '')
+  } else if (scanned.reasons.length > 0) {
+    out.reason = scanned.reasons.join('; ')
   }
   return out
 }

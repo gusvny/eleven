@@ -72,22 +72,28 @@ export function throughputOption(spec: { days: string[]; opened: unknown[]; clos
 }
 
 /**
- * Where the tokens go: one stacked column per day, value axis in millions,
- * date ticks. stack = { days, series:[{name,data}] } — the payload's own
- * series (legend verbatim); colours assign in order from the declared
- * palette. Values scale to millions here (the axis title says so).
+ * Where the tokens go: the payload's OWN charts.primary spec, verbatim
+ * (t261026-05: doc winner is the server — today a per-stage bar whose title
+ * the card carries; a stacked daily-by-model shape renders the same way).
+ * stack = { title, categories, series:[{name,data}] }; the API's title (when
+ * present) becomes the chart title so the card says what it draws. Series
+ * stack only when there is more than one (a single-series bar stays a plain
+ * bar). Colours assign in order from the declared palette; values scale to
+ * millions here (the axis title says so).
  */
-export function tokensOption(stack: { days: string[]; series: Array<{ name: string; data: unknown[] }> }): Record<string, unknown> {
-  const axes = commonAxes(stack.days, 'tokens / day (M)')
+export function tokensOption(stack: { title?: string | null; categories: string[]; series: Array<{ name: string; data: unknown[] }> }): Record<string, unknown> {
+  const axes = commonAxes(stack.categories, 'tokens (M)')
+  const stacked = stack.series.length > 1
   return {
     animation: false,
     grid: commonGrid(),
     legend: { top: 0, left: 0, type: 'scroll', textStyle: { color: LABEL, fontSize: 12 } },
     tooltip: { show: false },
+    ...(stack.title ? { title: { text: stack.title, left: 'center', bottom: 0, textStyle: { color: LABEL, fontSize: 11, fontWeight: 'normal' } } } : {}),
     ...axes,
     series: stack.series.map(function (s, i) {
       return {
-        name: s.name, type: 'bar', stack: 'tokens',
+        name: s.name, type: 'bar', ...(stacked ? { stack: 'tokens' } : {}),
         data: (s.data as unknown[]).map(function (v) {
           const n = (typeof v === 'number' && Number.isFinite(v)) ? v : null
           return n === null ? null : Math.round((n / 1e6) * 100) / 100

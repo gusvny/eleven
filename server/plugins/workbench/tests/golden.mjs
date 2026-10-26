@@ -75,7 +75,10 @@ for (const view of ['time', 'delivery', 'token', 'health'])
     cases.push({ view, window })
 
 const strip = (body) => {
-  const c = { ...body, generated_at: '', cache: { ...body.cache, computed_at: '' } }
+  // t261026-05: perf.ms_total is wall-clock by definition — strip it like the
+  // other response-side clocks; the rest of the perf shape stays frozen.
+  const perf = (body.perf && typeof body.perf === 'object') ? { ...body.perf, ms_total: 0 } : body.perf
+  const c = { ...body, generated_at: '', cache: { ...body.cache, computed_at: '' }, perf }
   return JSON.stringify(c)
 }
 

@@ -47,7 +47,7 @@ import { findProject, loadProjects, primaryDir } from '../../../../project-regis
 import { listEpics, resolveEpicsDir } from './epics.ts'
 import {
   aggregateTicketUsage, resolveAllSessionFiles, resolveLedgerSessionFiles, resolveProjectSessionFiles,
-  resolveArchivedSessionFiles, resolveTicketRoleSessionFiles,
+  resolveArchivedSessionFiles, resolveTicketRoleSessionFiles, dshSessionHomeRoot,
   stageWindowsFromTimeline,
   type StageWindow,
 } from './agent-usage.ts'
@@ -1023,10 +1023,11 @@ function aggregateV2(
  */
 async function computeProjectSessions(
   repo: string, listedIds: readonly string[],
-): Promise<{ block: Record<string, unknown> | null; reason?: string; searched?: string }> {
+): Promise<{ block: Record<string, unknown> | null; reason?: string; searched?: string; searchedRoots?: string[] }> {
   const ref = await resolveProjectSessionFiles(repo, listedIds)
-  if (ref.refused === true) return { block: null, reason: ref.reason ?? 'project sessions discovery refused (path outside workspace root)', searched: ref.searched }
-  if (ref.paths.length === 0) return { block: null, reason: ref.reason ?? 'no ticket-free project session files under the project root', searched: ref.searched }
+  const searchedRoots = ref.searchedRoots
+  if (ref.refused === true) return { block: null, reason: ref.reason ?? 'project sessions discovery refused (path outside workspace root)', searched: ref.searched, searchedRoots }
+  if (ref.paths.length === 0) return { block: null, reason: ref.reason ?? 'no ticket-free project session files under the project root', searched: ref.searched, searchedRoots }
   const buckets: Record<string, { in: number; out: number; cache_read: number; files: number }> = {}
   const reasons: string[] = []
   for (const [slug, paths] of Object.entries(ref.buckets)) {
@@ -1053,7 +1054,9 @@ async function computeProjectSessions(
     total.cache_read += b.cache_read
     if (b.in + b.out + b.cache_read > 0) any = true
   }
-  const block: Record<string, unknown> = { buckets, total: any ? total : null, searched: ref.searched }
+  // Rule 5: the block names BOTH roots it read (searchedRoots; `searched` stays
+  // the repo root for old readers).
+  const block: Record<string, unknown> = { buckets, total: any ? total : null, searched: ref.searched, searchedRoots: ref.searchedRoots ?? null }
   if (ref.reason) reasons.unshift(ref.reason)
   if (reasons.length > 0) block.reason = reasons.join('; ')
   return { block }
@@ -1067,17 +1070,18 @@ async function computeProjectSessions(
  * file by file (a bad file's reason surfaces per role, never swallowed). Roles are
  * named verbatim; a role with no session files is simply absent from `roles` (the
  * UI says 'no sessions in window' — a role nobody ran under is never invented).
- * Shape (b) discipline: `searched` names the root that was searched; the DSH-home
- * candidate is only ever named in a notice, never read.
+ * Rule 5 (t261026-05): the two DECLARED roots (repo + DSH home slug) are read;
+ * `searchedRoots` names both, `searched` stays the repo root for old readers.
  */
 async function computeRoleAggregate(repo: string): Promise<Record<string, unknown>> {
   const ref = await resolveTicketRoleSessionFiles(repo)
   const searched = ref.searched ?? ''
+  const searchedRoots = ref.searchedRoots ?? null
   if (ref.refused === true) {
-    return { searched, roles: {}, total: null, reason: ref.reason ?? 'per-role sessions discovery refused (path outside workspace root)' }
+    return { searched, searchedRoots, roles: {}, total: null, reason: ref.reason ?? 'per-role sessions discovery refused (path outside workspace root)' }
   }
   if (ref.paths.length === 0) {
-    return { searched, roles: {}, total: null, reason: ref.reason ?? 'no ticket-shaped per-role session files under the project root' }
+    return { searched, searchedRoots, roles: {}, total: null, reason: ref.reason ?? 'no ticket-shaped per-role session files under the project root' }
   }
   const roles: Record<string, { tickets: number; files: number; in: number; out: number; cache_read: number; reason?: string }> = {}
   const reasons: string[] = []
@@ -1104,7 +1108,7 @@ async function computeRoleAggregate(repo: string): Promise<Record<string, unknow
     total.cache_read += b.cache_read
     if (b.in + b.out + b.cache_read > 0) any = true
   }
-  const block: Record<string, unknown> = { searched, roles, total: any ? total : null }
+  const block: Record<string, unknown> = { searched, searchedRoots, roles, total: any ? total : null }
   if (ref.skips.length > 0) reasons.push(`skipped ticket-shaped dirs with no parseable role: ${ref.skips.join('; ')}`)
   if (ref.reason) reasons.unshift(ref.reason)
   if (reasons.length > 0) block.reason = reasons.join('; ')
@@ -1249,6 +1253,7 @@ export async function buildMetricsResponse(
   query: URLSearchParams | Record<string, string | string[]>,
   deps: MetricsDeps,
 ): Promise<MetricsResponse> {
+  const buildT0 = Date.now()
   const parsed = parseMetricsQuery(query)
   if (!parsed.ok) return { status: parsed.status, body: bad4xx(parsed.error) }
   const p = parsed.params
@@ -1458,14 +1463,14 @@ export async function buildMetricsResponse(
     role_aggregate: roleAgg,
   }
   if (projSess.block === null) {
-    resp.project_sessions_degrade = { reason: projSess.reason ?? 'no project-level sessions', searched: projSess.searched ?? null }
+    resp.project_sessions_degrade = { reason: projSess.reason ?? 'no project-level sessions', searched: projSess.searched ?? null, searchedRoots: projSess.searchedRoots ?? null }
   }
-  // Shape (b) honesty (t261026-02): the guard is not widened, but the notice names
-  // the DSH-home candidate root (derived from the repo path, never read) so a reader
-  // can tell 'nothing ran' from 'we looked in the wrong place'.
+  // Rule 5 (t261026-05): the DSH session home IS read now (declared second root,
+  // see computeProjectSessions). The candidate line stays additive for one release
+  // so an older reader can still see the home address, derived through the SAME
+  // helper the reader uses (they cannot drift).
   if (projSess.block === null && deps.repo) {
-    const munged = '--' + deps.repo.split('/').filter(Boolean).join('-') + '--'
-    resp.project_sessions_home_candidate = join('~', '.dsh', 'sessions', munged)
+    resp.project_sessions_home_candidate = join('~', '.dsh', 'sessions', dshSessionHomeRoot(deps.repo).split('/').filter(Boolean).pop() ?? '')
   }
   const respReasons = [...fastSkips, ...skipped, ...stableReasons(entries, cacheDir)]
   // 近似归窗计数（F3）：旧版缓存无锚点的票按缓存计算时刻近似归窗，显式计数让用户
@@ -1473,6 +1478,8 @@ export async function buildMetricsResponse(
   // （真实项目规模下 reason 常满，notice 沉尾=用户不可见，验收 F3 实锤）。
   const approxCount = approxInWindow
   const notices: string[] = []
+  // t261026-05: named gaps raised by the chart builders (token by_stage emptiness).
+  for (const n of body.notices ?? []) notices.push(n)
   if (archivedRows.length > 0) {
     notices.push(`度量宇宙补全：${archivedRows.length} 票仅存于度量缓存（工单列表已不可见，直并/收口终态）`)
   }
@@ -1511,6 +1518,14 @@ export async function buildMetricsResponse(
   if (notices.length > 0 || respReasons.length > 0) {
     const rest = dedupe(respReasons).slice(0, Math.max(0, 20 - notices.length))
     ;(resp as any).reason = [...notices, ...rest].join('；')
+  }
+  // t261026-05 perf block (additive, every view): cache hit vs compute on the
+  // face itself, so "why is the repeat read slow" is answerable per response.
+  resp.perf = {
+    cache: cacheStatus,
+    records_from_cache: entries.filter((e) => e.fromCache === true).length,
+    records_computed: entries.filter((e) => e.fromCache !== true).length,
+    ms_total: Date.now() - buildT0,
   }
   return { status: 200, body: resp }
 }
@@ -1665,8 +1680,12 @@ function dedupe(arr: string[]): string[] {
   return [...new Set(arr)]
 }
 
-/** 三数据视图的 charts（契约：跨模板不混排，stage 轴=该模板 stages 链序）。 */
-function buildChartsBody(view: string, records: MetricsCacheRecord[], stageIds: string[], kpis: ReturnType<typeof emptyKpis>): { charts: unknown } {
+/** The three data views' charts (contract: chains are never mixed; the stage
+ *  axis is the selected template's chain order).
+ *  Returns optional notices (t261026-05): a named gap when the token view's
+ *  per-stage chart is all zeros because tokens.by_stage is empty in the
+ *  per-ticket records — the tokens exist, the stage attribution does not. */
+function buildChartsBody(view: string, records: MetricsCacheRecord[], stageIds: string[], kpis: ReturnType<typeof emptyKpis>): { charts: unknown; notices?: string[] } {
   if (view === 'time') {
     const byStage = stageIds.map((s) => records.reduce((sum, r) => sum + (r.durations.by_stage[s] ?? 0), 0))
     const human = records.reduce((s, r) => s + r.durations.human_wait, 0)
@@ -1712,11 +1731,20 @@ function buildChartsBody(view: string, records: MetricsCacheRecord[], stageIds: 
   }
   // token
   const byStage = stageIds.map((s) => records.reduce((sum, r) => sum + (r.tokens?.by_stage[s] ? r.tokens!.by_stage[s].in + r.tokens!.by_stage[s].out : 0), 0))
+  const notices: string[] = []
+  // t261026-05 named gap: per-ticket records DO carry tokens but by_stage is
+  // empty in all of them — the per-stage chart would read as "no tokens spent"
+  // when the truth is "stage attribution is missing". Never silent zeros.
+  const tokensAnywhere = records.some((r) => r.tokens !== null && r.tokens.in + r.tokens.out > 0)
+  if (tokensAnywhere && byStage.every((v) => v === 0)) {
+    notices.push('tokens.by_stage is empty in the per-ticket records; the per-stage chart shows 0 for every stage because the stage attribution is missing, not because no tokens were spent (the model share and per-ticket faces still carry the real totals)')
+  }
   const byModel = new Map<string, number>()
   for (const r of records) for (const [m, v] of Object.entries(r.tokens?.by_model ?? {})) byModel.set(m, (byModel.get(m) ?? 0) + v)
   const modelEntries = [...byModel.entries()].sort((a, b) => b[1] - a[1])
   const top = [...records].filter((r) => r.tokens !== null).sort((a, b) => tok(b) - tok(a)).slice(0, 10)
   return {
+    notices: notices.length > 0 ? notices : undefined,
     charts: {
       primary: chart('bar', 'stage token 消耗（in+out，cacheRead 单列）', stageIds, [{ name: 'tokens', data: byStage }]),
       secondaries: [
@@ -1757,10 +1785,72 @@ function probePort(host: string, port: number, timeoutMs: number): Promise<boole
   })
 }
 
+/** One day in ms. */
+const DAY_MS = 86_400_000
+/** Hard span cap for the daily chart (≈10 years of week buckets) — a corrupt
+ *  anchor must not turn the health payload into an unbounded category axis. */
+const DAILY_SPAN_CAP_MS = 520 * 7 * DAY_MS
+
+/**
+ * The health view's THROUGHPUT primary chart (t261026-05: the view answers the
+ * shape the panel's throughputSpecOf was written against — daily opened/closed
+ * series; the blocked chart moves to secondaries[0]). Anchors are real, never
+ * approximated: opened buckets count `created` (epoch seconds, archive-backfilled
+ * before dispatch); closed buckets count `close_ts` on closed rows. A closed row
+ * with no `close_ts` is counted in a named gap reason, never silently dropped and
+ * never bucketed by an approximation (review condition C1). Buckets are days for
+ * spans up to 92 days, weeks beyond; the span is capped (named) against a corrupt
+ * anchor. The blocked-chart rows still need their show call — unchanged below.
+ */
+function dailyThroughputChart(
+  rows: any[], from: number, to: number, nowMs: number, reasons: string[],
+): { kind: string; title: string; categories: string[]; series: { name: string; data: number[] }[]; drill: boolean } {
+  const openedMs: number[] = []
+  const closedMs: number[] = []
+  let closedNoAnchor = 0
+  for (const r of rows) {
+    const c = Number(r?.created)
+    if (Number.isFinite(c) && c > 0) openedMs.push(c * 1000)
+    if (String(r?.status ?? '') === 'closed') {
+      const s = Number(r?.close_ts)
+      if (Number.isFinite(s) && s > 0) closedMs.push(s * 1000)
+      else closedNoAnchor += 1
+    }
+  }
+  let start = from === -Infinity
+    ? Math.min(nowMs, ...(openedMs.length > 0 ? openedMs : [nowMs]), ...(closedMs.length > 0 ? closedMs : [nowMs]))
+    : from
+  if (nowMs - start > DAILY_SPAN_CAP_MS) {
+    start = nowMs - DAILY_SPAN_CAP_MS
+    reasons.push('daily throughput chart: the window span exceeded the chart cap; buckets start at the cap, older tickets are not drawn')
+  }
+  const step = (to - start) <= 92 * DAY_MS ? DAY_MS : 7 * DAY_MS
+  const categories: string[] = []
+  const opened: number[] = []
+  const closed: number[] = []
+  for (let t = start; t < to; t += step) {
+    const end = Math.min(t + step, to)
+    categories.push(new Date(t).toISOString().slice(0, 10))
+    opened.push(openedMs.filter((m) => m >= t && m < end).length)
+    closed.push(closedMs.filter((m) => m >= t && m < end).length)
+  }
+  if (closedNoAnchor > 0) {
+    reasons.push(`${closedNoAnchor} closed tickets carry no close_ts anchor; the daily closed series covers only the anchored closes`)
+  }
+  if (openedMs.length === 0 && closedMs.length === 0) {
+    reasons.push('daily throughput chart: no row carries a created/close_ts anchor; the series are empty, not zero activity')
+  }
+  return chart('bar', `daily opened/closed（${step === DAY_MS ? 'day' : 'week'} buckets, created/close_ts anchors）`, categories, [
+    { name: 'opened', data: opened },
+    { name: 'closed', data: closed },
+  ])
+}
+
 async function healthView(
   deps: MetricsDeps, rows: any[], p: MetricsParams, stageIds: string[],
   from: number, to: number, nowMs: number, reasons: string[],
 ): Promise<MetricsResponse> {
+  const healthT0 = Date.now()
   const nowIso = new Date(nowMs).toISOString()
   const base: Record<string, unknown> = {
     kpis: emptyKpis(),
@@ -1798,13 +1888,13 @@ async function healthView(
   const kpis = base.kpis as ReturnType<typeof emptyKpis>
   const running = rows.filter((r) => String(r?.stage_state ?? '') === 'running')
   const blocked = rows.filter((r) => String(r?.stage_state ?? '') === 'blocked')
-  // Window anchoring matches the three data views (closed by close time, open by
-  // creation time); the health direct-query path has no cached created/closed, so the
-  // KPI denominators anchor on the list rows' updated_ts (epoch seconds, machine
-  // field) — before t261025-13 this misread the display column `updated` and invented
-  // a year-2001 anchor. window=all gives the exact full count; 7d/30d approximate by
-  // updated_ts window membership and name it in a reason (a known approximation of
-  // the direct-query path, never silent).
+  // Window membership for the bounded KPI denominators anchors on the list rows'
+  // updated_ts (epoch seconds, machine field) — a declared approximation: the
+  // direct-query path has no per-ticket closed_ms, but created IS available
+  // (archive-backfilled before dispatch) and the daily chart below uses the real
+  // created/close_ts anchors, never this one. Before t261025-13 this loop misread
+  // the display column `updated` and invented a year-2001 anchor. window=all gives
+  // the exact full count; 7d/30d approximate membership by updated_ts and name it.
   const anchorApprox = (r: any): number | null => rowUpdatedMs(r)
   for (const r of rows) {
     const a = from === -Infinity ? 0 : anchorApprox(r)
@@ -1812,7 +1902,7 @@ async function healthView(
     kpis.tickets += 1
     if (String(r?.status ?? '') === 'closed') kpis.closed += 1
   }
-  if (from !== -Infinity) reasons.push('health direct-query path has no created/closed timestamps; bounded-window tickets/closed are approximated by the list rows\' updated_ts (epoch seconds, machine field); window=all is the exact full count')
+  if (from !== -Infinity) reasons.push('bounded-window tickets/closed on the health direct-query path approximate window membership by the list rows\' updated_ts (epoch seconds, machine field); the daily throughput chart below buckets by the real created/close_ts anchors; window=all is the exact full count')
   kpis.avg_delivery_min = 0.0
   kpis.tokens_total = 0
   reasons.push('token 维不在 health 直查路径（tokens_total 恒 0；接通归 M2c 修约）')
@@ -1843,8 +1933,14 @@ async function healthView(
     }
   }
   base.charts = {
-    primary: chart('hBar', `blocked 榜（stage_state=blocked，封顶 ${BLOCKED_SHOW_CAP}）`, blockedCats, [{ name: '张', data: blockedData }]),
+    // t261026-05: charts.primary is the daily opened/closed series the panel's
+    // throughputSpecOf reads (doc winner: the server); the blocked chart —
+    // the old (undocumented) primary — moves to secondaries[0], which the
+    // panel never read.
+    primary: dailyThroughputChart(rows, from, to, nowMs, reasons),
     secondaries: [
+      // copy-lang-allow:t261026-05 pre-existing data title/series names, moved verbatim (not new copy)
+      chart('hBar', `blocked 榜（stage_state=blocked，封顶 ${BLOCKED_SHOW_CAP}）`, blockedCats, [{ name: '张', data: blockedData }]),
       chart('stackBar', '票流状态分布', ['open', 'closed', 'blocked', 'running'], [
         { name: '票数', data: [rows.filter((r) => String(r?.status ?? '') !== 'closed').length, rows.filter((r) => String(r?.status ?? '') === 'closed').length, blocked.length, running.length] },
       ]),
@@ -1852,6 +1948,9 @@ async function healthView(
     ],
   }
   void stageIds // health 直查路径不用模板 stage 轴（票流桶计数为准）
+  // t261026-05 perf block (additive, every view): answers "cache hit vs compute"
+  // on the face itself. The health view is direct-query by design — no cache.
+  base.perf = { cache: 'n/a (direct-query)', records_from_cache: 0, records_computed: 0, ms_total: Date.now() - healthT0 }
   if (reasons.length > 0) base.reason = dedupe(reasons).join('；')
   return { status: 200, body: base }
 }

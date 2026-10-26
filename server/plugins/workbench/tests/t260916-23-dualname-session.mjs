@@ -102,7 +102,7 @@ try {
   ok(rNone.paths.length === 0 && (rNone.reason ?? '').includes(OLD) && (rNone.reason ?? '').includes(NEW),
     '零会话文案双名并列表述', rNone.reason)
   const rEsc = await resolveAllSessionFiles(repo, 't-d', { worktree: '..' })
-  ok(rEsc.refused === true && (rEsc.reason ?? '').includes('越界'), '防穿不变：.. 越界 refused')
+  ok(rEsc.refused === true && (rEsc.reason ?? '').includes('refused to read'), '防穿不变：.. 越界 refused (t261026-05: the refusal reason has been English since t261008-23; the old Chinese word never matched)')
 
   /* ---------------------------------------------- C. resolveSessionFile */
   section('C resolveSessionFile：最新/角色/平局/文案')

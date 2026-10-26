@@ -5761,6 +5761,26 @@
       "anchor": "contract",
       "note": "t261025-13: p90_lead_time = rank ceil(0.9*(n-1)) over the sorted closed-ticket leads, null on an empty window (same degrade family as the median)"
     },
+    "integration/t261026-05/sc_t261026_05_throughput_daily_contract.mjs": {
+      "anchor": "contract",
+      "sync_path": "server/plugins/workbench/src/host/metrics.ts; server/plugins/executor-panel/src/host/metrics-tab-model.ts",
+      "note": "t261026-05 item 1: the health view's charts.primary is the daily opened/closed spec the panel's throughputSpecOf draws (server wins, blocked chart moved to secondaries); bucket honesty (close anchor or named updated_ts approximation, no silent mis-dating); anchorless rows named; empty window well-formed"
+    },
+    "integration/t261026-05/sc_t261026_05_token_stage_bar_honest.mjs": {
+      "anchor": "contract",
+      "sync_path": "server/plugins/workbench/src/host/metrics.ts; server/plugins/executor-panel/src/host/metrics-tab-model.ts",
+      "note": "t261026-05 item 2: the token card renders the API's own per-stage bar spec verbatim incl. title (no invented daily-by-model claim); an empty tokens.by_stage in the records is named on the face, never silent zeros; malformed payloads degrade to the named empty state"
+    },
+    "integration/t261026-05/sc_t261026_05_session_home_two_roots.mjs": {
+      "anchor": "behaviour",
+      "sync_path": "server/plugins/workbench/src/host/agent-usage.ts",
+      "note": "t261026-05 item 3 / Rule 5 (option u): both declared roots (repo root + DSH session home, slug-bounded) are read read-only, refusal vocabulary unchanged, both roots named on the face, newest-file-per-dir bound, neighbour slugs never read, and the per-role face grows from the home (the 1-ticket defect retired)"
+    },
+    "integration/t261026-05/sc_t261026_05_metrics_perf_face.mjs": {
+      "anchor": "behaviour",
+      "sync_path": "server/plugins/workbench/src/host/metrics.ts",
+      "note": "t261026-05 item 4: each metrics view carries a perf block (total, cache hit vs computed, parse time) and a warm repeat read reports hits with zero parse work while keeping the cold KPI totals (the tab-slowness question answered on the face itself)"
+    },
     "integration/t261025-13/sc_metrics_panel_degrade_faces.mjs": {
       "anchor": "behaviour",
       "note": "t261025-13: a degraded Metrics tile names its degrade (no bare dash on TOKENS split, no hardcoded 'P90 -'); happy split keeps rendering (assertions via the public kpiTilesOf seam)"

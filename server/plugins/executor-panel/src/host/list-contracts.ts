@@ -200,7 +200,11 @@ export const LIST_CONTRACTS: Record<string, ListContract> = {
     title: 'Metrics — KPI cards',
     // t261021-07: the tab is the approved mock (host 261021) — six KPI tiles
     // over the metrics v2 blocks; the four frozen v1 cells retire.
-    source: 'GET /sandbar-workbench/api/wf/metrics (view=time&mode=full: kpis+workflows+stages+epics+project_sessions; view=health: charts.primary daily opened/closed; view=token: charts.primary daily stacked by model) + GET /sandbar-executor-panel/api/certification (round_faces)',
+    // t261026-05 (doc winner named): the SERVER owns both chart shapes —
+    // view=health charts.primary IS the daily opened/closed spec (the blocked
+    // chart moved to secondaries[0]); view=token charts.primary renders
+    // verbatim (today the per-stage token bar, title carried to the card).
+    source: 'GET /sandbar-workbench/api/wf/metrics (view=time&mode=full: kpis+workflows+stages+epics+project_sessions; view=health: charts.primary daily opened/closed; view=token: charts.primary rendered verbatim — per-stage token bar) + GET /sandbar-executor-panel/api/certification (round_faces)',
     order: 'Fixed: six KPI tiles (rework rate, throughput, median lead time, tokens, tokens per ticket, human wait); workflows then per-workflow stages (payload chain order); epics by the sort control (default last activity, top five plus the picked names); charts after the cards.',
     cap: 'all',
     empty_copy: 'No metrics yet for this window.',

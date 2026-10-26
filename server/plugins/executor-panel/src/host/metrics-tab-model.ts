@@ -11,9 +11,12 @@
  *    /sandbar-workbench/api/wf/metrics?...&view=time&mode=full — kpis,
  *    workflows[], stages[], epics[], project_sessions.
  *  - the same endpoint view=health — charts.primary is the daily
- *    created/closed ChartSpec → the Throughput chart.
- *  - the same endpoint view=token — charts.primary is the daily stacked
- *    columns by model → the Where-the-tokens-go chart.
+ *    opened/closed ChartSpec → the Throughput chart (t261026-05: the server
+ *    ships this shape; the blocked chart it used to carry as primary moved
+ *    to secondaries[0]).
+ *  - the same endpoint view=token — charts.primary is the payload's OWN
+ *    spec, rendered verbatim (today the per-stage token bar; the card shows
+ *    the API's title so it says what it draws).
  *  - /sandbar-executor-panel/api/certification — round_faces.rounds → the
  *    certification strip and the green/red counts.
  *
@@ -512,10 +515,11 @@ export function throughputSpecOf(j: unknown): Record<string, unknown> | null {
 }
 
 /**
- * The tokens stack from the token view's charts.primary (the daily stacked
- * columns by model). The v2 contract carries no per-role daily face, so the
- * chart renders the payload's own series (legend = model names, verbatim);
- * the adapter assigns the declared palette in order. Not derivable → null.
+ * The tokens stack from the token view's charts.primary — the payload's OWN
+ * spec, rendered verbatim (t261026-05: the doc winner is the server; today
+ * that is the per-stage token bar, not the daily-by-model series an older
+ * docstring claimed). The spec's title travels with the shape so the card
+ * can say what it draws; not derivable → null.
  */
 export function tokensStackOf(j: unknown): Record<string, unknown> | null {
   const o = (j && typeof j === 'object') ? j as Record<string, unknown> : null
@@ -525,7 +529,8 @@ export function tokensStackOf(j: unknown): Record<string, unknown> | null {
   const series = p && Array.isArray(p.series) ? p.series as Array<Record<string, unknown>> : null
   if (!cats || !series || series.length === 0) return null
   return {
-    days: cats.map(function (d) { return mstr(d) ?? DASH }),
+    title: mstr(p.title),
+    categories: cats.map(function (d) { return mstr(d) ?? DASH }),
     series: series.map(function (s) {
       return { name: mstr(s.name) ?? DASH, data: Array.isArray(s.data) ? s.data : [] }
     }),
