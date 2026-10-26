@@ -5887,6 +5887,11 @@
     "integration/t261026-23/sc_t26102623_lane_build_freshness_stamp.mjs": {
       "anchor": "behaviour",
       "note": "t261026-23: the lane build-freshness gate as the user's capture journey meets it - a stamped tree with inverted (checkout-order) mtimes is FRESH by content, a changed/added/removed watched source is STALE by name (rule=stamp-mismatch), any malformed stamp (truncated JSON, wrong version/algorithm, sources not an object, non-hex hash) refuses fail-closed (rule=stamp-malformed), and a stamp-less tree keeps the 2 s mtime fallback named rule=mtime-fallback; the capture-baseline family predicate must agree."
+    },
+    "integration/t261026-24/sc_manifest_matches_generator.py": {
+      "anchor": "contract",
+      "note": "t261026-24 L2: writer/reader agreement of the batch-stage exception manifest - the on-disk manifest is byte-identical to what gen_batch_stage_exceptions emits today (same sort, same serialization), so a lockstep-edit miss cannot silently resurrect removed rows or lose corrected reasons on the next generator run; duplicates and empty schema keys named",
+      "sync_path": "integration/batch_stage_exceptions.json"
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

@@ -14,6 +14,27 @@
     "evidence": "integration/t260904-19/sc_stage_docker_parallel_zero_residue.py 多工程并发起台『t26090419-par-probe*』（grep 实证）"
   },
   {
+    "entry": "t260905-02-console-duplicate-guard",
+    "pool": "engine",
+    "project_pattern": "t26090502-*",
+    "reason": "同族：断言语义落在「自有台已拆」上（residue + 端口释放），批模式无此事实可测。",
+    "evidence": "同 t260905-02-worker-lifecycle（同目录同断言族）；261001 加入本清单，切片实测本条目 PASS。"
+  },
+  {
+    "entry": "t260905-02-ticket-worker-watch-exit",
+    "pool": "engine",
+    "project_pattern": "t26090502-*",
+    "reason": "同族：断言语义落在「自有台已拆」上（residue + 端口释放），批模式无此事实可测。",
+    "evidence": "同 t260905-02-worker-lifecycle（同目录同断言族，grep residue/端口 命中 3 处）；261001 加入本清单，切片实测 8 条 0 环境红。"
+  },
+  {
+    "entry": "t260905-02-worker-lifecycle",
+    "pool": "engine",
+    "project_pattern": "t26090502-*",
+    "reason": "被测对象=worker 起/退生命周期，且断言**拆台后零残留容器与 temporal 端口已释放**（三处读 down 回执 residue + 端口面）。批台恰是「不拆的共享台」：批模式下既无自有台可拆、批台端口也不会释放 ⇒ 断言与被测形态互斥，须自持台。",
+    "evidence": "261001 实测：--only t260904-02-worker-fingerprint-gate,t260905-02-worker-lifecycle → 本条目走批模式后 FAIL「舞台 down 后零残留容器（实得 None）／temporal 端口已释放（仍被占用）」；单独跑（旧缝面会 do_down 批台）才「过」。"
+  },
+  {
     "entry": "t260910-12-cwd-independence",
     "pool": "engine",
     "project_pattern": "t26091012-*",
@@ -54,13 +75,6 @@
     "project_pattern": "none-zero-boot-*",
     "reason": "零台行：租约状态机单元电池（内存态断言），零 docker 零起台。",
     "evidence": "integration/t260910-12 租约单元场景 cmd 直呼测试脚本，无起台调用"
-  },
-  {
-    "entry": "t260910-12-transient-retry-contract",
-    "pool": "ro",
-    "project_pattern": "none-zero-boot-*",
-    "reason": "零台行：瞬态重试白名单契约测试（lib_transient_retry 纯判定面），零起台零消费——在册以防「源码含消费模式字面量」的一级判据误接。",
-    "evidence": "integration/t260910-12 瞬态契约场景 cmd 直呼 lib_transient_retry.py，无 stage_docker 起台调用"
   },
   {
     "entry": "t260912-02-burst-managed-subnets",
@@ -126,83 +140,6 @@
     "evidence": "integration/t260915-01/tests/sc_detail_face_journey.py 只 import lib_bench_stage（process_bench），零 require_stage/stage_docker 调用"
   },
   {
-    "entry": "t260917-09-tests-false-escalation-guard",
-    "pool": "engine",
-    "project_pattern": "none-zero-boot-*",
-    "reason": "零台行：t260917-09 三相共用进程台（integration/process_bench.py 纯进程 Temporal），不再消费 docker 台也不再自建台——列册即宣告非批消费者（host order 261022）。",
-    "evidence": "integration/t260917-09/tests/sc_tests_false_escalation_guard.py 只 import lib_bench_stage（process_bench），零 require_stage/stage_docker 调用"
-  },
-  {
-    "entry": "t260921-06-batch-manifest-contract",
-    "pool": "ro",
-    "project_pattern": "none-zero-boot-*",
-    "reason": "零台行：本清单的静态契约看守（离线 ro 哨兵）——源码内嵌清点判据正则字面量导致一级判据自匹配，声明豁免（其本身零起台零消费）。",
-    "evidence": "integration/t260921-06/sc_batch_manifest_contract.py 自身含 CONSUMER_PAT 字面量（自匹配），cmd 直呼本场景脚本零起台"
-  },
-  {
-    "entry": "t260924-04-project-template-journey",
-    "pool": "main",
-    "project_pattern": "t26092404-*",
-    "reason": "被测对象=项目外置模板的建票全链＋续跑＋拒收面（真 Temporal＋真 worker＋桩大脑的 L3 旅程）：场景自持工程名 t260924-04-<pid> 调 require_stage（lib_gate 单点）——批模式下该调用走批台 ns-acquire 申请本场景命名空间（t260921-06 批级共享，零容器开销），批台不在位=exit 2 环境红（绝不静默回落）。故它是**批台消费者候选**，但注册池=main（第 4 元 serial=无池标注的串行条目，pool_of 归 main）：按清点判据「候选 ⊆ engine/exclusive ∪ 例外清单」在此显式登记豁免（不擅自改他人条目的池=不改变闸的跑法范围），工程名前缀沿用清单既有约定。",
-    "evidence": "integration/t260924-04/sc_project_template_ticket_journey.py:203 stage_mod, stage = require_stage(fail, \"t260924-04-%d\" % os.getpid(), \"t260924-04\")；require_stage=integration/t260904-02/lib_gate.py:137（SANDBAR_STAGE_BATCH 在场 ⇒ 不起台、向批台申请 ns）"
-  },
-  {
-    "entry": "t260905-02-worker-lifecycle",
-    "pool": "engine",
-    "project_pattern": "t26090502-*",
-    "reason": "被测对象=worker 起/退生命周期，且断言**拆台后零残留容器与 temporal 端口已释放**（三处读 down 回执 residue + 端口面）。批台恰是「不拆的共享台」：批模式下既无自有台可拆、批台端口也不会释放 ⇒ 断言与被测形态互斥，须自持台。",
-    "evidence": "261001 实测：--only t260904-02-worker-fingerprint-gate,t260905-02-worker-lifecycle → 本条目走批模式后 FAIL「舞台 down 后零残留容器（实得 None）／temporal 端口已释放（仍被占用）」；单独跑（旧缝面会 do_down 批台）才「过」。"
-  },
-  {
-    "entry": "t260905-02-ticket-worker-watch-exit",
-    "pool": "engine",
-    "project_pattern": "t26090502-*",
-    "reason": "同族：断言语义落在「自有台已拆」上（residue + 端口释放），批模式无此事实可测。",
-    "evidence": "同 t260905-02-worker-lifecycle（同目录同断言族，grep residue/端口 命中 3 处）；261001 加入本清单，切片实测 8 条 0 环境红。"
-  },
-  {
-    "entry": "t260905-02-console-duplicate-guard",
-    "pool": "engine",
-    "project_pattern": "t26090502-*",
-    "reason": "同族：断言语义落在「自有台已拆」上（residue + 端口释放），批模式无此事实可测。",
-    "evidence": "同 t260905-02-worker-lifecycle（同目录同断言族）；261001 加入本清单，切片实测本条目 PASS。"
-  },
-  {
-    "entry": "t261005-13-receipt-port-contract",
-    "pool": "ro",
-    "project_pattern": "sc-t26100513-*",
-    "reason": "被测对象=receipt-port 契约本体：场景自驱 stage_docker CLI、自有临时工程名（sc_t26100513_receipt_port_contract.py 头注与 :91 直呼实证）——批台复用会换掉被测对象本身，与清单既有三条 engine 池 stage-docker 契约条目同族。注册池=ro，按清点判据「候选 ⊆ engine/exclusive ∪ 例外清单」在此显式登记豁免。",
-    "evidence": "integration/t261005-13/sc_t26100513_receipt_port_contract.py:8,91 自驱 stage_docker.py CLI；261005 登记（t261005-10 arbitrate gen8 首入，gen9 复核；本条为 implement gen7 确定性重加——worker squash 曾两次丢弃该条目，KI 候选 F7）"
-  },
-  {
-    "entry": "t261006-03-engine-path-mount-contract",
-    "pool": "ro",
-    "project_pattern": "sc-t26100603-*",
-    "reason": "被测对象=engine-path mount 契约本体（t261006-03）：场景自驱 stage_docker CLI / 自有临时工程名，批台复用会换掉被测对象——与清单既有 stage-docker 契约条目同族。注册池=ro，按清点判据在此显式登记豁免。",
-    "evidence": "integration/t261006-03/sc_engine_path_mount_contract.py 直呼 stage_docker CLI（grep 实证）；t261005-10 arbitrate gen17 首入；F7 丢失史：23ca6a0 merge 解析取 main 侧版本第三次丢弃，implement gen20 确定性重加。"
-  },
-  {
-    "entry": "t261006-03-engine-path-capture-journey",
-    "pool": "browser",
-    "project_pattern": "sc-t26100603-*",
-    "reason": "被测对象=engine 自有采集链全旅程（run_capture_stage services=flat -> capture-lane --stage-json，t261006-03）：自带工程名起拆台，批台不在位/复用都会换掉被测链。注册池=browser，同族豁免。",
-    "evidence": "integration/t261006-03/sc_engine_path_capture_journey.py 自驱采集链（场景头注与 run 体）；F7 丢失史同上，gen20 重加。"
-  },
-  {
-    "entry": "t261008-46-supply-working-peer-ceiling",
-    "pool": "ro",
-    "project_pattern": "t26100846-*",
-    "reason": "被测对象=供给争用等待的两层上界契约本体（t261008-46）：场景自驱 stage_docker CLI、自有临时工程名 t26100846-ceiling（:86-88 直呼实证）+tmp 隔离锁根——批台复用会换掉被测的锁根/工程名，与清单既有 ro 池 stage-docker 契约条目同族。注册池=ro，按清点判据「候选 ⊆ engine/exclusive ∪ 例外清单」在此显式登记豁免。",
-    "evidence": "integration/t261008-46/sc_supply_working_peer_ceiling.py:7,86-88 自驱 stage_docker.py ensure、PROJECT='t26100846-ceiling'（grep 实证）；t261009-10 arbitrate gen0-gen4 连续五轮确认 settle 确定性丢弃本条目，implement gen2 确定性重加（KI 候选：settle 枚举丢 integration/ 写集面文件）。"
-  },
-  {
-    "entry": "t261008-45-executor-sandbox-worker-start",
-    "pool": "ro",
-    "project_pattern": "sandbar-t261008-45",
-    "reason": "被测对象=真 worker 进程对 workflow 沙箱的接纳面（t261008-45）：场景对 docker 台 require_stage 起 worker.py，断言沙箱不再拒收 ExecutorDeliveryWorkflow（第二读进程 describe_task_queue 见 poller、日志无 RestrictedWorkflowAccessError）；消费的是台子本身而非台机制，批台复用不触契约。",
-    "evidence": "integration/t261008-45/sc_executor_workflow_sandbox_validates.py require_stage + worker.py 子进程（grep 实证）；t260921-06 sentinel 本轮点名缺声明（arbitration gen5 修复被 settler 丢失，本轮重申报）"
-  },
-  {
     "entry": "t260915-20-project-identity-realchain",
     "pool": "exclusive",
     "project_pattern": "insa-*",
@@ -222,5 +159,54 @@
     "project_pattern": "verdict-cli-*",
     "reason": "同上：裁定旅程只要求 Temporal 前端，process bench 自供给，不起批台。",
     "evidence": "integration/t260916-22/sc_inspection_verdict_cli.py main() 首步 lib_proc_bench.ensure(modules=(lib, lib_inspection))；无 docker 台时实测跑满全部子用例（余一红属 KI-337 产品面，非环境）"
+  },
+  {
+    "entry": "t260917-09-tests-false-escalation-guard",
+    "pool": "engine",
+    "project_pattern": "none-zero-boot-*",
+    "reason": "零台行：t260917-09 三相共用进程台（integration/process_bench.py 纯进程 Temporal），不再消费 docker 台也不再自建台——列册即宣告非批消费者（host order 261022）。",
+    "evidence": "integration/t260917-09/tests/sc_tests_false_escalation_guard.py 只 import lib_bench_stage（process_bench），零 require_stage/stage_docker 调用"
+  },
+  {
+    "entry": "t260921-06-batch-manifest-contract",
+    "pool": "ro",
+    "project_pattern": "none-zero-boot-*",
+    "reason": "zero-boot sentinel：本清单的静态契约看守（离线 ro 哨兵）——源码内嵌清点判据正则字面量导致一级判据自匹配，声明豁免（其本身零起台零消费）。",
+    "evidence": "integration/t260921-06/sc_batch_manifest_contract.py 自身含 CONSUMER_PAT 字面量（自匹配），cmd 直呼本场景脚本零起台"
+  },
+  {
+    "entry": "t260924-04-project-template-journey",
+    "pool": "main",
+    "project_pattern": "t26092404-*",
+    "reason": "被测对象=项目外置模板的建票全链＋续跑＋拒收面（真 Temporal＋真 worker＋桩大脑的 L3 旅程）：场景自持工程名 t260924-04-<pid> 调 require_stage（lib_gate 单点）——批模式下该调用走批台 ns-acquire 申请本场景命名空间（t260921-06 批级共享，零容器开销），批台不在位=exit 2 环境红（绝不静默回落）。故它是**批台消费者候选**，但注册池=main（第 4 元 serial=无池标注的串行条目，pool_of 归 main）：按清点判据「候选 ⊆ engine/exclusive ∪ 例外清单」在此显式登记豁免（不擅自改他人条目的池=不改变闸的跑法范围），工程名前缀沿用清单既有约定。",
+    "evidence": "integration/t260924-04/sc_project_template_ticket_journey.py:203 stage_mod, stage = require_stage(fail, \"t260924-04-%d\" % os.getpid(), \"t260924-04\")；require_stage=integration/t260904-02/lib_gate.py:137（SANDBAR_STAGE_BATCH 在场 ⇒ 不起台、向批台申请 ns）"
+  },
+  {
+    "entry": "t261005-13-receipt-port-contract",
+    "pool": "ro",
+    "project_pattern": "sc-t26100513-*",
+    "reason": "被测对象=receipt-port 契约本体：场景自驱 stage_docker CLI、自有临时工程名（sc_t26100513_receipt_port_contract.py 头注与 :91 直呼实证）——批台复用会换掉被测对象本身，与清单既有三条 engine 池 stage-docker 契约条目同族。注册池=ro，按清点判据「候选 ⊆ engine/exclusive ∪ 例外清单」在此显式登记豁免。",
+    "evidence": "integration/t261005-13/sc_t26100513_receipt_port_contract.py:8,91 自驱 stage_docker.py CLI；261005 登记（t261005-10 arbitrate gen8 首入，gen9 复核；本条为 implement gen7 确定性重加——worker squash 曾两次丢弃该条目，KI 候选 F7）"
+  },
+  {
+    "entry": "t261006-03-engine-path-capture-journey",
+    "pool": "browser",
+    "project_pattern": "sc-t26100603-*",
+    "reason": "被测对象=engine 自有采集链全旅程（run_capture_stage services=flat -> capture-lane --stage-json，t261006-03）：自带工程名起拆台，批台不在位/复用都会换掉被测链。注册池=browser，同族豁免。",
+    "evidence": "integration/t261006-03/sc_engine_path_capture_journey.py 自驱采集链（场景头注与 run 体）；F7 丢失史同上，gen20 重加。"
+  },
+  {
+    "entry": "t261006-03-engine-path-mount-contract",
+    "pool": "ro",
+    "project_pattern": "sc-t26100603-*",
+    "reason": "被测对象=engine-path mount 契约本体（t261006-03）：场景自驱 stage_docker CLI / 自有临时工程名，批台复用会换掉被测对象——与清单既有 stage-docker 契约条目同族。注册池=ro，按清点判据在此显式登记豁免。",
+    "evidence": "integration/t261006-03/sc_engine_path_mount_contract.py 直呼 stage_docker CLI（grep 实证）；t261005-10 arbitrate gen17 首入；F7 丢失史：23ca6a0 merge 解析取 main 侧版本第三次丢弃，implement gen20 确定性重加。"
+  },
+  {
+    "entry": "t261008-46-supply-working-peer-ceiling",
+    "pool": "ro",
+    "project_pattern": "t26100846-*",
+    "reason": "被测对象=供给争用等待的两层上界契约本体（t261008-46）：场景自驱 stage_docker CLI、自有临时工程名 t26100846-ceiling（:86-88 直呼实证）+tmp 隔离锁根——批台复用会换掉被测的锁根/工程名，与清单既有 ro 池 stage-docker 契约条目同族。注册池=ro，按清点判据「候选 ⊆ engine/exclusive ∪ 例外清单」在此显式登记豁免。",
+    "evidence": "integration/t261008-46/sc_supply_working_peer_ceiling.py:7,86-88 自驱 stage_docker.py ensure、PROJECT='t26100846-ceiling'（grep 实证）；t261009-10 arbitrate gen0-gen4 连续五轮确认 settle 确定性丢弃本条目，implement gen2 确定性重加（KI 候选：settle 枚举丢 integration/ 写集面文件）。"
   }
 ]

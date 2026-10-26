@@ -11,9 +11,11 @@ the worker rejected exactly one workflow class at materialization time
 sandbox re-imported the workflow's module). The contract guarded here:
 
   A. REAL WORKER START (the ticket's proof, reader-side evidence): a real
-     worker.py process, started as a subprocess against a docker stage
-     Temporal, comes up polling the engine task queue — a SECOND process
-     (the reader) connects to the same stage and sees >=1 poller on that task
+     worker.py process, started as a subprocess against the process bench
+     (integration/lib_proc_bench.ensure, a plain-process Temporal server; the
+     bench owns the process and reaps it at exit), comes up polling the engine
+     task queue — a SECOND process
+     (the reader) connects to the same endpoint and sees >=1 poller on that task
      queue via describe_task_queue. The worker log must NOT contain a
      RestrictedWorkflowAccessError. The worker is then terminated with SIGTERM
      and is reaped (no orphan).
@@ -31,7 +33,7 @@ assumptions. A contract-preserving refactor of how the path constants are
 made lazy must not break this scenario; a regression that makes the sandbox
 reject any registered workflow must.
 
-Three-state: docker/stage unavailable = ENV_FAIL exit 2 (honest red, never
+Three-state: the bench refusing to boot = ENV_FAIL exit 2 (honest red, never
 SKIP). Pre-fix tree expected red (TDD signal); green at the integration gate.
 Stdlib + engine venv (temporalio) only; never touches 3099/7233/8233.
 """
@@ -179,10 +181,10 @@ def poller_count(target, namespace, task_queue):
     return int(data["pollers"])
 
 
-def case_a_real_worker_start(stage, fail):
+def case_a_real_worker_start(endpoint, fail):
     env = dict(os.environ)
-    env["SANDBAR_TARGET_HOST"] = "127.0.0.1:%d" % stage["ports"]["temporal"]
-    env["SANDBAR_NAMESPACE"] = stage["namespace"]
+    env["SANDBAR_TARGET_HOST"] = "127.0.0.1:%d" % endpoint["port"]
+    env["SANDBAR_NAMESPACE"] = endpoint["namespace"]
     env["PYTHONUNBUFFERED"] = "1"
     tq_code = "import sys; sys.path.insert(0, %r)\nimport shared\nprint(shared.TASK_QUEUE)\n" % str(ENGINE)
     p = subprocess.run(engine_python() + ["-c", tq_code], capture_output=True, text=True, timeout=60, cwd=str(ENGINE))
@@ -202,7 +204,7 @@ def case_a_real_worker_start(stage, fail):
             check(m is not None and "polling queues" in m.group(0),
                   "A1 real worker process comes up polling (no sandbox rejection)",
                   text[-800:] if m is None else "")
-            n = poller_count(env["SANDBAR_TARGET_HOST"], stage["namespace"], task_queue)
+            n = poller_count(env["SANDBAR_TARGET_HOST"], endpoint["namespace"], task_queue)
             check(n >= 1, "A2 reader-side: engine task queue has pollers (count=%d)" % n,
                   "describe_task_queue saw 0 pollers")
             check("RestrictedWorkflowAccessError" not in text,
@@ -220,29 +222,30 @@ def case_a_real_worker_start(stage, fail):
 
 
 def main():
-    class _StageFail:
-        """lib_gate.require_stage expects a gate object with .bail(msg, code);
+    class _Gate:
+        """The endpoint supply expects a gate object with .bail(msg, code);
         env codes (2) pass through as the three-state ENV_FAIL."""
         def bail(self, msg, code=1):
             print("FAIL  %s" % msg)
             sys.exit(code)
 
-    stage_mod = stage_state = None
     try:
         case_b_sandbox_family()
-        from lib_gate import require_stage, stage_down  # noqa: E402
-        stage_mod, stage_state = require_stage(_StageFail(), "sandbar-t261008-45", "t26100845")
-        case_a_real_worker_start(stage_state, _StageFail())
+        # Process-bench supply (host order 261026, batch 1): the bench owns the
+        # Temporal process and reaps it at interpreter exit (its own atexit
+        # handle) — no docker stage, no orphan process. A bench boot refusal
+        # stays the three-state ENV_FAIL exit 2, never a silent skip.
+        import lib_proc_bench  # noqa: E402
+        endpoint = lib_proc_bench.ensure(namespace="default")
+        case_a_real_worker_start(endpoint, _Gate())
         print("ALL PASS")
     except Fail as e:
         print("FAIL: %s" % e)
         sys.exit(1)
-    finally:
-        if stage_mod is not None:
-            try:
-                stage_down(stage_mod, stage_state)
-            except Exception as e:
-                print("WARN: stage teardown incomplete: %s" % e)
+    except RuntimeError as e:
+        print("ENV_FAIL: process bench boot refused (worker-start journey needs a live "
+              "Temporal endpoint): %s" % str(e)[:300])
+        sys.exit(2)
 
 
 if __name__ == "__main__":
