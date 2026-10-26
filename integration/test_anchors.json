@@ -5883,6 +5883,10 @@
     "integration/t261026-08/sc_t261026_08_request_sweep_ticket_channel.py": {
       "anchor": "contract",
       "note": "t261026-08: the sweep reads real ticket status - the REAL admin.py list channel (the live face t261026-06's stub seam cannot prove), the fail-closed truth table, and the user-perceivable sweep act on a real temp ledger (skip-by-name when the channel is dead, never a silent close)"
+    },
+    "integration/t261026-23/sc_t26102623_lane_build_freshness_stamp.mjs": {
+      "anchor": "behaviour",
+      "note": "t261026-23: the lane build-freshness gate as the user's capture journey meets it - a stamped tree with inverted (checkout-order) mtimes is FRESH by content, a changed/added/removed watched source is STALE by name (rule=stamp-mismatch), any malformed stamp (truncated JSON, wrong version/algorithm, sources not an object, non-hex hash) refuses fail-closed (rule=stamp-malformed), and a stamp-less tree keeps the 2 s mtime fallback named rule=mtime-fallback; the capture-baseline family predicate must agree."
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

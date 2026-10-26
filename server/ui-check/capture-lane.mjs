@@ -33,6 +33,7 @@
 //   重复拆）。
 
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync,
   realpathSync, rmSync, statSync,
@@ -87,17 +88,102 @@ function listFilesRecursive(dir) {
   return out;
 }
 
-/** 泳道 build 前置校验（方案 0.4 拒跑语义）。返回 null=可跑，否则为人话拒因。 */
+// 泳道 build 前置校验盯的源码集（与 build-client.sh 落 stamp 的集合必须一致：
+// 集合漂移=恒 mismatch 恒拒跑，改任一侧都要同步另一侧）。
+const WATCHED_SRC_DIRS = ["src/client", "src/host", "src/shared"];
+// stamp 落点=workbench 包根（.build-stamp.json），不放 lib/：lib 是 git 观测目录，
+// ensureLaneBuild 的字节一致守卫用 git status --porcelain 判「重建漂移」，未跟踪
+// 文件也会被当漂移（t261026-23 arbitrate gen2 实锤）。包根文件不进守卫观测面。
+const STAMP_RELPATH = path.join(".build-stamp.json");
+const ARTIFACT_RELPATHS = ["lib/client.cjs", "lib/client.js"];
+const HEX64 = /^[0-9a-f]{64}$/;
+
+function sha256File(p) {
+  return createHash("sha256").update(readFileSync(p)).digest("hex");
+}
+
+/** 内容 stamp（t261026-23）：freshness 按内容判，不按时钟。checkout 按树序写文件，
+ * 同批检出的 src mtime 晚于 lib（t261026 实雷：byte 级零 diff 仍被 mtime 规则误判
+ * 陈旧→拒跑）。stamp 由 build-client.sh 成功路径落 .build-stamp.json（workbench 包根）：sources=
+ * 盯防源码集逐文件 sha256，artifacts=产物逐字节 sha256（手改 lib 不重建也拦）。
+ * 这里重算同一集合与 stamp 逐项比对。返回 null=fresh，否则为 {rule, detail} 拒因。 */
+function stampCheckReason(laneWbDir) {
+  const stampPath = path.join(laneWbDir, STAMP_RELPATH);
+  let stamp;
+  try {
+    stamp = JSON.parse(readFileSync(stampPath, "utf8"));
+  } catch {
+    return { rule: "stamp-malformed", detail: `${STAMP_RELPATH} 缺失字段/不可读/非 JSON` };
+  }
+  if (!stamp || typeof stamp !== "object" || Array.isArray(stamp) ||
+      stamp.version !== 1 || stamp.algorithm !== "sha256" ||
+      !stamp.sources || typeof stamp.sources !== "object" || Array.isArray(stamp.sources) ||
+      !stamp.artifacts || typeof stamp.artifacts !== "object" || Array.isArray(stamp.artifacts)) {
+    return { rule: "stamp-malformed", detail: `${STAMP_RELPATH} 结构不符（version/algorithm/sources/artifacts）` };
+  }
+  for (const [k, v] of Object.entries({ ...stamp.sources, ...stamp.artifacts })) {
+    if (typeof v !== "string" || !HEX64.test(v)) {
+      return { rule: "stamp-malformed", detail: `${STAMP_RELPATH} 哈希值非 sha256 hex：${k}` };
+    }
+  }
+  // 产物逐字节比对：手改 lib 冒充现场=证据造假，内容不匹配即拦（mtime 规则追不到）。
+  for (const rel of ARTIFACT_RELPATHS) {
+    const p = path.join(laneWbDir, rel);
+    if (!existsSync(p)) {
+      return { rule: "stamp-mismatch", detail: `${rel} 不在树上（stamp 声明其存在）` };
+    }
+    const actual = sha256File(p);
+    if (stamp.artifacts[rel] !== actual) {
+      return { rule: "stamp-mismatch", detail: `${rel} 内容与 stamp 不符（期望 ${stamp.artifacts[rel]?.slice(0, 12)}…，实际 ${actual.slice(0, 12)}…）` };
+    }
+  }
+  // 源码集重算比对：键集必须完全一致（树里多的/少的都是漂移），值不同=真陈旧。
+  const actualSources = {};
+  for (const sub of WATCHED_SRC_DIRS) {
+    const dir = path.join(laneWbDir, sub);
+    if (!existsSync(dir)) continue; // 泳道没有的子目录不算陈旧证据
+    for (const f of listFilesRecursive(dir)) {
+      actualSources[path.relative(laneWbDir, f).split(path.sep).join("/")] = sha256File(f);
+    }
+  }
+  for (const rel of Object.keys(stamp.sources)) {
+    if (!(rel in actualSources)) {
+      return { rule: "stamp-mismatch", detail: `盯防源码 ${rel} 不在树上（stamp 声明其存在）` };
+    }
+    if (stamp.sources[rel] !== actualSources[rel]) {
+      return { rule: "stamp-mismatch", detail: `盯防源码 ${rel} 内容与 stamp 不符（真陈旧，重建 bundle）` };
+    }
+  }
+  for (const rel of Object.keys(actualSources)) {
+    if (!(rel in stamp.sources)) {
+      return { rule: "stamp-mismatch", detail: `盯防源码 ${rel} 在树上有而 stamp 没有（stamp 旧于源码，重建）` };
+    }
+  }
+  return null;
+}
+
+/** 泳道 build 前置校验（方案 0.4 拒跑语义）。返回 null=可跑，否则为人话拒因。
+ * 规则序（t261026-23）：先内容 stamp（有 stamp 的树按内容判，不看时钟），
+ * 无 stamp 才回落 2s mtime 规则（老树兜底）。拒因一律点名命中哪条规则。 */
 export function laneBuildRejectReason(laneWbDir) {
   const lib = path.join(laneWbDir, "lib", "client.js");
   if (!existsSync(lib)) {
     return `泳道 build 缺失：${lib} 不存在。先在泳道构建：` +
-      `cd <lane>/server/plugins/workbench && npx -y tsdown@0.22.2 -c tsdown.config.ts`;
+      `cd <lane>/server/plugins/workbench && bash server/plugins/workbench/build-client.sh`;
+  }
+  if (existsSync(path.join(laneWbDir, STAMP_RELPATH))) {
+    const reason = stampCheckReason(laneWbDir);
+    if (reason) {
+      return `泳道 build 陈旧（rule=${reason.rule}）：${reason.detail}。` +
+        `拍陈旧/被改 build 的截图=证据造假，先在泳道重建 bundle 再跑：` +
+        `cd <lane>/server/plugins/workbench && bash build-client.sh`;
+    }
+    return null;
   }
   const buildM = statSync(lib).mtimeMs;
   let newestSrc = 0;
   let newestPath = "";
-  for (const sub of ["src/client", "src/host", "src/shared"]) {
+  for (const sub of WATCHED_SRC_DIRS) {
     const dir = path.join(laneWbDir, sub);
     if (!existsSync(dir)) continue; // 泳道没有的子目录不算陈旧证据
     for (const f of listFilesRecursive(dir)) {
@@ -107,12 +193,14 @@ export function laneBuildRejectReason(laneWbDir) {
   }
   // 容差 2s：git checkout 按树序写文件，同批检出的 lib/src mtime 相差毫秒级
   // （t260903-12 两建实雷：18ms 写序差被误判陈旧→拒跑）。分钟级陈旧仍必拦
-  // （防伪语义不变：拍陈旧 build 截图=证据造假）。
+  // （防伪语义不变：拍陈旧 build 截图=证据造假）。仅无 stamp 的树走本规则。
   const MTIME_TOL_MS = 2000;
   if (newestSrc > buildM + MTIME_TOL_MS) {
-    return `泳道 build 陈旧：lib/client.js（${new Date(buildM).toISOString()}）早于源码 ` +
+    return `泳道 build 陈旧（rule=mtime-fallback，树无内容 stamp）：lib/client.js` +
+      `（${new Date(buildM).toISOString()}）早于源码 ` +
       `${newestPath}（${new Date(newestSrc).toISOString()}，容差 ${MTIME_TOL_MS}ms）。` +
-      `拍陈旧 build 的截图=证据造假，先在泳道重建 bundle 再跑。`;
+      `拍陈旧 build 的截图=证据造假，先在泳道重建 bundle 再跑：` +
+      `cd <lane>/server/plugins/workbench && bash build-client.sh`;
   }
   return null;
 }

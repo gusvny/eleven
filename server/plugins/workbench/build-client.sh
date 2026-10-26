@@ -47,3 +47,32 @@ fi
 
 echo "[build-client] 产物 sha256："
 shasum -a 256 lib/client.cjs lib/client.js
+
+# 内容 stamp（t261026-23）：freshness 按内容判，不按时钟。泳道 capture-lane 的
+# mtime 陈旧闸有 checkout 写序误报（同 commit 检出 src 晚于 lib，byte 级零 diff
+# 仍被拒跑）。成功路径在此落包根 .build-stamp.json（不放 lib/——lib 是 ensureLaneBuild
+# 字节守卫的 git 观测目录，未跟踪文件会被误判漂移，arbitrate gen2）：sources=闸盯防源码集
+# （src/client、src/host、src/shared，与 capture-lane.mjs 的 WATCHED_SRC_DIRS
+# 必须同集——改任一侧同步另一侧，否则恒 mismatch 恒拒跑）逐文件 sha256，
+# artifacts=产物逐字节 sha256（手改 lib 不重建也拦）。路径 NUL 分隔处理，文件名
+# 带空格不炸。失败路径不写 stamp（旧产物已拆，缺 stamp 由闸按 mtime 兜底拒跑）。
+stamp=.build-stamp.json
+{
+  printf '{"version":1,"algorithm":"sha256","sources":{'
+  first=1
+  while IFS= read -r -d '' f; do
+    rel=$f
+    h=$(shasum -a 256 "$f" | awk '{print $1}')
+    [ "$first" -eq 1 ] || printf ','
+    printf '"%s":"%s"' "$rel" "$h"
+    first=0
+  done < <(
+    for d in src/client src/host src/shared; do
+      [ -d "$d" ] && find "$d" -type f -print0
+    done | sort -z
+  )
+  printf '},"artifacts":{"lib/client.cjs":"%s","lib/client.js":"%s"}}\n' \
+    "$(shasum -a 256 lib/client.cjs | awk '{print $1}')" \
+    "$(shasum -a 256 lib/client.js | awk '{print $1}')"
+} > "$stamp"
+echo "[build-client] 内容 stamp 已落 $stamp"
