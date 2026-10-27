@@ -226,7 +226,7 @@ if [ -z "${SANDBAR_LINE_ROUND_RUNNER+x}" ]; then
     echo "  line-round runner：已设 ${SANDBAR_LINE_ROUND_RUNNER}"
   else
     export SANDBAR_LINE_ROUND_RUNNER="python3 $LINE_ROUND_RUNNER"
-    echo "⚠️  引擎 venv 缺失（$LINE_ROUND_PY）——回落系统 python3；browser/池子场景会 ENV_FAIL，不是场景坏" >&2
+    echo "⚠️  引擎 venv 缺失（${LINE_ROUND_PY}）——回落系统 python3；browser/池子场景会 ENV_FAIL，不是场景坏" >&2
     echo "  line-round runner：已设 ${SANDBAR_LINE_ROUND_RUNNER}（回落解释器）"
   fi
 else

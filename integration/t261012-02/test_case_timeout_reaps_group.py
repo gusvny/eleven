@@ -26,9 +26,10 @@ zero docker/Temporal/port/console, never touches 3099):
      contended stage wait's NAMED red converges inside the case budget;
 - F  spawn-face OSError still lands a named verdict and never leaks fds;
 - G  source lock: the case spawn carries start_new_session=True with
-     stdout/stderr on files (never capture_output pipes), and the stage
-     hold leg keeps DEVNULL stdout + own session (nothing a case spawns
-     inherits the runner's faces).
+     stdout/stderr on files (never capture_output pipes), the wait rides the
+     entry's OWN declared budget (min with CMD_TIMEOUT, host order 261022 —
+     never the bare per-round constant), and the stage hold leg keeps DEVNULL
+     stdout + own session (nothing a case spawns inherits the runner's faces).
 """
 import importlib.util
 import inspect
@@ -201,9 +202,19 @@ class TimeoutReapsGroup(unittest.TestCase):
         self.assertNotIn("capture_output", src,
                          "case output must never ride a pipe the runner waits on")
         self.assertIn("os.killpg", src)
-        self.assertIn("proc.wait(timeout=CMD_TIMEOUT)", src,
+        # Host order 261022 (entry_budget_s): the wait rides THIS entry's own
+        # declared budget, min() with the CMD_TIMEOUT ceiling — the bare
+        # constant wait is the retired per-round shape. `wait()` stays the honest
+        # primitive once no pipes exist (review comment 1).
+        self.assertIn("budget_s = entry_budget_s(entry)", src)
+        self.assertIn("wait_s = min(budget_s, CMD_TIMEOUT) if budget_s else CMD_TIMEOUT",
+                      src)
+        self.assertIn("proc.wait(timeout=wait_s)", src,
                       "wait() is the honest primitive once no pipes exist "
                       "(review comment 1)")
+        self.assertNotIn("proc.wait(timeout=CMD_TIMEOUT)", src,
+                         "the per-round constant wait is retired: a declared "
+                         "budget must shorten the wait, never be bypassed")
         hold_src = (INTEG / "stage_docker.py").read_text(encoding="utf-8")
         self.assertIn("stdout=subprocess.DEVNULL", hold_src)
         self.assertIn("start_new_session=True", hold_src,

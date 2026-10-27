@@ -5,13 +5,20 @@ Covers the create_plan gen1 acceptance mapping:
   - declaration: version/malformed loud errors, several-repo shape, (repo,
     branch) uniqueness across lines (DuplicateBranchError, goal 19/7), extra
     set read from the declaration only (goal 5, spec d);
-  - landing: happy path owns one merge commit per landing via the settle core
-    (post-amend message asserted), linear history, lock serialization under a
-    two-thread race, conflict bounce-back with no record, one-landing-per-ticket
-    refusal, already_settled named refusal (never amends a pre-existing commit),
-    partial-failure faces with no record, append-only strict read, ULID shape,
-    malformed inputs fail closed;
-  - coexistence (rule 13): the running flow never imports this module.
+  - landing: happy path owns ONE squash commit per landing via the settle core
+    (host order 261011 / t261011-24: the line reads like main — no merge commit,
+    no lane step history; the landing message names the ticket, the line, the
+    repo and the revision), linear single-parent history, lock serialization
+    under a two-thread race, conflict bounce-back with no record,
+    one-landing-per-ticket refusal, already_settled named refusal (never amends
+    a pre-existing commit), partial-failure faces with no record, append-only
+    strict read, ULID shape, malformed inputs fail closed;
+  - coexistence in its LANDED form: the running flow reaches the line through
+    this one module (module edge declared by t261009-46), the edge stays one-way
+    (no import cycle back into dev_lane), and the landing commit message has
+    exactly one writer in the engine. The slice-1 lock ("nothing on the running
+    flow imports develop_line") expired when the line went live — see the note
+    on the coexistence case below.
 """
 import json
 import subprocess
@@ -197,17 +204,29 @@ def test_landing_happy_path(store, line_and_repos):
                              "revision": _git("rev-parse", "develop", cwd=repo).stdout.strip()}]
     # `base` is retired (t261009-28): what the landing sat on is derived
     assert "base" not in rec and "revisions" not in rec
-    # exactly one merge commit; its message is the landing message, not the
-    # settle core's conflict-resolution message
-    log = _git("log", "--merges", "--format=%s", "develop", cwd=repo).stdout.strip().splitlines()
-    assert log == ["landing t1 onto line buffer (r): rev %s" % sha[:12]]
-    # linear: every landing is a merge whose parents are the line tip and the lane
-    parents = _git("log", "--merges", "--format=%P", "develop", cwd=repo).stdout.strip()
-    assert len(parents.split()) == 2
+    # exactly ONE commit per ticket (host order 261011, t261011-24): the landing
+    # is the SQUASH commit, never a merge commit — the line reads like main, with
+    # no lane step history. Its message names the ticket, the line, the repo and
+    # the revision, and it is the landing message (not the settle core's
+    # conflict-resolution message).
+    log = _git("log", "--format=%s", "develop", cwd=repo).stdout.strip().splitlines()
+    assert log == ["landing t1 onto line buffer (r): rev %s" % sha[:12], "base"]
+    # linear and merge-free: the landing commit has exactly one parent (the
+    # pre-landing line tip), so nothing merged the lane history into the line
+    parents = _git("log", "-1", "--format=%P", "develop", cwd=repo).stdout.split()
+    assert len(parents) == 1
+    assert _git("log", "--merges", "--format=%s", "develop", cwd=repo).stdout.strip() == ""
     # the branch was seeded at main and reported
     assert res.seeded_branches == ["develop"]
-    # lane branch tip is an ancestor of the new line tip (nothing lost)
-    _git("merge-base", "--is-ancestor", sha, "develop", cwd=repo)
+    # nothing lost after a SQUASH landing: the lane tip is deliberately NOT an
+    # ancestor of the line (develop_line's own note — a squash rewrites the
+    # content as one new commit), so the "nothing lost" face is asserted on the
+    # CONTENT: what the lane changed is on the line verbatim, and the lane tip's
+    # own history stayed off the line (a merge landing would make it an ancestor
+    # — that is the leg that reds if the squash is reverted).
+    assert _git("show", "develop:feat.txt", cwd=repo).stdout == "one\n"
+    assert _git("merge-base", "--is-ancestor", sha, "develop", cwd=repo,
+                check=False).returncode != 0
 
 
 def test_landing_serialized_under_race(store, line_and_repos):
@@ -246,8 +265,13 @@ def test_landing_serialized_under_race(store, line_and_repos):
     assert len(rows) == 2
     ats = [r["at"] for r in rows]
     assert ats == sorted(ats)  # strictly ordered appends
-    merges = _git("log", "--merges", "--format=%s", "develop", cwd=repo).stdout.strip().splitlines()
-    assert len(merges) == 2  # two landings, no interleaving
+    # one squash commit per landing: two landings = two landing commits on the
+    # line, each naming its OWN ticket, and no merge commit interleaving them
+    subjects = _git("log", "--format=%s", "develop", cwd=repo).stdout.strip().splitlines()
+    landings = [s for s in subjects if s.startswith("landing ")]
+    assert len(landings) == 2, subjects
+    assert sorted(s.split()[1] for s in landings) == ["t-race-0", "t-race-1"]
+    assert _git("log", "--merges", "--format=%s", "develop", cwd=repo).stdout.strip() == ""
 
 
 def test_landing_conflict_bounces_with_no_record(store, line_and_repos):
@@ -382,12 +406,38 @@ def test_unwritable_store_dir_fails_closed(store, line_and_repos):
 
 # ---------------------------------------------------------------- coexistence
 
-def test_running_flow_never_imports_develop_line():
-    """Rule 13: today's lane version must be byte-for-byte unaffected — nothing
-    on the running flow path imports the new module."""
-    for name in ("dev_lane.py", "workflows_v2.py", "workflows.py"):
-        src = (POC / name).read_text(encoding="utf-8")
-        assert "develop_line" not in src, "%s must not import develop_line" % name
+def test_running_flow_reaches_the_line_through_one_module():
+    """Coexistence in its LANDED form.
+
+    The slice-1 lock read "nothing on the running flow path imports the new
+    module" while the line was still being built beside the flow (ticket
+    t261009-18, design goal 13: the new flow ships as a version a ticket
+    chooses). That phase ENDED: t261009-46 declared the module edge in dev_lane
+    (``import develop_line``, "inert: every behaviour sits behind
+    is_develop_buffer_ticket") and t261019-02 wired the landing close-out to it,
+    so the flow DOES import this module today — by design, and every real
+    landing commit on the line is that writer's output.
+
+    What must still hold, and what this case now pins (each leg red if the rule
+    is reverted):
+      - the edge exists: an orphan module means the running flow bypassed the
+        line and lands some other way;
+      - the edge stays ONE-WAY at module level (develop_line's own docstring):
+        a cycle back into dev_lane breaks the engine's import order;
+      - the landing message has exactly ONE writer in the engine: a second
+        writer is a second landing implementation, the drift class this battery
+        exists for.
+    """
+    edge = (POC / "dev_lane.py").read_text(encoding="utf-8")
+    assert "import develop_line" in edge, \
+        "the running flow must reach the line through this module"
+    line_src = (POC / "develop_line.py").read_text(encoding="utf-8")
+    assert "import dev_lane" not in line_src and "from dev_lane" not in line_src, \
+        "the module edge is one-way (develop_line -> settle core), never a cycle"
+    writers = sorted(p.name for p in POC.glob("*.py")
+                     if "onto line %s (" in p.read_text(encoding="utf-8"))
+    assert writers == ["develop_line.py"], \
+        "exactly one landing-commit writer, got %r" % (writers,)
 
 
 def test_shared_develop_dir_guard():
