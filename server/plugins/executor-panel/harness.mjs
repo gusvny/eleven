@@ -38,8 +38,30 @@ export async function startPluginHarness({ port = 0, panelDir, watchdogDir, exec
   if (executorActionsDir !== undefined) setEnv('SANDBAR_EXECUTOR_ACTIONS_DIR', executorActionsDir)
 
   const mod = await import('./node.ts')
+  // t261028-18: the stub honours the registration KIND, like the production
+  // webServer does. The old stub keyed routes by path only and matched them
+  // exactly, so a `kind:'prefix'` route (the /vendor echarts route) was
+  // unreachable here while it answered 200 in production: the harness could not
+  // see the very route the host reported healthy. Exact wins; otherwise the
+  // longest matching prefix serves the request.
   const routes = new Map()
-  const ws = { register: (o) => { routes.set(o.path, o.handler); return () => routes.delete(o.path) } }
+  const ws = {
+    register: (o) => {
+      const key = String(o.kind || 'exact') + '\u0000' + o.path
+      routes.set(key, o)
+      return () => routes.delete(key)
+    },
+  }
+  const handlerFor = (pathname) => {
+    const exact = 'exact\u0000' + pathname
+    if (routes.has(exact)) return routes.get(exact).handler
+    let best = null
+    for (const r of routes.values()) {
+      if (r.kind !== 'prefix' || !pathname.startsWith(r.path)) continue
+      if (!best || r.path.length > best.path.length) best = r
+    }
+    return best ? best.handler : null
+  }
   const fakeCtx = {
     get: () => ws,
     on: () => () => {},
@@ -51,7 +73,7 @@ export async function startPluginHarness({ port = 0, panelDir, watchdogDir, exec
   const server = createServer(async (req, res) => {
     try {
       const u = new URL(req.url ?? '/', 'http://x')
-      const handler = routes.get(u.pathname)
+      const handler = handlerFor(u.pathname)
       if (!handler) { sendJson(res, 404, { ok: false, error: `未注册路由（生产同形 404）：${u.pathname}` }); return }
       await handler(req, res)
     } catch (e) {
@@ -62,7 +84,7 @@ export async function startPluginHarness({ port = 0, panelDir, watchdogDir, exec
   const addr = server.address()
   return {
     base: `http://127.0.0.1:${addr.port}`,
-    registeredRoutes: [...routes.keys()],
+    registeredRoutes: [...new Set([...routes.values()].map((r) => r.path))],
     async close() {
       await new Promise((resolve) => server.close(() => resolve()))
       for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v }

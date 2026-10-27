@@ -213,6 +213,161 @@ export function capCoalesced(groups: CoalescedAlert[], max: unknown): { rows: Co
 }
 
 
+// ---- t261028-18: the chart library bridge (the Metrics tab's two charts) ----
+// What went wrong (host report 261028, reproduced in a real browser against the
+// plugin harness): the load guard was armed when the PAGE loaded, not when the
+// first chart asked for the library. Four seconds after load the guard fired on
+// an empty queue and set the failure latch; every later draw then (a) never
+// attempted the import at all and (b) flushed the chart to the dead empty state.
+// The host therefore saw "charts could not load" on both charts while the
+// vendor route answered 200 from outside: the page never asked for the file.
+//
+// The bridge below replaces that latch: one attempt at a time, the guard starts
+// with the demand, a failed attempt names its class of failure, and a later
+// draw retries — bounded by maxAttempts. Closure-free and dependency-injected
+// so the unit leg drives THE page's implementation (embedded via String(fn)).
+export interface ChartLibBridgeDeps {
+  /** One module load attempt. Rejects for a missing file AND for a throwing file. */
+  importLib: () => Promise<unknown>
+  /** True when the vendor route serves the file — separates "not reachable"
+   *  from "served, but it failed to run". */
+  probeRoute: () => Promise<boolean>
+  setTimer: (fn: () => void, ms: number) => unknown
+  clearTimer: (handle: unknown) => void
+  timeoutMs: number
+  maxAttempts: number
+  copies: { failed: string; unreachable: string; moduleError: string; timedOut: string }
+  /** A loaded module (typed-later by the caller); may throw to reject the build. */
+  onReady: (mod: unknown) => void
+  /** The named empty state. Called once per failed attempt. */
+  onFail: (message: string) => void
+}
+
+export interface ChartLibBridge {
+  /** Ask for the library: the first call arms the guard, later calls retry. */
+  start: () => void
+  isReady: () => boolean
+  attempts: () => number
+  /** Test seam: adopt an externally loaded library (window.__metricsChartLibReady). */
+  adopt: (mod: unknown) => void
+  /** Test seam: report a failure from outside (window.__metricsChartLibFail). */
+  failNow: (message?: string) => void
+}
+
+export function createChartLibBridge(deps: ChartLibBridgeDeps): ChartLibBridge {
+  let lib: unknown = null
+  let loading = false
+  let tries = 0
+  // Attempt token: a stale rejection or a late arrival must not clobber a newer
+  // attempt's outcome (one owner per generation).
+  let seq = 0
+  let guard: unknown = null
+  let lastMessage = ''
+
+  function clearGuard() {
+    if (guard !== null) { deps.clearTimer(guard); guard = null }
+  }
+  function fail(token: number, message: string) {
+    if (token !== seq) return
+    loading = false
+    lastMessage = message
+    deps.onFail(message)
+  }
+  function start() {
+    if (lib !== null || loading) return
+    if (tries >= deps.maxAttempts) {
+      // The retry budget is spent: the last named cause stands. No loop, and no
+      // silent blank — the reader keeps the reason the last attempt gave.
+      deps.onFail(lastMessage || deps.copies.moduleError)
+      return
+    }
+    tries += 1
+    const token = ++seq
+    loading = true
+    // The guard belongs to THIS attempt and starts now (the defect was arming
+    // it at page load).
+    guard = deps.setTimer(function () {
+      guard = null
+      loading = false
+      lastMessage = deps.copies.timedOut
+      if (token === seq) deps.onFail(lastMessage)
+    }, deps.timeoutMs)
+    // The loader is caller-supplied: a synchronous throw must not leave this
+    // attempt "loading" forever (that would be the old latch in a new place).
+    let loadingPromise: Promise<unknown>
+    try {
+      loadingPromise = deps.importLib()
+    } catch (e) {
+      clearGuard()
+      fail(token, deps.copies.moduleError)
+      return
+    }
+    loadingPromise.then(function (mod) {
+      if (token !== seq) return
+      clearGuard()
+      try {
+        deps.onReady(mod)
+      } catch (e) {
+        fail(token, deps.copies.moduleError)
+        return
+      }
+      lib = mod
+      loading = false
+    }).catch(function () {
+      if (token !== seq) return
+      clearGuard()
+      // A rejected import covers two causes: the file was never served, or it
+      // was served and threw. The probe names which one the reader sees.
+      let probe: Promise<boolean>
+      try {
+        probe = deps.probeRoute()
+      } catch (e) {
+        fail(token, deps.copies.unreachable)
+        return
+      }
+      return probe.then(function (served) {
+        fail(token, served ? deps.copies.moduleError : deps.copies.unreachable)
+      }, function () {
+        fail(token, deps.copies.unreachable)
+      })
+    })
+  }
+
+  return {
+    start: start,
+    isReady: function () { return lib !== null },
+    attempts: function () { return tries },
+    adopt: function (mod: unknown) {
+      clearGuard()
+      seq += 1
+      loading = false
+      lib = mod
+      deps.onReady(mod)
+    },
+    failNow: function (message?: string) {
+      clearGuard()
+      seq += 1
+      loading = false
+      lastMessage = message || deps.copies.moduleError
+      deps.onFail(lastMessage)
+    },
+  }
+}
+
+/** The chart bridge's three named failure classes (the empty state names which
+ *  one happened) plus the base phrase. One copy source; the page reads it as
+ *  JSON (CHART_BRIDGE_TABLES). */
+export const CHART_LIB_COPIES = {
+  failed: 'charts could not load',
+  unreachable: 'charts could not load: the chart library file could not be reached',
+  moduleError: 'charts could not load: the chart library file failed to run',
+  timedOut: 'charts could not load: the chart library did not answer in time',
+} as const
+
+/** One attempt's load budget and the page-lifetime retry budget. The retry is
+ *  bounded: three attempts per page, then the last named cause stays. */
+export const CHART_LIB_LOAD = { TIMEOUT_MS: 4000, MAX_ATTEMPTS: 3 } as const
+
 // t261009-37 (defect found by the colour-bar work): the two module-private
 // constants the embedded identity functions close over. project-identity.ts does
 // not export them, so the embedded isProjectKeyLike/baseIdentity sources used to
@@ -275,7 +430,17 @@ const EMBEDDED = EMBED_CONSTS + [
   String(fmtMsFromNumber), String(fmtAgoFromNumber),
   String(colorAt), String(commonAxes), String(commonGrid),
   String(throughputOption), String(tokensOption),
+  // t261028-18: the chart library bridge state machine (one implementation with
+  // the retry unit leg; its copies/timeouts ride as JSON below).
+  String(createChartLibBridge),
 ].join('\n')
+
+/** t261028-18: the chart bridge's copy table, load budget and retry budget as
+ *  JSON — the data half of the embedded bridge. CHART_LIB_COPIES /
+ *  CHART_LIB_LOAD stay the single copy/number sources. */
+const CHART_BRIDGE_TABLES = JSON.stringify({
+  COPIES: CHART_LIB_COPIES, TIMEOUT_MS: CHART_LIB_LOAD.TIMEOUT_MS, MAX_ATTEMPTS: CHART_LIB_LOAD.MAX_ATTEMPTS,
+})
 
 /** t261021-07: the Metrics tab's copy table + series palette as JSON — the
  *  data half of the embedded model/chart cores. METRICS_TAB_COPIES and
@@ -1997,66 +2162,72 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   // Metrics-tab open (arbitrate round 11, defect B: a page-load module import
   // taxed every PANEL_HTML consumer — harnesses without the vendor route got a
   // deterministic module MIME/404 error and their zero-error legs went red;
-  // lazy load = only Metrics-visiting faces need the route). Every failure
-  // path (route down, MIME refused, JS error, 4s no-report timeout) flushes
-  // the queued charts to the named 'charts could not load' empty state —
-  // never a silent blank.
-  var MTC = { lib: null, pending: [], failed: false, timer: null, loading: false }
-  function mtEnsureChartLib() {
-    if (MTC.lib || MTC.failed || MTC.loading) return
-    MTC.loading = true
+  // lazy load = only Metrics-visiting faces need the route).
+  //
+  // t261028-18 (host report 261028, reproduced in a real browser): the guard
+  // used to be armed HERE, when the page script ran. Four seconds after page
+  // load it fired on an empty queue and latched the tab dead, so a Metrics tab
+  // opened later than that never asked for the module at all — the host's two
+  // charts said 'charts could not load' while the vendor route served 200. The
+  // guard now belongs to one load ATTEMPT and starts with the first draw; a
+  // failed attempt names its class and a later draw retries (maxAttempts).
+  var MTC_CFG = ${CHART_BRIDGE_TABLES};
+  var MTC = { lib: null, pending: [] }
+  var mtBridge = createChartLibBridge({
     // D1 fix (gate round 2) still applies: the route is interpolated RAW.
-    import('${PANEL_ROUTE}/vendor/echarts.mjs').then(function (mod) {
+    importLib: function () { return import('${PANEL_ROUTE}/vendor/echarts.mjs') },
+    // A rejected import does not say WHY. The probe answers "did the route
+    // serve the file at all", so the empty state names the real class.
+    probeRoute: function () {
+      return fetch('${PANEL_ROUTE}/vendor/echarts.mjs', { method: 'HEAD', cache: 'no-store' })
+        .then(function (r) { return r.ok === true }, function () { return false })
+    },
+    setTimer: function (fn, ms) { return setTimeout(fn, ms) },
+    clearTimer: function (h) { clearTimeout(h) },
+    timeoutMs: MTC_CFG.TIMEOUT_MS,
+    maxAttempts: MTC_CFG.MAX_ATTEMPTS,
+    copies: MTC_CFG.COPIES,
+    onReady: function (mod) {
       var echarts = (mod && mod.default && typeof mod.default.init === 'function') ? mod.default : mod
       if (!echarts || typeof echarts.init !== 'function') throw new Error('echarts build has no init')
       var insts = new WeakMap()
-      if (typeof window.__metricsChartLibReady === 'function') {
-        window.__metricsChartLibReady({
-          draw: function (mount, option) {
-            var prev = insts.get(mount)
-            if (prev) { try { prev.dispose() } catch (e) { /* dispose is idempotent-tolerant */ } insts.delete(mount) }
-            var inst = echarts.init(mount, null, { renderer: 'canvas' })
-            insts.set(mount, inst)
-            inst.setOption(option)
-          },
-          dispose: function (mount) {
-            var inst = insts.get(mount)
-            if (inst) { try { inst.dispose() } catch (e) { /* same */ } insts.delete(mount) }
-          },
-        })
+      MTC.lib = {
+        draw: function (mount, option) {
+          var prev = insts.get(mount)
+          if (prev) { try { prev.dispose() } catch (e) { /* dispose is idempotent-tolerant */ } insts.delete(mount) }
+          var inst = echarts.init(mount, null, { renderer: 'canvas' })
+          insts.set(mount, inst)
+          inst.setOption(option)
+        },
+        dispose: function (mount) {
+          var inst = insts.get(mount)
+          if (inst) { try { inst.dispose() } catch (e) { /* same */ } insts.delete(mount) }
+        },
       }
-    }).catch(function () {
-      if (typeof window.__metricsChartLibFail === 'function') window.__metricsChartLibFail()
-    })
-  }
+      var q = MTC.pending; MTC.pending = []
+      q.forEach(function (p) { MTC.lib.draw(p[0], p[1]) })
+    },
+    onFail: function (message) { mtFlushFailed(message) },
+  })
   function mtDraw(id, option) {
     var mount = el(id)
     if (!mount) return
     if (MTC.lib) { MTC.lib.draw(mount, option); return }
-    mtEnsureChartLib()
     MTC.pending.push([mount, option])
-    if (MTC.failed) mtFlushFailed()
+    // First draw arms the guard; after a failure this is the retry (bounded).
+    mtBridge.start()
   }
-  function mtFlushFailed() {
-    MTC.failed = true
+  function mtFlushFailed(message) {
     var q = MTC.pending; MTC.pending = []
+    var text = message || MTC_CFG.COPIES.failed
     q.forEach(function (p) {
-      p[0].innerHTML = '<div class="empty">' + esc('charts could not load') + '</div>'
+      p[0].innerHTML = '<div class="empty">' + esc(text) + '</div>'
     })
   }
-  window.__metricsChartLibReady = function (lib) {
-    if (MTC.timer) { clearTimeout(MTC.timer); MTC.timer = null }
-    MTC.lib = lib
-    var q = MTC.pending; MTC.pending = []
-    q.forEach(function (p) { lib.draw(p[0], p[1]) })
-  }
-  window.__metricsChartLibFail = function () {
-    if (MTC.timer) { clearTimeout(MTC.timer); MTC.timer = null }
-    mtFlushFailed()
-  }
-  // The load-failure face must not wait forever: if the module script never
-  // reports (route down, MIME refused, JS error), flush after 4s.
-  MTC.timer = setTimeout(function () { if (!MTC.lib) mtFlushFailed() }, 4000)
+  // The two seams stay for a caller that drives the bridge by hand (diagnosis,
+  // tests). The page's own load path goes through mtBridge directly.
+  window.__metricsChartLibReady = function (lib) { mtBridge.adopt(lib) }
+  window.__metricsChartLibFail = function () { mtBridge.failNow() }
 
   function mtProjectParam() { return MT.allProjects ? 'all' : state.project }
   function metricsBaseQuery() {
