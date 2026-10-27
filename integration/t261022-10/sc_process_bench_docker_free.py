@@ -25,7 +25,9 @@ Legs:
                                    subprocess on that environment and exits 0
                                    with its own SUMMARY green;
   L5  down leaves no residue     - group SIGTERM, port refuses, no survivor, db
-                                   reclaimed, and a FRESH process re-probes the
+                                   reclaimed, the obedient stop never escalates
+                                   to SIGKILL and lands inside its declared
+                                   window, and a FRESH process re-probes the
                                    same verdict (reader side, not the writer's);
   L6  the escalation exists      - a child that ignores SIGTERM is SIGKILLed, so
                                    L5's green is not "TERM and hope";
@@ -70,6 +72,25 @@ PRODUCTION_ADDRESSES = ("127.0.0.1:7233", "127.0.0.1:8233", "127.0.0.1:3099")
 #: A child's own process ceiling (injectable): the bench is the point, not
 #: patience with a hung child.
 CHILD_TIMEOUT_S = float(os.environ.get("SANDBAR_BENCH_CHILD_TIMEOUT_S") or 240)
+
+#: L5's bounded allowance for an OBEDIENT stop's wall time (ticket t261027-18).
+#: stopped_s measures two different facts at once: the TERM wait on the child,
+#: and the post-TERM bookkeeping after it (deadman close, child reap, the port
+#: probe, the temp-dir reclaim). Only the first is bounded by the module's own
+#: escalation bound (process_bench.TERM_S, 8.0 s by default), so a stop under
+#: round load legitimately runs past it with escalated still false: the same
+#: tree measured stopped_s=1.10 s standalone (this case, one host) and 16.1 s
+#: inside a full round (the red this ticket fixes), the down receipt clean in
+#: both runs. A second measurement under load can be worse than the first, so
+#: the window is the round-load figure times a declared factor of 2 (32.2 s),
+#: with 2 x TERM_S (16.0 s) as the floor so the module's own escalation bound
+#: always sits inside the window. This is a load ceiling, not a performance
+#: contract: the no-SIGKILL assertion carries the correctness, and a stop that
+#: truly hangs runs past the escalation bound and reds THAT one.
+STOP_STANDALONE_S = 1.1     # measured: obedient stop alone on this host
+STOP_ROUND_LOAD_S = 16.1    # measured: the same stop inside a full round
+STOP_LOAD_FACTOR = 2.0
+STOP_WINDOW_S = max(bench.TERM_S * 2, STOP_ROUND_LOAD_S * STOP_LOAD_FACTOR)
 
 _SA_TYPES = ("Keyword", "KeywordList", "Text", "Int", "Double", "Bool",
              "Datetime")
@@ -285,8 +306,26 @@ def main():
         rec.check(block["db_removed"] is True,
                   "the private temp dir is reclaimed")
         rec.check(block["escalated"] is False,
-                  "an obedient server needed no SIGKILL (stopped_s=%s)"
-                  % block["stopped_s"])
+                  "an obedient server was never escalated to SIGKILL "
+                  "(escalated=%s)" % block["escalated"])
+        rec.check(block["stopped_s"] <= STOP_WINDOW_S,
+                  "the obedient stop lands inside its declared window "
+                  "(measured stopped_s=%.2f, declared window=%.1fs = %g x %.1fs "
+                  "round-load stop, TERM_S %.1fs floor)"
+                  % (block["stopped_s"], STOP_WINDOW_S, STOP_LOAD_FACTOR,
+                     STOP_ROUND_LOAD_S, bench.TERM_S))
+        print("  evidence L5 stop: %s"
+              % json.dumps({"stopped_s": block["stopped_s"],
+                            "window_s": round(STOP_WINDOW_S, 2),
+                            "basis": {"standalone_s": STOP_STANDALONE_S,
+                                      "round_load_s": STOP_ROUND_LOAD_S,
+                                      "load_factor": STOP_LOAD_FACTOR,
+                                      "term_s": bench.TERM_S},
+                            "escalated": block["escalated"],
+                            "port_refuses": block["port_refuses"],
+                            "group_alive": block["group_alive"],
+                            "survivors": block["survivors"]},
+                           sort_keys=True), flush=True)
         rc, out, err = _run([sys.executable, "-B", MODULE, "status",
                              "--port", str(handle["port"]),
                              "--pid", str(handle["pid"])], timeout_s=60)
