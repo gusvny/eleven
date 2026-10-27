@@ -68,8 +68,13 @@ if cfg is not None:
     ok(bool(supply), "D1 供给声明在场（supply 列表非空——声明被删=供给面裸奔）")
     needs = [str((e or {}).get("need") or "") for e in supply]
     cmds = [str((e or {}).get("cmd") or "") for e in supply]
-    ok(all("docker" not in n.lower() for n in needs),
-       "D1g docker 供给要求已退役（宿主令 261027：未来不允许再使用 docker）")
+    # D1g: the retirement is about a docker STAGE requirement, not the word: a
+    # supply whose text says "zero docker" is fine. Judge the commands: no supply
+    # may drive stage_docker / the daemon / compose any more (host order 261027).
+    docker_drivers = ("stage_docker", "docker info", "docker image inspect",
+                      "docker compose", "docker run")
+    ok(all(not any(tok in c for tok in docker_drivers) for c in cmds),
+       "D1g docker 舞台供给已退役（宿主令 261027：没有任何供给命令驱动 stage_docker/daemon/compose）")
     ok(all("docker info" not in c and "docker image inspect" not in c for c in cmds),
        "D1b 无界裸 docker info/image inspect 不在任何供给命令里")
     if supply:
