@@ -70,7 +70,7 @@ import { limitStep, concChipState, CONC_LIMITS } from './concurrency.ts'
 // t261009-44: the Certification tab's render core — embedded via String() like
 // the other pure cores, so the UT and the page run one implementation. The
 // CERT_COPIES copy table rides along as JSON (single copy source).
-import { buildCertificationCore, buildRoundDialogCore, buildPromoteDialogCore, certQueueNoteText, buildRoundsRows, countsCell, roundPill, roundReason, roundTrigger, roundTriggerWord, roundMeasured, roundsSectionNote, CERT_COPIES, ROUND_COPIES } from './certification-view.ts'
+import { buildCertificationCore, buildRoundDialogCore, buildPromoteDialogCore, certQueueNoteText, buildRoundsRows, countsCell, roundPill, roundReason, roundTrigger, roundTriggerWord, roundMeasured, roundsSectionNote, runsWindowNote, CERT_COPIES, ROUND_COPIES } from './certification-view.ts'
 // t261021-07: the Metrics tab v2 model + chart option factories — pure,
 // closure-free, embedded via String(fn) like the other cores, so the UT and
 // the page run one implementation. The chart factories shape echarts OPTIONS
@@ -255,7 +255,7 @@ const EMBEDDED = EMBED_CONSTS + [
   String(buildRoundDialogCore),
   // t261025-12: the two controls' pure faces — the signed-promotion dialog
   // body and the queue note text (one implementation with the UT).
-  String(buildPromoteDialogCore), String(certQueueNoteText),
+  String(buildPromoteDialogCore), String(certQueueNoteText), String(runsWindowNote), // t261028-16 (KI-390): called by buildCertificationCore — left out of the embed, the served page dies on `runsWindowNote is not defined` and the tab is dead
   // t261009-57: alerts face core — relative time, coalesce-then-cap (one implementation).
   String(relTimeAgo), String(coalesceAlerts), String(capCoalesced),
   // t261021-07: the Metrics tab v2 model + chart option factories (one
