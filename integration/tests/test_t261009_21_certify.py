@@ -67,6 +67,19 @@ def CH(idx, freeze, change, seq=None, by="integration", reason="r",
     return row
 
 
+def REL(idx, seq=None, frm="t-fix", to="ldg-y002", line="default",
+        kind=dc.REL_KIND_REPAIRS, at=T0 + 4000):
+    """A relation row (record-models §B): the recorder is never the
+    beneficiary, and the evidence says what the claim is about."""
+    row = {"kind": kind, "id": "rel-y%03d" % idx, "from": frm, "to": to,
+           "line": line, "recorded_by": "integration",
+           "reason": "repairs the landing the red implicated",
+           "evidence": {"what": "ticket", "ref": to}, "at": at}
+    if seq is not None:
+        row["seq"] = seq
+    return row
+
+
 def green(run):
     return lambda r: r == run
 
@@ -116,15 +129,41 @@ class MayLandTest(unittest.TestCase):
         self.assertTrue(dc.may_land([], "default", dc.FREEZE_EXEMPT_KIND))
 
     def test_frozen_takes_only_the_structural_fix_kind(self):
-        rows = [FRZ(1, seq=1)]
+        # t261009-63: on a frozen line the exemption is DERIVED from a
+        # current ``repairs`` relation recorded BY the candidate naming a
+        # landing on this line — never from the kind alone. A non-exempt
+        # kind is refused with or without a granting relation.
+        rows = [FRZ(1, seq=1), L(2, seq=2, ticket="t-broken")]
         self.assertFalse(dc.may_land(rows, "default", "chore"))
-        self.assertTrue(dc.may_land(rows, "default", dc.FREEZE_EXEMPT_KIND))
+        self.assertFalse(dc.may_land(rows, "default", "chore",
+                                     ticket="t-fix", repair=REL(1)))
+        granting = rows + [REL(1, seq=3)]
+        self.assertTrue(dc.may_land(granting, "default",
+                                    dc.FREEZE_EXEMPT_KIND, ticket="t-fix",
+                                    repair=REL(1)))
+        # a fix that merely declares itself is refused by name (goal 17)
+        with self.assertRaises(dc.CertifyError) as cm:
+            dc.may_land(granting, "default", dc.FREEZE_EXEMPT_KIND,
+                        ticket="t-fix")
+        self.assertEqual(str(cm.exception), "freeze_repair_relation_missing")
+        # the relation must name a landing on THIS line, never another line's
+        other = rows + [L(9, seq=3, line="other", ticket="t-elsewhere"),
+                        REL(1, seq=4, to="ldg-y009")]
+        with self.assertRaises(dc.CertifyError) as cm:
+            dc.may_land(other, "default", dc.FREEZE_EXEMPT_KIND,
+                        ticket="t-fix", repair=REL(1, to="ldg-y009"))
+        self.assertIn("repair_target_unresolved", str(cm.exception))
         # the exemption is judged, not granted: a landing may carry a
         # self-set "fix" field about itself, but only the explicit declared
         # kind argument is judged (goal 17)
         landing = dict(L(2, seq=2), ticket_kind=dc.FREEZE_EXEMPT_KIND)
         self.assertFalse(dc.may_land(rows, "default", "chore"))
         self.assertNotEqual(landing["ticket_kind"], "chore")
+        # an undeclared kind is refused by name, never read as the freeze's
+        # own no (a misspelled fix kind must not deadlock silently)
+        with self.assertRaises(dc.CertifyError) as cm:
+            dc.may_land(rows, "default", "prayer")
+        self.assertIn("ticket_kind_undeclared", str(cm.exception))
 
     def test_closed_freeze_reopens_landings(self):
         rows = [FRZ(1, seq=1),
@@ -155,40 +194,47 @@ class WaitStateTest(unittest.TestCase):
         self.assertIsNone(st["covered_by"])
 
     def test_certified_names_the_covering_green_cert(self):
-        rows = [C(1, seq=1, run="run-a", revision="r1"),
-                L(1, seq=2, at=T0, rev="r1")]
-        st = dc.ticket_wait_state(rows, "default", L(1, rev="r1"),
+        # the coverage rule (t261011-23): the landing must lie INSIDE the
+        # green cert's range, ``prev_cert(cert).seq < landing.seq <=
+        # cert.seq``; its own revision is not read by this face
+        rows = [L(1, seq=1, at=T0, rev="r1"),
+                C(1, seq=2, run="run-a", revision="r9")]
+        landing = L(1, seq=1, at=T0, rev="r1")
+        st = dc.ticket_wait_state(rows, "default", landing,
                                   is_green=green("run-a"), now_ms=T0 + 1)
         self.assertEqual(st["state"], dc.WAIT_CERTIFIED)
         self.assertEqual(st["covered_by"], "cert-y001")
         self.assertFalse(dc.needs_slot(st))  # done waiting: slot released
 
     def test_red_implicated_is_not_waiting_and_not_certified(self):
-        # (b) drive: three landings, a green cert over the prefix, then the
-        # third landing and a red cert implicating it — the prefix stays
-        # landable while the third waits implicated.
+        # (b) drive: three landings, a green cert's range over the first two,
+        # then the third landing and a red cert implicating it — the covered
+        # prefix is certified while the third reads implicated, never waiting.
         rows = [L(1, seq=1, rev="r1"), L(2, seq=2, rev="r2"),
                 C(1, seq=3, run="run-green", revision="r2"),
                 L(3, seq=4, rev="r3"),
                 C(2, seq=5, run="run-red", revision="r3")]
-        one = dc.ticket_wait_state(rows, "default", L(1, rev="r1"),
+        one = dc.ticket_wait_state(rows, "default", L(1, seq=1, rev="r1"),
                                    is_green=green("run-green"), now_ms=T0)
-        # the deliverable prefix is the revision the green cert named (r2);
-        # r1 is an earlier revision — still waiting, never faked as covered
-        self.assertEqual(one["state"], dc.WAIT_WAITING)
-        two = dc.ticket_wait_state(rows, "default", L(2, rev="r2"),
+        two = dc.ticket_wait_state(rows, "default", L(2, seq=2, rev="r2"),
                                    is_green=green("run-green"), now_ms=T0)
+        # both prefix landings sit inside the green cert's range, so both read
+        # certified: the range rule reads order, never a revision prefix
+        self.assertEqual(one["state"], dc.WAIT_CERTIFIED)
+        self.assertEqual(one["covered_by"], "cert-y001")
         self.assertEqual(two["state"], dc.WAIT_CERTIFIED)
-        self.assertTrue(dc.landable(rows, "default", L(2, rev="r2"),
+        self.assertEqual(two["covered_by"], "cert-y001")
+        self.assertTrue(dc.landable(rows, "default", L(1, seq=1, rev="r1"),
                                     is_green=green("run-green")))
-        self.assertFalse(dc.landable(rows, "default", L(1, rev="r1"),
+        self.assertTrue(dc.landable(rows, "default", L(2, seq=2, rev="r2"),
+                                    is_green=green("run-green")))
+        self.assertFalse(dc.landable(rows, "default", L(3, seq=4, rev="r3"),
                                      is_green=green("run-green")))
-        self.assertFalse(dc.landable(rows, "default", L(3, rev="r3"),
-                                     is_green=green("run-green")))
-        three = dc.ticket_wait_state(rows, "default", L(3, rev="r3"),
+        three = dc.ticket_wait_state(rows, "default", L(3, seq=4, rev="r3"),
                                      is_green=green("run-green"), now_ms=T0)
         self.assertEqual(three["state"], dc.WAIT_RED_IMPLICATED)
         self.assertNotEqual(three["state"], one["state"])  # not the same face
+        self.assertNotEqual(three["state"], two["state"])
         self.assertEqual(three["waiting_for"], "cert-y002")
         self.assertFalse(dc.needs_slot(three))  # implicated still waits out
 

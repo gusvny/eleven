@@ -218,17 +218,27 @@ class RangeTest(unittest.TestCase):
         self.assertEqual(len(other["covered_landings"]), 1)
 
     def test_landable_contained_in_green_cert_only(self):
+        # Coverage rule (t261011-23): a certification covers the range
+        # ``prev_cert(cert).seq < landing.seq <= cert.seq`` on its line, and
+        # the landing's own revision is NOT read here. One landing sits
+        # inside the green cert's range, one sits inside the red cert's.
         rows = [L(1, seq=1), C(1, seq=2, revision="r1", run="run-red"),
-                C(2, seq=3, revision="r2", run="run-green")]
-        green_landing = dict(L(1), repos=[{"repo": "sandbar",
+                L(2, seq=3), C(2, seq=4, revision="r3", run="run-green")]
+        inside = dict(L(2, seq=3), repos=[{"repo": "sandbar",
                                            "revision": "r2"}])
-        self.assertTrue(dc.landable(rows, "default", green_landing,
+        # inside the green cert's range, and landable on ORDER alone: the
+        # landing's revision matches no certification's revision set
+        self.assertTrue(dc.landable(rows, "default", inside,
                                     is_green=lambda r: r == "run-green"))
-        # the only matching cert's run is red: not landable while green-only
-        self.assertFalse(dc.landable(rows, "default", L(1),
+        # the same landing with the covering certification RED: not landable
+        self.assertFalse(dc.landable(rows, "default", inside,
+                                     is_green=lambda r: r != "run-green"))
+        # the landing the red swallowed is outside the green range: a
+        # green-only reader never reaches back across the previous cert
+        self.assertFalse(dc.landable(rows, "default", L(1, seq=1),
                                      is_green=lambda r: r == "run-green"))
         # no run reader injected: caller says so, every cert counts
-        self.assertTrue(dc.landable(rows, "default", L(1)))
+        self.assertTrue(dc.landable(rows, "default", inside))
 
     def test_landable_garbage_landing_named(self):
         with self.assertRaises(dc.CertifyError):
@@ -488,13 +498,19 @@ class ScenarioParityTest(unittest.TestCase):
         w = dc.append_rows([thief], self.led)
         self.assertEqual(w["written"], 0)
         self.assertIn("restates", w["rejected"][0]["reason"])
-        # red cert later: green prefix stays landable (goal 8)
+        # red cert later: the green prefix stays landable (goal 8) — the
+        # landing is inside the EARLIER green cert's range, and the red's
+        # range does not reach back over it
         red = dc.build_certification(
             [{"repo": "sandbar", "revision": "r2"}],
             RUN(failed=1, rid="run-" + "b" * 26), "inv-x", "judge", at_ms=6)
         dc.append_rows([red], self.led)
         rows2, _ = dc.read_rows(self.led)
-        self.assertTrue(dc.landable(rows2, "default", L(1),
+        # coverage is decided by the landing's seq in the shared space, so the
+        # row read back from the ledger is the input (an unseq'd row is
+        # covered by nothing — fail closed)
+        landing_disk = [r for r in rows2 if r["kind"] == dc.KIND_LANDING][0]
+        self.assertTrue(dc.landable(rows2, "default", landing_disk,
                                     is_green=lambda r: r == "run-" + "a" * 26))
 
     def test_red_bounded_journey(self):

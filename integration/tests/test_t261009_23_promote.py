@@ -335,10 +335,12 @@ class TestTicketOutcome(TempCase):
 
     def test_waiting_ticket_is_landed_not_certified_not_delivered(self):
         rows = self.seeded()
-        # t2's landing IS covered by cert-x002 (rev2); a ticket waiting is
-        # one whose landing no green certification's revision covers
+        # 261016 rule C: the FIRST green certification recorded after the
+        # landing certifies it — order alone, no revision identity. t2's
+        # landing (seq 2) is certified by cert-x001 (seq 3), not by the later
+        # cert-x002; a ticket really waiting is one with no cert after it.
         out = dp.ticket_outcome(rows, "t2")
-        self.assertEqual(out["certified_by"], "cert-x002")
+        self.assertEqual(out["certified_by"], "cert-x001")
         self.append_delivery([LANDING(7, "t4", revision="rev4", seq=5)])
         rows2, _ = dc.read_rows(self.delivery)
         out = dp.ticket_outcome(rows2, "t4")
@@ -363,7 +365,11 @@ class TestTicketOutcome(TempCase):
         dp.append_rows([row], self.delivery)
         rows, _ = dc.read_rows(self.delivery)
         out = dp.ticket_outcome(rows, "t2")
-        self.assertEqual(out["certified_by"], "cert-x002")
+        # the projection selects the FIRST green cert after the landing by
+        # order (cert-x001, seq 3); the promotion cites cert-x002. Those are
+        # two different questions — the builder proves the carried revision,
+        # the projection names where the wait ended — so they may differ.
+        self.assertEqual(out["certified_by"], "cert-x001")
         self.assertEqual(out["delivered_in"], row["id"])
         # t261009-29: one file, one seq — the delivery's own seq is readable
         # off the single cursor (the promotion landed after seq 4)
@@ -419,10 +425,11 @@ class TestTicketOutcome(TempCase):
     def test_red_certification_does_not_certify(self):
         rows = self.seeded()
         out = dp.ticket_outcome(rows, "t1", is_green=lambda run: run != "run-a")
-        # cert-x001 ran run-a (red by this verdict) — the next green one
-        # covers a different revision, so t1 stays waiting
-        self.assertIsNone(out["certified_by"])
-        self.assertIsNotNone(out["waiting_since"])
+        # cert-x001 ran run-a (red by this verdict) and is skipped BY NAME;
+        # the next green certification in order (cert-x002) certifies t1 —
+        # its different revision does not matter (261016 rule C)
+        self.assertEqual(out["certified_by"], "cert-x002")
+        self.assertIsNone(out["waiting_since"])
 
 
 if __name__ == "__main__":
