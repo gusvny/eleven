@@ -80,7 +80,7 @@ ok('frontmatter 畸形矩阵：缺闭合符/空文件/嵌套线/非字符串均�
 
 /* ------------------------------------------------ 目录树（C2 动态聚合） */
 
-ok('buildDocTree：按实际子目录聚合，根级组单列「总目录」且恒在最前', () => {
+ok('buildDocTree：按实际子目录聚合，根级组单列固定标签（t261027-25 起为英文 Root files）且恒在最前', () => {
   const tree = buildDocTree([
     { rel: 'design/b.md', title: '乙' },
     { rel: 'README.md' },
@@ -88,7 +88,7 @@ ok('buildDocTree：按实际子目录聚合，根级组单列「总目录」且�
     { rel: 'ops/x.md' },
   ])
   assert.deepEqual(tree.map((g) => g.dir), ['', 'design', 'ops'])
-  assert.equal(tree[0].label, '总目录')
+  assert.equal(tree[0].label, 'Root files')
   assert.equal(tree[0].files.length, 1)
   // 组内字典序
   assert.deepEqual(tree[1].files.map((f) => f.rel), ['design/a.md', 'design/b.md'])

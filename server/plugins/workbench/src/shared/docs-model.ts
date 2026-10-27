@@ -7,7 +7,9 @@
  *   2. parseFrontmatter —— docs/ 定稿库每篇头部 YAML 简版解析（title/status/updated）；
  *      畸形输入（缺闭合符/嵌套 ---/空文件）一律定值分支不 throw。
  *   3. buildDocTree —— 扁平文件清单 → 按实际子目录动态聚合（C2：不写死 design/ops 名单，
- *      客户端分组跟着树渲染）；无子目录的根级文件单列「总目录」组。
+ *      client groups follow the tree); root-level files with no sub-directory get
+ *      their own 'Root files' group (t261027-25: that label is fixed English UI
+ *      copy and no longer follows library content).
  *
  * 纪律（R1 取舍清单 2 承接）：白名单拒绝必须可判定——skipped 计数+理由随响应下发，
  * 「人读视图完整性」不靠猜。
@@ -83,8 +85,12 @@ export function parseFrontmatter(text: string): ParsedDoc {
 /** 目录树节点：dir=相对根的目录路径（''=根级），files=该目录下的篇（按路径排序）。 */
 export interface DocTreeGroup {
   dir: string
-  /** 客户端展示名：根级='总目录'（组标签随库内容走，不属工单固定 UI 元素英文清单——
-   *  t260910-10 维持 C2 既有口径，登记场景与既有单测均锚此），子目录=目录名最后一段。 */
+  /**
+   * Client display name for the root group. t261027-25: fixed to the English
+   * 'Root files' — console UI copy is English (CLAUDE.md rule 6, host 250925).
+   * This supersedes the t260910-10 C2 decision that let this label follow
+   * library content; sub-directory labels stay data (last dir segment).
+   */
   label: string
   files: { rel: string; title: string }[]
 }
@@ -112,7 +118,7 @@ export function buildDocTree(entries: DocEntry[]): DocTreeGroup[] {
   const dirs = [...byDir.keys()].sort((a, b) => (a === '' ? -1 : b === '' ? 1 : a < b ? -1 : 1))
   return dirs.map((dir) => ({
     dir,
-    label: dir === '' ? '总目录' : dir.slice(dir.lastIndexOf('/') + 1),
+    label: dir === '' ? 'Root files' : dir.slice(dir.lastIndexOf('/') + 1),
     files: byDir.get(dir)!.sort((a, b) => (a.rel < b.rel ? -1 : 1)),
   }))
 }

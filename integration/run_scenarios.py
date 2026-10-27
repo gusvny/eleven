@@ -4095,6 +4095,52 @@ SCENARIOS = [
     ("t261026-35-interp-lint-gate",
      "The mechanical interpreter lint is wired into the REAL static gate and is NOT vacuous (ticket t261026-35 spec point 3: a case proving the lint catches an injected offender and the fixed registry passes; grey-box L3, only public faces asserted - the real `python3 integration/lint_tests.py` gate command and its exit code / named output, driven over a real `git clone --shared` copy of the tree so the real registries are never mutated, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A the real tree's static gate exits 0; B an injected registry entry - a bare python3 cmd over a probe importing the engine module shared via the server/engine path insert, the exact finding-261026 shape - turns the copied gate red NAMING the L29 rule and the offender id (pre-implement this leg is red: no L29 rule exists yet, the named TDD signal); C the same entry relaunched through `sh integration/py_interp.sh ...` is green again in the same copy. Intent split: the in-memory injected-registry truth tables (offender red, py_interp shape green, malformed cmd / missing script / syntax error / engine-name shadowing all named fail-closed) belong to the developer L1 battery test_lint_interp.py; THIS entry uniquely owns the real-gate reachability and non-vacuity of the lint. fast-catch: an L29 rule that exists but never fires, or a gate that passes a registry still carrying the chronic shape, is caught here in offline seconds. git unavailable = ENV_FAIL exit 2",
      "python3 integration/t261026-35/sc_t261026_35_interp_lint_gate.py", "ro", "fast"),
+    # ---- t261027-25: the console Docs tab journey after the four host-reported
+    # defects (redundant scope bar, inline reader, Chinese root label, epics
+    # under notes). Intent division: t261021-13-epic-doc-link-opens-reader owns
+    # "the epic link opens the reader at all" (E1-E7); THIS browser entry owns
+    # the view-split faces S1-S6 (one scope selector via the entry rows, an
+    # article that replaces the list with a back control, an ASCII root label,
+    # notes/epics hidden in the view while docs/epics stays visible) plus the
+    # malformed-payload face S7 and X1. The ro entry keeps the two fixed faces
+    # enforced when the browser stack is missing.
+    ("t261026-18-docs-tab-own-page",
+     "The Docs tab journey after the four host-reported defects are fixed (ticket "
+     "t261027-25, host user words 261026: redundant docs//notes buttons under the "
+     "entry rows, a clicked doc should open on its own page instead of below the "
+     "list, the root group label still Chinese, epics under notes dead weight; "
+     "grey-box L3, real browser + page-boundary API stubs, zero docker, never "
+     "touches 3099/7233): S1 exactly one scope selector - the redundant bar is gone "
+     "from the page source and the live DOM, the entry rows remain; S2 an entry row "
+     "still switches scope (the stub records the requested scope, the notes tree "
+     "loads); S3 the root-level file group label is ASCII and the fixed Chinese "
+     "label appears nowhere on the page (data titles/dirs are never asserted); S4 "
+     "clicking a doc replaces the list with the rendered article and a back control "
+     "returns the list; S5 the stub's notes tree still returns an epics group (files "
+     "stay on disk) but the pane hides it, while the docs scope keeps epics visible; "
+     "S6 the Epics tab document link still lands on the article with the list "
+     "hidden (reader-opening itself owned by t261021-13); S7 a malformed doc payload "
+     "states a readable error, never raw JSON; X1 zero pageerror across every leg. "
+     "Pre-fix tree red = the named TDD signal; green required at the integration "
+     "gate/merge. playwright-core missing = ENV_FAIL exit 2 (KI-036 family); "
+     "tier: the entry-row-to-article-to-back view split is only observable in a "
+     "served browser pair; cost: minutes",
+     "node integration/t261026-18/sc_t26102618_docs_tab_own_page.mjs", "browser"),
+    ("t261026-18-docs-static-face",
+     "Static sweep guard for the Docs tab's fixed faces, enforced without the "
+     "browser stack (ticket t261027-25, grey-box L3, offline seconds, read-only, "
+     "zero docker/browser, never touches 3099/7233): A1 both source modules are "
+     "readable; A2 no live scope-bar shape in the panel page source (red pre-fix, "
+     "the named TDD signal); A3 negative control - the detector flags a synthetic "
+     "bar snippet; B1 the root-group label in docs-model.ts carries no CJK "
+     "characters (anchor by shape, not one English word; red pre-fix - the old "
+     "label is CJK); B2 negative control - a synthetic CJK label is flagged; C the "
+     "real tree is never mutated (byte-compare). Rationale for a separate entry "
+     "alongside t261027-25-docs-tab-own-page: the browser entry goes ENV_FAIL when "
+     "playwright/chromium are missing, and an env-red must not cover these two "
+     "fixed faces (KI-036/KI-051 family lesson). Sources missing/unreadable = FAIL "
+     "named; arbitrate/merge must be green; cost: seconds",
+     "python3 -B integration/t261026-18/sc_t26102618_docs_static_face.py", "ro"),
 ]
 
 # ---- t261009-16: the lane's fast global set (the declaration) ----------------

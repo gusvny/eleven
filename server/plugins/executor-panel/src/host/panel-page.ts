@@ -845,7 +845,6 @@ th{color:var(--muted);font-weight:600;font-size:11px}
          '— pages', never a fabricated number) and an Open action. The mock is silent
          on the Open target; the in-tab reader/scope switch is chosen, no new endpoint. -->
     <div class="bar" id="docsEntries" style="margin-top:0"></div>
-    <div class="bar" style="margin-top:0" id="docsScopeBar"></div>
     <div id="docsTree"></div>
     <div id="docsReader"></div>
   </section>
@@ -2339,6 +2338,13 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   }
 
   // ---- t261005-10 (UI-2): Docs tab (read-only tree + markdown reader) ----
+  // t261027-25 (item 4): view-level group filter, per scope. The 'notes' scope
+  // hides the 'epics' group — the epic notes duplicate the Epics tab and read as
+  // dead weight in the ledger view. The 'docs' scope keeps showing epics: the
+  // Epics tab's Open links target docs/epics/<code>.md through that list. Named
+  // for the next reader: this constant, consumed in renderDocs(). No file under
+  // docs/ or notes/ is deleted or moved.
+  var DOCS_HIDDEN_GROUPS={ notes:['epics'] };
   function loadDocs(){
     if(!state.project){ state.docs=null; renderDocs(); return; }
     var scope=state.docsScope;
@@ -2367,28 +2373,34 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     });
   }
   function renderDocs(){
-    var e=el('docsBanner'), bar=el('docsScopeBar'), tree=el('docsTree'), reader=el('docsReader');
-    if(!state.project){ e.innerHTML=''; bar.innerHTML=''; el('docsEntries').innerHTML=''; tree.innerHTML=''; reader.innerHTML=''; return; }
+    // t261027-25 (item 1): the second selector bar is gone — the entry rows above
+    // (#docsEntries) are the only scope chooser; scope state and loadDocs() are
+    // unchanged.
+    var e=el('docsBanner'), tree=el('docsTree'), reader=el('docsReader');
+    if(!state.project){ e.innerHTML=''; el('docsEntries').innerHTML=''; tree.innerHTML=''; reader.innerHTML=''; return; }
     renderDocEntries();
-    bar.innerHTML=['docs','notes'].map(function(s){
-      return '<button class="backbtn" data-scope="'+s+'"'+(s===state.docsScope?' style="border-color:var(--blue);color:var(--blue)"':'')+'>'+s+'/</button>';
-    }).join('');
-    Array.prototype.forEach.call(bar.querySelectorAll('[data-scope]'), function(b){
-      b.onclick=function(){ if(state.docsScope!==b.dataset.scope){ state.docsScope=b.dataset.scope; state.docs=null; state.docSel=''; loadDocs(); } };
-    });
+    // t261027-25 (item 2): a selected document is its own page — it replaces the
+    // list instead of rendering below it (view state only: same endpoint, same
+    // renderer). The entry rows stay on screen as the way back to the other scope.
+    if(state.docSel){ e.innerHTML=''; tree.innerHTML=''; renderDocBody(); return; }
+    reader.innerHTML='';
     // t261019-04: the workbench endpoint answers the {ok,result} envelope; reading
     // groups off the envelope made every project look empty ('The library is empty
     // for this scope.') while the payload actually carried the tree (measured:
     // /api/wf/docs/tree?scope=docs&project=sandbar -> result.groups x4). Accept
     // both shapes: the envelope (t261016-07 family) and a bare tree.
     var d=(state.docs && state.docs.result) ? state.docs.result : state.docs;
-    if(!d){ e.innerHTML=bannerHtml('The doc tree could not be reached (the workbench plugin may not be loaded).', true); tree.innerHTML=''; reader.innerHTML=''; return; }
+    if(!d){ e.innerHTML=bannerHtml('The doc tree could not be reached (the workbench plugin may not be loaded).', true); tree.innerHTML=''; return; }
     e.innerHTML='';
-    // t261021-13: an empty tree must not wipe an in-flight reader selection (an
-    // epic document click can land here when the library answers empty) — the
-    // reader renders the document body or its own named error instead.
-    if(d.empty===true){ tree.innerHTML='<div class="empty">'+esc(d.reason||emptyCopyOf('docs_tree'))+'</div>'; if(state.docSel) renderDocBody(); else reader.innerHTML=''; return; }
-    var groups=Array.isArray(d.groups)?d.groups:[];
+    // t261021-13: an empty tree states its own named reason; the document page
+    // above owns the reader face, so nothing else can be wiped here.
+    if(d.empty===true){ tree.innerHTML='<div class="empty">'+esc(d.reason||emptyCopyOf('docs_tree'))+'</div>'; return; }
+    var hidden=DOCS_HIDDEN_GROUPS[state.docsScope]||[];
+    // Lookup object, not indexOf-with-literal: the list-cap check bans bare
+    // integer comparisons on render lines (see list-cap-check.test.mjs).
+    var hide={};
+    for(var h=0;h<hidden.length;h++) hide[hidden[h]]=true;
+    var groups=(Array.isArray(d.groups)?d.groups:[]).filter(function(g){ return hide[g&&g.dir]!==true; });
     var html='';
     for(var i=0;i<groups.length;i++){
       var g=groups[i];
@@ -2409,28 +2421,44 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     Array.prototype.forEach.call(tree.querySelectorAll('[data-doc]'), function(n){
       n.onclick=function(){ openDoc(n.dataset.doc); };
     });
-    if(state.docSel) renderDocBody();
-    else reader.innerHTML='';
   }
   function openDoc(rel){
-    state.docSel=rel; renderDocBody();
+    state.docSel=rel; renderDocs();
+  }
+  // t261027-25 (item 2): back from the document page to the list. The tree payload
+  // is still in state.docs, so returning is a pure re-render (no refetch).
+  function closeDoc(){
+    state.docSel=''; renderDocs();
   }
   function renderDocBody(){
     var reader=el('docsReader');
     var rel=state.docSel;
     if(!rel){ reader.innerHTML=''; return; }
-    reader.innerHTML='<div class="muted" style="font-size:11px">Loading '+esc(rel)+' …</div>';
+    // t261021-13: keep accepting both the envelope and the bare doc shape; the
+    // page chrome (Back button) is the t261027-25 own-page face and is present on
+    // every branch (loading / error / body) so the way back never disappears
+    // mid-fetch.
+    var chrome='<div style="margin-bottom:6px"><button class="backbtn" data-docback>Back to the list</button></div>';
+    var bind=function(){
+      var b=reader.querySelector('[data-docback]');
+      if(b) b.onclick=closeDoc;
+    };
+    reader.innerHTML=chrome+'<div class="muted" style="font-size:11px">Loading '+esc(rel)+' …</div>';
+    bind();
     var url='/sandbar-workbench/api/wf/docs/doc?scope='+state.docsScope+'&project='+encodeURIComponent(state.project)
       +'&path='+encodeURIComponent(rel);
     fetch(url).then(function(r){ return r.json(); }).then(function(j){
       var body=j && (j.body!==undefined ? j.body : (j.result && j.result.body));
       if(typeof body!=='string'){
-        reader.innerHTML='<div class="banner red">The document could not be read'+(j&&j.error?': '+esc(String(j.error)):'')+'</div>';
+        reader.innerHTML=chrome+'<div class="banner red">The document could not be read'+(j&&j.error?': '+esc(String(j.error)):'')+'</div>';
+        bind();
         return;
       }
-      reader.innerHTML='<div class="sect">'+esc(rel)+'</div><div class="detail" style="max-height:none">'+renderMarkdown(body)+'</div>';
+      reader.innerHTML=chrome+'<div class="sect">'+esc(rel)+'</div><div class="detail" style="max-height:none">'+renderMarkdown(body)+'</div>';
+      bind();
     }).catch(function(err){
-      reader.innerHTML='<div class="banner red">The document could not be loaded: '+esc(String(err&&err.message||err))+'</div>';
+      reader.innerHTML=chrome+'<div class="banner red">The document could not be loaded: '+esc(String(err&&err.message||err))+'</div>';
+      bind();
     });
   }
 

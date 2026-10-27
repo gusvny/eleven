@@ -2650,27 +2650,27 @@
     },
     "integration/t260910-12/sc_cwd_independence.py": {
       "anchor": "behaviour",
-      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
+      "note": "",
       "sync_path": ""
     },
     "integration/t260910-12/sc_full_capacity_queue.py": {
       "anchor": "behaviour",
-      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
+      "note": "",
       "sync_path": ""
     },
     "integration/t260910-12/sc_herd_no_crosstalk.py": {
       "anchor": "behaviour",
-      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
+      "note": "",
       "sync_path": ""
     },
     "integration/t260910-12/sc_holder_kill_reclaim.py": {
       "anchor": "behaviour",
-      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
+      "note": "",
       "sync_path": ""
     },
     "integration/t260910-12/sc_idempotent_reup.py": {
       "anchor": "behaviour",
-      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
+      "note": "",
       "sync_path": ""
     },
     "integration/t260910-12/sc_transient_retry_contract.py": {
@@ -5725,6 +5725,16 @@
       "note": "t261021-08 L3: the request-layer contract over a fixture ledger shaped like the measured live one - G1 today's write face still accepts the measured defect shapes (proof of defect), G2 the contract detectors name all seven measured classes evidence-first, G3 the fold converges duplicate condition keys to one card with count/last_seen and classifies resolved/expired/legacy, digest above the cap, G4 assertions on ledger file bytes plus fold output (KI-195)",
       "sync_path": ""
     },
+    "integration/t261026-18/sc_t26102618_docs_tab_own_page.mjs": {
+      "anchor": "behaviour",
+      "note": "t261027-25 L3: the Docs tab view-split journey after the four host-reported defects - exactly one scope selector (the redundant bar gone from the page source and the live DOM, the entry rows remain and still switch scope), the root group label ASCII with no fixed Chinese label anywhere on the page, a clicked doc replaces the list with the rendered article and a back control returns the list, the notes tree hides its epics group while the docs scope keeps epics visible, the Epics tab document link lands on the article view with the list hidden, a malformed doc payload states a readable error never raw JSON, zero pageerror",
+      "sync_path": "server/plugins/executor-panel/src/host/panel-page.ts; server/plugins/workbench/src/shared/docs-model.ts"
+    },
+    "integration/t261026-18/sc_t26102618_docs_static_face.py": {
+      "anchor": "source-text",
+      "note": "t261027-25 L3 static sweep: no live scope-bar shape in the panel page source and the root-group label in docs-model.ts carries no CJK characters (anchored by shape, not one English word), each with a negative control so a detector regression cannot masquerade as green; enforced without the browser stack so a playwright ENV_FAIL cannot cover these two fixed faces (KI-036/KI-051 family); the real tree is never mutated (byte-compare)",
+      "sync_path": "server/plugins/executor-panel/src/host/panel-page.ts; server/plugins/workbench/src/shared/docs-model.ts"
+    },
     "integration/t261021-13/sc_epic_doc_link_opens_reader.mjs": {
       "anchor": "behaviour",
       "note": "t261021-13 L3: the epic's document control opens the panel's own markdown reader in the same page (Docs tab, docs scope, title path epics/<code>.md, headings/list/table/fenced code rendered, no literal markers, no raw JSON); vanished/unreadable/malformed documents land in the reader's named red banner, never an empty box; empty doc-tree answer still renders the reader; double-click race lands the epic doc; zero pageerror",
@@ -5925,10 +5935,6 @@
       "anchor": "behaviour",
       "note": "t261026-25: the docker-carveout disposition holds and the t260905-02 family still runs green on docker - the exception table keeps the three rows with reasons naming the teardown-residue face, each scenario file still carries its own-stage residue+port-release assertions (not migrated; a fork-ruling lift fails here by name on purpose), and each of the three cases runs as its registry cmd to exit 0 with SUMMARY pass>0 fail=0 env_fail=0; child exit 2 is named env_fail per child, any other exit or a missing SUMMARY line is a named failure."
     },
-    "integration/t261027-16/sc_t261027_16_cert_receipt_bounded.py": {
-      "anchor": "behaviour",
-      "note": "t261027-16 L3: the certification read face stays bounded on a fat 3.6k-row run ledger - the real adapter subprocess over an isolated temp projects root answers ok:true under the declared 1,000,000-byte cap with runs_window {shown,total,older} naming the window, per-line runs bounded to the Rounds cap plus cited runs, a cert-cited run older than the window preserved, failed_detail never in the receipt bytes and per-run cases carrying header-level counts only; a deliberately oversized receipt (cap patched at the module seam) refuses 'receipt too large: N bytes, window ...'; the real reader over a stub maxBuffer error refuses by name, never 'not valid JSON', and a healthy receipt still parses carrying runs_window."
-    },
     "integration/t261027-10/sc_t261027_10_dead_holder_sweep_reclaims.py": {
       "anchor": "behaviour",
       "note": "t261027-10 scenario: the proof-of-death sweep drops workflow-gone holders (human-hold included), keeps alive and unknown holders fail-closed with named probe_errors and a bounded wait, refuses a corrupt ledger by name, and proves the reclaim reader-side (state bytes clean, waiter promoted, next acquire immediate)."
@@ -5936,11 +5942,6 @@
     "integration/t261027-10/sc_t261027_10_terminal_release_caller_blocked.py": {
       "anchor": "behaviour",
       "note": "t261027-10 scenario: with the caller-side ledger write physically blocked, the cancel receipt stays honest (released=false, reason naming the write failure) and the engine-side reclaim returns the slot — reader bytes clean, waiter promoted, next acquire immediate — without the caller writing."
-    },
-    "integration/t261027-11/sc_stage_process_backend_zero_docker.py": {
-      "anchor": "behaviour",
-      "note": "t261027-11 gate blocker: the migration's user-visible outcome on public faces only (zero docker containers for the project pattern, no silent backend fallback, dual-face zero residue incl. a delayed re-probe past the re-bind window).",
-      "sync_path": ""
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {
