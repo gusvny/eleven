@@ -121,7 +121,6 @@ def added_lines_in_path(diff_text, rel_path):
 _LAUNCH_TOKENS = [
     r'PY=server/engine/.venv/bin/python; [ -x \"$PY\" ] || ',
     r'PY=../../server/engine/.venv/bin/python; [ -x \"$PY\" ] || ',
-    r'PY=server/dsh/temporal-poc/.venv/bin/python; [ -x \"$PY\" ] || ',
     'PY=python3; ',
     r'\"$PY\" -B ',
     r'\"$PY\" ',
