@@ -323,6 +323,14 @@ def _caller_env(caller, caller_src=""):
 # 契约（t260922-10 等桩只认三参+裸串 caller），加形参会把桩打断（gen1 集成闸实录）。
 _PENDING_CALLER_SRC = ''
 
+#: Wall-clock bound for ONE spawned client.py call (t261028-06, KI-378 ②).
+#: Generic ops keep the long original bound (900 s: a stage-level op may
+#: legitimately take minutes). The reconcile probe lowers it to its own probe
+#: bound for the duration of the batch, so a query that blocks on the Temporal
+#: socket is KILLED at the bound instead of leaving an orphaned child behind
+#: every probe. Stubs that replace `_poc` never read this.
+_POC_TIMEOUT_S = 900
+
 
 def _poc(subcmd, payload, caller=None):
     """spawn engine/client.py，返回解析后的回执 dict（不判 ok）。
@@ -335,7 +343,14 @@ def _poc(subcmd, payload, caller=None):
     身份有出处；空串=未声明身份，不注入、由 client 按策略记名/拒收）。
     t260930-14：随身份注入推导出处 SANDBAR_CALLER_IDENTITY_SRC——出处由
     _write_op_poc 经 _PENDING_CALLER_SRC 暂存（模块级单调用面，ticket.py 每次
-    CLI 调用单线程消费；_poc 被桩替换时该键天然缺席=不透传，行为同旧）。"""
+    CLI 调用单线程消费；_poc 被桩替换时该键天然缺席=不透传，行为同旧）。
+
+    t261028-06 (KI-378 ②): the child's wall-clock bound is `_POC_TIMEOUT_S`
+    (generic ops keep the long original value; the reconcile probe lowers it
+    for the duration of its bounded batch, so a query stuck on the Temporal
+    socket is KILLED at the probe bound instead of outliving the command). The
+    signature is unchanged on purpose: scenario stubs replace `_poc` wholesale
+    and would break on an added parameter."""
     global _PENDING_CALLER_SRC
     env = dict(os.environ)
     env['SANDBAR_CLIENT_ENTRY'] = _audit_mod().ENTRY_MARK
@@ -348,7 +363,7 @@ def _poc(subcmd, payload, caller=None):
            json.dumps(payload, ensure_ascii=False)]
     try:
         proc = subprocess.run(cmd, cwd=str(REPO), capture_output=True, text=True,
-                              timeout=900, env=env)
+                              timeout=_POC_TIMEOUT_S, env=env)
     except Exception as e:
         raise ValueError('Temporal 调用失败（temporal server/worker 在线？'
                          'cd server/engine && ./run_server.sh + .venv/bin/python worker.py）: %s' % e)
@@ -1362,6 +1377,24 @@ def _probe_verdict(kind, ev):
     return 'unknown'        # transient / internal / 未知 kind：不清账（fail-closed）
 
 
+def _query_probe(tid):
+    """One liveness probe for the repair entry (bounded by the caller of this).
+
+    t261028-06 (KI-378 ②): the probe seam fed to
+    `concurrency.probe_holders_bounded`. Returns (kind, note): "" = the
+    workflow answered, "not_found" = Temporal says it is gone, any other kind =
+    an error name. Raises nothing of its own: a spawn/parse fault propagates
+    into the runner, which classifies it unknown and NAMES it, so a broken
+    probe can never clear a slot.
+    """
+    receipt = _poc('query', {'workflow_id': tid})
+    if isinstance(receipt, dict) and receipt.get('ok'):
+        return '', ''
+    kind = str((receipt or {}).get('kind') or '')
+    note = str((receipt or {}).get('error') or receipt)[:160]
+    return kind, note
+
+
 def _concurrency(args):
     """t261004-32：项目并发上限的只读面 + 僵尸 holder 清账（CL-2/CL-3 面板消费）。
 
@@ -1384,8 +1417,21 @@ def _concurrency(args):
     边界可达（console 宿主持 console 凭据拉起本 CLI），与 reconcile 清账写、CL-2b
     set_limit 同闸——不另设第二道闸。已知欠账：插件路由本身无 token 闸（KI-193
     未收），本边界是宿主进程spawn闸而非完整身份面。
+
+    t261028-06 (KI-378 ②) receipt contract: the reconcile probe is bounded by
+    ONE shared deadline (`concurrency.probe_holders_bounded`, daemon threads),
+    so N holders cost about one bound; a probe that does not answer is unknown
+    (the slot is KEPT) and NAMED in probe_errors under kind `timeout`, and the
+    command always returns a receipt. The receipt carries probed /
+    probe_timeout_s / probe_hung / elapsed_s / unknown / changed. `changed`
+    separates "nothing to reap" from "the reap worked" — an unchanged ledger is
+    never presented as a successful repair. Only the PROVED-dead set is dropped
+    (`concurrency.reconcile` dead_tickets); a holder nobody could classify, or
+    one that entered the ledger after this read, keeps its slot and is named in
+    kept_unclassified.
     """
     project = str(args.get('project') or '').strip()
+    global _POC_TIMEOUT_S
     if not project:
         raise ValueError('op=concurrency 需要 project（项目 key，声明按项目逐份判读）')
     conc = _concurrency_mod()
@@ -1397,23 +1443,46 @@ def _concurrency(args):
     if not args.get('reconcile'):
         return conc.read_state(project)
     state = conc.read_state(project)
+    holders = [h for h in (state.get('holders') or [])
+               if str(h.get('ticket') or '')]
+    # t261028-06 (KI-378 ②): ONE bounded probe driver, owned by the engine.
+    # Every probe carries a timeout; probes run concurrently under one shared
+    # deadline, so N holders cost about one bound, not N. A timeout (or any
+    # other unprovable answer) is classified unknown: the slot is KEPT and the
+    # reason is NAMED in probe_errors below. The command therefore always
+    # returns a receipt in bounded time — never the 4-minute silent block, and
+    # never a byte-identical state file presented as a successful repair.
+    probe_timeout_s = float(getattr(conc, 'PROBE_TIMEOUT_S', 10.0) or 10.0)
+    t0 = time.monotonic()
+    tids = [str(h.get('ticket')) for h in holders]
+    bounded = {'results': {}, 'hung': [], 'timeout_s': probe_timeout_s,
+               'elapsed_s': 0.0}
+    if tids:
+        # Two bounds, both named on the receipt: the spawned query is killed at
+        # the probe bound (no orphan child survives the command), and the probe
+        # seam adds a hard backstop above it for a probe that ignores its own
+        # bound (see concurrency.PROBE_SEAM_GRACE_S).
+        previous_child_bound = _POC_TIMEOUT_S
+        _POC_TIMEOUT_S = probe_timeout_s
+        try:
+            bounded = conc.probe_holders_bounded(_query_probe, tids,
+                                                 probe_timeout_s)
+        finally:
+            _POC_TIMEOUT_S = previous_child_bound
+    results = bounded.get('results') or {}
     alive = []
     draining = []
     unknown = []
+    dead = []
     probe_errors = {}
-    dropped_evidence = []
-    for h in state.get('holders') or []:
-        tid = str(h.get('ticket') or '')
+    dropped_evidence = {}
+    for h in holders:
+        tid = str(h.get('ticket'))
+        probed = results.get(tid) or {'kind': 'unknown',
+                                      'note': 'no probe result for this holder'}
+        kind = str(probed.get('kind') or '')
+        note = str(probed.get('note') or '')
         ev = _holder_evidence(tid)
-        try:
-            receipt = _poc('query', {'workflow_id': tid})
-            if isinstance(receipt, dict) and receipt.get('ok'):
-                alive.append(tid)          # live: the workflow answers
-                continue
-            kind = str((receipt or {}).get('kind') or '')
-            note = str((receipt or {}).get('error') or receipt)[:160]
-        except Exception as e:  # noqa: BLE001——spawn/解析层失败：不可证死，按 unknown 保槽
-            kind, note = 'unknown', '%s: %s' % (type(e).__name__, str(e)[:160])
         verdict = _probe_verdict(kind, ev)
         if verdict == 'live':
             alive.append(tid)
@@ -1422,15 +1491,29 @@ def _concurrency(args):
         elif verdict == 'dead':
             ev['probe'] = kind
             ev['ticket'] = tid
-            dropped_evidence.append(ev)
+            dropped_evidence[tid] = ev
+            dead.append(tid)
             probe_errors[tid] = 'dead (kind=%s) %s' % (kind, note)
-        else:  # unknown：fail-closed=不清账，具名留底等人看
+        else:
+            # unprovable: fail-closed keeps the slot; the reason rides along
             unknown.append(tid)
             probe_errors[tid] = 'kept (%s) %s' % (kind, note)
-    out = conc.reconcile(project, alive, draining, unknown)
+    out = conc.reconcile(project, alive, draining, unknown, dead_tickets=dead)
+    kept = set(out.get('dropped') or [])
     out['probe_errors'] = probe_errors
-    out['dropped_evidence'] = dropped_evidence
+    out['dropped_evidence'] = [dropped_evidence[t] for t in dead
+                               if t in kept and t in dropped_evidence]
     out['decl'] = state.get('decl')
+    out['probed'] = len(holders)
+    out['unknown'] = sorted(unknown)
+    out['bounded'] = True
+    out['probe_timeout_s'] = bounded.get('timeout_s', probe_timeout_s)
+    out['probe_hung'] = list(bounded.get('hung') or [])
+    out['elapsed_s'] = round(time.monotonic() - t0, 3)
+    # "Nothing to reap" and "the reap worked" are different receipts: this flag
+    # is what stops an unchanged state file from reading as a repair (KI-378).
+    out['changed'] = bool(out.get('dropped') or out.get('promoted')
+                          or out.get('merge_wait_dropped'))
     return out
 
 

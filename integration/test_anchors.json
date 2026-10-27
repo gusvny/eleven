@@ -1736,6 +1736,10 @@
     "server/engine/tests/test_t261028_03_foreign_artifact_repair.py": {
       "anchor": "behaviour",
       "note": "t261028-04 (KI-379) L1: the foreign repair's self-consistency floor judges importability, not path shape - at the merge_check floor seam over REAL temp git repos, a foreign .json build stamp whose blob main lacks is REMOVED by the sanctioned repair (green item, one engine repair commit, no floor refusal, the ticket's own in-write-set write untouched), a foreign .py that is genuinely still imported is still REFUSED whole by name (the text names the importer file and the module, never <not-a-module>, zero writes, no commit), and with both in one round the artifact is never the reason (whole refusal, artifact left in place, its path absent from the refusal text)"
+    },
+    "server/engine/tests/test_t261028_02_terminal_holder_and_bounded_reconcile.py": {
+      "anchor": "behaviour",
+      "note": "t261028-06 (KI-378) L1: the reader-side proof-of-death verdict gives a TERMINAL holder's slot back and names it - only not_found is proof of death (a raise/malformed answer is unknown, slot kept), reconcile drops ONLY the proved-dead set (a holder nobody classified, or one that entered the ledger after the caller's snapshot, keeps its slot and is named in kept_unclassified) and carries evidence per drop; and the repair entry op=concurrency reconcile=true is BOUNDED - every probe runs under ONE shared deadline (a hung probe is kind timeout, unknown, kept, named in probe_errors, receipt returned in seconds with changed=false), three hung probes cost about one bound, a transient RPC keeps the holder and says nothing changed, and a proved-dead holder is dropped, its queue head promoted and the next acquire immediate."
     }
   },
   "scenarios": {

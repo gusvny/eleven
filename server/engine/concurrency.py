@@ -68,6 +68,7 @@ import asyncio
 import fcntl
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -729,6 +730,97 @@ async def probe_holder_liveness(probe, tid: str) -> Tuple[str, str]:
     return verdict, note
 
 
+#: The kind the BLOCKING runner reports for a probe that did not answer inside
+#: its bound (t261028-06). It is a named refusal, never a death:
+#: `_classify_probe_kind` maps it to unknown, so the holder keeps its slot and
+#: the receipt says why.
+PROBE_KIND_TIMEOUT = "timeout"
+
+#: Slack the blocking runner allows ABOVE the probe's own bound before it
+#: declares a probe hung (t261028-06). The probe's own bound is expected to
+#: fire first and report a clean, named timeout (the spawned query is killed at
+#: that bound); this slack only covers a callable that ignores its own bound,
+#: so the seam is a hard backstop over a bounded probe, never the primary
+#: deadline. Zero would race the two bounds and could report "hung" for a probe
+#: that was about to name its own timeout.
+PROBE_SEAM_GRACE_S = 1.0
+
+
+def probe_holders_bounded(probe, tickets: Iterable[str],
+                          timeout_s: Optional[float] = None) -> Dict[str, Any]:
+    """Blocking, bounded, named liveness probe for a consumer that is NOT async.
+
+    t261028-06 (KI-378 ②): the repair entry
+    (`ticket.py op=concurrency reconcile=true`) runs on the plain host python
+    next to a Temporal socket it cannot await. Measured fault: a probe that
+    blocked in that socket held the command for 4+ minutes with a
+    byte-identical state file and no output. Every probe here runs on its own
+    daemon thread and the calls are joined against ONE shared deadline
+    (`timeout_s` plus PROBE_SEAM_GRACE_S), so the wall-clock cost of N probes is
+    about one bound, not N.
+
+    Returns {"results": {tid: {"verdict", "kind", "note"}}, "hung": [tids],
+             "timeout_s": <bound>, "elapsed_s": <wall clock seconds>}.
+
+    The verdict follows the SAME rule as `probe_holder_liveness`
+    (`_classify_probe_kind`): only not_found is proof of death; a timeout, a
+    raise and a malformed answer are all unknown — the holder keeps its slot
+    and the reason is NAMED on `note`. Nothing here raises on a probe fault.
+    A thread still running at the deadline is abandoned, never joined again:
+    daemon threads die with the process, so a wedged probe can never become a
+    wedged exit.
+    """
+    tids = [str(t) for t in (tickets or ())]
+    if not callable(probe):
+        raise ValueError(
+            "Concurrency holder probe refused: no probe callable - refusing "
+            "instead of judging holders with an absent probe")
+    budget = PROBE_TIMEOUT_S if timeout_s is None else float(timeout_s)
+    t0 = time.monotonic()
+    deadline = t0 + max(0.0, budget) + PROBE_SEAM_GRACE_S
+    raw: Dict[str, Tuple[str, str]] = {}
+    guard = threading.Lock()
+
+    def _one(tid: str) -> None:
+        try:
+            res = probe(tid)
+        except BaseException as e:  # noqa: BLE001 - a probe fault is named, not raised
+            row: Tuple[str, str] = ("unknown",
+                                    "%s: %s" % (type(e).__name__, str(e)[:160]))
+        else:
+            if isinstance(res, tuple) and len(res) == 2 \
+                    and isinstance(res[0], str) and isinstance(res[1], str):
+                row = (res[0], res[1][:160])
+            else:
+                row = ("malformed", "malformed probe result: %r" % (res,))
+        with guard:
+            raw[tid] = row
+
+    threads: List[Tuple[str, threading.Thread]] = []
+    for tid in tids:
+        th = threading.Thread(target=_one, args=(tid,),
+                              name="conc-probe", daemon=True)
+        th.start()
+        threads.append((tid, th))
+    for _tid, th in threads:
+        th.join(max(0.0, deadline - time.monotonic()))
+    results: Dict[str, Dict[str, str]] = {}
+    hung: List[str] = []
+    for tid, _th in threads:
+        seen = raw.get(tid)
+        if seen is None:
+            hung.append(tid)
+            kind, note = (PROBE_KIND_TIMEOUT,
+                          "probe timed out after %ss" % (round(budget, 3),))
+        else:
+            kind, note = seen
+        results[tid] = {"verdict": _classify_probe_kind(kind),
+                        "kind": kind, "note": note}
+    return {"results": results, "hung": hung,
+            "timeout_s": budget,
+            "elapsed_s": round(time.monotonic() - t0, 3)}
+
+
 async def sweep(project_key: str, probe) -> Dict[str, Any]:
     """Probe every holder of the project and drop only provably-dead ones.
 
@@ -946,7 +1038,8 @@ def read_state(project_key: str) -> Dict[str, Any]:
 
 def reconcile(project_key: str, alive_tickets: Iterable[str],
               draining_tickets: Iterable[str] = (),
-              unknown_tickets: Iterable[str] = ()) -> Dict[str, Any]:
+              unknown_tickets: Iterable[str] = (),
+              dead_tickets: Optional[Iterable[str]] = None) -> Dict[str, Any]:
     """Drop holders whose workflows are gone (crash-path leak janitor, review
     item 5). `alive_tickets` is the caller-verified set of live ticket ids
     (ticket.py checks Temporal per holder). `draining_tickets` (t261009-74)
@@ -959,30 +1052,62 @@ def reconcile(project_key: str, alive_tickets: Iterable[str],
     Callers omitting the arguments keep today's behavior. Promotion follows
     in the same locked step. Named output: exactly which stale holders were
     dropped, and which holders are draining. The `merge_wait` face (t261022) is
-    pruned by the same rule: a gate waiter nobody could prove alive leaves it."""
+    pruned by the same rule: a gate waiter nobody could prove alive leaves it.
+
+    t261028-06 (KI-378 (a), the proof-of-death form): `dead_tickets` is the
+    PROOF set — the holders whose workflow the caller PROVED terminal (the
+    liveness probe answered not_found). When it is given, ONLY those holders
+    lose their slot: a holder that is neither proved alive nor proved dead (the
+    probe timed out, or it entered the ledger after the caller's snapshot)
+    KEEPS its slot and is named in `kept_unclassified`. That is the difference
+    between "nobody vouched for it" and "we watched it die"; an absent set
+    (None) keeps the legacy contract the earlier callers rely on, where an
+    unclassified holder is dropped."""
     k = _check_key(project_key)
     alive = {str(t) for t in (alive_tickets or ())}
     draining = {str(t) for t in (draining_tickets or ())} - alive
     unknown = {str(t) for t in (unknown_tickets or ())} - alive - draining
+    proven_dead: Optional[set] = None
+    if dead_tickets is not None:
+        proven_dead = {str(t) for t in (dead_tickets or ())} \
+            - alive - draining - unknown
     root = os.path.join(str(shared.perkey_projects_root()), k)
     now = time.time()
     dropped: List[str] = []
+    kept_unclassified: List[str] = []
+    merge_wait_dropped: List[str] = []
     with _locked(root) as g:
         doc = g.doc
-        keep = [h for h in doc["holders"] if h.get("ticket") in alive
-                or h.get("ticket") in draining or h.get("ticket") in unknown]
-        dropped = [h.get("ticket") for h in doc["holders"]
-                   if h.get("ticket") not in alive
-                   and h.get("ticket") not in draining
-                   and h.get("ticket") not in unknown]
+        keep: List[Dict[str, Any]] = []
+        for h in doc["holders"]:
+            tid = h.get("ticket")
+            if tid in alive or tid in draining or tid in unknown:
+                keep.append(h)
+            elif proven_dead is None or tid in proven_dead:
+                dropped.append(tid)
+            else:
+                # Neither proved alive nor proved dead: the slot is not ours to
+                # take (fail-closed). Named on the receipt, never dropped.
+                kept_unclassified.append(tid)
+                keep.append(h)
         doc["holders"] = keep
         # t261022: the merge-wait face is not a second zombie channel — a gate
         # waiter the caller could not prove alive leaves the face exactly like a
         # dead holder leaves the holder list (unknown/draining keep it, same
-        # fail-closed stance as above).
-        doc["merge_wait"] = [e for e in doc.get("merge_wait", [])
-                             if isinstance(e, dict)
-                             and e.get("ticket") in alive | draining | unknown]
+        # fail-closed stance as above). t261028-06: under the proof form, a
+        # waiter that was not proved dead keeps the face too.
+        kept_wait: List[Dict[str, Any]] = []
+        for e in doc.get("merge_wait", []):
+            if not isinstance(e, dict):
+                continue
+            tid = e.get("ticket")
+            if tid in alive or tid in draining or tid in unknown:
+                kept_wait.append(e)
+            elif proven_dead is None or tid in proven_dead:
+                merge_wait_dropped.append(tid)
+            else:
+                kept_wait.append(e)
+        doc["merge_wait"] = kept_wait
         promoted = None
         dropped_stale: List[str] = []
         limit = load_limit(k)
@@ -993,6 +1118,8 @@ def reconcile(project_key: str, alive_tickets: Iterable[str],
             dropped_stale = hop["dropped_stale"]
         return {"dropped": dropped, "promoted": promoted,
                 "dropped_stale": dropped_stale,
+                "kept_unclassified": kept_unclassified,
+                "merge_wait_dropped": merge_wait_dropped,
                 "draining": [h.get("ticket") for h in doc["holders"]
                              if h.get("ticket") in draining],
                 "holders": len(doc["holders"]), "waiting": len(doc["queue"])}
