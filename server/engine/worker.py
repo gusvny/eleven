@@ -90,7 +90,8 @@ import agent_runtime
 from agent_activities import ALL_AGENT_ACTIVITIES, make_stage_activity
 # t261004-32 (CL-1): the three thin concurrency-cap activities (decision
 # logic lives in concurrency.py; this layer only enters the Temporal registry).
-from concurrency import CONCURRENCY_ACTIVITIES
+# t261027-10: also wires the liveness probe the dead-holder sweep uses.
+from concurrency import CONCURRENCY_ACTIVITIES, configure_probe
 from dsh_pin import dsh_face_payload, enforce_expected
 from agent_activities import (inflight_stage_snapshot, owned_spawn_snapshot,
                               recent_stage_outcomes, reap_owned_spawns)
@@ -883,6 +884,39 @@ async def run_worker(args: argparse.Namespace) -> None:
     else:
         logging.info("%s", face_note)
     client = await Client.connect(TARGET_HOST, namespace=NAMESPACE)
+
+    # t261027-10 (KI-378 ①): wire the dead-holder sweep's liveness probe to
+    # THIS worker's client. The worker process owns both the Temporal client
+    # and write access to the projects root, so the sweep runs here — the
+    # ending caller's (possibly sandbox-locked) file access never decides
+    # whether a terminal ticket's slot comes back. Probe contract (see
+    # concurrency.configure_probe): async (tid) -> (kind, note), kind
+    # ""=answered, "not_found"=workflow gone, else an error name. The sweep
+    # itself bounds every probe (PROBE_TIMEOUT_S) and fails closed on unknown.
+    def _temporal_probe(c):
+        # Not-found recognition mirrors client._is_not_found_exc (narrow
+        # reading, class-name MRO + text fallback; no SDK class import — the
+        # same KI-025 stance: a misread "gone" is exactly the false claim this
+        # probe must never make, because the sweep DROPS on not_found).
+        def _is_not_found(e: BaseException) -> bool:
+            return any(t.__name__ in ("WorkflowNotFoundError",
+                                      "NotFoundFailureError", "NotFoundFailure")
+                       for t in type(e).__mro__) \
+                or "not found" in str(e).lower()
+
+        async def probe_one(tid):
+            try:
+                await c.get_workflow_handle(str(tid)).describe()
+                return "", ""
+            except Exception as e:  # noqa: BLE001 - classified, named upstream
+                if _is_not_found(e):
+                    return "not_found", "workflow gone (not_found)"
+                return type(e).__name__, str(e)[:160]
+
+        return probe_one
+
+    configure_probe(_temporal_probe(client))
+    logging.info("concurrency liveness probe wired (t261027-10 sweep arm)")
     # The old TicketWorkflow is retired (ticket t260823, all tickets closed).
     # Workflow list = the two step-1 classes (compat) + the six template
     # subclasses; activity list = generic activities + agent-stage activities.

@@ -1053,7 +1053,17 @@ def _release_slot_after_cancel(project: str, ticket: str) -> Dict[str, Any]:
     (terminate), so a slot-release failure must be a NAMED note on the receipt,
     never a failed cancel. An empty project (the gate could not read one) is
     reported as such rather than guessed: releasing in the wrong project's
-    ledger would free somebody else's slot."""
+    ledger would free somebody else's slot.
+
+    t261027-10 (KI-378 ①): this caller-side release is now the BACKSTOP, not
+    the guarantee. The engine arms run without this caller's file access: the
+    workflow releases its own slot at the next async boundary after
+    cancel_notice / close_out_notice (base.py handlers set
+    `_terminal_slot_pending`; dev_lane consumes it behind
+    TERMINAL_SLOT_PATCH_ID), and the worker's acquire-time sweep
+    (concurrency.sweep, probe-backed) reclaims any row a terminated workflow
+    left behind. A `released:false` here is still honest — and no longer
+    final."""
     if not project:
         return {"released": False, "reason": "project_unknown"}
     try:

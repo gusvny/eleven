@@ -435,5 +435,6 @@ def test_stdlib_only_loader_face_has_no_activities():
     temporalio (engine venv), so only the shape contract is pinned here:
     CONCURRENCY_ACTIVITIES is a tuple of named callables."""
     names = [getattr(a, "__name__", "") for a in cc.CONCURRENCY_ACTIVITIES]
+    # t261027-10: concurrency_sweep joins the family (dead-holder reclaim).
     assert names == ["concurrency_acquire", "concurrency_release",
-                     "concurrency_renew"]
+                     "concurrency_renew", "concurrency_sweep"]

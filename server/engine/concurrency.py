@@ -64,6 +64,7 @@ writes it via reorder(); the engine consumes it as-is, FIFO by default).
 """
 from __future__ import annotations
 
+import asyncio
 import fcntl
 import json
 import os
@@ -509,10 +510,12 @@ def acquire(project_key: str, ticket: str, priority: bool = False) -> Dict[str, 
         # a same-call jackpot.
         room = unlimited or len(holders) < limit
         # t261019-31: sweep stale RUNNING holders in the same locked step.
-        # HUMAN-HOLD holders are NEVER judged — a gate waiter does not
+        # HUMAN-HOLD holders are NEVER judged HERE — a gate waiter does not
         # re-acquire until after the signature, so it has no heartbeat by
-        # design, and its hold is deliberate (rule 3); the sweep must never
-        # release it, whatever its age.
+        # design, and its hold is deliberate (rule 3); this heartbeat sweep
+        # must never release it, whatever its age. (t261027-10: the
+        # proof-of-death sweep judges by workflow liveness instead, and a
+        # TERMINATED human-hold holder does lose its slot there.)
         dropped_stale_holders: List[str] = []
         if any(_holder_is_stale(h, now) for h in holders
                if h.get("ticket") != t):
@@ -603,8 +606,12 @@ def _is_stale(entry: Dict[str, Any], now: float) -> bool:
 #: generous where the queue window (QUEUE_STALE_S) is tight: six hours clears
 #: every observed corpse within half a day. Judgement is restricted to
 #: `reason == REASON_RUNNING`: a human-hold holder waits for a signature and
-#: does NOT re-acquire until after it, so it has no heartbeat by design and its
-#: hold is deliberate (rule 3) — the sweep must never release it at any age.
+#: does NOT re-acquire until after it, so it has no heartbeat by design and
+#: THIS HEARTBEAT sweep must never judge it at any age. (t261027-10: the
+#: proof-of-death sweep — `sweep`, above — is a different judgement: "the
+#: workflow is gone" is a fact about the workflow, not about the hold
+#: expiring, so it MAY release a TERMINATED holder parked as human-hold;
+#: a live or unprovable one keeps its slot there.)
 HOLDER_STALE_S = 6 * 3600
 
 
@@ -614,7 +621,9 @@ def _holder_is_stale(holder: Dict[str, Any], now: float) -> bool:
     Fail-closed on freshness exactly like `_is_stale`: a running holder that
     cannot prove it is alive (missing / non-numeric `since`) counts stale.
     A `human-hold` holder is exempt at any age: the hold is by design (rule 3)
-    and the gate waiter has no heartbeat to expire — see HOLDER_STALE_S."""
+    and the gate waiter has no heartbeat to expire — see HOLDER_STALE_S.
+    (t261027-10: this exemption is about the HEARTBEAT judgement only; the
+    proof-of-death sweep judges dead human-hold holders by workflow liveness.)"""
     if holder.get("reason") == REASON_HUMAN_HOLD:
         return False
     try:
@@ -631,6 +640,192 @@ def over_limit_face(limit: int, holders: int) -> Dict[str, Any]:
     Both consumers (the panel's read_state face and the gate's acquire refusal)
     call THIS one function, so the face and the gate read one judgement."""
     return {"limit": limit, "at_work": holders, "surplus": holders - limit}
+
+
+# ---------- bounded liveness probe + dead-holder sweep (t261027-10, KI-378) ----------
+#
+# Measured fault: four of five slots on dengzhufpv were held by TERMINATED
+# workflows — three of them as `human-hold` rows. The only automatic backstop
+# (the heartbeat sweep below) deliberately never judges a human-hold holder,
+# and the only janitor was the manual reconcile entry, whose own probe had no
+# time bound (measured: a 4-minute silent hang). Two closes, both engine-side
+# so the ending caller's (possibly sandboxed, read-only) file access never
+# matters:
+#   (b) `probe_holder_liveness` — one bounded, named liveness probe. A probe
+#       either answers, or the failure is NAMED on the receipt; it never waits
+#       unbounded.
+#   (a) `sweep` — probe every holder (concurrently, so the total cost is one
+#       PROBE_TIMEOUT_S, not N x it), then drop ONLY provably-dead holders
+#       under a fresh lock with revalidation (a holder that renewed between the
+#       snapshot and the drop survives). The ledger lock is never held across
+#       probes: a probe storm must not stall concurrent acquire/release/renew.
+#
+# Judgement split, stated once so no reader mistakes one for the other:
+#   - HEARTBEAT sweep (_holder_is_stale): "this RUNNING holder stopped
+#     proving it is alive". A human-hold holder has no heartbeat by design,
+#     so this sweep never judges it at any age.
+#   - PROOF-OF-DEATH sweep (`sweep`): "this workflow is GONE (Temporal says
+#     not_found)". That is a fact about the workflow, not about the hold
+#     being expired — it releases a dead human-hold holder exactly like a
+#     dead running one. A live human-hold holder (the probe answers) keeps
+#     its slot, as does anything unprovable (fail-closed, unchanged).
+PROBE_TIMEOUT_S = 10.0
+#: One sweep per process per interval, so a saturated project's acquire polls
+#: (5 s..120 s backoff) cannot turn into a probe storm. The sweep receipt says
+#: when it was skipped for throttle — visible, not silent.
+SWEEP_MIN_INTERVAL_S = 60.0
+
+#: The liveness probe seam. One async callable `(tid) -> (kind, note)` with
+#: kind "" = the workflow answered, "not_found" = Temporal says it is gone,
+#: anything else = an error name. Wiring is the worker's job (it owns the
+#: Temporal client): worker.py calls `configure_probe`. Unset = the sweep
+#: refuses by name instead of pretending to judge (a missing probe must not
+#: look like "everybody is alive").
+_probe_query = None
+_sweep_state = {"at": 0.0}
+
+
+def configure_probe(fn) -> None:
+    """Install the liveness probe callable (worker.py wiring point). Passing
+    None uninstalls (tests / shutdown)."""
+    global _probe_query
+    _probe_query = fn
+
+
+def _classify_probe_kind(kind: str) -> str:
+    """"live" / "dead" / "unknown" from the probe's structured kind. Only
+    not_found is proof of death; everything else keeps the slot (fail-closed,
+    the same stance reconcile takes on unknown)."""
+    if kind == "":
+        return "live"
+    if kind == "not_found":
+        return "dead"
+    return "unknown"
+
+
+async def probe_holder_liveness(probe, tid: str) -> Tuple[str, str]:
+    """One bounded, named probe. Returns (verdict, note) with verdict
+    live|dead|unknown; note is "" or a named failure a reader can act on.
+    A hung probe is cancelled at PROBE_TIMEOUT_S and named; a probe that
+    raises or returns a malformed result is unknown, never an exception and
+    never silently alive."""
+    try:
+        res = await asyncio.wait_for(probe(str(tid)), timeout=PROBE_TIMEOUT_S)
+    except asyncio.CancelledError:
+        raise
+    except (asyncio.TimeoutError, TimeoutError):
+        return "unknown", "probe timed out after %ss" % PROBE_TIMEOUT_S
+    except Exception as e:  # noqa: BLE001 - a probe fault is named, not raised
+        return "unknown", "%s: %s" % (type(e).__name__, str(e)[:160])
+    if not (isinstance(res, tuple) and len(res) == 2
+            and isinstance(res[0], str) and isinstance(res[1], str)):
+        return "unknown", "malformed probe result: %r" % (res,)[:120]
+    kind = res[0]
+    note = res[1][:160]
+    verdict = _classify_probe_kind(kind)
+    if verdict == "unknown":
+        # Name the kind on the note: the reader sees WHY the slot was kept.
+        note = "kept (%s) %s" % (kind, note)
+    return verdict, note
+
+
+async def sweep(project_key: str, probe) -> Dict[str, Any]:
+    """Probe every holder of the project and drop only provably-dead ones.
+
+    Lock discipline (review_plan condition 1): the ledger lock is taken twice,
+    briefly — once to snapshot the holder records, once to drop — and NEVER
+    across probes; concurrent acquire/release/renew of the project cannot
+    stall behind a probe. Cost bound (condition 2): probes run concurrently,
+    so the wall-clock cost is one PROBE_TIMEOUT_S, and the receipt carries
+    `elapsed_s` plus per-holder named notes. Drop revalidation: a holder is
+    dropped only if it is still present AND identical to its snapshot
+    (ticket+since+reason); a holder that renewed between snapshot and drop is
+    KEPT and named in `kept_revalidated`. Human-hold holders are judged here
+    by proof of death, not by hold age — a live human-hold keeps its slot
+    (tested), an unprovable one keeps it too."""
+    k = _check_key(project_key)
+    if not callable(probe):
+        raise ValueError(
+            "Concurrency sweep refused: no liveness probe is configured - "
+            "the worker must wire one via concurrency.configure_probe; "
+            "refusing instead of judging with an absent probe")
+    root = os.path.join(str(shared.perkey_projects_root()), k)
+    t0 = time.monotonic()
+    with _locked(root) as g:
+        snap = {h.get("ticket"): dict(h) for h in g.doc.get("holders", [])
+                if isinstance(h, dict)}
+    if not snap:
+        return {"probed": 0, "dropped": [], "kept_revalidated": [],
+                "unknown": [], "probe_errors": {}, "dropped_evidence": [],
+                "promoted": None, "dropped_stale": [],
+                "holders": 0, "waiting": 0,
+                "elapsed_s": round(time.monotonic() - t0, 3)}
+    verdicts: Dict[str, Tuple[str, str]] = {}
+
+    async def _one(tid: str) -> None:
+        verdicts[tid] = await probe_holder_liveness(probe, tid)
+
+    await asyncio.gather(*(_one(t) for t in snap))
+    dead = {t for t, (v, _n) in verdicts.items() if v == "dead"}
+    dropped: List[str] = []
+    kept_revalidated: List[str] = []
+    promoted = None
+    dropped_stale: List[str] = []
+    holders_now = len(snap)
+    waiting_now = 0
+    if dead:
+        with _locked(root) as g:
+            doc = g.doc
+            keep: List[Dict[str, Any]] = []
+            for h in doc.get("holders", []):
+                tid = h.get("ticket")
+                s = snap.get(tid)
+                if tid in dead and s is not None \
+                        and h.get("since") == s.get("since") \
+                        and h.get("reason") == s.get("reason"):
+                    dropped.append(tid)
+                    continue
+                if tid in dead:
+                    # The holder changed between snapshot and drop (it renewed
+                    # or was rewritten) - it proved itself alive meanwhile.
+                    kept_revalidated.append(tid)
+                keep.append(h)
+            doc["holders"] = keep
+            limit = load_limit(k)
+            room = limit is None or len(keep) < limit
+            if room and doc.get("queue"):
+                hop = _promote_live_head(doc, time.time())
+                promoted = hop["promoted"]
+                dropped_stale = hop["dropped_stale"]
+            holders_now = len(keep)
+            waiting_now = len(doc.get("queue", []))
+    else:
+        face = read_state(k)
+        holders_now = len(face.get("holders", []))
+        waiting_now = len(face.get("queue", []))
+    unknown = sorted(t for t, (v, _n) in verdicts.items() if v == "unknown")
+    probe_errors = {t: verdicts[t][1] for t in snap if verdicts[t][1]}
+    dropped_evidence = [{"ticket": t, "verdict": "dead",
+                         "probe": verdicts[t][1]} for t in sorted(dead)]
+    return {"probed": len(snap), "dropped": sorted(dropped),
+            "kept_revalidated": sorted(kept_revalidated),
+            "unknown": unknown, "probe_errors": probe_errors,
+            "dropped_evidence": dropped_evidence,
+            "promoted": promoted, "dropped_stale": dropped_stale,
+            "holders": holders_now, "waiting": waiting_now,
+            "elapsed_s": round(time.monotonic() - t0, 3)}
+
+
+def sweep_due(now: Optional[float] = None) -> bool:
+    """Whether a new sweep may start (one per process per
+    SWEEP_MIN_INTERVAL_S). Tests drive the clock through the parameter."""
+    now = time.time() if now is None else now
+    return now - _sweep_state["at"] >= SWEEP_MIN_INTERVAL_S
+
+
+def sweep_mark(now: Optional[float] = None) -> None:
+    """Record that a sweep is starting (the throttle marker)."""
+    _sweep_state["at"] = time.time() if now is None else now
 
 
 def _promote_live_head(doc: Dict[str, Any], now: float) -> Dict[str, Any]:
@@ -822,7 +1017,34 @@ except ImportError:  # pragma: no cover — stdlib-only consumer face (ticket.py
 if activity is not None:
     @activity.defn
     async def concurrency_acquire(args: AcquireArgs) -> Dict[str, Any]:
-        return acquire(args.project, args.ticket, priority=bool(args.priority))
+        res = acquire(args.project, args.ticket, priority=bool(args.priority))
+        # t261027-10 (KI-378 ① guarantee arm): when the project is saturated
+        # (this waiter was refused because holders >= limit) and a liveness
+        # probe is wired, sweep the holders before this poll gives up: dead
+        # holders (including TERMINATED ones parked as human-hold) are
+        # reclaimed here, by the worker — which owns both the Temporal client
+        # and write access to the projects root — never by the ending caller.
+        # Bounded: at most one sweep per process per SWEEP_MIN_INTERVAL_S,
+        # each sweep's probes concurrent under one PROBE_TIMEOUT_S; the
+        # receipt carries the sweep outcome so a skipped or failed sweep is
+        # visible on the acquire receipt, never silent.
+        if (not res.get("granted") and callable(_probe_query)
+                and res.get("limit") is not None
+                and int(res.get("holders") or 0) >= int(res["limit"])
+                and sweep_due()):
+            sweep_mark()
+            try:
+                sw = await sweep(args.project, _probe_query)
+            except Exception as e:  # noqa: BLE001 - named, never fatal to the poll
+                sw = {"error": "%s: %s" % (type(e).__name__, str(e)[:200])}
+            res["sweep"] = sw
+            if sw.get("dropped"):
+                # A real reclaim: re-judge once so this waiter can take the
+                # freed slot in the same poll instead of waiting a backoff.
+                res = acquire(args.project, args.ticket,
+                              priority=bool(args.priority))
+                res["sweep"] = sw
+        return res
 
     @activity.defn
     async def concurrency_release(args: ReleaseArgs) -> Dict[str, Any]:
@@ -833,7 +1055,13 @@ if activity is not None:
         reason = REASON_HUMAN_HOLD if args.cause == CAUSE_HUMAN_GATE else REASON_RUNNING
         return renew(args.project, args.ticket, reason)
 
+    @activity.defn
+    async def concurrency_sweep(args: AcquireArgs) -> Dict[str, Any]:
+        """Standalone sweep entry (also callable on demand). Refuses by name
+        when no probe is wired — never judges with an absent probe."""
+        return await sweep(args.project, _probe_query)
+
     CONCURRENCY_ACTIVITIES = (concurrency_acquire, concurrency_release,
-                              concurrency_renew)
+                              concurrency_renew, concurrency_sweep)
 else:  # pragma: no cover
     CONCURRENCY_ACTIVITIES = ()

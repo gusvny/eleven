@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-10-05T14:33:19+08:00",
-  "total": 29,
+  "generated_at": "2026-10-27T09:51:00+08:00",
+  "total": 38,
   "categories": [
     "design",
     "content",
@@ -55,6 +55,24 @@
       "has_frontmatter": true
     },
     {
+      "path": "design/develop-buffer-v1.md",
+      "file": "develop-buffer-v1.md",
+      "title": "Develop Buffer v1 (lane → develop → main)",
+      "category": "design",
+      "tags": [
+        "merge flow",
+        "integration gate",
+        "certification",
+        "develop branch",
+        "mode: dependency",
+        "mode: practice reference",
+        "mode: context"
+      ],
+      "status": "active",
+      "updated": "2026-10-09",
+      "has_frontmatter": true
+    },
+    {
       "path": "design/devlane-lite-v1.md",
       "file": "devlane-lite-v1.md",
       "title": "Lightweight Dev Lane (devlane-lite) v1",
@@ -88,6 +106,26 @@
       "status": "active",
       "updated": "2026-09-28",
       "has_frontmatter": true
+    },
+    {
+      "path": "design/epic-registry-v1.md",
+      "file": "epic-registry-v1.md",
+      "title": "Epic registry v1 — `docs/epics/`, one boolean, enforced at ticket creation",
+      "category": "design",
+      "tags": [],
+      "status": "active",
+      "updated": "",
+      "has_frontmatter": false
+    },
+    {
+      "path": "design/executor-operational-envelope-v1.md",
+      "file": "executor-operational-envelope-v1.md",
+      "title": "The executor's operational envelope v1 — run watch, stop tiers, request audience",
+      "category": "design",
+      "tags": [],
+      "status": "active",
+      "updated": "",
+      "has_frontmatter": false
     },
     {
       "path": "design/failure-classification-protocol-v1.md",
@@ -139,6 +177,20 @@
       "has_frontmatter": true
     },
     {
+      "path": "design/markdown-reviewer-panel-design.md",
+      "file": "markdown-reviewer-panel-design.md",
+      "title": "Markdown reviewer panel design",
+      "category": "design",
+      "tags": [
+        "design",
+        "workbench",
+        "change-review"
+      ],
+      "status": "active",
+      "updated": "2026-10-22",
+      "has_frontmatter": true
+    },
+    {
       "path": "design/metrics-api-contract-v1.md",
       "file": "metrics-api-contract-v1.md",
       "title": "metrics Definitions and API Contract v1",
@@ -153,6 +205,20 @@
       "has_frontmatter": true
     },
     {
+      "path": "design/metrics-api-contract-v2.md",
+      "file": "metrics-api-contract-v2.md",
+      "title": "metrics Definitions and API Contract v2",
+      "category": "design",
+      "tags": [
+        "metrics",
+        "contract",
+        "API"
+      ],
+      "status": "active",
+      "updated": "2026-10-21",
+      "has_frontmatter": true
+    },
+    {
       "path": "design/metrics-panel-ui-plan.md",
       "file": "metrics-panel-ui-plan.md",
       "title": "metrics Panel UI Plan",
@@ -163,6 +229,20 @@
       ],
       "status": "active",
       "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/metrics-token-face-delta.md",
+      "file": "metrics-token-face-delta.md",
+      "title": "metrics token face and population — delta rulings 261025",
+      "category": "design",
+      "tags": [
+        "metrics",
+        "tokens",
+        "contract"
+      ],
+      "status": "active",
+      "updated": "2026-10-25",
       "has_frontmatter": true
     },
     {
@@ -199,6 +279,25 @@
       "has_frontmatter": true
     },
     {
+      "path": "design/project-fact-ledgers-v1.md",
+      "file": "project-fact-ledgers-v1.md",
+      "title": "Project Fact Ledgers v1 (where the project's own facts live)",
+      "category": "design",
+      "tags": [
+        "fact ledger",
+        "known issues",
+        "store",
+        "multi-user",
+        "mode: dependency",
+        "mode: dependency",
+        "mode: dependency",
+        "mode: practice reference"
+      ],
+      "status": "active",
+      "updated": "2026-10-09",
+      "has_frontmatter": true
+    },
+    {
       "path": "design/project-management-ui-design.md",
       "file": "project-management-ui-design.md",
       "title": "Project Management UI Design (embedded in the left column)",
@@ -212,6 +311,16 @@
       "status": "active",
       "updated": "2026-09-28",
       "has_frontmatter": true
+    },
+    {
+      "path": "design/quickmanual-lane-v1.md",
+      "file": "quickmanual-lane-v1.md",
+      "title": "Quickmanual lane v1 — a recorded lane where a session works directly",
+      "category": "design",
+      "tags": [],
+      "status": "active",
+      "updated": "",
+      "has_frontmatter": false
     },
     {
       "path": "design/sandbar-distribution-v1.md",
@@ -255,6 +364,24 @@
       ],
       "status": "draft",
       "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/ticket-relations-v1.md",
+      "file": "ticket-relations-v1.md",
+      "title": "Ticket Relations v1 (what one ticket is to another)",
+      "category": "design",
+      "tags": [
+        "ticket engine",
+        "relations",
+        "dependency",
+        "attribution",
+        "mode: dependency",
+        "mode: dependency",
+        "mode: practice reference"
+      ],
+      "status": "active",
+      "updated": "2026-10-09",
       "has_frontmatter": true
     },
     {
@@ -344,6 +471,34 @@
       "has_frontmatter": true
     },
     {
+      "path": "reference/engine-operation-face.md",
+      "file": "engine-operation-face.md",
+      "title": "The engine operation face",
+      "category": "reference",
+      "tags": [],
+      "status": "active",
+      "updated": "",
+      "has_frontmatter": false
+    },
+    {
+      "path": "reference/ledger-record-models-v1.md",
+      "file": "ledger-record-models-v1.md",
+      "title": "Ledger Record Models v1 (what the ledgers store, and how)",
+      "category": "reference",
+      "tags": [
+        "fact ledger",
+        "record shape",
+        "data model",
+        "review draft",
+        "mode: dependency",
+        "mode: dependency",
+        "mode: dependency"
+      ],
+      "status": "draft",
+      "updated": "2026-10-09",
+      "has_frontmatter": true
+    },
+    {
       "path": "reference/panel-list-conventions.md",
       "file": "panel-list-conventions.md",
       "title": "Panel list conventions",
@@ -415,38 +570,15 @@
       "status": "active",
       "updated": "2026-10-04",
       "has_frontmatter": true
-    },
-    {
-      "path": "design/metrics-api-contract-v2.md",
-      "file": "metrics-api-contract-v2.md",
-      "title": "metrics Definitions and API Contract v2",
-      "category": "design",
-      "tags": [
-        "metrics",
-        "contract",
-        "API"
-      ],
-      "status": "active",
-      "updated": "2026-10-21",
-      "has_frontmatter": true
-    },
-    {
-      "path": "design/metrics-token-face-delta.md",
-      "file": "metrics-token-face-delta.md",
-      "title": "metrics token face and population — delta rulings 261025",
-      "category": "design",
-      "tags": [
-        "metrics",
-        "tokens",
-        "contract"
-      ],
-      "status": "active",
-      "updated": "2026-10-25",
-      "has_frontmatter": true
     }
   ],
   "review": {
-    "missing_frontmatter": [],
+    "missing_frontmatter": [
+      "design/epic-registry-v1.md",
+      "design/executor-operational-envelope-v1.md",
+      "design/quickmanual-lane-v1.md",
+      "reference/engine-operation-face.md"
+    ],
     "deprecated": [
       "design/ticket-workflow-console-design.md"
     ],

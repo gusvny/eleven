@@ -19,11 +19,15 @@ scenario pins the user-perceivable contract:
      waiter re-polls within its declared backoff, 5 s..120 s, so the corpse
      can never hold the slot for more than one backoff).
   H2 a fresh running holder is never dropped (the sweep is not a jackpot).
-  H3 a human-hold holder is NEVER swept, whatever its age — and even with a
+  H3 a human-hold holder is NEVER swept BY AGE, whatever its age — and even with a
      malformed/unprovable `since` (the ticket authority: "do not release a
      human-gate holder (that hold is by design)"; a gate waiter has no heartbeat
      by design, so age alone must never condemn it). It keeps counting toward
-     at_work and the room judgement.
+     at_work and the room judgement. (t261027-10 refines this contract: a
+     human-hold holder may still be dropped on PROOF OF DEATH via the
+     workflow probe — an age-independent judgement owned by
+     integration/t261027-10/sc_t261027_10_dead_holder_sweep_reclaims.py;
+     the age rule pinned here is unchanged.)
   H4 the heartbeat exists: acquire on an already-holding running ticket refreshes
      its `since` (a live lane working long stages must not be swept from under
      itself by a slow stage).

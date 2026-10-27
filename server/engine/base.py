@@ -381,6 +381,14 @@ class TicketCrossProjectMixin:
     _now_iso。重放安全：盖章字段带默认值 ""，老历史解码→judge 首分支放行零动作。
     """
 
+    #: t261027-10 (KI-378 ①, prompt arm): set by the cancel_notice /
+    #: close_out_notice handlers on acceptance, consumed (and cleared FIRST)
+    #: at the next async boundary in the lane's run loop (dev_lane
+    #: `_terminal_slot_release_if_pending`, behind TERMINAL_SLOT_PATCH_ID).
+    #: A plain attribute — the handlers never call workflow.* runtime APIs, so
+    #: the flag is replay-deterministic and the handlers stay offline-stubbable.
+    _terminal_slot_pending = False
+
     def _cross_project_gate(self, stamped_caller: str, note: str, op: str,
                             who: str, want: str) -> bool:
         g = cross_project_judge(stamped_caller, str(self.meta.get("project") or ""), note)
@@ -462,6 +470,12 @@ class TicketCrossProjectMixin:
         self._mark(was_stage or "close_out", "closed",
                    "named close-out (work already done): %s" % reason)
         self._touch()
+        # t261027-10 (KI-378 ①): the slot release must not depend on the
+        # ending caller's write access to the projects root — the workflow
+        # schedules its own terminal release (activity, worker-executed) at
+        # the next async boundary, before the terminate lands. The caller-side
+        # release in client.py stays as the idempotent backstop.
+        self._terminal_slot_pending = True
 
     # ---------- t260922-10：记名清场信号（cancel 前置留痕，先留痕后终结） ----------
     @workflow.signal
@@ -515,6 +529,10 @@ class TicketCrossProjectMixin:
                               "state": "cancel-noticed",
                               "reason": "%s requests cleanup: %s" % (who, reason)})
         self._touch()
+        # t261027-10 (KI-378 ①): same terminal-release scheduling as
+        # close_out_notice — the slot comes back via the worker's activity at
+        # the next async boundary, not via the ending caller's file access.
+        self._terminal_slot_pending = True
 
 
 # t260928-13：事件账本发射的重放安全 patch——老 RUNNING 实例重放无 marker ⇒ enqueue

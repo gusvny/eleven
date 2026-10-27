@@ -1337,6 +1337,10 @@ class LightLaneWorkflow(DevLaneWorkflow):
             # t261004-32: pause accounting before the gate (rule 4: a paused ticket holds
             # nothing); after resume the slot gate below re-acquires.
             await self._concurrency_release_if_paused()
+            # t261027-10: consume a notice-signal terminal release before the
+            # gate renews the hold (same prompt arm as the other lanes; the
+            # helper and the patch marker are inherited from DevLaneWorkflow).
+            await self._terminal_slot_release_if_pending()
             await self._pause_gate()
             # t261004-32: slot gate before a stage (rule 1) - holding = atomic renewal,
             # not holding = queued acquire.

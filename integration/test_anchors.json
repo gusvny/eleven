@@ -1719,6 +1719,14 @@
     "server/engine/tests/test_t261026_08_request_sweep_channel.py": {
       "anchor": "contract",
       "note": "t261026-08: the default_ticket_status_fn channel contract - server/admin.py path, closed/not-listed statuses with the named source, unparseable receipt and dead channel both fail closed to None"
+    },
+    "server/engine/tests/test_t261027_10_bounded_probe_and_sweep.py": {
+      "anchor": "behaviour",
+      "note": "t261027-10 L1: the probe is bounded/named/fail-closed (only not_found is proof of death), the sweep never holds the ledger lock across probes, probes run concurrently, drops revalidate (a renewed holder survives), a live human-hold keeps its slot, dead human-hold rows are reclaimed, the queue head is promoted, and the saturation trigger on the acquire activity sweeps once with a visible throttled skip."
+    },
+    "server/engine/tests/test_t261027_10_terminal_release_engine_side.py": {
+      "anchor": "behaviour",
+      "note": "t261027-10 L1: the prompt arm — cancel/close-out notices set the replay-safe pending flag consumed behind TERMINAL_SLOT_PATCH_ID, the caller-side write blocked (PermissionError) still returns the slot, state-file bytes are asserted reader-side, the new-ticket acquire is immediate, and a marker-less history replays with no new command while release faults are named, never raised."
     }
   },
   "scenarios": {
@@ -5916,6 +5924,14 @@
     "integration/t261026-25/sc_t261026_25_docker_carveout_guard.py": {
       "anchor": "behaviour",
       "note": "t261026-25: the docker-carveout disposition holds and the t260905-02 family still runs green on docker - the exception table keeps the three rows with reasons naming the teardown-residue face, each scenario file still carries its own-stage residue+port-release assertions (not migrated; a fork-ruling lift fails here by name on purpose), and each of the three cases runs as its registry cmd to exit 0 with SUMMARY pass>0 fail=0 env_fail=0; child exit 2 is named env_fail per child, any other exit or a missing SUMMARY line is a named failure."
+    },
+    "integration/t261027-10/sc_t261027_10_dead_holder_sweep_reclaims.py": {
+      "anchor": "behaviour",
+      "note": "t261027-10 scenario: the proof-of-death sweep drops workflow-gone holders (human-hold included), keeps alive and unknown holders fail-closed with named probe_errors and a bounded wait, refuses a corrupt ledger by name, and proves the reclaim reader-side (state bytes clean, waiter promoted, next acquire immediate)."
+    },
+    "integration/t261027-10/sc_t261027_10_terminal_release_caller_blocked.py": {
+      "anchor": "behaviour",
+      "note": "t261027-10 scenario: with the caller-side ledger write physically blocked, the cancel receipt stays honest (released=false, reason naming the write failure) and the engine-side reclaim returns the slot — reader bytes clean, waiter promoted, next acquire immediate — without the caller writing."
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

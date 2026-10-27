@@ -964,6 +964,19 @@ CONCURRENCY_GATE_PATCH_ID = "dev-lane-concurrency-gate-v1"
 #: did (TMPRL1100 would otherwise hit every ticket parked at merge today).
 MERGE_SLOT_RELEASE_PATCH_ID = "dev-lane-merge-slot-release-v1"
 
+#: t261027-10 (KI-378 ①, prompt arm): the notice-signal handlers
+#: (cancel_notice / close_out_notice, in base.py) set `_terminal_slot_pending`;
+#: at the next async boundary the run loop releases the slot via the
+#: worker-executed `concurrency_release` activity — engine-side, so the ending
+#: caller's (possibly sandbox-locked) write access to the projects root no
+#: longer decides whether the slot comes back. Same replay discipline as every
+#: other concurrency patch: a history recorded before this marker existed
+#: replays with no new command (the guard below returns early), so a ticket
+#: parked at a gate or mid-stage today redetermines tomorrow. The caller-side
+#: release in client.py stays as the idempotent backstop (release() is a no-op
+#: receipt for a ticket that holds nothing).
+TERMINAL_SLOT_PATCH_ID = "dev-lane-terminal-slot-release-v1"
+
 #: Replay anchor for the CL-1 gate family (t261005-15): the instant CL-1
 #: (775bdb1) landed, 2026-10-05 07:20:14 +0800. A workflow's
 #: ``info().start_time`` is part of its history - constant for a given
@@ -2436,6 +2449,30 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         if not self._paused:
             return
         await self._concurrency_release(CAUSE_PAUSED)
+
+    async def _terminal_slot_release_if_pending(self) -> None:
+        """t261027-10 (KI-378 ①, prompt arm): consume the notice-signal flag.
+        Called at the top of every run-loop iteration; when the worker gets a
+        workflow task in after `cancel_notice`/`close_out_notice` and before
+        the terminate lands, the slot is released HERE — by this worker, which
+        owns the write to the projects root — instead of depending on the
+        ending caller's file access. The flag is cleared BEFORE the release
+        (a replayed history cannot double-fire the command; `release()` itself
+        is idempotent anyway, so the residual risk is a duplicated receipt,
+        never a leaked slot). A release failure is named on the ticket face
+        and never fails the workflow task: the acquire-time sweep
+        (concurrency.sweep) remains the guarantee arm behind it."""
+        if not getattr(self, "_terminal_slot_pending", False):
+            return
+        if not _concurrency_gate_active(workflow, TERMINAL_SLOT_PATCH_ID):
+            return
+        self._terminal_slot_pending = False
+        try:
+            await self._concurrency_release(CAUSE_TERMINATED)
+        except Exception as e:  # noqa: BLE001 - named on the face, never fatal
+            self._log("Terminal slot release failed (%s: %s); the engine-side "
+                      "acquire sweep will reclaim the row if the workflow dies "
+                      "holding it" % (type(e).__name__, str(e)[:160]))
 
     # ---------- blocked wait (retry_qc re-runs this step / rework jumps) ----------
     async def _blocked(self, step_id: str, why: str) -> None:
@@ -4659,6 +4696,10 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             # t261004-32: pause accounting happens before the gate - the in-flight
             # stage hands the slot back as soon as it finishes (rule 4: a paused
             await self._concurrency_release_if_paused()
+            # t261027-10: consume a notice-signal terminal release before the
+            # gate renews the hold (a cancel/close-out must not renew a hold
+            # it is about to give back).
+            await self._terminal_slot_release_if_pending()
             await self._pause_gate()
             # t261009-58: consume queued annex requests at the stage boundary
             # (intake signal is queue-only; admission needs the holder-scan activity)
@@ -8368,6 +8409,9 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
 
         while phase != "done":
             await self._concurrency_release_if_paused()
+            # t261027-10: consume a notice-signal terminal release before the
+            # gate renews the hold (same prompt arm as the dev-lane loop).
+            await self._terminal_slot_release_if_pending()
             await self._pause_gate()
             if _concurrency_gate_active(workflow, QUICKMANUAL_CONCURRENCY_GATE_PATCH_ID):
                 await self._concurrency_gate()
