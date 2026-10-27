@@ -46,31 +46,14 @@ lanes:
         cmd: python3 integration/lint_tests.py
 integration:
   cmd: python3 integration/run_scenarios.py
-  # supply 简化为一条「确保测试台在位」（t260904-19，宿主令「既然用 docker 就都用」）：
-  # 一切需要舞台的场景同一搭台方式（integration/stage_docker.py 单点入口 + 同一
-  # compose 文件），supply 只做三件事——docker 在场、测试镜像在场、共享供给台
-  # （sandbar-test-integ）健康。docker 缺席/镜像缺席/起台不健康=supply 红=环境红
-  # 点名（三态语义不变，exit 2），不假绿不静默降级。
-  # t260920-01（stage-ops 票①）：供给面等待预算化——daemon 探针与全部「等别人」
-  # 窗口（ensure 互斥/他人 booting/心跳宽限/保险丝锁）受 SANDBAR_STAGE_WAIT_BUDGET_S
-  # （缺省 120s）封顶，等待期 STAGE_WAIT 点名（在等谁/已等多久/为何未就绪），超预算
-  # =ENV_FAIL exit 2 诚实红不硬等（旧：daemon 假死硬等 900s 兜底=t260916-25 假封链
-  # 的等待形态）。daemon/镜像在场门移交 stage_docker `_gates`（15s 有界、冷起必经、
-  # 同为 exit 2）；裸 docker info/image inspect 无界接触面摘除。段级 timeout=900
-  # 兜底不变（预算在其内），ENV_FAIL 三态语义只收紧不放宽。
-  # 生命周期边界（防混读）：本条起的共享台是 **常驻基建例外**——ensure 幂等（健康
-  # 复用/半残拆重起/--keep 不拆在跑台），闸后有意常驻不拆；验收口径「拆台零残留」
-  # 的适用对象是 **场景台**（每场景独立工程名，场景结束即拆，容器/端口零残留）。
+  # 261027 宿主令：未来不允许再使用 docker。集成闸的 docker 供给要求已整条摘除
+  # （见 supply 段注）；本仓测试不应再依赖 daemon/镜像/共享供给台。
   supply:
-    # 单行串接（接入契约 ②a：引擎解析器无块标量语法，多行 cmd=fail-closed——
-    # t260904-19 gen1 实锤①归因）。失败段 exit 2=环境红（t260920-01：exit 1→2
-    # 对齐三态）。
-    - need: docker 测试台在位（t260920-01：daemon 有界探针+测试镜像+共享供给台健康；等待预算缺省 120s，超预算 exit 2 收诚实红不硬等）
-      cmd: 'export SANDBAR_STAGE_LOCK_DIR="${SANDBAR_STAGE_LOCK_DIR:-/tmp/sandbar-test-stages}"; export SANDBAR_STAGE_WAIT_BUDGET_S="${SANDBAR_STAGE_WAIT_BUDGET_S:-120}"; MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/engine/bin/temporal"; [ -x "$SRC" ] || SRC="$MAIN/server/dsh/temporal-poc/bin/temporal"; [ -x "$SRC" ] || { echo "ENV_FAIL: 主树 temporal CLI 缺失：$SRC（供给台 namespace/SA 注册需要）"; exit 2; }; mkdir -p server/engine/bin; [ -e server/engine/bin/temporal ] || ln -s "$SRC" server/engine/bin/temporal; python3 integration/stage_docker.py daemon-probe && python3 integration/stage_docker.py ensure --project sandbar-test-integ --keep --services full'  # engine-venv-compat（t260907-10 主树迁移窗口回落；摘除票删旧腿）
-    # playwright-core 条保留（gen1 实锤②归因：方案 v2 C10 定稿「browser 族仍在消费」；
-    # 泳道 ui-check node_modules 实况不存在，KI-036② LANE_DEP_SYMLINKS 引擎面未落地
-    # 前，删此条=browser 族 16+ 条环境红回潮顶撞宿主令）。工单「供给简化为一条」
-    # 语义=**台**供给一条；浏览器依赖供给是另一维度，并列保留。
+    # 261027 宿主令：未来不允许再使用 docker。原「docker 测试台在位」条整条摘除——
+    # 集成闸不再要求 daemon/镜像/共享供给台；依赖 docker 的用例已在已知红册
+    # （integration/known-red-baseline.json，home=「docker 面退出」）排除出常规轮次，
+    # 批次台预起在 daemon 缺席时按具名跳过（integration/run_scenarios.py）。
+    # 保留 playwright-core 条（浏览器族仍在消费，KI-036）。
     - need: playwright-core（泳道 ui-check node_modules 软链主树，KI-036）
       cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || SRC="$MAIN/server/dsh/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || { echo "ENV_FAIL: 主树 playwright-core 缺失：$SRC"; exit 1; }; mkdir -p server/ui-check/node_modules; DST=server/ui-check/node_modules/playwright-core; [ -e "$DST" ] || ln -s "$SRC" "$DST"; [ -e "$DST/package.json" ] || { echo "ENV_FAIL: 软链后不可解析：$DST"; exit 1; }'  # engine-venv-compat（t260907-10 主树迁移窗口回落；摘除票删旧腿）
   # ---- 每票集测段跳过慢池（t260913-03 落地；本声明由 main 侧随该票合并落账）----
