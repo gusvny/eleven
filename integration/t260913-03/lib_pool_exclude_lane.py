@@ -44,6 +44,28 @@ MAIN_ANCHOR = 'if __name__ == "__main__":'
 # 被跳池（本票的机械判据只认执行器自有的池字段；声明面值由各夹具显式给出）
 EXCLUDE_VALUE = "engine,exclusive"
 
+# t261028-19 (KI-397): one pytest-form code-lane check in the generated
+# verify.yaml. Two consumers need it:
+#   1. a quickmanual `l1_battery` declaration resolves its OWNER CHECK from the
+#      DECLARED pytest-form checks of the lane's verify.yaml (verify_lane's own
+#      predicate: the command carries "pytest") and appends the battery as
+#      `pytest_node`; without a declared pytest-form check the declaration can
+#      only be refused, so the battery round is unreachable on this fixture;
+#   2. every merge_check runs `verify_lane lane=code` over the declared checks,
+#      so the DEFAULT target of this check must be cheap, green and present in
+#      every fixture world - a bare `-m pytest` would collect the whole suite
+#      from the lane root.
+# The default target is the fixture's own green battery directory; a battery
+# declaration appends its pytest_node to the same command.
+PYTEST_CHECK_ID = "test"
+BATTERY_DIR = "fixture_battery"
+# The lane worktree carries the engine venv as a symlinked dependency
+# (prepare_workspace's LANE_DEP_SYMLINKS), not as a tracked file; the fallback
+# covers a tree where that link is absent without ever faking the pytest run.
+PYTEST_CHECK_CMD = ('py=server/engine/.venv/bin/python; [ -x "$py" ] || '
+                    'py=python3; exec "$py" -m pytest -q -p no:cacheprovider %s'
+                    % BATTERY_DIR)
+
 
 # ---------------------------------------------------------------- 夹具搭建
 
@@ -84,6 +106,20 @@ def _stage_stub_text():
     )
 
 
+def _battery_text():
+    """The fixture's own pytest target (green by construction): the declared
+    `test` check runs it by default, and a battery declaration appends its own
+    node to that same command."""
+    return ('"""Fixture code-lane battery (t261028-19): the generated verify.yaml\n'
+            'declares ONE pytest-form check whose default target is this file.\n'
+            'Green by construction - the fixture world asserts the gate scope and\n'
+            'plumbing faces, never this file."""\n'
+            '\n'
+            '\n'
+            'def test_fixture_battery_is_present():\n'
+            '    assert True\n')
+
+
 def build_lane(root, spec, exclude_pools=EXCLUDE_VALUE,
                force_assets=("integration/stage_docker.py",), declare=True):
     """在 root 下造一条最小泳道。
@@ -102,6 +138,10 @@ def build_lane(root, spec, exclude_pools=EXCLUDE_VALUE,
                  root / "server" / "engine" / "failure_protocol.py")
     (root / "integration" / "stage_docker.py").write_text(_stage_stub_text(),
                                                           encoding="utf-8")
+    # t261028-19 (KI-397): the pytest target the declared `test` check runs.
+    battery = root / BATTERY_DIR / "test_fixture_battery.py"
+    battery.parent.mkdir(parents=True, exist_ok=True)
+    battery.write_text(_battery_text(), encoding="utf-8")
 
     entries, files = [], {}
     for name, pool, ok in spec:
@@ -119,7 +159,13 @@ def build_lane(root, spec, exclude_pools=EXCLUDE_VALUE,
     lines.insert(hits[0], "SCENARIOS = %r\n\n" % (tuple(entries),))
     (root / "integration" / "run_scenarios.py").write_text("".join(lines), encoding="utf-8")
 
+    # t261028-19 (KI-397): the declaration carries ONE pytest-form check (id
+    # `test`) so a quickmanual battery declaration resolves to a real check id
+    # instead of a named refusal, and so both a full round and a narrowed
+    # battery round can be driven over this fixture.
     decl = ["schema: v1", "lanes:", "  code:", "    write_allow:", "      - server/",
+            "    checks:", "      - id: %s" % PYTEST_CHECK_ID,
+            "        cmd: '%s'" % PYTEST_CHECK_CMD,
             "integration:", "  cmd: python3 integration/run_scenarios.py"]
     if declare and exclude_pools:
         decl.append("  exclude_pools: %s" % exclude_pools)

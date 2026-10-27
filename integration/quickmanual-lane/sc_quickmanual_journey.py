@@ -30,12 +30,20 @@ docs/design/quickmanual-lane-v1.md, host ruling 261019):
       refusal, the ticket stays parked); a valid signal lands the session id and
       its role on the ticket face — a reader can say WHO worked, never a borrowed
       role name.
-  J5. THE ORDINARY PATH: after work-done the EXISTING settle/disposal path commits
-      the work (the lane branch gains a commit), the existing run_integration_tests
-      and merge_check gates run against the project-declared integration command
-      (the fixture registry's scenario names appear in the gate ledger — only a real
-      executor reading a real registry can produce them), and the ticket reaches the
-      human merge gate through the existing landing path. No arbitrate stage, ever.
+  J5. THE ORDINARY PATH, SCOPED BY THE DECLARATION: after work-done the EXISTING
+      settle/disposal path commits the work (the lane branch gains a commit) and
+      the existing run_integration_tests gate runs NARROWED to this ticket's
+      evidence declaration — a `l1_battery` runs exactly one declared verify.yaml
+      check (the pytest-form one) with the battery as its pytest target. The
+      receipt NAMES the scope ("narrowed by declaration: battery=..."), the
+      executed target carries only_check + pytest_node, the counts are honest,
+      and the gate ledger row names the narrowed round; no fixture registry
+      scenario runs. The ticket reaches the human merge gate through the existing
+      landing path. No arbitrate stage, ever.
+  J5b. THE FULL GATE STAYS REACHABLE: a ticket whose declaration names no
+      narrowed target (the reserved full-gate token `integ` — the declaration
+      itself is mandatory, J2) runs the UNCHANGED full registry round: all three
+      fixture scenarios appear in the gate ledger and the receipt says so.
   J6. NO SELF-SIGNED GATE: signing the merge with the working session's own id is
       REFUSED with a named reason and the ticket stays awaiting-human; signing as
       the executor closes the ticket and tears the lane down (archive before
@@ -93,9 +101,22 @@ LANE_MARKERS = ("SANDBAR_TASK_QUEUE", "SANDBAR_TASK_QUEUES", "SANDBAR_WATCH_WORK
 PROJECT_KEY = "quickmanual-e2e"
 TID = "quickmanual-%d" % os.getpid()                 # healthy journey ticket
 TID_NOEV = "quickmanual-noev-%d" % os.getpid()       # evidence-mandatory ticket
+# t261028-19 (KI-397): the full-registry leg. The evidence declaration is
+# mandatory (J2), so "declares nothing narrowed" is the reserved full-gate token
+# `integ` - the only accepted declaration that keeps the UNCHANGED full round.
+TID_FULL = "quickmanual-full-%d" % os.getpid()
 SESSION = "e2e-session-host-01"
 SESSION_ROLE = "host"
+SESSION_FULL = "e2e-session-host-02"
 WRITE_FILE = "QUICKMANUAL_PROBE.md"
+WRITE_FILE_FULL = "QUICKMANUAL_FULL_PROBE.md"
+# The ticket's declaration (l1_battery): the battery file the fixture lane
+# carries and the check id the fixture's verify.yaml declares (one pytest-form
+# check). The narrowed round runs exactly that check with the battery as its
+# pytest target - asserted by id and target on the public receipt.
+BATTERY = "test_quickmanual_lane.py"
+BATTERY_CHECK_ID = "test"
+FULL_GATE_TOKEN = "integ"
 GATE_NAMES = ("qm-fixture-alpha", "qm-fixture-beta", "qm-fixture-gamma")
 EXCLUDED_STAGES = ("create_plan", "review_plan", "design_integration_tests",
                    "arbitrate", "acceptance_walkthrough", "implement", "ui_evidence")
@@ -209,6 +230,36 @@ def stub_stages_of(tid):
             if r.get("ticket") == tid]
 
 
+def receipt_of(snap):
+    """The machine-gate receipt on the public snapshot face
+    (`results.run_integration_tests`: summary / evidence / violations)."""
+    return dict(((snap or {}).get("results") or {}).get("run_integration_tests") or {})
+
+
+def gate_row_of(snap, stage="run_integration_tests"):
+    """The LAST public gate-ledger row of one stage (`snapshot.gate_runs`), the
+    per-round row a reader of the ticket face sees: label / green / counts."""
+    rows = [r for r in ((snap or {}).get("gate_runs") or [])
+            if isinstance(r, dict) and str(r.get("stage") or "") == stage]
+    return dict(rows[-1]) if rows else {}
+
+
+def lane_worktree_of(snap, tid):
+    """The lane worktree path the ticket face records (meta.workspace.path); the
+    fallback reads the ordinary `.lane/<ticket>` layout under the fixture repo."""
+    ws = str((((snap or {}).get("meta") or {}).get("workspace") or {}).get("path") or "")
+    if ws and os.path.isdir(ws):
+        return ws
+    lane_root = os.path.join(G.get("fixture") or "", ".lane")
+    if os.path.isdir(lane_root):
+        for name in sorted(os.listdir(lane_root)):
+            cand = os.path.join(lane_root, name)
+            if os.path.isdir(cand) and \
+                    name.replace("-", "") == str(tid).replace("-", ""):
+                return cand
+    return ""
+
+
 def git(*args, cwd=None):
     p = subprocess.run(["git", "-C", cwd or G["fixture"]] + list(args),
                        # SANCTIONED-WAIT: bounded git call, not a state wait
@@ -261,15 +312,16 @@ def build_fixture(fail):
     # first stage (concurrency.load_limit is fail-closed on an absent
     # declaration - the fixture project simply had none, so both tickets died
     # named at open). Minimal per-project declaration, same schema as
-    # server/engine/concurrency.py DECL_FILE (version 1 + limit; limit 2 lets
-    # the journey's two tickets hold slots concurrently). Note recorded from
-    # this incident: a deterministically failing activity burns its whole
-    # retry window (~minutes) before the fault reaches the ticket face - the
-    # fail-named boundary makes it visible, but a fixture gap like this one
-    # costs the window; fix declarations, not windows.
+    # server/engine/concurrency.py DECL_FILE (version 1 + limit; limit 3 lets
+    # the journey's three tickets hold slots: the healthy one, the evidence-less
+    # one parked at open, and the full-gate leg - t261028-19 added the third).
+    # Note recorded from this incident: a deterministically failing activity
+    # burns its whole retry window (~minutes) before the fault reaches the
+    # ticket face - the fail-named boundary makes it visible, but a fixture gap
+    # like this one costs the window; fix declarations, not windows.
     with open(os.path.join(projects, PROJECT_KEY, "concurrency-limit.json"), "w",
               encoding="utf-8") as f:
-        f.write('{"version": 1, "limit": 2}\n')
+        f.write('{"version": 1, "limit": 3}\n')
     G["projects"] = projects
     G["seam_registered"] = True
     target = os.path.join(REPO, "server", "engine", ".venv")
@@ -512,17 +564,7 @@ def main():
                   "J4a the refusal is loud (non-empty reply/error face)")
 
             # ---------- J3/J4: the session works, then signals done ----------
-            ws = str((((snap2.get("meta") or {}).get("workspace") or {})
-                      .get("path")) or "")
-            if not ws:
-                # fall back to the conventional lane path under the fixture repo
-                ws = ""
-                for root, dirs, files in os.walk(G["fixture"]):
-                    if os.path.basename(root) == ".lane" and TID.replace("-", "") in \
-                            os.path.basename(os.path.normpath(
-                                os.path.join(root, ".."))).replace("-", ""):
-                        ws = os.path.join(root, os.listdir(root)[0])
-                        break
+            ws = lane_worktree_of(snap2, TID)
             work_file = None
             if ws and os.path.isdir(ws):
                 work_file = os.path.join(ws, WRITE_FILE)
@@ -531,6 +573,14 @@ def main():
             check(bool(work_file and os.path.isfile(work_file)),
                   "J3 the session wrote its repair inside the lane worktree (%r)"
                   % (work_file,))
+            # t261028-19: the fixture registry ledger BEFORE this ticket's gate.
+            # A battery-declared round must not touch the registry at all, so the
+            # ledger stays empty here and after the narrowed round (the teeth
+            # against a silent fall-back to the full gate).
+            ledger0 = len(read_jsonl(G["gate_ledger"]))
+            check(ledger0 == 0,
+                  "J5 no fixture registry scenario had run before this ticket's "
+                  "gate round (ledger rows=%d)" % ledger0)
             r = cli(py, stage, "ticket", {"op": "work_done", "ticket_id": TID,
                                           "session": SESSION,
                                           "role": SESSION_ROLE})
@@ -568,15 +618,66 @@ def main():
                       "J5 the stub-brain ledger is STILL empty after settle and "
                       "the gates (the whole lane is agent-free; got %r)"
                       % stub_stages_of(TID))
-                # ---------- J5: gates ran the declared command; merge gate reached ----------
-                gate_names = sorted({r.get("name") for r in read_jsonl(G["gate_ledger"])})
-                check(gate_names == sorted(GATE_NAMES),
-                      "J5 the integration gate ran the fixture registry's declared "
-                      "scenarios (got %r)" % gate_names)
+                # ---------- J5: the NARROWED battery round, named honestly ----------
+                # t261028-19 (KI-397): this ticket declares an l1_battery, so the
+                # evidence-scope patch NARROWS the machine gate to exactly ONE
+                # declared verify.yaml check (the pytest-form one) with the battery
+                # as its pytest target. The full registry never runs here. The old
+                # assertion demanded all three GATE_NAMES - a face this round never
+                # produced - and only ever passed because the gate receipt was
+                # silently green while reporting `1 ran / 0 passed / 1 failed`
+                # (KI-388). The full-registry expectation lives on the
+                # declaration-free leg below (J5b).
+                s5r = wait_snap(fail, py, stage, TID,
+                                lambda x: bool(receipt_of(x).get("summary")),
+                                "J5 the narrowed battery round produced its "
+                                "machine-gate receipt", 480)
+                gate_green = False
+                if s5r is not None:
+                    rec = receipt_of(s5r)
+                    summ = str(rec.get("summary") or "")
+                    scope_phrase = "narrowed by declaration: battery=%s" % BATTERY
+                    check(scope_phrase in summ,
+                          "J5 the gate receipt NAMES the declared battery scope "
+                          "(%r; summary=%r)" % (scope_phrase, summ[:300]))
+                    check("1 ran / 1 passed / 0 failed" in summ,
+                          "J5 the narrowed round's counts are honest - 1 ran / 1 "
+                          "passed / 0 failed on a green battery (summary=%r)"
+                          % summ[:300])
+                    ev = str(rec.get("evidence") or "")
+                    check("only_check=%s" % BATTERY_CHECK_ID in ev
+                          and "pytest_node=%s" % BATTERY in ev,
+                          "J5 the executed target carries only_check=%s plus "
+                          "pytest_node=%s (evidence=%r)"
+                          % (BATTERY_CHECK_ID, BATTERY, ev[:300]))
+                    row = gate_row_of(s5r)
+                    label = str(row.get("label") or "")
+                    counts = dict(row.get("counts") or {})
+                    got = {k: counts.get(k) for k in ("ran", "passed", "failed")}
+                    check(scope_phrase in label,
+                          "J5 the gate ledger row names the NARROWED round, not the "
+                          "full one (label=%r)" % label[:200])
+                    check(row.get("green") is True
+                          and got == {"ran": 1, "passed": 1, "failed": 0},
+                          "J5 the gate ledger row agrees with the receipt "
+                          "(green=%r counts=%r)" % (row.get("green"), counts))
+                    gate_green = row.get("green") is True
+                    # Teeth (direction 1): the narrowed round must not touch the
+                    # fixture registry. A silent fall-back to the full gate runs
+                    # all three fixture scenarios and shows up right here.
+                    after = read_jsonl(G["gate_ledger"])
+                    check(len(after) == ledger0,
+                          "J5 the narrowed round ran NO fixture registry scenario "
+                          "(ledger rows %d -> %d; names=%r)"
+                          % (ledger0, len(after),
+                             [r0.get("name") for r0 in after[ledger0:]]))
+                # A red round cannot reach the human gate: fail fast instead of
+                # burning the full deadline (the red is already named above).
                 s5 = wait_snap(fail, py, stage, TID,
                                lambda x: x.get("stage") == "merge"
                                and x.get("stage_state") == "awaiting-human",
-                               "J5 healthy ticket reaches the human merge gate", 420)
+                               "J5 healthy ticket reaches the human merge gate",
+                               420 if gate_green else 30)
                 if s5 is not None:
                     # ---------- J6: no self-signed merge ----------
                     r = cli(py, stage, "ticket", {"op": "sign", "ticket_id": TID,
@@ -621,6 +722,84 @@ def main():
                               or s7.get("stage_state") == "closed",
                               "J6 end state closed (status=%r stage_state=%r)"
                               % (s7.get("status"), s7.get("stage_state")))
+
+                # ---------- J5b: the declaration-free leg still runs the FULL gate ----------
+                # t261028-19 (KI-397): the full-registry expectation moved here.
+                # The evidence declaration is mandatory (J2), so "declares nothing
+                # NARROWED" is the reserved full-gate token `integ`: the round it
+                # drives is the UNCHANGED full registry - all three fixture
+                # scenarios, said out loud on the receipt and on the ledger row.
+                # Teeth (direction 2): a narrowed declaration quietly falling back
+                # to (or being folded from) the full face fails right here.
+                start_worker(py, stage, TID_FULL)
+                _rc, brf = git("rev-parse", "--short", "HEAD")
+                full_create = dict(create, ticket_id=TID_FULL,
+                                   base_ref=(brf or "").strip(),
+                                   write_set=[WRITE_FILE_FULL])
+                _rc, outf = run_poc_client(py, "ticket-start", dict(
+                    full_create,
+                    title="[e2e] quickmanual full-gate leg (declares no narrowed "
+                          "target)",
+                    user_request="integration e2e: the reserved full-gate "
+                                 "declaration keeps the whole registry round",
+                    evidence={"kind": "check", "name": FULL_GATE_TOKEN},
+                # SANCTIONED-WAIT: bounded client call, not a state wait
+                ), env_for(stage), timeout=300)
+                goodf, whyf = accepted(outf, TID_FULL)
+                check(goodf, "J5b the full-gate ticket is accepted on the explicit "
+                             "create face (%s)" % whyf)
+                if goodf:
+                    sw = wait_snap(fail, py, stage, TID_FULL,
+                                   lambda x: x.get("stage") == "work"
+                                   and x.get("stage_state") in ("awaiting", "running"),
+                                   "J5b the full-gate ticket parks at work", 420)
+                    if sw is not None:
+                        wsf = lane_worktree_of(sw, TID_FULL)
+                        wf = None
+                        if wsf and os.path.isdir(wsf):
+                            wf = os.path.join(wsf, WRITE_FILE_FULL)
+                            with open(wf, "w", encoding="utf-8") as f:
+                                f.write("quickmanual e2e: the full-gate leg's "
+                                        "one-file change\n")
+                        check(bool(wf and os.path.isfile(wf)),
+                              "J5b the session wrote its change inside its own lane "
+                              "worktree (%r)" % (wf,))
+                        r = cli(py, stage, "ticket",
+                                {"op": "work_done", "ticket_id": TID_FULL,
+                                 "session": SESSION_FULL, "role": SESSION_ROLE})
+                        check(r.get("ok") is True,
+                              "J5b the done signal with a session id is accepted "
+                              "(reply error=%r)" % str(r.get("error") or "")[:120])
+                        sf = wait_snap(fail, py, stage, TID_FULL,
+                                       lambda x: bool(receipt_of(x).get("summary")),
+                                       "J5b the full round produced its "
+                                       "machine-gate receipt", 480)
+                        if sf is not None:
+                            recf = receipt_of(sf)
+                            summf = str(recf.get("summary") or "")
+                            full_phrase = ("full registry (declared: check=%s)"
+                                           % FULL_GATE_TOKEN)
+                            check(full_phrase in summf,
+                                  "J5b a declaration that names no narrowed target "
+                                  "still runs the FULL registry, said out loud "
+                                  "(%r; summary=%r)" % (full_phrase, summf[:300]))
+                            want_counts = "%d ran / %d passed / 0 failed" % (
+                                len(GATE_NAMES), len(GATE_NAMES))
+                            check(want_counts in summf,
+                                  "J5b the full round's counts are honest - %s "
+                                  "(summary=%r)" % (want_counts, summf[:300]))
+                            rowf = gate_row_of(sf)
+                            labelf = str(rowf.get("label") or "")
+                            check("full registry" in labelf
+                                  and not rowf.get("narrowed"),
+                                  "J5b the gate ledger row names the FULL round "
+                                  "(label=%r narrowed=%r)"
+                                  % (labelf[:200], rowf.get("narrowed")))
+                            names_f = sorted({str(r0.get("name") or "")
+                                              for r0 in read_jsonl(G["gate_ledger"])})
+                            check(names_f == sorted(GATE_NAMES),
+                                  "J5b the full round ran the fixture registry's "
+                                  "declared scenarios (got %r)" % names_f)
     finally:
         stop_all_workers(fail, "L7 worker reaping")
         if stage_mod is not None:
