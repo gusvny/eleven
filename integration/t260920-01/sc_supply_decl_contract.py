@@ -55,6 +55,10 @@ def ok(cond, label):
 
 
 # ---- D1 结构纪律：真解析器读仓根声明（与闸同源，零 yaml 依赖） ----
+# 261027 host order: docker is retired from the test estate. The declaration must
+# therefore NOT carry a docker test-stage supply any more; the live entry is the
+# browser dependency (playwright-core), and it still has to satisfy the contract
+# (a named need, a bounded command, exit 2 on failure, no bare unbounded probe).
 from verify_lane import _cfg_load  # noqa: E402
 
 cfg, cfg_err = _cfg_load(REPO)
@@ -62,59 +66,33 @@ ok(cfg is not None, "D0 前置：仓根 verify.yaml 可解析（got err=%r）" %
 if cfg is not None:
     supply = ((cfg.get("integration") or {}).get("supply")) or []
     ok(bool(supply), "D1 供给声明在场（supply 列表非空——声明被删=供给面裸奔）")
+    needs = [str((e or {}).get("need") or "") for e in supply]
+    cmds = [str((e or {}).get("cmd") or "") for e in supply]
+    ok(all("docker" not in n.lower() for n in needs),
+       "D1g docker 供给要求已退役（宿主令 261027：未来不允许再使用 docker）")
+    ok(all("docker info" not in c and "docker image inspect" not in c for c in cmds),
+       "D1b 无界裸 docker info/image inspect 不在任何供给命令里")
     if supply:
-        s0 = supply[0]
-        cmd = str(s0.get("cmd") or "")
-        ok(bool(str(s0.get("need") or "").strip()),
-           "D1a 首条供给声明带 need 点名（契约 ②a）")
-        ok("docker info" not in cmd,
-           "D1b 无界裸 docker info 已摘除（daemon 门交有界封装）")
-        ok("docker image inspect" not in cmd,
-           "D1c 无界裸 docker image inspect 已摘除（镜像门交有界封装）")
-        ok("SANDBAR_STAGE_WAIT_BUDGET_S" in cmd,
-           "D1d 等待预算 env 旋钮已声明（要求③的声明面）")
-        ok("exit 1" not in cmd,
-           "D1e 失败出口无 exit 1（三态不放宽；环境红语义要求 exit 2）")
-        ok("exit 2" in cmd, "D1f 失败出口 exit 2 在场（三态诚实红）")
+        ok(all(str((e or {}).get("need") or "").strip() for e in supply),
+           "D1a 每条供给声明带 need 点名（契约 ②a）")
+        ok(any("playwright" in n.lower() for n in needs),
+           "D1h 浏览器依赖供给仍在（browser 族仍消费，KI-036）")
+        for i, c in enumerate(cmds):
+            ok("exit 1" not in c,
+               "D1e 供给[%d] 失败出口无 exit 1（三态不放宽；环境红要求 exit 2）" % i)
+            ok("exit 1" in c or "exit 2" in c or "||" in c,
+               "D1f 供给[%d] 带具名失败出口（不静默）" % i)
 
-# ---- D2 缺席形态真跑：预算内快速红 exit 2 + 点名（任何机器可判） ----
-if cfg is not None and supply:
-    env = dict(os.environ)
-    # 受限 PATH：剔除**所有** docker 所在目录（多路径安装形态——只剔第一个会让
-    # daemon 健康机器上的缺席用例调到真 docker，前提构造失效，260920 仲裁实锤）；
-    # 无 docker 机器天然满足。保留系统命令。
-    env["PATH"] = os.pathsep.join(
-        d for d in env.get("PATH", "").split(os.pathsep)
-        if d and not os.path.exists(os.path.join(d, "docker")))
-    # 自清卫兵：实现后声明若把无 docker 接触的段排前（软链用例），不能往仓里
-    # 留新文件——记录软链目标存在性，跑后新建则删（幂等声明不应有净写入）。
-    link = REPO / "server" / "engine" / "bin" / "temporal"
-    link_before = link.exists()
-    # 缺席形态由实现按「未就绪」反复探到预算收口（契约内）——注入小预算使本用例
-    # 墙钟可断言（预算内收口），不依赖缺省 120s。
-    env["SANDBAR_STAGE_WAIT_BUDGET_S"] = "2"
-    t0 = time.time()
-    try:
-        p = subprocess.run(["/bin/sh", "-c", cmd], cwd=str(REPO),
-                           capture_output=True, text=True, timeout=120, env=env)
-        rc, out = p.returncode, (p.stdout or "") + (p.stderr or "")
-    except subprocess.TimeoutExpired:
-        rc, out = "TIMEOUT", ""
-    wall = time.time() - t0
-    if not link_before and link.exists():
-        try:
-            link.unlink()
-        except OSError:
-            pass
-    ok(rc == 2, "D2 缺席形态真跑声明 → exit 2 诚实红（got rc=%s）" % (rc,))
-    ok(wall < 60,
-       "D2b 预算内快速收口绝不硬等（wall=%.1fs，900s 兜底只在真正挂死时垫底）"
-       % wall)
-    ok("ENV_FAIL" in out, "D2c 输出带 ENV_FAIL 三态标记（got: %s)"
-       % out[:80].replace("\n", " "))
-    ok("docker" in out, "D2d 点名 docker（缺什么说什么，不静默）")
+# ---- D2 缺席形态真跑：docker 供给已退役（宿主令 261027），本条不再适用 ----
+# 原来的 D2 检验「docker 缺席时供给声明按预算内快速 exit 2 并点名 docker」。那条
+# 供给已整条摘除，docker 不再是任何闸的前置，所以这里如实记 N/A 并点名原因，
+# 不假装跑过、也绝不把 N/A 算成 pass。剩余供给（playwright 依赖）的失败出口纪律
+# 由 D1e/D1f 静态执法。
+if cfg is None:
+    ok(False, "D2 声明不可读，缺席用例未执行（D0 已红归因）")
 else:
-    ok(False, "D2 声明不可读，缺席用例未执行（D1/D0 已红归因）")
+    print("  N/A  D2 docker 缺席形态 —— docker 供给已按宿主令 261027 退役，"
+          "本条无被测对象（不计 pass、不计 fail；纪律面由 D1g/D1e/D1f 静态执法）")
 
 print("SUMMARY pass=%d fail=%d env_fail=0 na=0" % (pass_n, fail_n))
 sys.exit(1 if fail_n > 0 else 0)

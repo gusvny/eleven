@@ -55,7 +55,7 @@ integration:
     # 批次台预起在 daemon 缺席时按具名跳过（integration/run_scenarios.py）。
     # 保留 playwright-core 条（浏览器族仍在消费，KI-036）。
     - need: playwright-core（泳道 ui-check node_modules 软链主树，KI-036）
-      cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || SRC="$MAIN/server/dsh/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || { echo "ENV_FAIL: 主树 playwright-core 缺失：$SRC"; exit 1; }; mkdir -p server/ui-check/node_modules; DST=server/ui-check/node_modules/playwright-core; [ -e "$DST" ] || ln -s "$SRC" "$DST"; [ -e "$DST/package.json" ] || { echo "ENV_FAIL: 软链后不可解析：$DST"; exit 1; }'  # engine-venv-compat（t260907-10 主树迁移窗口回落；摘除票删旧腿）
+      cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || SRC="$MAIN/server/dsh/ui-check/node_modules/playwright-core"; [ -d "$SRC" ] || { echo "ENV_FAIL: 主树 playwright-core 缺失：$SRC"; exit 2; }; mkdir -p server/ui-check/node_modules; DST=server/ui-check/node_modules/playwright-core; [ -e "$DST" ] || ln -s "$SRC" "$DST"; [ -e "$DST/package.json" ] || { echo "ENV_FAIL: 软链后不可解析：$DST"; exit 2; }'  # engine-venv-compat（t260907-10 主树迁移窗口回落；摘除票删旧腿）
   # ---- 每票集测段跳过慢池（t260913-03 落地；本声明由 main 侧随该票合并落账）----
   # 宿主 260913 令：把「耗时长、又不经常动」的基础类测试先拿出每票段，交给每天一次的
   # 集成测试巡检跑（巡检票 t260913-02）。判据纯机械＝**按执行器注册表自声明的池名过滤**，
