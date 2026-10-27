@@ -47,7 +47,7 @@ PLANTED = REPO / "server" / "engine" / "tests" / "test_zz_t26101122_scoped_lesio
 PLANTED_REL = "server/engine/tests/" + PLANTED.name
 LESION = (
     "def test_zz_t26101122_lesion():\n"
-    "    assert '/Users/' + 'xingu/absolute/home/path' == '/Users/' + 'xingu/absolute/home/path'\n"
+    "    assert '/Users/' + 'user/absolute/home/path' == '/Users/' + 'user/absolute/home/path'\n"
 )
 
 _ck = ScenarioCheck(detail_cap=800, flush=True)

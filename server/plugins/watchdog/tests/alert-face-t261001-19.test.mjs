@@ -77,10 +77,10 @@ function makeDeps({ clock, dshHome, executorSession = 'executor-sb', ledgerLines
   assert(sceneAlerts.length === 1, 'temp-home scenario instance records its refusal once')
   assert(sceneAlerts[0].scope === '/tmp/scene-capture-lane', 'recorded alert carries its instance scope (audit face)')
   // ② 真宿主实例（不同 DSH_HOME，共享同一账）：不得被场景实例静音。
-  const real = makeDeps({ clock, dshHome: '/Users/xingu/.dsh', executorSession: '', ledgerLines: [ledgerLine({ seq: 1, ticket: 't1' })], sessionEnsure: refused, coreIo: shared })
+  const real = makeDeps({ clock, dshHome: '/Users/user/.dsh', executorSession: '', ledgerLines: [ledgerLine({ seq: 1, ticket: 't1' })], sessionEnsure: refused, coreIo: shared })
   await real.w.start()
   // status().alerts 含共享账重放回来的历史行（含场景实例的）——按本实例 scope 计数。
-  const realAlerts = real.w.status().alerts.filter(a => a.rule === 'executor_session_refused' && a.scope === '/Users/xingu/.dsh')
+  const realAlerts = real.w.status().alerts.filter(a => a.rule === 'executor_session_refused' && a.scope === '/Users/user/.dsh')
   assert(realAlerts.length === 1, 'real host records its OWN refusal alert (not muted by temp-home instance)')
   // ③ 同实例冷却内不重响（节流语义不丢）。
   scene.coreIo.appended.length = 0

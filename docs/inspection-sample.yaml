@@ -6,7 +6,7 @@
 #   要指到别处（绝对/相对皆可，允许落仓外，例如机器级 ~/.sandbar/projects/<key>/），
 #   在 ~/.sandbar/projects/<key>/project.yaml 顶层加：
 #     paths:
-#       inspection_decl: /Users/xingu/.sandbar/projects/<key>/inspection.yaml
+#       inspection_decl: /Users/user/.sandbar/projects/<key>/inspection.yaml
 #   （校验口径同 paths.model_routes：~/… 与绝对路径原样用，相对路径拼项目主目录；
 #   声明了就必须存在——锚点缺失/类型错位 fail-closed。）
 #

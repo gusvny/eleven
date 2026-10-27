@@ -9,7 +9,7 @@ updated: 2026-09-24
 # 项目外置工作流模板（设计稿）
 
 > 来源：nusuyou 项目《给 sandbar 的需求说明：项目外置工作流模板》
-> （`/Users/xingu/Documents/nusuyou/notes/discussions/260924-给sandbar需求说明-项目外置工作流模板.md`）。
+> （`/Users/user/Documents/nusuyou/notes/discussions/260924-给sandbar需求说明-项目外置工作流模板.md`）。
 > 宿主 260924 会话拍板四条——隔离强度=分池防故障／坏模板损面=模板级隔离拒收／演进策略=新 id 并存+补丁纪律／
 > 命名边界=项目注册名属数据面豁免——由 integration 岗据审核意见成稿。
 > **本文只写「是什么、为什么」**：接口形状以需求书§六为准（供实现方对形状）；落地状态与进度不属本文

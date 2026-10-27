@@ -1,7 +1,7 @@
 # 测试夹具临时物料 · 第二批整治报告（260927，不开票 / 未 commit）
 
 > 范围=宿主授权的「三家生产者 + 全族清扫」。本文件是交付报告，不是工单；状态以工作区 diff 与本文数字为准。
-> 所有路径相对仓库根 `/Users/xingu/Documents/sandbar`。**未 commit**（宿主先看后提交）。
+> 所有路径相对仓库根 `/Users/user/Documents/sandbar`。**未 commit**（宿主先看后提交）。
 
 ---
 

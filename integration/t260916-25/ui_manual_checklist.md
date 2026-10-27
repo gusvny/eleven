@@ -27,7 +27,7 @@ server/tools/stage_console.sh stop
 - [ ] 打开浏览器 DevTools console：**无任何报错**（M9 会再总检一次）
 
 ### M1 旧会话列表与打开（矩阵行 8）
-- [ ] 侧栏能看到拷入的旧会话（prepare 默认拷最近 10 个，目录名是扁平化路径如 `--Users-xingu-Documents-sandbar--`）
+- [ ] 侧栏能看到拷入的旧会话（prepare 默认拷最近 10 个，目录名是扁平化路径如 `--Users-user-Documents-sandbar--`）
 - [ ] 任选 2~3 个旧代（v0）会话点开：**能打开**，会话列表/消息骨架不崩
 
 ### M2 会话日志视图正文完整性（矩阵行 8，**本票重点**）

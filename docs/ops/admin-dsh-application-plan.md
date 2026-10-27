@@ -12,7 +12,7 @@ updated: 2026-09-28
 # Suyou admin × DeepSeek Harness (dsh) Application Plan
 
 > Version: v0.1; date: 2026-08-19; status: research conclusions + route recommendation, no code touched
-> Subject of study: `/Users/xingu/Documents/deepseek-harness` (0.1.0-rc.7 Developer Preview, read statically only, not installed and not built)
+> Subject of study: `/Users/user/Documents/deepseek-harness` (0.1.0-rc.7 Developer Preview, read statically only, not installed and not built)
 > Comparison baseline: `server/serve.py` / `server/admin.py` / `server/tools_registry.py` / `server/tools/*` / Platform Architecture Design §12
 
 ---
@@ -114,7 +114,7 @@ Prerequisite: install Node ≥22.19 (or 24+). No need to clone/build the dsh sou
    ```yaml
    - insert:
        - id: sandbar-admin
-         name: '/Users/xingu/Documents/suyou/server-plugin/sandbar-admin.ts'
+         name: '/Users/user/Documents/suyou/server-plugin/sandbar-admin.ts'
    ```
    Start it with: `npx @deepseek-ai/dsh@0.1.0-rc.7 web --patch server-plugin/cordis.yml`
 
@@ -125,7 +125,7 @@ Prerequisite: install Node ≥22.19 (or 24+). No need to clone/build the dsh sou
    import type { Context } from '@deepseek-ai/cordis'
 
    const execFileP = promisify(execFile)
-   const REPO = '/Users/xingu/Documents/suyou'
+   const REPO = '/Users/user/Documents/suyou'
    // Destructive tool list: a hit routes to human approval (§12.2-③ two-phase commit v1)
    const NEEDS_APPROVAL = new Set(['params_set'])
 

@@ -2,7 +2,7 @@
 /**
  * sc_migration_path_hygiene.mjs —— t260907-01：移仓收尾路径卫生守卫（工单验收①②回归锚）。
  *
- * 用户故事：宿主已把旧仓（/Users/xingu/Documents/ 下的 suyou 目录）物理移走（sandbar M2 迁移终验）。
+ * 用户故事：宿主已把旧仓（/Users/user/Documents/ 下的 suyou 目录）物理移走（sandbar M2 迁移终验）。
  * 任何仍按旧仓绝对路径解析的代码/调试/冒烟文件，移仓后一用即炸——且多为静默炸
  * （REPO_ROOT 指错→profile 拷空→控制台起不来，报错不指向真因）。本场景把本票
  * 验收口径机械化为常驻守卫：
@@ -40,7 +40,7 @@ function section(t) { console.log(`\n== ${t}`) }
 
 const REPO = resolve(join(fileURLToPath(import.meta.url), '..', '..', '..'))
 // 串接构造：本文件自身不得含旧仓字面量（自引用免疫）
-const NEEDLE = '/Users/xingu/Documents/' + 'suyou'
+const NEEDLE = '/Users/user/Documents/' + 'suyou'
 
 // admin.log 的轮转归档名（真源=server/engine/audit.py：归档名 admin.log.YYYYMMDD=文件「关闭日」，
 // 同日过大顺切再带 -HHMMSS）。t261008 实报：过滤器只跳 *.log，归档后缀不是 .log ⇒

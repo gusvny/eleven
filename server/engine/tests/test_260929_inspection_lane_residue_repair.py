@@ -41,7 +41,7 @@ P_NEXT = "20260928"     # 次日（定向模式不许碰）
 #: 真形失败文案（逐字取自 agent_activities._prepare_worktree_lane 的返回值 +
 #: 260927-02 票面 blocked_reason 的 stderr 尾）。
 REAL_OCCUPIED = (
-    "git worktree add /Users/xingu/Documents/sandbar/.lane/inspection-integration-tests-20260927 "
+    "git worktree add /Users/user/Documents/sandbar/.lane/inspection-integration-tests-20260927 "
     "-b inspection/integration-tests/20260927 失败（目录已存在但非本仓库 worktree？请人工处置）:\n"
     "Preparing worktree (new branch 'inspection/integration-tests/20260927')\n"
     "fatal: a branch named 'inspection/integration-tests/20260927' already exists")

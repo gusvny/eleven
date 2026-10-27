@@ -61,7 +61,7 @@ const spec = (rule, level) => ({ rule, target: 't1', level, title: 'x' })
   const j1 = judgeAlert(baseCfg, sa, state, clockAt, 60_000)
   assert(j1.record === true && j1.key === 'executor_session_refused:sandbar@/tmp/scene-home', 'scoped alert records with scoped key')
   applyDedupe(state, j1.key, clockAt)
-  const sb = { ...sa, scope: '/Users/xingu/.dsh' }
+  const sb = { ...sa, scope: '/Users/user/.dsh' }
   const j2 = judgeAlert(baseCfg, sb, state, clockAt + 1000, 60_000)
   assert(j2.record === true, 'same rule+target from a different instance scope still records (temp-home must not mute real host)')
   applyDedupe(state, j2.key, clockAt + 1000)

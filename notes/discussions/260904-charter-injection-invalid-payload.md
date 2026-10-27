@@ -13,7 +13,7 @@
 - 生产台（3099，PID 16042）代码非陈旧：build-info `stale:false`（boot==disk 指纹），
   lib/client.js 17:22 随 d6c4554 重建；charter 端点 `GET ?project=sandbar` 200，
   渲染干净（1979 字符、零 `{{` 残留）——**服务端无恙**。
-- 用户失败现场：`~/.dsh/sessions/--Users-xingu-Documents-sandbar--/session-c5ea997f-*`
+- 用户失败现场：`~/.dsh/sessions/--Users-user-Documents-sandbar--/session-c5ea997f-*`
   转录仅 4 行（session/preset/sandbox/approval），**零注入事件零 prompt 事件**：
   会话创建成功、注入调用在写下任何东西之前就被拒。
 - 错误文案来源：dsh-client-ui-conversation `showToast(\`${error.message} (${error.code})\`)`
@@ -87,7 +87,7 @@ SKIP 的那条场景的断言面正中央。**
 | 透传+不抛错 | dsh-client-runtime lib/client.js L7196-7240、session.d.ts L137 |
 | toast 展示 | dsh-client-ui-conversation lib/client.js L3565/L3589-3590 |
 | 闸 SKIP 实证 | server/dsh/temporal-poc/data/worker-t260904-07.log L54/L61/L85/L93-94 |
-| 用户失败会话 | ~/.dsh/sessions/--Users-xingu-Documents-sandbar--/session-c5ea997f-*(4 行转录零注入) |
+| 用户失败会话 | ~/.dsh/sessions/--Users-user-Documents-sandbar--/session-c5ea997f-*(4 行转录零注入) |
 | 服务端健康 | 3099 build-info stale:false；charter 端点 200 零残渣（curl 实测） |
 | 设计带病 | notes/discussions/260904-project-session-charter.md L46（`prompt(content,'queue')` 止步方法名未钉类型） |
 | smoke 断言面 | server/dsh/workbench/smoke/session-charter.mjs 头注 A-D（D=源文本锚非调用形状） |

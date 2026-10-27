@@ -43,7 +43,7 @@
   { "version": 1,
     "sessions": [ { "session_id": "session-09ca0247-…", "handle": "executor", "title": "",
                     "opened_at": 1791080000000, "last_opened_at": 1791092000000,
-                    "cwd": "/Users/xingu/Documents/sandbar" } ] }
+                    "cwd": "/Users/user/Documents/sandbar" } ] }
   ```
 - **localStorage 降级为缓存**：可丢，丢了从项目文件重建（读失败/坏 JSON → 空表，不崩，沿用既有容错纪律）。
 - **写路径**：UI → 宿主 API（workbench 宿主侧写项目目录，与 `watchdog.json` / `executor-grants.json` 同族，**宿主专属**；

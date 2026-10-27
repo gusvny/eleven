@@ -176,7 +176,7 @@ def test_config_non_covering_entry_ignored():
     d.mkdir()
     (d / "project.yaml").write_text(
         "schema: v1\nproject:\n  - key: otherproj\n    name: n\n    dirs:\n"
-        "      - /Users/xingu/Documents/dengzhufpv\nadmin_log:\n  keep_days: 1\n",
+        "      - /Users/user/Documents/dengzhufpv\nadmin_log:\n  keep_days: 1\n",
         encoding="utf-8")
     audit._reset_config()
     assert audit._admin_log_config()["keep_days"] == 14

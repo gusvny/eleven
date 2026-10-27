@@ -2,9 +2,9 @@
 
 > 写入方：sandbar 集成把关岗（integration）。**核验基准＝引擎 HEAD `ab3a817`**（2026-09-30）。
 > 来源两份（各自的原文为准，本件只做归并+复核+定位）：
-> - nusuyou：`/Users/xingu/Documents/nusuyou/notes/discussions/260929-给sandbar需求说明-引擎侧五条.md`
+> - nusuyou：`/Users/user/Documents/nusuyou/notes/discussions/260929-给sandbar需求说明-引擎侧五条.md`
 >   （九条，文件名是初稿名）
-> - dengzhufpv：`/Users/xingu/Documents/dengzhufpv/notes/discussions/260930-engine-findings-handover.md`
+> - dengzhufpv：`/Users/user/Documents/dengzhufpv/notes/discussions/260930-engine-findings-handover.md`
 >   （E1–E7，已按 `ab3a817` 复核过）
 >
 > 归并口径：**按故障族合并**（同族只在一条里说清，避免同一个人被同一处代码绊两次）；每条带

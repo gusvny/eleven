@@ -109,7 +109,7 @@ python 侧 `.venv`（系统 python 3.9.6）+ **temporalio 1.18.2**。
 完工核对方式（任何人可复跑）：
 
 ```bash
-cd /Users/xingu/Documents/suyou
+cd /Users/user/Documents/suyou
 git status --porcelain -- server/tickets server/tools/ticket.py app/public/data pipeline/output \
   > /tmp/after.txt
 grep -E "server/tickets|server/tools/ticket.py|app/public/data|pipeline/output" \

@@ -11,7 +11,7 @@
 | `notes/` 构成：`discussions/` **55 篇 996 KB（58%）**、`epics/` 13 篇 164 KB、`debts/known-issues.md` 1 篇 **424 KB**；合计 105 文件 1.7 MB | `find`/`du` 实测 |
 | **泳道不许写 notes/**（只有 main 侧会话动它） | `server/tools/ticket.py:693` 的 `validate_write_set_no_notes` |
 | `notes/epics/<code>.md` 是**票面契约**：`create --epic` 靠它的存在性校验 | `client.py:1139`、`validate_epic_code` |
-| 引擎解析 epics 的规则**本来就是 `<项目主目录>/notes/epics`**；sandbar 恰好主目录＝本仓（`dirs: [/Users/xingu/Documents/sandbar]`），所以今天看着像"仓内 notes" | `shared.py:resolve_epics_dir`（三级解析 + `SANDBAR_EPICS_DIR` 逃生口） |
+| 引擎解析 epics 的规则**本来就是 `<项目主目录>/notes/epics`**；sandbar 恰好主目录＝本仓（`dirs: [/Users/user/Documents/sandbar]`），所以今天看着像"仓内 notes" | `shared.py:resolve_epics_dir`（三级解析 + `SANDBAR_EPICS_DIR` 逃生口） |
 | `notes/debts/known-issues.md` 是**巡检 inspect 段的输入面**（open 条目喂 prompt），路径写在 prompt 与解析里 | `inspection_inspect.py:807/932` |
 | 项目目录 `~/.sandbar/projects/sandbar/` 现在**没有 notes/**（只有 ledger/grants/watchdog/requests/sessions 面） | `ls` 实测 |
 | 今天的实例代价：main 工作区的**草稿脏文件挡了 4 次 merge**（每次多一轮闸 + 竞态） | 执行器 request `-0021` |

@@ -11,7 +11,7 @@
 | 09-16 21:24 | `/private/tmp/dsh-stage` 出现一个独立控制台（端口 3199、`DSH_HOME=/private/tmp/dsh-stage`、profile=`sandbar-stage`） |
 | 09-16 22:2x–22:3x | 一批票集体 blocked（worker 侧中断，见 §三 缺陷③） |
 | 09-16 23:xx | dengzhufpv `t260916-17` 的 merge 被劫、写 `.git/ORIG_HEAD.lock` 得 `EPERM` |
-| 09-17 01:28 | nusuyou `t260916-30` 卡 `workspace/blocked`：`Operation not permitted: /Users/xingu/Documents/nusuyou/.lane/...` |
+| 09-17 01:28 | nusuyou `t260916-30` 卡 `workspace/blocked`：`Operation not permitted: /Users/user/Documents/nusuyou/.lane/...` |
 | 09-17 03:03 / 04:51 / 06:37 | 在飞 agent 段反复被 `CancelledError` + `Activity task timed out` 砍 |
 | 09-17 全天 | 多张票的 agent 段报 `dsh: corrupt Zstandard session log: complete frame contains a torn JSONL record`（会话拒读） |
 

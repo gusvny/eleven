@@ -49,7 +49,7 @@ const REALCASE_ROW = {
 // 受阻面镜像。引擎键在场（=abnormal）与键缺（部署窗兜底）都必须判 abnormal。
 const LIVE_REALCASE_ROW = {
   ...REALCASE_ROW, id: 't260921-01',
-  report_path: '/Users/xingu/Documents/sandbar/server/engine/out/inspection/inspection-integration-tests-20260920.json',
+  report_path: '/Users/user/Documents/sandbar/server/engine/out/inspection/inspection-integration-tests-20260920.json',
   close_health_reason: '面快照 blocked：只读审查 agent 起不来（dsh 报 unknown preset "read-only"）；发现 0 条（落账文件为受阻面镜像）',
 }
 // 正常收口巡检行（clean 期 0 发现也落报告；面无受阻记录）
@@ -275,7 +275,7 @@ ok('gen1 修订（验收走查问题1）：落账镜像形态（abnormal×report
     exec_status: 'COMPLETED', close_health: 'abnormal',
     close_health_reason: '面快照 blocked：agent 退出码 1（未完成）；发现 0 条（落账文件为受阻面镜像）',
     findings: { high: 0, med: 0, low: 0, total: 0 },
-    report_path: '/Users/xingu/Documents/sandbar/server/engine/out/inspection/inspection-integration-tests-20260920.json',
+    report_path: '/Users/user/Documents/sandbar/server/engine/out/inspection/inspection-integration-tests-20260920.json',
   })
   assert.ok(card !== null && card.terminal === true)
   const missing = card.closeFacts.find(f => f.startsWith('Missing:'))

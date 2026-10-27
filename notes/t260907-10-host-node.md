@@ -6,7 +6,7 @@
 
 ## 1. 主树 .venv/bin 物理迁移（数据不丢）
 ```
-cd /Users/xingu/Documents/sandbar
+cd /Users/user/Documents/sandbar
 mkdir -p server/engine
 mv server/dsh/temporal-poc/.venv  server/engine/.venv
 mv server/dsh/temporal-poc/bin    server/engine/bin     # temporal CLI（verify supply 消费）
@@ -19,8 +19,8 @@ mv server/dsh/temporal-poc/data   server/engine/data    # server.log/worker.pid/
 
 ## 2. profile 农场软链重定向（写 ~/.dsh，泳道外）
 ```
-ln -sfn /Users/xingu/Documents/sandbar/server/profile         ~/.dsh/profiles/sandbar
-ln -sfn /Users/xingu/Documents/sandbar/server/profile-headless ~/.dsh/profiles/sandbar-headless
+ln -sfn /Users/user/Documents/sandbar/server/profile         ~/.dsh/profiles/sandbar
+ln -sfn /Users/user/Documents/sandbar/server/profile-headless ~/.dsh/profiles/sandbar-headless
 ```
 旧名链处置（宿主裁定，建议删除）：`~/.dsh/profiles/suyou`（现指 sandbar 仓 server/dsh/profile，迁移后为死链）
 与 `~/.dsh/profiles/suyou-headless`（跨仓 suyou 旧链）。

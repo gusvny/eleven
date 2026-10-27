@@ -36,7 +36,7 @@ project:
     dirs:
       - /path/to/repo
 # paths:
-#   dsh_bin: /Users/xingu/.sandbar/dsh-015/bin/dsh   ← 注释掉/删除这一行即回退
+#   dsh_bin: /Users/user/.sandbar/dsh-015/bin/dsh   ← 注释掉/删除这一行即回退
 ```
 
 - 回退立即生效（每次 spawn 现场解析，无缓存进程依赖——worker 重启也不需要）。

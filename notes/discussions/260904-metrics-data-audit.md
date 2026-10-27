@@ -34,8 +34,8 @@ metrics 双前门（HTTP 3099 + metrics-cli.mjs）× 缓存记录原文（~/.san
 ### ② 泳道活口径死于 join 毒路径（KI-041）
 
 - 现象：在制票 t260904-03（泳道活着、base_ref=e5e6f0a）报「泳道不可用」。
-- 根因：worktree 字段存**绝对路径**（/Users/xingu/Documents/sandbar/.lane/
-  t260904-03），`join(repo, 绝对路径)` 拼出 `/…/sandbar/Users/xingu/…` 不存在
+- 根因：worktree 字段存**绝对路径**（/Users/user/Documents/sandbar/.lane/
+  t260904-03），`join(repo, 绝对路径)` 拼出 `/…/sandbar/Users/user/…` 不存在
   的路径（Node path.join 不把第二参当绝对），git fatal: cannot change to …。
   实证真值：活泳道 `git diff e5e6f0a...HEAD` = **+671/−43/6 commits**，全部丢失。
   KI-032 修复后 worktree 恒锚根为绝对路径，本毒路径从那时起杀死全部活口径。

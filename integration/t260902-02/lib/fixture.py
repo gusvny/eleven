@@ -172,7 +172,7 @@ def make_lane(sb, lane_name="lane1", with_sessions=True, with_shots=True,
     dsh = lane / ".dsh"
     dsh.mkdir(parents=True, exist_ok=True)
     if with_sessions:
-        sess = dsh / "sessions" / "--Users-xingu-repo-slug--"
+        sess = dsh / "sessions" / "--Users-user-repo-slug--"
         sess.mkdir(parents=True)
         (sess / "events.jsonl").write_text('{"e":1}\n', "utf-8")
     (dsh / ".credentials.yaml").write_text("token: secret-do-not-archive\n", "utf-8")
