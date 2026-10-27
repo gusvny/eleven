@@ -6,7 +6,7 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
 - 六路 ensure 真同时发车（各自 compose 工程名，temporal-only 档）全成功；
 - 端口两两不相交、∉ 禁产硬集 {3099,3199,7233,8233,17233,18233}、全落档位窗
   [21000,25000)、各台 temporal 端口全程 TCP 可连；
-- **持有期内二次 ensure=幂等复用**（reused=true 且 container_ids 与首起一致）
+- **持有期内二次 ensure=幂等复用**（reused=true 且 proc_ids 与首起一致；进程台身份面）
   ——「同 compose 项目二次起台挤掉健康台」（背景 run L/M/O 族）在 herd 风暴
   窗根治的用户级证据；
 - 持有子用例在场观测（pgrep -f CLI 子命令行，进程表公开观测面）；
@@ -27,10 +27,10 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 CLI = os.path.join(REPO, "integration", "stage_docker.py")
 sys.path.insert(0, HERE)
 from lib_herd_case import (  # noqa: E402
+    bench_alive,
+    bench_gate,
     check,
     cli,
-    compose_containers,
-    docker_present,
     ensure_leg,
     ensure_up,
     env_guard,
@@ -39,6 +39,7 @@ from lib_herd_case import (  # noqa: E402
     guarded_down,
     hold_pids,
     port_set,
+    proc_ids,
     stage_tag,
     tcp_open,
 )
@@ -50,8 +51,12 @@ TAG = stage_tag("t26091012-herd")  # 泳道唯一化（跨泳道同项目名互�
 
 
 def spawn_ensure(project):
-    """并发发车：ensure 子进程（不等待；共享缺省锁根纪律，不设 LOCK_DIR）。"""
+    """并发发车：ensure 子进程（不等待；共享缺省锁根纪律，不设 LOCK_DIR）。
+    后端注入（t261027-11 仲裁 gen5 修）：本场景与 cli() 同走 process 后端——
+    裸 Popen 不经 cli()，缺此注入则六路并发回落 docker 台，与 down 子用例的
+    process 后端错位（docker 租约被 process down 诚实空转 rc=0，容器残留）。"""
     env = dict(os.environ)
+    env["SANDBAR_STAGE_BACKEND"] = "process"
     return subprocess.Popen(
         [sys.executable, CLI, "ensure", "--project", project,
          "--services", "temporal", "--timeout", "900"],
@@ -68,9 +73,7 @@ def parse_state(out):
 
 
 def main():
-    if not docker_present():
-        envfail("docker 缺席——并发租约化起台面不可验（启动 Docker/OrbStack 后重试）")
-        finish()
+    bench_gate()   # 进程台供给门（docker_present 的等价物，t261027-11 迁移）
     projects = ["%s-%d" % (TAG, i) for i in range(N)]
     try:
         procs = [spawn_ensure(p) for p in projects]
@@ -123,22 +126,30 @@ def main():
             check(bool(temporal) and tcp_open(temporal),
                   "%s temporal 端口活（%s）" % (project, temporal))
             check(bool(hold_pids(project)), "%s 持有子用例进程在场" % project)
-            ids1[project] = sorted(st.get("container_ids") or [])
-            check(ids1[project] != [] and ids1[project] == sorted(compose_containers(project)),
-                  "%s 租约 container_ids 与 docker 实盘一致" % project)
+            ids1[project] = proc_ids(st)
+            temporal_port = (st.get("ports") or {}).get("temporal")
+            check(ids1[project] != [] and all(bench_alive(temporal_port, pid)
+                  for pid in ids1[project]),
+                  "%s 租约 proc_ids 与 bench 实盘一致（status pid_alive）" % project)
 
         # 持有期内二次 ensure=幂等复用（互拆根治证据面）
         for project in projects[:2]:
             proc, st2 = ensure_up(project, timeout=300)
             check(proc.returncode == 0 and st2 is not None and bool(st2.get("reused")),
                   "%s 持有期内二次 ensure=幂等复用" % project)
-            check(sorted((st2 or {}).get("container_ids") or []) == ids1[project],
-                  "%s 二次 ensure 容器 id 与首起一致（未重建）" % project)
+            check(proc_ids(st2) == ids1[project],
+                  "%s 二次 ensure bench 进程 id 与首起一致（未重建）" % project)
     finally:
         guarded_down(projects)
 
     for project in projects:
-        check(not compose_containers(project), "%s 终态零残留" % project)
+        # 终态零残留（进程台观测面，t261027-11 迁移改名）：down 后租约身份亡、
+        # 端口释放——容器计数归 runner 窗口看守。
+        _st = states.get(project) or {}
+        _port = (_st.get("ports") or {}).get("temporal")
+        check(_port is not None and not tcp_open(_port)
+              and not any(bench_alive(_port, pid) for pid in ids1.get(project, [])),
+              "%s 终态零残留（bench 已停、端口已释放）" % project)
         check(not hold_pids(project), "%s 持有子用例已收割" % project)
     finish()
 

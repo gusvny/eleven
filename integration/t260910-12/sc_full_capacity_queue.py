@@ -31,10 +31,9 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 CLI = os.path.join(REPO, "integration", "stage_docker.py")
 sys.path.insert(0, HERE)
 from lib_herd_case import (  # noqa: E402
+    bench_gate,
     check,
     cli,
-    compose_containers,
-    docker_present,
     env_guard,
     envfail,
     finish,
@@ -64,9 +63,7 @@ def last_json(proc):
 
 
 def main():
-    if not docker_present():
-        envfail("docker 缺席——起台保险丝面不可验（启动 Docker/OrbStack 后重试）")
-        finish()
+    bench_gate()   # 进程台供给门（docker_present 的等价物，t261027-11 迁移）
     os.makedirs(ISO_ROOT, exist_ok=True)
     try:
         # A 占满唯一额度（超时容错转 FAIL：三态契约要求总产出 SUMMARY 行）
@@ -101,7 +98,14 @@ def main():
         check(("pid=%s" % a_holder_pid) in err_b or PROJ_A in err_b,
               "B 红行附活租约清单（holder pid / 工程名可辨）")
         check("满员" not in err_b, "B 红行不含「满员」字样（瞬态白名单不得重试失控红）")
-        check(not compose_containers(PROJ_B), "B 期间零容器（不硬挤起台）")
+        # B 期间零新起台（t261027-11 迁移改名：容器计数面由 runner 窗口看守承接，
+        # 场景内改以「B 名下无活租约」观测——不硬挤不假红的语义原样）。
+        # SANCTIONED-WAIT: inventory is a read-only docker/lease query bound, not a sleep
+        inv = last_json(cli("inventory", timeout=120, env_extra=ENV))
+        live_b = [l for l in ((inv or {}).get("stages") or [])
+                  if isinstance(l, dict) and l.get("project") == PROJ_B
+                  and l.get("state") in ("up", "booting")]
+        check(not live_b, "B 期间零新起台（B 名下无活租约，不硬挤起台）")
 
         # A down 释放 → C 预算内入位（释放准入子用例保留）
         d_proc = cli("down", "--project", PROJ_A, timeout=300, env_extra=ENV)
@@ -116,10 +120,21 @@ def main():
         port_c = ((last_json(proc_c) or {}).get("ports") or {}).get("temporal")
         check(bool(port_c) and tcp_open(port_c), "C 台可服务（temporal %s）" % port_c)
     finally:
-        guarded_down([PROJ_A, PROJ_B, PROJ_C])
+        # env_extra 必须随行（t261027-11 arbitrate gen3 根因）：本场景的台
+        # 全在隔离锁根 ISO_ROOT——不带 ENV 的 down 打在缺省根上是空操作，C 的
+        # 租约在 ISO_ROOT 里活到 hold 锚回收才消（docker 台时代 compose down
+        # 与锁根无关所以从未暴露；进程台的 down 依赖租约里的 bench 身份）。
+        guarded_down([PROJ_A, PROJ_B, PROJ_C], env_extra=ENV)
 
     for proj in (PROJ_A, PROJ_B, PROJ_C):
-        check(not compose_containers(proj), "%s 终态零残留" % proj)
+        # 终态零残留（进程台观测面，t261027-11 迁移改名）：down 后租约消亡，
+        # inventory 无在册活台——容器计数归 runner 窗口看守。
+        # SANCTIONED-WAIT: inventory is a read-only docker/lease query bound, not a sleep
+        inv2 = last_json(cli("inventory", timeout=120, env_extra=ENV))
+        live = [l for l in ((inv2 or {}).get("stages") or [])
+                if isinstance(l, dict) and l.get("project") == proj
+                and l.get("state") in ("up", "booting")]
+        check(not live, "%s 终态零残留（租约已释放）" % proj)
     finish()
 
 

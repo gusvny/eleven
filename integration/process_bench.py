@@ -141,6 +141,19 @@ PROBE_S = float(os.environ.get("SANDBAR_BENCH_PROBE_S") or 0.25)
 SWEEP_TERM_S = float(os.environ.get("SANDBAR_BENCH_SWEEP_TERM_S") or 1.0)
 SWEEP_KILL_S = float(os.environ.get("SANDBAR_BENCH_SWEEP_KILL_S") or 2.0)
 POLL_S = 0.05
+#: Post-kill port-close await (t261027-11 arbitrate gen4: down rc=0 must mean
+#: the port REFUSES, not that the leader pid is gone — the temporal dev
+#: server's listener can outlive the leader by a beat, so a one-shot probe
+#: right after leader death races the child's shutdown). Injectable per the
+#: L25 wait-bound discipline; the await is bounded and its cost is visible in
+#: the receipt (port_close_wait_s).
+PORT_CLOSE_S = float(os.environ.get("SANDBAR_BENCH_PORT_CLOSE_S") or 10.0)
+#: Terminality window (t261027-11 arbitrate gen5): a clean-looking stop must
+#: STAY clean — the temporal server child can escape the signalled group and
+#: re-bind the port ~2.5s after leader death (measured). The residue judgement
+#: therefore requires the port to refuse CONTINUOUSLY for this long before
+#: stop returns, and any re-open re-arms the kill. Injectable per L25.
+PORT_STABLE_S = float(os.environ.get("SANDBAR_BENCH_PORT_STABLE_S") or 3.0)
 
 #: Popen handles of benches started BY THIS PROCESS, keyed by pid. A process
 #: only reaps its own child, so the handle lives here: without it the stopped
@@ -733,6 +746,72 @@ def start(bin_path=None, boot_s=None, root=None, port=None):
             "start_s": round(time.time() - t0, 2), "db": str(db_file)}
 
 
+def _tree_pids(pid):
+    """All live descendants of pid, BFS over pgrep -P (public process-table
+    face; pgrep legs run in the executor context). Snapshot semantics: call
+    BEFORE any signal, while the leader is alive — a child that escapes the
+    process group (the temporal CLI's server spawn does) is invisible to the
+    group signal but visible to this walk only while its parent lives."""
+    out, frontier, seen = [], [int(pid)], {int(pid)}
+    while frontier:
+        cur = frontier.pop()
+        try:
+            p = subprocess.run(["pgrep", "-P", str(cur)],
+                               capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for tok in (p.stdout or "").split():
+            try:
+                kid = int(tok)
+            except ValueError:
+                continue
+            if kid not in seen:
+                seen.add(kid)
+                out.append(kid)
+                frontier.append(kid)
+    return out
+
+
+def _signal_pids(pids, sig):
+    for pid in pids:
+        try:
+            os.kill(int(pid), sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
+
+def _port_holder_pids(port):
+    """Best-effort pids holding a LISTEN/ESTABLISHED socket on port
+    (arbitrate gen6 demand: name and kill the survivor at resurrection time).
+    lsof is the portable face here; when it is absent (or exec-blocked) the
+    scan returns [] honestly — the stable-refusal window still judges the
+    outcome, this only widens the kill reach."""
+    try:
+        p = subprocess.run(["lsof", "-ti", "tcp:%d" % int(port)],
+                           capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    out = []
+    for tok in (p.stdout or "").split():
+        try:
+            out.append(int(tok))
+        except ValueError:
+            continue
+    return sorted(set(out))
+
+
+def _await_port_refuses(port, bound_s, probe_s=None):
+    """Bounded await until nothing accepts on the port (arbitrate gen4: the
+    stop contract is the docker-era one — down returning means UNREACHABLE,
+    not leader-dead). Returns the final probe verdict."""
+    deadline = time.time() + float(bound_s)
+    verdict = port_refuses(port, probe_s)
+    while not verdict and time.time() < deadline:
+        time.sleep(POLL_S)
+        verdict = port_refuses(port, probe_s)
+    return verdict
+
+
 def stop(port, pid, pgid=None, term_s=None, kill_s=None, db=None):
     """Stop the bench and judge the residue.
 
@@ -755,20 +834,110 @@ def stop(port, pid, pgid=None, term_s=None, kill_s=None, db=None):
     except Exception:                                    # noqa: BLE001
         pass
     t0 = time.time()
+    # Tree snapshot BEFORE any signal (arbitrate gen5): the temporal server
+    # child escapes the process group, so the group signal alone misses it and
+    # it re-binds the port ~2.5s after the leader dies. While the leader is
+    # alive the whole tree is enumerable — snapshot it now and signal every
+    # member explicitly, group signal on top.
+    tree = _tree_pids(pid)
+    targets = sorted(set(tree) | {int(pid)})
     _signal_group(pgid, signal.SIGTERM)
+    _signal_pids(tree, signal.SIGTERM)
     escalated = False
-    if not _await_gone(pid, pgid, term_s):
+
+    def _targets_gone(bound_s):
+        deadline = time.time() + float(bound_s)
+        while time.time() < deadline:
+            if not any(pid_alive(p) for p in targets):
+                return True
+            time.sleep(POLL_S)
+        return not any(pid_alive(p) for p in targets)
+
+    if not _targets_gone(term_s):
         escalated = True
         _signal_group(pgid, signal.SIGKILL)
-        _await_gone(pid, pgid, kill_s)
+        _signal_pids(tree, signal.SIGKILL)
+        _targets_gone(kill_s)
     _close_deadman(pid)
     _reap_own_child(pid, kill_s)
     unregister(pid)
+    # Terminality, not snapshot (arbitrate gen4/gen5; acceptance gen6 rework):
+    # the port must refuse CONTINUOUSLY for the stable window before stop
+    # returns; a re-open re-arms the kill on the recorded targets (and the
+    # lsof-resolved holder). The window is LOAD-SCALED (acceptance gen6: the
+    # 3s constant was outrun under six-way teardown — the re-bind lag grows
+    # with the number of live benches on the host) and a pass that saw a
+    # resurrection or live targets is followed by ONE CONFIRMATION pass
+    # (re-kill + full window again) before stop is allowed to call the stage
+    # terminal. A quiet first pass costs a single window. Budget exhaustion
+    # leaves clean=false — fail-visible, never an rc=0 lie.
+    try:
+        live_entries = len([e for e in entries() if not e.get("corrupt")])
+    except Exception:                                    # noqa: BLE001
+        live_entries = 0
+    stable_s = PORT_STABLE_S + 0.5 * max(0, live_entries - 1)
+    settle_deadline = time.time() + PORT_CLOSE_S + 2 * stable_s + PORT_STABLE_S
+    port_closed = False
+    resurrections = 0
+    known = set(targets)
+    survivor_pids = []
+
+    def _settle_once(required_s):
+        """One kill-and-stable cycle; True when the port held refusal for
+        required_s continuously (and nothing recorded stayed alive)."""
+        last_open = None
+        while time.time() < settle_deadline:
+            frontier = [q for q in known if pid_alive(q)]
+            # Expanding re-walk (arbitrate gen6): children can be spawned
+            # after the stop-entry snapshot by still-alive members.
+            while frontier:
+                cur = frontier.pop()
+                for kid in _tree_pids(cur):
+                    if kid not in known:
+                        known.add(kid)
+                        frontier.append(kid)
+            alive = [q for q in known if pid_alive(q)]
+            if alive:
+                nonlocal survivor_pids
+                survivor_pids = alive
+                _signal_pids(alive, signal.SIGKILL)
+            if port_refuses(port):
+                if last_open is None:
+                    last_open = time.time()
+                if time.time() - last_open >= required_s:
+                    return True
+            else:
+                # Resurrection: re-arm, and reach the actual holder even when
+                # it was reparented outside the recorded tree (lsof best-effort).
+                nonlocal resurrections
+                resurrections += 1
+                last_open = None
+                holders = _port_holder_pids(port)
+                fresh = [h for h in holders if h not in known]
+                if fresh:
+                    known.update(fresh)
+                _signal_pids(holders, signal.SIGKILL)
+            time.sleep(POLL_S)
+        return False
+
+    port_closed = _settle_once(stable_s)
+    confirmed = False
+    if port_closed and (resurrections or survivor_pids):
+        # Suspicious first pass: re-kill whatever re-appeared and require the
+        # window to hold a second time before calling the stage terminal.
+        _signal_pids([q for q in known if pid_alive(q)], signal.SIGKILL)
+        confirmed = _settle_once(stable_s)
+        port_closed = port_closed and confirmed
     block = residue(port, pid, pgid)
     block["stopped_s"] = round(time.time() - t0, 2)
     block["escalated"] = escalated
+    block["port_closed"] = port_closed
+    block["resurrections"] = resurrections
+    block["settle_window_s"] = round(stable_s, 2)
+    block["confirmed"] = bool(confirmed or (port_closed and not resurrections))
+    block["survivor_pids"] = [p for p in known if pid_alive(p)]
     block["db_removed"] = reclaim_db(db)
-    block["clean"] = residue_clean(block)
+    block["clean"] = residue_clean(block) and port_closed
     return block
 
 

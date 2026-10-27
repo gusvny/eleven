@@ -107,11 +107,14 @@ def env_guard(err, leg="子用例"):
 def cli(*args, **kw):
     """stage_docker CLI 子进程调用。拓扑纪律：不设 SANDBAR_STAGE_LOCK_DIR，
     与生产调用方共享缺省锁根（flock 互斥只在共享根下生效）。
+    本夹具固定注入 SANDBAR_STAGE_BACKEND=process（t261027-11 迁进程台）——
+    被测的租约/排队/保险丝机械全部共享，只有起台载荷换 process_bench。
     kw: cwd=（默认仓库根）、env_extra=（注入满员/TTL 旋钮等）、timeout=。"""
     cwd = kw.get("cwd", REPO)
     timeout = kw.get("timeout", 900)
     env_extra = kw.get("env_extra")
     env = dict(os.environ)
+    env["SANDBAR_STAGE_BACKEND"] = "process"
     if env_extra:
         env.update(env_extra)
     return subprocess.run([sys.executable, CLI] + [str(a) for a in args],
@@ -185,10 +188,19 @@ def ensure_up(project, services="temporal", timeout=600, **kw):
 
 
 def guarded_down(projects, **kw):
-    """finally 兜底拆台：无论断言走道，起过的工程不残留（崩溃路径零残留半边）。"""
+    """finally 兜底拆台：无论断言走道，起过的工程不残留（崩溃路径零残留半边）。
+    down 非 0=杀鸡用牛刀的留痕面（acceptance gen6 欠账）：stderr 点名工程与
+    rc（证据行，不加 check——断言计数是票面硬验收，走道的活证据归场景自己的
+    零残留子用例），让脏 down 不再「假过再 flake 猎捕」。"""
     for proj in projects:
         try:
-            cli("down", "--project", proj, timeout=180, **kw)
+            # SANCTIONED-WAIT: 180s is the down ceiling (kill on expiry, not a sleep)
+            d = cli("down", "--project", proj, timeout=180, **kw)
+            rc = getattr(d, "returncode", 0)
+            if rc != 0:
+                print("STAGE_GUARD_DOWN_FAIL: down %s rc=%s（%s）——脏拆台点名"
+                      % (proj, rc, " ".join((d.stderr or "").split())[:160]),
+                      file=sys.stderr, flush=True)
         except (OSError, subprocess.SubprocessError):
             pass
 
@@ -198,6 +210,62 @@ def port_set(state):
     if not state or not isinstance(state.get("ports"), dict):
         return set()
     return {int(v) for v in state["ports"].values() if str(v).strip().lstrip("-").isdigit()}
+
+
+PROC_BENCH = os.path.join(REPO, "integration", "process_bench.py")
+
+
+def bench_bin():
+    """process 台供给面（temporal 二进制）——与 stage_docker/_gates 同判据的
+    场景侧公开观测：env 指定优先，否则仓内自带件。"""
+    return os.environ.get("SANDBAR_TEMPORAL_BIN") or os.path.join(
+        REPO, "server", "engine", "bin", "temporal")
+
+
+def bench_gate():
+    """进程台供给门（docker_present 的进程台等价物，t261027-11）：temporal
+    二进制缺席=ENV_FAIL exit 2（点名路径），绝不静默跑空。"""
+    if not os.path.exists(bench_bin()):
+        envfail("temporal 二进制缺席：%s（进程台供给面）——设 SANDBAR_TEMPORAL_BIN "
+                "或构建仓内件后重试" % bench_bin())
+        finish()
+    return True
+
+
+def proc_ids(state):
+    """process 台身份面：租约回报的 proc_ids（int 化排序）；docker 台字段
+    （container_ids）缺席返回空表——断言面自行判。"""
+    if not state or not isinstance(state.get("proc_ids"), list):
+        return []
+    return sorted(int(p) for p in state["proc_ids"] if str(p).strip().isdigit())
+
+
+def bench_status(port, pid):
+    """process_bench.py status 公开 CLI 观测（身份实盘交叉面，替代 docker
+    inspect/docker ps）：返回 residue block JSON，CLI 失败返回 {}（断言面自判）。"""
+    try:
+        p = subprocess.run([sys.executable, PROC_BENCH, "status",
+                            "--port", str(port), "--pid", str(pid)],
+                           capture_output=True, text=True, timeout=30)
+        return json.loads((p.stdout or "").strip().split("\n")[-1])
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return {}
+
+
+def bench_alive(port, pid):
+    """台身份实盘判活：status 的 pid_alive 位（公开 CLI 观测，不读实现内部）。"""
+    return bool(bench_status(port, pid).get("pid_alive"))
+
+
+def proc_start_token(pid):
+    """/proc 启动时刻（进程侧的 StartedAt 等价观测面，重建即变）；读取失败
+    返回空串（证据缺席如实，绝不编造）。"""
+    try:
+        with open("/proc/%d/stat" % int(pid), "r") as fh:
+            fields = fh.read().rsplit(")", 1)[1].split()
+        return fields[19] if len(fields) > 19 else ""
+    except (OSError, IndexError, ValueError):
+        return ""
 
 
 def wait_until(fn, budget, gap=0.5):

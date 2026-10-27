@@ -4,7 +4,7 @@
 
 intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
 - 同一工程：cwd=仓库根 ensure 起台后，cwd=/tmp 与 cwd=/ 对同项目 ensure
-  =幂等复用（reused、container_ids 与端口和首起完全一致）——cwd 不改变
+  =幂等复用（reused、proc_ids 与端口和首起完全一致；进程台身份面）——cwd 不改变
   锁根/仓库锚/状态面解析，另一台被起出来（端口漂/容器更替）即红；
 - cwd=/ down 拆台成功、零残留；
 - 场景文件自身路径全部 __file__ 锚（不受执行 cwd 影响）。
@@ -21,15 +21,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from lib_herd_case import (  # noqa: E402
     REPO,
+    bench_alive,
+    bench_gate,
     check,
     cli,
-    compose_containers,
-    docker_present,
     env_guard,
     envfail,
     finish,
     guarded_down,
     port_set,
+    proc_ids,
     stage_tag,
     tcp_open,
 )
@@ -39,13 +40,13 @@ ALTERNATE_CWDS = ["/tmp", "/"]
 
 
 def ids_of(state):
-    return sorted((state or {}).get("container_ids") or [])
+    """进程台身份面（t261027-11 迁移）：proc_ids 取代 container_ids——
+    租约/幂等语义不变，只有身份载体从容器换成 bench 进程。"""
+    return proc_ids(state)
 
 
 def main():
-    if not docker_present():
-        envfail("docker 不可用（docker info 失败）——本场景守真 docker 台，启动 Docker/OrbStack 后重试")
-        finish()
+    bench_gate()   # 进程台供给门（docker_present 的等价物，t261027-11 迁移）
 
     try:
         p1, st1_raw = cli("ensure", "--project", A, "--services", "temporal", timeout=600), None
@@ -74,7 +75,7 @@ def main():
             if check(p2.returncode == 0 and st2 is not None,
                      "cwd=%s 同项目 ensure 成功" % cwd):
                 check(bool(st2.get("reused")), "cwd=%s 为幂等复用（reused）" % cwd)
-                check(ids_of(st2) == ids1, "cwd=%s 容器 id 与首起一致（未另起一台）" % cwd)
+                check(ids_of(st2) == ids1, "cwd=%s bench 进程 id 与首起一致（未另起一台）" % cwd)
                 check(port_set(st2) == ports1, "cwd=%s 端口与首起一致" % cwd)
                 check(all(tcp_open(v) for v in port_set(st2)), "cwd=%s 台可服务" % cwd)
 
@@ -84,7 +85,12 @@ def main():
     finally:
         guarded_down([A])
 
-    check(not compose_containers(A), "终态零残留")
+    # 终态零残留（进程台观测面）：down 后 bench 进程亡 + 端口释放（t261027-11
+    # 迁移改名——docker ps 容器计数面由 runner 窗口看守承接，场景内不再查 docker）。
+    _port = ((st1 or {}).get("ports") or {}).get("temporal")
+    _pid = (ids_of(st1) or [None])[0]
+    check(not tcp_open(_port) and not (_pid and bench_alive(_port, _pid)),
+          "终态零残留（bench 已停、temporal 端口已释放）")
 
     finish()
 

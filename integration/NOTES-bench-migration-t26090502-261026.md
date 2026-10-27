@@ -64,3 +64,29 @@ batch-mode measurements already recorded in the exception table.
 - docs/README.md (index triage); docs/reference/test-tiers-and-e2e-admission.md (tier context).
 - Truth sources for the findings: the three scenario files, `integration/batch_stage_exceptions.json`,
   `integration/lib_proc_bench.py`, `integration/process_bench.py`, `integration/run_scenarios.py`.
+
+## Batch A follow-up (t261027-11, 261027): the t260910-12 lease/queue family moved
+
+Host order 261027 took the five t260910-12 cases (cwd-independence, full-capacity-queue,
+herd-no-crosstalk, holder-kill-reclaim, idempotent-reup) off the docker stage. Unlike the
+t260905-02 family above, no assertion had to be dropped: the family's subject is stage_docker's
+lease/queue machinery (lock root, lease files, TTL reclaim, capacity fuse, band allocation, hold
+child), which is plain process/flock code — only the up payload was docker. The migration is a
+named adaptation of the prescribed `ensure(modules=...)` pattern:
+
+- `stage_docker.py` gained `SANDBAR_STAGE_BACKEND=process` (t261027-11): the shared
+  lease/queue/fuse/hold path is verbatim; only the up payload (process_bench dev server on the
+  band-allocated port, `proc_ids` identity face instead of `container_ids`) and the
+  down/residue leg (process_bench.stop + residue block) are swapped. Default (env unset) stays
+  docker byte-for-byte — the reason the bare-bench `ensure(modules=...)` pattern of
+  t260915-20/t260916-02 was NOT used here: those cases only need a Temporal frontend and hold no
+  stage contract; re-expressing lease/queue contracts against a bare endpoint would have deleted
+  exactly the assertions acceptance item 3 protects.
+- Docker-face assertions were renamed, not deleted (container cross-checks -> process_bench.py
+  status /proc start time; docker-present gates -> temporal-binary gate). Assertion counts are
+  unchanged: 8/14/11/15/12.
+- The five rows left batch_stage_exceptions.json (30 -> 25) and the generator ROWS in lockstep;
+  the t260921-06 window-form guard now reds any new t26091012-* compose project — that is the
+  runner-side "zero containers" observation for this family.
+- The t260905-02 fork above is untouched: those three cases keep their docker teardown
+  assertions and stay put, pending the user decision recorded there.

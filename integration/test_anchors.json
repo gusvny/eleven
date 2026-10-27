@@ -2650,27 +2650,27 @@
     },
     "integration/t260910-12/sc_cwd_independence.py": {
       "anchor": "behaviour",
-      "note": "",
+      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
       "sync_path": ""
     },
     "integration/t260910-12/sc_full_capacity_queue.py": {
       "anchor": "behaviour",
-      "note": "",
+      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
       "sync_path": ""
     },
     "integration/t260910-12/sc_herd_no_crosstalk.py": {
       "anchor": "behaviour",
-      "note": "",
+      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
       "sync_path": ""
     },
     "integration/t260910-12/sc_holder_kill_reclaim.py": {
       "anchor": "behaviour",
-      "note": "",
+      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
       "sync_path": ""
     },
     "integration/t260910-12/sc_idempotent_reup.py": {
       "anchor": "behaviour",
-      "note": "",
+      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
       "sync_path": ""
     },
     "integration/t260910-12/sc_transient_retry_contract.py": {
@@ -5936,6 +5936,11 @@
     "integration/t261027-10/sc_t261027_10_terminal_release_caller_blocked.py": {
       "anchor": "behaviour",
       "note": "t261027-10 scenario: with the caller-side ledger write physically blocked, the cancel receipt stays honest (released=false, reason naming the write failure) and the engine-side reclaim returns the slot — reader bytes clean, waiter promoted, next acquire immediate — without the caller writing."
+    },
+    "integration/t261027-11/sc_stage_process_backend_zero_docker.py": {
+      "anchor": "behaviour",
+      "note": "t261027-11 gate blocker: the migration's user-visible outcome on public faces only (zero docker containers for the project pattern, no silent backend fallback, dual-face zero residue incl. a delayed re-probe past the re-bind window).",
+      "sync_path": ""
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

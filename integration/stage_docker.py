@@ -290,6 +290,24 @@ def max_stages():
     return int(os.environ.get("SANDBAR_STAGE_MAX_STAGES", 100))
 
 
+def stage_backend():
+    """Stage backend selector (t261027-11): "" / "docker" (default — the
+    compose payload, byte-for-byte unchanged) or "process" (the
+    process_bench payload used by the migrated lease/queue cases: same lock
+    root, same lease files, same fuse, same hold child; only the up payload
+    and the down/residue leg are swapped). Anything else is a named usage
+    red — never a silent fallback to docker (外部输入三态纪律)."""
+    raw = (os.environ.get("SANDBAR_STAGE_BACKEND") or "").strip().lower()
+    if raw in ("", "docker"):
+        return "docker"
+    if raw == "process":
+        return "process"
+    raise StageError(
+        "usage 红：SANDBAR_STAGE_BACKEND=%r 不认识（可选 docker|process）"
+        "——绝不静默回落缺省后端" % os.environ.get("SANDBAR_STAGE_BACKEND"),
+        kind="usage")
+
+
 def net_base():
     """受管网段表 base（t260912-02 病灶三）。必须是 IPv4 /16——畸形=usage 红
     点名（外部输入三态纪律：畸形拒收，绝不静默回落）。"""
@@ -1181,6 +1199,23 @@ def cmd_hold(project, anchor_pid, lease_id=None, keep=False):
                   % holder_pid(lease), file=sys.stderr)
             _cleanup_pidfile()
             return EXIT_ENV
+        # R1''（t261027-11 arbitrate gen2）：写前复核。TERM 只在本循环顶被看到
+        # ——信号落在读之后，本迭代的陈旧写（state=up）会落在 down 的 unlink
+        # 之后，把租约从死里写活（满员场景实测 3/3：down 后 inventory 仍见活
+        # 行，残留只能等下一次清扫）。以文件现状为准：已消失/易主/翻 downing
+        # 一律停写走终态，绝不回写陈旧心跳；TERM 在途也立即弃写。
+        if stopping["flag"]:
+            _cleanup_pidfile()
+            return 130                                                        # ⑤
+        cur = read_lease(project)
+        if not isinstance(cur, dict) or cur.get("lease_id") != lease_id:      # ①
+            try:
+                pidfile.unlink()
+            except FileNotFoundError:
+                pass
+            return 0
+        if cur.get("state") == "downing":                                     # ②
+            return 0
         lease["heartbeat_ts"] = time.time()
         try:
             write_lease(project, lease)
@@ -1524,7 +1559,7 @@ def compose_env(project, services, ports, opts):
     for cand in ([cred_env] if cred_env else []) + [
             os.path.expanduser("~/.sandbar/projects/suyou/credentials.yaml"),
             str(REPO / ".dsh" / ".credentials.yaml"),
-            "/Users/xingu/Documents/sandbar/.dsh/.credentials.yaml"]:
+            "/Users/user/Documents/sandbar/.dsh/.credentials.yaml"]:
         if cand and os.path.isfile(cand):
             cred_src = cand
             break
@@ -1557,7 +1592,7 @@ def compose_env(project, services, ports, opts):
     preset_name = "sandbar-integration"  # naming-compat
     for base in filter(None, [os.path.expanduser("~/.dsh/.agent-presets"),
                               str(REPO / ".dsh" / ".agent-presets"),
-                              "/Users/xingu/Documents/sandbar/.dsh/.agent-presets"]):
+                              "/Users/user/Documents/sandbar/.dsh/.agent-presets"]):
         cand = pathlib.Path(base) / preset_name
         if cand.is_dir():
             dst = presets_dir / preset_name
@@ -2294,6 +2329,14 @@ def sweep_residues_quiet(budget=None):
               % os.environ["SANDBAR_STAGE_SWEEP"], file=sys.stderr)
         return None
     try:
+        pb = _sweep_process_benches()
+        if pb["stopped"] or pb["errors"]:
+            print("[stage-sweep] process bench 判拆 %d / 失败 %d"
+                  % (len(pb["stopped"]), len(pb["errors"])), file=sys.stderr)
+    except Exception as e:                                  # noqa: BLE001
+        print("STAGE_SWEEP_WARN: process bench 清扫异常（%s: %s）——继续清扫"
+              % (type(e).__name__, e), file=sys.stderr)
+    try:
         rpt = sweep_stages(budget_s=budget, orphan_face="hook")
     except Exception as e:                                  # noqa: BLE001
         print("STAGE_SWEEP_WARN: 残台清扫异常（%s: %s）——继续起台，残留交下次清扫"
@@ -2333,6 +2376,15 @@ def fuse_precheck():
 def cmd_sweep(dry_run=False):
     """`sweep` 子命令：残台清扫机械入口（验收 C/D）。判拆全拆逐条点名；失败
     上抛=非零退出；stdout 末行=JSON 报告（脚本消费面）。"""
+    # Bench harvest FIRST: sweep_stages' capacity counting reclaims dead lease
+    # FILES in place (enumerate_leases reclaim=True) — run after it, the lease
+    # record this harvest reads proc_ids from is already gone and the bench
+    # would be orphaned exactly where it should be reaped (measured 261027).
+    pb = _sweep_process_benches()
+    if pb["stopped"] or pb["errors"]:
+        print("[stage-sweep] process bench 判拆 %d / 失败 %d"
+              % (len(pb["stopped"]), len(pb["errors"])))
+        rpt["process_benches"] = pb
     rpt = sweep_stages(dry_run=dry_run)
     print("[stage-sweep] 扫描 %d 条租约：判拆 %d、保留 %d、仅报告 %d、失败 %d、"
           "预算跳过 %d、孤儿跳过 %d（%.1fs）" % (
@@ -2357,7 +2409,13 @@ def cmd_inventory():
     """`inventory` 子命令（t260915-18 工单②，只读）：台面清点 JSON 回执——
     容量面（容器/工程/活租约/孤儿 vs SANDBAR_STAGE_MAX_STAGES）+ 每台归属
     （holder.ticket=票号/attempt、pid、锚、owner、心跳年龄）+ 工程名全列——
-    人工排障不再猜哈希台名。docker 缺席=ok:false（CLI exit 2），绝不假装查过。"""
+    人工排障不再猜哈希台名。docker 缺席=ok:false（CLI exit 2），绝不假装查过。
+    process 后端（t261027-11）：容器面按 0 如实呈报（本后端零容器是构造事实，
+    docker 窗口看守归批 runner），租约面照常清点。"""
+    if stage_backend() == "process":
+        inv = build_inventory(leases=enumerate_leases(), rows=[])
+        inv["ok"] = True
+        return inv
     if not docker_present():
         return {"ok": False,
                 "error": "docker 不可用（docker info 失败）——容器面不可见，"
@@ -3159,10 +3217,12 @@ def adopt_live_residue(project, services_list, opts):
 
 
 def _flip_lease_up(project, lease, ports, services_list, env, opts,
-                   sa_registered, sa_note):
+                   sa_registered, sa_note, identity=None):
     """boot 完成 → 翻 state=up（原子写，写前保 lease_id/holder 不变）。CLI 翻面
     自带一拍新鲜心跳，此后心跳由 hold 分支接管；container_ids 在此定格，作为
-    同租约二次 up 幂等复用的证据面（验收④：容器 id 不变=未被重建）。
+    同租约二次 up 幂等复用的证据面（验收④：容器 id 不变=未被重建）。process
+    后端（t261027-11）传 identity={"proc_ids": [...], "bench_db": ...}——身份面
+    换成 bench 进程 id，绝不冒充容器 id。
     翻面兜底 new_lease（租约文件丢失的退化路）同样带 anchor_pid/anchor_token
     两件套（对抗复核 F2：缺了它们，hold ③ 两段判活在这条退化路上无从谈起
     ——pid 重用形态的「愿主已亡 hold 仍续跳」判不出来）。"""
@@ -3181,18 +3241,130 @@ def _flip_lease_up(project, lease, ports, services_list, env, opts,
         "namespace": env["SANDBAR_TEST_NAMESPACE"],
         "ports": {k: ports[k] for k in used},
         "repo_dir": opts.get("repo_dir"),
-        "container_ids": container_ids(project),
         "sa_registered": sa_registered,
         "sa_note": sa_note,
         "booted_ts": int(time.time()),
         "heartbeat_ts": time.time(),
     })
+    if identity is None:
+        lease["container_ids"] = container_ids(project)
+    else:
+        lease.update(identity)
     # t260916-26 C1：起台后的只读插件断言回执进租约（观测位不是闸；
     # --check-plugins 的升格退出在 plugins_postboot_probe 内已抛）。
     if opts.get("_plugins_receipt") is not None:
         lease["plugins"] = opts["_plugins_receipt"]
     write_lease(project, lease)
     return lease
+
+
+def _bench_module():
+    """The process-bench module (integration/process_bench.py), imported
+    lazily so the docker default path never pays the import."""
+    import importlib
+    here = str(pathlib.Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    return importlib.import_module("process_bench")
+
+
+def _up_process(project, services_list, opts, timeout, lease):
+    """Process-backend up payload (t261027-11): one process_bench dev server
+    on the band-allocated temporal port instead of compose. Everything above
+    this line (gates, sweep hook, fuse, hold leg, capacity claim, band
+    allocation) is the shared lease/queue machinery, verbatim. Failure paths
+    stop the bench they started — a refused start leaves nothing behind
+    (process_bench.start contract)."""
+    bench = _bench_module()
+    ports = dict(opts["ports"])
+    extra = sorted(set(ports) - {"temporal"})
+    if extra and opts.get("ports_explicit"):
+        raise StageError(
+            "usage 红：process 后端只接受 temporal 端口（多出 %s）——bench 的 "
+            "ui 端口由内核自选，不接受显式指定" % extra, kind="usage")
+    # band 分配的 ui/console 槽位对 process 台是无主的相邻预留（bench 的 ui 端口
+    # 由内核自选）：如实只消费 temporal 槽，不冒充绑定了整个档位。
+    ports = {"temporal": ports["temporal"]}
+    port = int(ports["temporal"])
+    res = bench.start(port=port)
+    if not res.get("ok"):
+        raise StageError(
+            "process bench 起动被拒（%s）——env 红，绝不静默回落 docker 台"
+            % res.get("reason"), kind="env")
+    pid, db = int(res["pid"]), str(res["db"])
+    env = {"SANDBAR_TEST_NAMESPACE": opts.get("namespace") or "sandbar-test"}
+    try:
+        wait_temporal(port, timeout)
+        sa_registered, sa_note = register_namespace(
+            env["SANDBAR_TEST_NAMESPACE"], "127.0.0.1:%d" % port)
+        for name, p in ports.items():
+            if p in PROD_PORTS:
+                raise StageError(
+                    "起台端口 %s=%d 落在生产端口面——红线自检失败，已就地清场"
+                    % (name, p), kind="env")
+    except BaseException:
+        try:
+            bench.stop(port=port, pid=pid, db=db)
+        except Exception:                                # noqa: BLE001
+            print("STAGE_FAIL: process bench 就地清场失败（pid=%s）——交注册表 "
+                  "sweep/人工回收" % pid, file=sys.stderr)
+        raise
+    lease2 = _flip_lease_up(project, lease, ports, services_list, env, opts,
+                            sa_registered, sa_note,
+                            identity={"proc_ids": [pid], "bench_db": db,
+                                      "bench_detached": True})
+    # Hand the bench over (t261027-11 rework, arbitrate gen0 defect): this CLI
+    # must exit to return the receipt, and process_bench's atexit/deadman would
+    # reap the bench with it while the lease reports state=up. detach() drops
+    # the spawner handle, stops the deadman watch, and marks the registry entry
+    # detached (the sweep leaves it standing); from here the LEASE owns the
+    # bench — down/reclaim by proc_ids, and _sweep_process_benches harvests a
+    # dead lease's bench.
+    bench.detach(pid)
+    return lease2
+
+
+def _sweep_process_benches(now=None):
+    """Lease-driven bench harvest (t261027-11 rework, arbitrate gen0 defect).
+
+    The process backend detaches every bench from its spawning CLI (the CLI
+    must exit to return the receipt — detach is what keeps the bench serving
+    for the whole lease lifetime), so ownership is carried by the LEASE, not
+    by a live spawner. This sweep closes the loop: every lease that records
+    proc_ids but is dead (expired AND holder gone) or already downing has its
+    bench stopped here, loudly on failure and never blocking the sweep.
+
+    Boundary (declared, not silent): a bench whose lease FILE was deleted by
+    hand leaves no lease record to drive this harvest — it stays a detached
+    registry entry, reclaimed by process_bench's own operator hatch
+    (`process_bench.py sweep --include-detached`) or by the next down of the
+    same project. Same trust boundary as a hand-deleted docker lease."""
+    bench = _bench_module()
+    stopped, errors = [], []
+    # Scan the lease FILES (not enumerate_leases: its reclaim=True unlinks a
+    # dead lease before this sweep could read proc_ids off it, which would
+    # orphan the bench exactly where the harvest is supposed to find it).
+    for f in sorted(lock_root().glob("project-*.json")):
+        proj = f.name[len("project-"):-len(".json")]
+        lease = read_lease(proj)
+        if not isinstance(lease, dict):
+            continue
+        pids = lease.get("proc_ids") or []
+        if not pids:
+            continue
+        if lease.get("state") != "downing" and not lease_dead(lease, now=now):
+            continue
+        port = (lease.get("ports") or {}).get("temporal")
+        try:
+            block = bench.stop(port=int(port), pid=int(pids[0]),
+                               db=lease.get("bench_db"))
+            stopped.append({"project": proj, "clean": bool(block.get("clean"))})
+        except Exception as e:                             # noqa: BLE001
+            errors.append({"project": proj, "err": "%s: %s"
+                           % (type(e).__name__, e)})
+            print("STAGE_SWEEP_WARN: process bench 判拆失败 %s（%s）——残留交"
+                  "下次清扫/人工" % (proj, e), file=sys.stderr)
+    return {"stopped": stopped, "errors": errors}
 
 
 def do_up(project, services_list, opts, timeout, lock_fd=None, lease=None):
@@ -3372,6 +3544,8 @@ def do_down(project, harvest_hold=True):
               "模拟拆台失败，租约保留", file=sys.stderr)
         raise StageError("[inject] 模拟拆台失败（SANDBAR_STAGE_INJECT_DOWN_FAIL，一次性）"
                          "——租约保留待重试/人工", kind="fail")
+    if stage_backend() == "process":
+        return _down_process(project, lease)
     if not docker_present():
         # t260915-18（C4:2078）：docker 缺席不再销账——daemon 恢复后容器可能
         # 还在，租约（state=downing）是它们唯一的账本；保留交 sweep crit_iii/
@@ -3391,7 +3565,7 @@ def do_down(project, harvest_hold=True):
                          .splitlines() or [""])[-1].split())
         raise StageError("compose down 失败（rc=%d）：%s——租约保留待重试/人工"
                          % (comp.returncode, tail[:200]), kind="fail")
-    release_lease(project)
+    _release_lease_guarded(project, lease)
     try:
         (lock_root() / ("holder-%s.pid" % project)).unlink()
     except FileNotFoundError:
@@ -3406,9 +3580,138 @@ def do_down(project, harvest_hold=True):
             "tmp_artifacts": tmp_artifacts}
 
 
+def _log_resurrection(project, cur, tag):
+    """Arbitrate gen3 demand (1): a surviving row must be NAMEABLE. Dump the
+    full record (lease_id / holder pid / state / proc_ids / ports) to stderr
+    AND persist it under the lock root so a later reader can name the writer
+    family even after the down CLI has exited."""
+    rec = {"project": project, "tag": tag, "lease_id": (cur or {}).get("lease_id"),
+           "state": (cur or {}).get("state"),
+           "holder_pid": holder_pid(cur) if cur else None,
+           "proc_ids": (cur or {}).get("proc_ids"),
+           "ports": (cur or {}).get("ports"),
+           "heartbeat_ts": (cur or {}).get("heartbeat_ts"),
+           "seen_at": time.time()}
+    line = json.dumps(rec, ensure_ascii=False)
+    print("STAGE_RACE_EVIDENCE: %s" % line, file=sys.stderr, flush=True)
+    try:
+        with open(str(lock_root() / ("resurrect-%s.log" % project)), "a",
+                  encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass
+
+
+def _release_lease_guarded(project, lease, budget=2.0):
+    """R1''（t261027-11 arbitrate gen2/gen3）：release 后的有界防复活复核。
+
+    down 的收割（hold TERM→退出）与 unlink 之间留有半拍：hold 一迭代内的陈旧
+    心跳写可能落在 unlink 之后，把租约从死里写活。gen3 修正（仲裁点名「新
+    lease_id 复活无人打」）：身份判定从 lease_id 改为 **bench 身份** ——proc_ids
+    或 temporal 端口与本台一致的复活，无论它姓什么 lease_id 都属垂死 hold 家族
+    的最后一批写，一律再删再等；身份完全异己（别的 bench、别的端口）的行不是
+    本 down 的对战对象（互拆纪律），但必须**点名留痕**（stderr + 锁根
+    resurrect-<project>.log），绝不静默。同 bench 复活耗尽预算=真竞态，
+    fail-visible 上抛。"""
+    lease_id = (lease or {}).get("lease_id")
+    mine_pids = set((lease or {}).get("proc_ids") or [])
+    mine_port = ((lease or {}).get("ports") or {}).get("temporal")
+    t0 = time.time()
+    absent_since = None
+    while True:
+        release_lease(project)
+        time.sleep(0.05)
+        cur = read_lease(project)
+        if isinstance(cur, dict):
+            same_lease = bool(lease_id) and cur.get("lease_id") == lease_id
+            cur_pids = set(cur.get("proc_ids") or [])
+            cur_port = (cur.get("ports") or {}).get("temporal")
+            same_bench = (bool(mine_pids) and cur_pids == mine_pids) or \
+                         (bool(mine_port) and cur_port == mine_port)
+            if same_lease or same_bench:
+                _log_resurrection(project, cur,
+                                  "same-lease" if same_lease else "same-bench")
+                absent_since = None   # ours to fight: re-delete, re-arm
+            else:
+                # foreign identity: a genuinely different bench owns this row —
+                # not ours to fight (互拆纪律), but never silently: name it.
+                _log_resurrection(project, cur, "foreign")
+                return
+        else:
+            absent_since = absent_since if absent_since is not None else time.time()
+        # A single absence proves nothing (the stale write may not have landed
+        # yet): require the record to stay gone for a short quiesce window.
+        if absent_since is not None and time.time() - absent_since >= 0.3:
+            return
+        if time.time() - t0 >= budget:
+            raise StageError(
+                "down 后租约 %s 复活（lease_id=%s，holder pid=%s）——hold 收割"
+                "与 unlink 的竞态未闭合，fail-visible 留痕交人工/下次清扫"
+                % (project, lease_id, holder_pid(cur) if cur else "?"),
+                kind="fail")
+
+
+def _down_process(project, lease):
+    """Process-backend down payload (t261027-11): process_bench.stop on the
+    recorded bench identity, then the same release sequence as the docker
+    leg (lease unlink + holder pidfile). Idempotent: no proc_ids/port on the
+    lease = nothing this root started, succeed honestly. Residue is the
+    bench residue block named, never silent."""
+    bench = _bench_module()
+    pids = (lease or {}).get("proc_ids") or []
+    port = ((lease or {}).get("ports") or {}).get("temporal")
+    if not pids or not port:
+        _release_lease_guarded(project, lease)
+        try:
+            (lock_root() / ("holder-%s.pid" % project)).unlink()
+        except FileNotFoundError:
+            pass
+        return {"project": project, "down": True, "residue": [],
+                "backend": "process"}
+    block = bench.stop(port=int(port), pid=int(pids[0]),
+                       db=lease.get("bench_db"))
+    _release_lease_guarded(project, lease)
+    try:
+        (lock_root() / ("holder-%s.pid" % project)).unlink()
+    except FileNotFoundError:
+        pass
+    if block.get("clean"):
+        residue = []
+    else:
+        residue = ["bench-pid-alive", "bench-port-still-serving"][:  \
+            (1 if block.get("pid_alive") else 0)
+            + (1 if not block.get("port_refuses") else 0)]
+        if block.get("group_alive"):
+            residue.append("bench-group-survivors:%s"
+                           % (block.get("survivors") or []))
+        # gen6 naming demand: any process the settle loop could not end is
+        # named pid-by-pid in the receipt (main() turns residue into rc!=0).
+        residue.extend("survivor-pid:%s" % p
+                       for p in (block.get("survivor_pids") or []))
+    return {"project": project, "down": True, "residue": residue,
+            "backend": "process",
+            "bench": {"stopped_s": block.get("stopped_s"),
+                      "escalated": block.get("escalated")}}
+
+
 def _gates(services_list):
     """docker / image presence gates (the honest three-state ENV_FAIL face —
-    preserved verbatim, ticket spec ⑤)."""
+    preserved verbatim, ticket spec ⑤). The process backend (t261027-11)
+    gates the bench's own supply instead: temporal-only services and the
+    temporal binary present; docker presence is deliberately NOT required."""
+    if stage_backend() == "process":
+        if set(services_list) - {"temporal"}:
+            raise StageError(
+                "ENV_FAIL: process 后端只供 temporal 档（实得 %s）——dsh/console "
+                "档的供给面仍走 docker 台，绝不静默换后端" % sorted(services_list),
+                kind="env")
+        bin_path = _bench_module().default_bin()
+        if not os.path.exists(bin_path):
+            raise StageError(
+                "ENV_FAIL: temporal 二进制缺席：%s（process 台的供给面；"
+                "设 SANDBAR_TEMPORAL_BIN 指向可执行件后重试）" % bin_path,
+                kind="env")
+        return
     if not docker_present():
         raise StageError("ENV_FAIL: docker 不可用（docker info 失败）——本票测试台一律走 "
                          "docker；启动 Docker/OrbStack 后重试", kind="env")
@@ -3495,6 +3798,7 @@ def _boot_new_stage(project, services_list, opts, timeout, cold_cleanup=False,
         capacity_acquire(project, lease, timeout)   # 保险丝判定+占位同临界区（R4 原样）
         try:
             ports = explicit_ports(services_list)
+            explicit = ports
             lock_fd = None
             try:
                 if ports is None:
@@ -3503,6 +3807,14 @@ def _boot_new_stage(project, services_list, opts, timeout, cold_cleanup=False,
                 # C2：择槽后立刻写进租约（state 仍 booting 的占位态）——booting
                 # 窗口内网段对并发分配器可见，32 并发不靠概率避让；写后复核 +
                 # do_up 的 overlaps 换槽重试只是兜底（C3）。
+                if stage_backend() == "process":
+                    # process 后端（t261027-11）：无 compose 网段面可占，
+                    # 载荷换 _up_process；保险丝/档位锁/租约占位全部共享。
+                    opts = dict(opts)
+                    opts["ports"] = ports
+                    opts["ports_explicit"] = explicit is not None
+                    return _up_process(project, services_list, opts,
+                                       timeout, lease=lease)
                 subnet = claim_subnet(project, lease)
                 opts = dict(opts)
                 opts["ports"] = ports
