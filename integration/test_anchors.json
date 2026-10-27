@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 350,
+      "engine_tests": 353,
       "scenarios": 855
     },
     "vocab": [
@@ -1745,6 +1745,10 @@
       "anchor": "behaviour",
       "note": "t261028-17 (KI-391) L1: a closed ticket past Temporal's hydrate window takes its row IDENTITY from the closing archive - the real archived title on the board (plus epic/role/created where the manifest carries them, SA epic first), a missing / malformed / title-less manifest serving an EMPTY title plus an identity_note that names which condition held with the path, the zero-pollers degraded row keeping its title untouched with the diagnostic in the note (compared against the unproven-probe control row), no row title on any path carrying a diagnostic sentence, and the no-snapshot family (FAILED / minimal / degraded) sharing ONE keyset whose only key beyond the live row's names is the pre-existing additive identity_note.",
       "sync_path": "server/engine/client.py"
+    },
+    "server/engine/tests/test_t261028_05_quick_gate_receipt_unwrap.py": {
+      "anchor": "behaviour",
+      "note": "t261028-15 KI-388: the quickmanual battery/check gate reads admin.py's {ok, result} envelope through the one single point shared.gate_verdict - a wrapped green payload parses green where the pre-ticket read produced '1 ran / 0 passed / 1 failed', a wrapped red payload is red with its named check and detail text carried into the receipt (violations + evidence), and ok:false / a missing-or-empty result / an unparseable stdout are each a NAMED red with an error string plus a detail row (never counts-only, never a full-registry fallback); the activity hands its stdout to that one reader (fake subprocess, argv and process-group bookkeeping unchanged); and the verdict counts lock - failed>0 or ran with passed==0 is red, so the counts-only receipt four 261028 battery tickets booked as green is red while every pre-existing green and red path stays intact."
     }
   },
   "scenarios": {

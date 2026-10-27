@@ -8545,17 +8545,41 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                  "main-sync conflict)" % c.commit,
             lane_commits=-1, error="")
 
+    def _quick_counts_red(self, ir: Any) -> bool:
+        """True when the counts alone say red (t261028-15, KI-388): `failed > 0`,
+        or `ran > 0` with `passed == 0`, or counters too malformed to read
+        (conservative direction — never green on an unreadable count)."""
+        try:
+            _ran = int(getattr(ir, "ran", 0) or 0)
+            _passed = int(getattr(ir, "passed", 0) or 0)
+            _failed = int(getattr(ir, "failed", 0) or 0)
+        except (TypeError, ValueError):
+            return True
+        return bool(_failed > 0 or (_ran > 0 and _passed == 0))
+
     def _quick_gate_verdict(self, ir: Any) -> str:
         """Verdict for a FULL-registry round (pure w.r.t. the receipt + the parent's
         red-name single writers):
           - a receipt error is red;
+          - the counts may never disagree with the verdict (t261028-15, KI-388):
+            `failed > 0`, or `ran > 0 with passed == 0`, is red — a round that
+            recorded failures, or that ran work and passed nothing, can never be
+            green, even when the receipt named no detail row;
           - any product red (parent _tests_red_names: details exit != 0 union the
             gate blocker list, minus named environment reds) is red;
           - env_fail > 0 with NO named env-red channel is red (no named channel =
             no exemption - the B2 rule, same as light-lane);
           - otherwise green.
-        UT-pinned against the same truth table as the light-lane verdict."""
+        UT-pinned against the same truth table as the light-lane verdict, plus the
+        counts-red lock. The light-lane verdict does NOT take this lock: it runs
+        the failure-classification protocol (every product red carries a main
+        baseline answer and `blockers` carries this ticket's own account), so a
+        `failed > 0` round fully attributed to the main baseline stays green
+        there by design."""
         if str(getattr(ir, "error", "") or ""):
+            return "red"
+        # Counts lock (t261028-15, KI-388): an unreadable count is red, never green.
+        if self._quick_counts_red(ir):
             return "red"
         if self._tests_red_names(ir):
             return "red"
@@ -9153,6 +9177,10 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                         reason_code = "quick_scope_unresolved"
                     elif _err:
                         reason_code = "quick_gate_error"
+                    elif not self._tests_red_names(ir) and self._quick_counts_red(ir):
+                        # t261028-15 (KI-388): a counts-only red is its own cause.
+                        # It must not read as an environment red it never was.
+                        reason_code = "quick_gate_counts_red"
                     elif not self._tests_red_names(ir):
                         reason_code = "quick_gate_env_unnamed"
                     else:

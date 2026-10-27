@@ -11701,6 +11701,129 @@ async def _run_integration_tests_body(args: IntegrationRunArgs) -> IntegrationRu
                                 ledger_source="lane:%s" % args.ticket_id)
 
 
+def _quick_check_receipt(receipt_payload: Dict[str, Any], returncode: int,
+                         check_id: str, cmd: str, stdout_text: str = "",
+                         stderr_tail: str = "") -> IntegrationRunResult:
+    """Read one `verify_lane lane=code` payload into the IntegrationRunResult shape.
+
+    t261028-15 (KI-388): admin.py prints a WRAPPER, not the receipt —
+    `{"ok": ..., "result": {"lane", "green", "red_count", "checks"}}`. The one
+    single point that reads such a gate payload is `shared.gate_verdict`, which
+    unwraps `result` and reports parsed / receipt_ok / receipt_green / red_count
+    / green. This function routes through that point and never derives green
+    from the wrapper again (the defect: `res.get("green")` on the wrapper is
+    always None, so a red round landed as "1 ran / 0 passed / 1 failed" with no
+    named row and the verdict called it green).
+
+    Every non-green face is NAMED — a detail row plus an error string for the
+    three malformed faces, the receipt's own red check rows for a real red.
+    Never a counts-only red, never a fallback to the full registry.
+
+    t261028-15 (KI-395): the counts derive from what RAN. `verify_lane` appends a
+    row for the check it executes and returns before that when it refuses a call
+    (for example `pytest_node` without `only_check`), so a receipt with no row
+    for the declared check proves that nothing ran: that case returns `ran=0`
+    with a named error instead of the old hardcoded `ran=1`. A receipt that does
+    carry the declared check's row is ONE executed target, hence `ran=1`.
+    """
+    payload = receipt_payload if isinstance(receipt_payload, dict) else {}
+    v = shared.gate_verdict(payload, returncode)
+    # The verdict above is the single point's. This read only carries the
+    # receipt's OWN per-check detail text into the rows below; it never decides.
+    _res = payload.get("result")
+    body = _res if isinstance(_res, dict) else {}
+
+    def _receipt_details() -> str:
+        """The receipt's own per-check detail text (joined), for naming a face."""
+        out = []
+        for c in (body.get("checks") or []):
+            if not isinstance(c, dict):
+                continue
+            out.extend(str(i.get("detail") or "") for i in (c.get("items") or [])
+                       if isinstance(i, dict))
+        return "; ".join(x for x in out if x)
+
+    def _named_red(why: str) -> IntegrationRunResult:
+        return IntegrationRunResult(
+            ran=0, failed=1, error=why,
+            details=[{"name": check_id, "cmd": cmd, "exit": 1,
+                      "output_tail": (stderr_tail
+                                      or (stdout_text or "")[-400:])[:400]}],
+            only_names=[check_id])
+
+    if not v.get("parsed"):
+        return _named_red(
+            "quick scope check %s produced no parseable JSON receipt "
+            "(exit=%s, stdout head=%r) — named red, never a counts-only red, "
+            "never a full-run fallback"
+            % (check_id, returncode, (stdout_text or "")[:180]))
+    if not v.get("receipt_ok"):
+        _why = str(payload.get("error") or body.get("err") or "")
+        return _named_red(
+            "quick scope check %s: the admin envelope says ok=false%s "
+            "(exit=%s) — named red, never a counts-only red, never a full-run "
+            "fallback"
+            % (check_id, (" (%s)" % _why[:300]) if _why else "", returncode))
+    if not body:
+        return _named_red(
+            "quick scope check %s: the admin envelope carried no result "
+            "receipt (exit=%s) — named red, never a counts-only red, never a "
+            "full-run fallback" % (check_id, returncode))
+    if not check_id:
+        # KI-395: the reader cannot point at what ran, and nothing may claim a
+        # run it cannot name. The activity refuses this before spawning; a
+        # receipt reaching here is still read honestly (ran=0, named).
+        _detail = _receipt_details()
+        return IntegrationRunResult(
+            ran=0, failed=1,
+            error=("quick scope check: the round declared no check id, so no run "
+                   "can be claimed%s — named red, never a counts-only red"
+                   % ((" (the receipt says: %s)" % _detail[:300]) if _detail else "")),
+            details=[{"name": "quick_scope_no_check_id", "cmd": cmd, "exit": 1,
+                      "output_tail": (_detail or "the receipt named no check")[:400]}],
+            only_names=[])
+    rows = []
+    for c in (body.get("checks") or []):
+        if not isinstance(c, dict):
+            continue
+        rows.append({
+            "name": str(c.get("check") or check_id),
+            "cmd": cmd,
+            "exit": 0 if str(c.get("level")) != "red" else 1,
+            "output_tail": "; ".join(
+                str(i.get("detail") or "") for i in (c.get("items") or [])
+                if isinstance(i, dict))[-400:]})
+    green = bool(v.get("green"))
+    if not any(r["name"] == check_id for r in rows):
+        # KI-395: the receipt carries no row for the DECLARED check, so that
+        # check never executed (a refusal returns before the run). ran=0 is the
+        # honest count; the receipt's own words name the refusal.
+        _detail = _receipt_details()
+        return IntegrationRunResult(
+            ran=0, failed=1,
+            error=("quick scope check %s: the receipt carries no row for the "
+                   "declared check, so nothing ran for it%s — named red, never a "
+                   "counts-only red, never a full-run fallback"
+                   % (check_id, (" (the receipt says: %s)" % _detail[:300])
+                      if _detail else "")),
+            details=[{"name": check_id, "cmd": cmd, "exit": 1,
+                      "output_tail": (_detail or
+                                      "the receipt named no check row")[:400]}],
+            only_names=[check_id])
+    if not green and not any(int(r.get("exit") or 0) != 0 for r in rows):
+        # A red round must stay NAMED even when the receipt forgot its red row.
+        rows.append({
+            "name": check_id, "cmd": cmd, "exit": 1,
+            "output_tail": ("the receipt is not green but names no red check "
+                            "(red_count=%s, ok=%s, result.green=%s, exit=%s)"
+                            % (v.get("red_count"), v.get("receipt_ok"),
+                               v.get("receipt_green"), returncode))[:400]})
+    note = str(body.get("note") or "")
+    return IntegrationRunResult(
+        ran=1, passed=1 if green else 0, failed=0 if green else 1,
+        details=rows, warnings=([note] if note else []), only_names=[check_id])
+
+
 async def _run_quick_named_check(wt: Path, args: IntegrationRunArgs,
                                  sc: Dict[str, Any]) -> IntegrationRunResult:
     """t261022-09: the quickmanual evidence gate for check/battery modes — run
@@ -11714,15 +11837,44 @@ async def _run_quick_named_check(wt: Path, args: IntegrationRunArgs,
     timeout (KI-116 session isolation); a timeout/parse failure is a NAMED red
     receipt naming the check — never a fallback to the full registry, never a
     silent green. Only the ONE declared check runs; the narrowed round is honest
-    because the workflow-side receipt names the declared scope."""
+    because the workflow-side receipt names the declared scope.
+
+    t261028-15 (KI-388): stdout is a gate payload, not the receipt. It is read
+    through `_quick_check_receipt`, which routes through the one single point
+    `shared.gate_verdict` (unwrap `result`, then verdict).
+
+    t261028-15 (KI-395): a battery round must send a REAL check id together with
+    its pytest target. The plan resolves that id (`quick_scope_resolve`), so an
+    empty id here means the plan could not name what it would run — the round is
+    refused BY NAME before any spawn, with `ran=0` (nothing ran), because
+    verify_lane refuses `pytest_node` without `only_check` anyway and that
+    refusal receipt would only say nothing ran."""
     lane_admin = wt / "server" / "admin.py"
     admin = str(lane_admin if lane_admin.is_file() else
                 Path(__file__).resolve().parents[1] / "admin.py")
     check_id = str(sc.get("check") or "")
+    _mode = str(sc.get("mode") or "")
     payload: Dict[str, Any] = {"lane": "code", "path": str(wt),
                                "only_check": check_id}
     if sc.get("mode") == "battery":
         payload["pytest_node"] = str(sc.get("pytest_node") or "")
+    if not check_id:
+        # KI-395: nothing can be named, so nothing may run. ran=0 is the truthful
+        # count here (the pre-KI-395 hardcoded ran=1 claimed a run that never was).
+        _why = ("quick scope mode=%s declared no check id — nothing ran. The plan "
+                "must name the declared verify.yaml check that owns the target "
+                "(a battery is run through that check), and verify_lane refuses "
+                "pytest_node without only_check. Named red, never an "
+                "empty-only_check call, never a full-run fallback"
+                % (_mode or "(none)"))
+        return IntegrationRunResult(
+            ran=0, failed=1, error=_why,
+            details=[{"name": "quick_scope_no_check_id",
+                      "cmd": "verify_lane lane=code only_check=(none)%s"
+                             % ((" pytest_node=" + str(payload.get("pytest_node")))
+                                if payload.get("pytest_node") else ""),
+                      "exit": 1, "output_tail": _why[:400]}],
+            only_names=[])
     # The check's own declared timeout (verify.yaml, default 600s) is the inner
     # bound; the outer chain guard stays the segment-wide INTEG_GUARD_SEC.
     chain_to = float(INTEG_GUARD_SEC)
@@ -11750,37 +11902,18 @@ async def _run_quick_named_check(wt: Path, args: IntegrationRunArgs,
             % int(chain_to))
     finally:
         unregister_owned_spawn(p)
-    try:
-        res = json.loads(p_out_b.decode("utf-8", "replace"))
-    except json.JSONDecodeError:
-        return IntegrationRunResult(
-            ran=0, failed=1,
-            error="quick scope check produced no JSON receipt (%s) — named red, "
-            "never a full-run fallback" % check_id,
-            details=[{"name": check_id, "cmd": "verify_lane lane=code only_check="
-                      + check_id, "exit": 1,
-                      "output_tail": p_err_b.decode("utf-8", "replace")[-400:]}])
-    reds = [c for c in (res.get("checks") or [])
-            if isinstance(c, dict) and c.get("level") == "red"]
-    green = bool(res.get("green"))
-    items = []
-    for c in (res.get("checks") or []):
-        if not isinstance(c, dict):
-            continue
-        items.append({
-            "name": str(c.get("check") or check_id),
-            "cmd": "verify_lane lane=code only_check=%s%s"
-                   % (check_id, (" pytest_node=" + str(payload.get("pytest_node")))
-                      if payload.get("pytest_node") else ""),
-            "exit": 0 if str(c.get("level")) != "red" else 1,
-            "output_tail": "; ".join(str(i.get("detail") or "")
-                                     for i in (c.get("items") or []))[-400:]})
-    note = str(res.get("note") or "")
-    return IntegrationRunResult(
-        ran=1, passed=1 if green else 0, failed=0 if green else 1,
-        details=items,
-        warnings=([note] if note else []),
-        only_names=[check_id])
+    stdout_text = p_out_b.decode("utf-8", "replace")
+    cmd = "verify_lane lane=code only_check=%s%s" % (
+        check_id, (" pytest_node=" + str(payload.get("pytest_node")))
+        if payload.get("pytest_node") else "")
+    # t261028-15 (KI-388): read the gate payload at the ONE single point
+    # (shared.gate_receipt_parse -> shared.gate_verdict, which unwraps admin.py's
+    # {ok, result} envelope). The old inline `json.loads` took the wrapper for
+    # the receipt, so green/checks were always None.
+    return _quick_check_receipt(shared.gate_receipt_parse(stdout_text),
+                                int(p.returncode or 0), check_id, cmd,
+                                stdout_text,
+                                p_err_b.decode("utf-8", "replace")[-400:])
 
 
 @activity.defn
@@ -11892,9 +12025,14 @@ async def _quick_scope_resolve_body(args: "shared.QuickScopeResolveArgs"
                      "never a guessed resolution" % type(_payload).__name__)
         return out
     out.registry_count = len(names)
-    # --- truth source 2: the lane's declared verify.yaml code-lane check ids ---
+    # --- truth source 2: the lane's declared verify.yaml code-lane checks ---
+    # t261028-15 (KI-395): the ids are what the pure plan validates against; the
+    # pytest-form ids are the ones that can actually carry a battery target.
+    # The predicate is verify_lane's own ('pytest' in the declared cmd) so the
+    # resolver and the runner can never disagree about what a battery may run.
     vy = wt / "verify.yaml"
     check_ids: List[str] = []
+    pytest_form_ids: List[str] = []
     if vy.is_file():
         try:
             import yaml  # noqa: PLC0415 - engine venv carries PyYAML; local to this face
@@ -11902,7 +12040,10 @@ async def _quick_scope_resolve_body(args: "shared.QuickScopeResolveArgs"
             lane_cfg = (cfg.get("lanes") or {}).get("code") or {}
             for c in (lane_cfg.get("checks") or []):
                 if isinstance(c, dict) and str(c.get("id") or "").strip():
-                    check_ids.append(str(c["id"]).strip())
+                    cid = str(c["id"]).strip()
+                    check_ids.append(cid)
+                    if "pytest" in str(c.get("cmd") or ""):
+                        pytest_form_ids.append(cid)
         except Exception as e:  # noqa: BLE001 - fail-closed, named
             out.error = ("quick_scope_resolve_failed: reading the lane verify.yaml "
                          "failed (%s: %s)" % (type(e).__name__, str(e)[:200]))
@@ -11925,6 +12066,33 @@ async def _quick_scope_resolve_body(args: "shared.QuickScopeResolveArgs"
     out.check = str(plan.get("check") or "")
     out.pytest_node = str(plan.get("pytest_node") or "")
     out.note = str(plan.get("note") or "")
+    if out.mode == "battery" and not out.check:
+        # t261028-15 (KI-395): a battery round MUST name the declared check that
+        # runs its pytest target. `shared.quick_scope_plan` is the single writer
+        # of the plan but it only knows the check IDS, so the owner is resolved
+        # HERE, from the declared checks list, with verify_lane's own pytest-form
+        # predicate. Never an empty only_check call: an unnameable owner is a
+        # NAMED refusal of the claim (quick_scope_unresolved), not a run.
+        if len(pytest_form_ids) == 1:
+            out.check = pytest_form_ids[0]
+        else:
+            _why = (
+                ("no declared verify.yaml code-lane check runs pytest (declared: "
+                 "%s)" % (", ".join(check_ids) or "(none declared)"))
+                if not pytest_form_ids else
+                ("more than one declared check runs pytest (%s) — the check that "
+                 "owns the battery is ambiguous"
+                 % ", ".join(pytest_form_ids)))
+            out.ok = False
+            out.mode = ""
+            out.check = ""
+            out.pytest_node = ""
+            out.error = (
+                "quick_scope_unresolved: the l1_battery declaration %r cannot name "
+                "the check that runs it: %s — a defect of the ticket, never an "
+                "empty only_check call and never an environment red"
+                % (str(plan.get("pytest_node") or ""), _why))
+            return out
     return out
 
 
