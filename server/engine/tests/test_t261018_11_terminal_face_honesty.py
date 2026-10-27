@@ -179,12 +179,16 @@ class _FakeAsyncForList:
 def test_minimal_row_branch_serves_closed_not_awaiting():
     src = (POC / "client.py").read_text(encoding="utf-8")
     marker = src.index("snapshot unavailable (closed past the window")
-    block = src[marker:marker + 1600]
+    block = src[marker:marker + 2760]   # the whole minimal-row branch (t261028-17 grew it)
     assert '"stage_state": "closed" if exec_status == "COMPLETED" else "awaiting"' in block
     assert '"stage_state": "awaiting",' not in block
-    # row-family parity: the reconciliation label rides inside `title`, no new key
+    # t261028-17 superseded the original shape here: the reconciliation label left the
+    # title slot for identity_note (a title is a NAME), so this block must name the note
+    # key and must not hand a sentence to `title`.
+    assert "identity_note" in block
     assert "terminal_face_note" not in block
     assert "stage_state reconciled: awaiting -> closed" in block
+    assert '"title": _ident["title"]' in block
 
 
 # ---------- consumer sweep pins (Delta 2: classify the new served word) ----------

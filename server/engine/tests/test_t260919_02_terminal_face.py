@@ -407,8 +407,11 @@ def test_d_inspection_failed_row():
     assert r["updated_ts"] and abs(r["updated_ts"] - (_NOW - 60)) < 5
 
 
-def test_d_devlane_failed_row_key_parity():
+def test_d_devlane_failed_row_key_parity(monkeypatch, tmp_path):
     # dev-lane 形：FAILED 极简失败行——键集与 COMPLETED 超窗匿名极简行逐键同形。
+    # t261028-17: the minimal row reads its identity from the archive store, so point
+    # the store at a tmp root — this test asserts row SHAPE, not the real project data.
+    monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(tmp_path))
     w_fail = FakeListWf("t-fail", "FAILED", Q, sa_kv=_sa_kv(project="sandbar"),
                         close_time=datetime.fromtimestamp(_NOW - 60, tz=timezone.utc))
     w_old = FakeListWf("t-old", "COMPLETED", Q, sa_kv=_sa_kv(project="sandbar"),
@@ -425,11 +428,13 @@ def test_d_devlane_failed_row_key_parity():
     assert "执行失败" in str(r_fail["title"]) and "刷新重试" not in str(r_fail["title"])
     assert r_fail["project"] == "sandbar"           # SA 直读保留
     # t261018-11: the past-window COMPLETED minimal row no longer pairs the closed
-    # status with the waiting word — it serves the terminal word 'closed' and the
-    # reconciliation label rides inside the existing title key (row-family parity
-    # kept: no new top-level row key, keyset still equal to the FAILED row above).
+    # status with the waiting word — it serves the terminal word 'closed'.
+    # t261028-17: the reconciliation label is a DIAGNOSTIC and rides in identity_note;
+    # the title slot is a name slot (empty here — this fixture has no archive), never a
+    # sentence. Row-family parity holds: both shapes carry the same keyset.
     assert r_old["status"] == "closed" and r_old["stage_state"] == "closed"
-    assert "stage_state reconciled: awaiting -> closed" in str(r_old["title"])
+    assert r_old["title"] == ""
+    assert "stage_state reconciled: awaiting -> closed" in r_old["identity_note"]
 
 
 def test_d_regression_running_completed_terminated_rows():

@@ -7,14 +7,24 @@
   B. RUNNING 三败（t260903-06 升级：默认 attempts=3 指数退避）→ 显式降级行：
      标题「查询超时，刷新重试」、stage_state=running、
      status=dispatched、id/project/epic 保留——绝不能显示成等待态或只剩 id。
-  C. COMPLETED 超窗的匿名最小行路径回归不变（快照真不可得的唯一合法匿名形态）。
+  C. COMPLETED 超窗最小行（t261018-11 改约）：不再与等待词 pairing——status=closed
+     的行必须出终态词 closed。
+     t261028-17 (KI-391) 收紧本段：`title` 是**名字槽**——超窗闭合行改从收官档
+     archive.json 取真标题（无档=空标题 + identity_note 点名缺档条件），对账标签
+     只在 identity_note；零 poller 降级行的原因句同理只进 identity_note，title 原样。
+     灰盒口径：档店用 tmp 根（SANDBAR_PROJECTS_DIR），poller 面用注入桩。
+  D. 零 poller 降级行：原因**真的产出了**（identity_note 含 0 live pollers + 队列名），
+     title 与普通降级行逐字节相同（t261005-03 死诊断经 KI-393 修复后可达）。
 黑盒口径：_connect 打桩 + 假 list_workflows；SA 经 typed_search_attributes 假对象
 直取，验证「SA 直取不受快照影响」。
 
 跑法：python3 -B integration/t260901-23/t02_list_running_degrade.py
 """
 import asyncio
+import json
+import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -166,6 +176,7 @@ def main():
     h = FakeHandle(["timeout", "timeout", "timeout"])
     res = run_list([FakeListWf("t-b", "RUNNING", q, sa)], {"t-b": h})
     r = row_of(res, "t-b")
+    degraded_title = r.get("title") if r else None   # control title for case D
     ok(r is not None, "降级行仍在台面（不是消失/只剩隐身）")
     ok(r is not None and h.queries == 3, "降级行穷尽 3 次尝试（queries=%d）" % h.queries)
     ok(r is not None and "刷新重试" in str(r.get("title") or ""),
@@ -177,19 +188,52 @@ def main():
     ok(r is not None and r.get("project") == "suyou" and r.get("epic") == "ki-003",
        "降级行保留 SA 直取的 project/epic：%r/%r" % (r and r.get("project"), r and r.get("epic")))
 
-    # C. COMPLETED 超窗最小行（t261018-11 改约）：不再与等待词 pairing——status=closed
-    #    的行必须出终态词 closed，对账标签进既有 title 键（行族 parity：不加新行键；
-    #    原「匿名 + awaiting」契约被票面诚实要求取代，仲裁返工轮裁定于此）。
+    # C. COMPLETED past-window minimal row — the terminal word plus a NAMED slot.
+    # t261018-11 settled the word (closed, never "awaiting"). t261028-17 (KI-391) moved
+    # the reconciliation label OUT of `title`: a title is a ticket NAME, and the Epics
+    # tab renders it verbatim, so a diagnostic there reached the operator as the
+    # ticket's name. Today's contract: title = the archived real title (EMPTY when the
+    # archive is missing), stage_state = closed, the label in identity_note.
     import time
+    # the archive store is a tmp root, reclaimed when main() returns (TemporaryDirectory)
+    empty_store = tempfile.TemporaryDirectory(prefix="t02-noarchive-")
+    os.environ["SANDBAR_PROJECTS_DIR"] = empty_store.name
     w = FakeListWf("t-c", "COMPLETED", q, sa)
     w.close_time = datetime.fromtimestamp(time.time() - 10**7, tz=timezone.utc)  # 远超回填窗
     h = FakeHandle([], result_value=None)
     res = run_list([w], {"t-c": h})
     r = row_of(res, "t-c")
+    note_c = str((r or {}).get("identity_note") or "")
     ok(r is not None and r.get("stage_state") == "closed"
-       and "stage_state reconciled: awaiting -> closed" in str(r.get("title") or ""),
-       "COMPLETED 超窗最小行出终态词+title 内对账标签（title=%r stage_state=%r）"
-       % (r and r.get("title"), r and r.get("stage_state")))
+       and r.get("title") == ""
+       and "archive manifest missing" in note_c
+       and "stage_state reconciled: awaiting -> closed" in note_c,
+       "COMPLETED past-window minimal row: closed word, EMPTY title, missing-archive "
+       "note + reconcile label in identity_note (title=%r note=%r stage_state=%r)"
+       % (r and r.get("title"), note_c, r and r.get("stage_state")))
+
+    # C-arch. The archive is LOAD-BEARING (not merely "the title is empty now"): a
+    # closed past-window ticket whose archive carries a title serves THAT title.
+    arch_store = tempfile.TemporaryDirectory(prefix="t02-archive-")
+    adir = Path(arch_store.name) / "suyou" / "data" / "tickets" / "t-c-arch"
+    adir.mkdir(parents=True)
+    (adir / "archive.json").write_text(json.dumps({
+        "schema": "v1", "ticket_id": "t-c-arch", "legacy": False,
+        "archived_at": "2026-10-28T00:00:00+00:00",
+        "meta": {"title": "Archived real title", "role": "developer",
+                 "created": 1788764302},
+        "files": [], "absent": [],
+    }), encoding="utf-8")
+    os.environ["SANDBAR_PROJECTS_DIR"] = arch_store.name
+    w = FakeListWf("t-c-arch", "COMPLETED", q, sa)
+    w.close_time = datetime.fromtimestamp(time.time() - 10**7, tz=timezone.utc)
+    res = run_list([w], {"t-c-arch": FakeHandle([], result_value=None)})
+    r = row_of(res, "t-c-arch")
+    ok(r is not None and r.get("title") == "Archived real title"
+       and r.get("role") == "developer" and r.get("created") == 1788764302,
+       "archived closed row serves the archive's real title/role/created "
+       "(title=%r role=%r created=%r)"
+       % (r and r.get("title"), r and r.get("role"), r and r.get("created")))
 
     # C2. 畸形：RUNNING 查询回非 dict / 缺 meta → 不崩，降级或空 meta 均可，不能裸抛
     h = FakeHandle(["ok"], snapshot="garbage")
@@ -200,6 +244,21 @@ def main():
     res = run_list([FakeListWf("t-e", "RUNNING", q, sa)], {"t-e": h})
     ok(row_of(res, "t-e") is not None and "UNCAUGHT" not in str(res),
        "snapshot 缺 meta 列表不崩")
+
+    # D. 零 poller 降级行：cause 真的产出了（KI-393 前这条诊断被 `except Exception:
+    #    pass` 吞成死代码——本用例声明它可达），且 title 原样不动（t261028-17 spec 2）。
+    async def _zero_pollers(_client, queue, timeout=0.0, alive_fn=None):
+        return {"available": True, "live_pollers": 0, "queue": queue,
+                "stale_history": 0, "unverifiable": 0, "note": "stub: zero live pollers"}
+    client_mod.queue_live_pollers = _zero_pollers
+    h = FakeHandle(["timeout", "timeout", "timeout"])
+    res = run_list([FakeListWf("t-z", "RUNNING", q, sa)], {"t-z": h})
+    r = row_of(res, "t-z")
+    note_z = str((r or {}).get("identity_note") or "")
+    ok(r is not None and "0 live pollers" in note_z and q in note_z
+       and r.get("title") == degraded_title,
+       "zero-pollers cause PRODUCED in identity_note, title untouched (title=%r note=%r)"
+       % (r and r.get("title"), note_z))
 
     print("t02 结果：pass=%d fail=%d" % (PASS, FAIL))
     return 1 if FAIL else 0

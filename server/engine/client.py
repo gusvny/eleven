@@ -4041,7 +4041,12 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                 # one bounded probe; probe failure keeps the plain degraded row).
                 degrade: Dict[str, Any] = {"_query_degraded": True}
                 try:
-                    pface = await _queue_poller_face(client, ticket_task_queue(tid),
+                    # t261028-17: this call named a helper that does not exist
+                    # (`_queue_poller_face`), so the NameError was swallowed below and
+                    # the named cause could never be produced. The probe is
+                    # queue_live_pollers — the bounded, proven-face function the
+                    # ticket-list degradation was designed around.
+                    pface = await queue_live_pollers(client, ticket_task_queue(tid),
                                                      timeout=2.0)
                     if pface.get("available") and pface.get("live_pollers") == 0:
                         pface["ticket"] = tid
@@ -4185,33 +4190,38 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "engine": ENGINE_V2, "exec_status": exec_status,
                          "close_health": _close_health_of(exec_status)[0],
                          "close_health_reason": _close_health_of(exec_status)[1],
-                         "authz_active": 0})  # 降级/极简/失败行同形（无快照=无授权面可读）
+                         # degraded / minimal / failed rows share one shape (no
+                         # snapshot = no authorization face to read)
+                         "authz_active": 0,
+                         # t261028-17: the family's note slot — a diagnostic rides
+                         # here, never in `title`
+                         "identity_note": ""})
         elif meta.get("_query_degraded"):
             # KI-008: a RUNNING query still failing after retries → an explicit degraded
             # row. id/project/epic come straight from the SA and are unaffected;
             # stage_state/status keep the running-state reading (not the anonymous row's
             # awaiting/empty, so a genuinely running ticket is not misread as waiting).
-            # t261005-03: when the probe proved zero live pollers, the title names the
+            # t261005-03: when the probe proved zero live pollers, the row names the
             # cause (which queue, 0 pollers) instead of a generic "timeout, refresh".
             npf = meta.get("_no_poller_face") or {}
             # t261009-55 spec (3): the degraded row renders the durable facts (memo
-            # stage/time) instead of a bare stage=None + bogus updated. The labels
-            # ride INSIDE existing family-wide keys (the title string), never as new
-            # top-level row keys — the t260919-02/t260921-03 no-snapshot-family
-            # parity contract pins ONE keyset across FAILED/minimal/degraded shapes
-            # (arbitrate gen1 code-fault fix).
+            # stage/time) instead of a bare stage=None + bogus updated. The labels ride
+            # in identity_note, never in the row's name slot: the t260919-02/t260921-03
+            # no-snapshot-family parity contract pins ONE keyset across
+            # FAILED/minimal/degraded shapes, and t261028-17 forbids a sentence in
+            # `title` on any path (the Epic tab renders a title verbatim).
             dur = meta.get("_durable") or {}
             _row_updated_ts = int(dur.get("updated_ts") or 0)
-            _dur_title = ""
+            _dur_note = ""
             if dur:
-                _dur_title = (
-                    "; %s (durable stage: %s; status=%s)" % (
+                _dur_note = (
+                    "%s (durable stage: %s; status=%s)" % (
                         dur.get("unavailable") or "unavailable(query_timeout)",
                         (dur.get("last_stage") if dur.get("last_stage_available")
                          else (dur.get("last_stage_note") or "memo unavailable")),
                         dur.get("status") or "unknown"))
                 if dur.get("orphan_window_note"):
-                    _dur_title += (
+                    _dur_note += (
                         "; waiting on the platform, not stuck "
                         "(STARTED task start_to_close_timeout 499s)")
             rows.append({"id": tid, "project": sa_project, "epic": sa_epic,
@@ -4234,21 +4244,22 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "engine": ENGINE_V2, "exec_status": exec_status,
                          "close_health": _close_health_of(exec_status)[0],
                          "close_health_reason": _close_health_of(exec_status)[1],
-                         "authz_active": 0})  # t260912-03 降级/极简行同形（无快照=无授权面可读）
+                         "authz_active": 0,   # degraded / minimal / failed rows share one
+                                             # shape (no snapshot = no authorization face)
+                         "identity_note": ""})
+            _diag = ""
             if npf:
-                # t261005-03: the probe PROVED zero live pollers — the degraded row
-                # names the cause (which queue, 0 pollers) instead of a generic
-                # "timeout, refresh" (UI copy in English per the 261004 host order).
-                rows[-1]["title"] = (
-                    "ticket query timed out: queue %s has 0 live pollers (dedicated "
-                    "worker stopped polling or absent); wait for the ensure "
-                    "replacement before refreshing"
-                    % (npf.get("queue") or ticket_task_queue(tid)))
-            if _dur_title:
-                # the labels append into the EXISTING title key (a family-wide
-                # string slot) — never a new top-level row key (parity, arbitrate
-                # gen1 code-fault fix)
-                rows[-1]["title"] += _dur_title
+                # t261005-03 / t261028-17: the named cause is a DIAGNOSTIC — it rides in
+                # identity_note, and the title is left untouched (UI copy in English per
+                # the 261004 host order).
+                _diag = ("ticket query timed out: queue %s has 0 live pollers (dedicated "
+                         "worker stopped polling or absent); wait for the ensure "
+                         "replacement before refreshing"
+                         % (npf.get("queue") or ticket_task_queue(tid)))
+            if _dur_note:
+                _diag = "; ".join(x for x in (_diag, _dur_note) if x)
+            if _diag:
+                rows[-1]["identity_note"] = _diag
         elif meta:
             meta.setdefault("project", sa_project)
             # epic takes the EpicCode SA as truth (SA first) with meta as fallback (the
@@ -4262,16 +4273,26 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
             # t261018-11: a COMPLETED minimal row must not carry the waiting word —
             # past the hydrate window this branch is the only face a closed ticket
             # has, and "awaiting" sent readers hunting a signature a COMPLETED
-            # workflow can never deliver. The reconciliation label rides INSIDE
-            # the existing title key (row-family parity: labels are never new
-            # top-level row keys, t260919-02 arbitrate gen1); non-COMPLETED
-            # minimal rows keep the legacy shape byte-identical.
-            rows.append({"id": tid, "project": sa_project, "epic": sa_epic,
-                         "role": None,
+            # workflow can never deliver.
+            # t261028-17: the row takes its IDENTITY from the closing archive (title,
+            # and epic / role / created where the manifest carries them) — past the
+            # hydrate window the archive is the only surviving copy of the real name.
+            # The reconciliation label is a DIAGNOSTIC: it rides in identity_note, never
+            # in the title slot (the Epic tab renders a title verbatim).
+            _ident = _archive_identity_of(tid, sa_project)
+            _note_parts = [
+                ("workflow COMPLETED; snapshot past the hydrate window; "
+                 "stage_state reconciled: awaiting -> closed")
+                if exec_status == "COMPLETED"
+                else "snapshot carried no meta (identity unavailable; exec_status=%s)"
+                     % (exec_status or "unknown"),
+                _ident["note"],
+            ]
+            rows.append({"id": tid, "project": sa_project,
+                         "epic": sa_epic or _ident["epic"],
+                         "role": _ident["role"],
                          "status": "closed" if exec_status == "COMPLETED" else "",
-                         "title": ("workflow COMPLETED; snapshot past the hydrate "
-                                   "window; stage_state reconciled: awaiting -> closed"
-                                   if exec_status == "COMPLETED" else ""),
+                         "title": _ident["title"],
                          "workflow": "", "proposal_id": "",
                          "stage": None,
                          "stage_state": "closed" if exec_status == "COMPLETED" else "awaiting",
@@ -4279,12 +4300,16 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          # t261009-76: row-keyset parity with the live row (spec (4));
                          # no snapshot = nothing to read, honest empty, never a guess
                          "lane_version": "", "develop_line": "",
-                         "workspace": None, "created": None, "updated": "", "updated_ts": 0,
+                         "workspace": None, "created": _ident["created"],
+                         "updated": "", "updated_ts": 0,
                          "close_ts": e["close_ts"],
                          "engine": ENGINE_V2, "exec_status": exec_status,
                          "close_health": _close_health_of(exec_status)[0],
                          "close_health_reason": _close_health_of(exec_status)[1],
-                         "authz_active": 0})  # t260912-03 降级/极简行同形（无快照=无授权面可读）
+                         # degraded / minimal / failed rows share one shape (no
+                         # snapshot = no authorization face to read)
+                         "authz_active": 0,
+                         "identity_note": "; ".join(x for x in _note_parts if x)})
     # t260917-02 修复②收尾 pass（巡检板面专用）：
     # ① identity_note：不可辨且在跑的行（kept_unresolved 分支）带假设语气注记——疑似
     #   旧调度 action 直发或演练残留，给核查入口不写死处方（报错必须精确纪律）。
@@ -4380,7 +4405,11 @@ def _read_archive_manifest(ticket_id: str, project_key: str) -> Dict[str, Any]:
     {"state": "missing"|"ok"|"malformed"|"error", "legacy": bool, "detail": str}
     missing = the ticket is not archived (prune refuses to delete); malformed = a broken
     manifest (fail-closed: counted as a prune failure, never quietly treated as
-    unarchived); error = an IO exception (counted as a failure)."""
+    unarchived); error = an IO exception (counted as a failure).
+
+    state="ok" also carries `meta` (the archived ticket identity: title / epic / role /
+    created where the manifest has them, t261028-17) — additive key, the status readers
+    above are unaffected."""
     import json as _json
     try:
         mpath = ticket_data_dir(project_key, ticket_id) / "archive.json"
@@ -4396,7 +4425,54 @@ def _read_archive_manifest(ticket_id: str, project_key: str) -> Dict[str, Any]:
     if not isinstance(data, dict) or str(data.get("schema") or "") != "v1":
         return {"state": "malformed", "legacy": False,
                 "detail": "%s is missing schema=v1 (gray face; handle manually)" % mpath}
-    return {"state": "ok", "legacy": bool(data.get("legacy")), "detail": str(mpath)}
+    meta = data.get("meta")
+    return {"state": "ok", "legacy": bool(data.get("legacy")), "detail": str(mpath),
+            "meta": meta if isinstance(meta, dict) else {}}
+
+
+def _archive_identity_of(ticket_id: str, project_key: str) -> Dict[str, Any]:
+    """The archived identity of a ticket whose snapshot is out of reach (t261028-17).
+
+    Past Temporal's hydrate window the closing archive is the ONLY place an old closed
+    ticket's real name survives, so the degraded list row reads its identity from there:
+    the title, plus epic / role / created where the manifest carries them.
+
+    A manifest that cannot be read never becomes a row title. `title` stays empty and
+    `note` names WHICH condition held, with the path — the title slot holds a ticket
+    name and the note slot holds the diagnostic (the Epic tab renders a title verbatim,
+    so a sentence there reaches the operator as the ticket's name).
+
+    Returns {"title": str, "epic": str, "role": Optional[str],
+             "created": Optional[int], "note": str}.
+    """
+    m = _read_archive_manifest(ticket_id, project_key)
+    state = str(m.get("state") or "")
+    path = str(m.get("detail") or "")
+    if state != "ok":
+        # Each state names its own cause: "no title available" alone would send the
+        # reader hunting the wrong failure (report-precision rule).
+        if state == "missing":
+            note = "archive manifest missing (no archived identity to read): %s" % path
+        elif state == "malformed":
+            note = "archive manifest malformed: %s" % path   # detail names path + cause
+        else:
+            note = "archive manifest read failed (state=%s): %s" % (state or "unknown", path)
+        return {"title": "", "epic": "", "role": None, "created": None, "note": note}
+    meta = m.get("meta") if isinstance(m.get("meta"), dict) else {}
+    title = str(meta.get("title") or "").strip()
+    try:
+        created = int(meta.get("created") or 0)
+    except (TypeError, ValueError):
+        created = 0
+    role = meta.get("role")
+    note = ""
+    if not title:
+        note = "archive manifest has no meta.title (identity unavailable): %s" % path
+    return {"title": title,
+            "epic": str(meta.get("epic") or ""),
+            "role": role if isinstance(role, str) and role else None,
+            "created": created if created > 0 else None,
+            "note": note}
 
 
 async def _closed_ticket_entries(args: Dict[str, Any]) -> "List[Dict[str, Any]]":
