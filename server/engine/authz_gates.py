@@ -47,15 +47,11 @@ def validate_authorization(auth: Any, now_epoch: int, ticket_id: str) -> str:
         return "invalid kind: %r (only %s accepted)" % (kind, "|".join(shared.AUTH_KINDS))
     who_raw = _get(auth, "who")
     who = str(who_raw or "")
-    if not who.strip():
-        return "missing who (the authorizer identity is injected by the caller)"
-    if len(who) > shared.AUTHZ_WHO_MAX_LEN:
-        return "who too long (%d > %d)" % (len(who), shared.AUTHZ_WHO_MAX_LEN)
-    norm = who.strip().lower()
-    if norm in shared.AUTHZ_AGENT_ROLE_NAMES:
-        return "an agent must not self-authorize (who=%r is an agent role name; only a human issues authorization)" % who
-    if norm.endswith("-agent"):
-        return "an agent must not self-authorize (who=%r is in the agent display-name family: the -agent suffix)" % who
+    # t261027-26: the identity guard is one definition in shared (the acceptance cap
+    # lift uses the same helper); messages are the previous ones verbatim.
+    err = shared.identity_refusal(who)
+    if err:
+        return err
     reason = str(_get(auth, "reason") or "")
     if not reason.strip():
         return "missing reason (it must answer \"approved on what grounds\")"

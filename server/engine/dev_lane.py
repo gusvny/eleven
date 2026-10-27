@@ -152,6 +152,8 @@ with workflow.unsafe.imports_passed_through():
     from shared import (
         ENGINE_V2,
         ENGINE_VERSION_V2,
+        ACCEPTANCE_CAP_LIFT_MAX_RECORDS,
+        ACCEPTANCE_REPORT_STAGE,
         ArchiveArgs,
         ArchiveResult,
         MAX_ACCEPTANCE_ROUNDS,
@@ -161,6 +163,12 @@ with workflow.unsafe.imports_passed_through():
         MAX_TESTS_FAULT_ROUNDS,
         ReprobeRedArgs,
         ReprobeRedResult,
+        acceptance_cap_blocked_text,
+        acceptance_cap_lift,
+        acceptance_lift_live,
+        acceptance_report_token,
+        acceptance_sendback_finding,
+        agent_env_failed_reason,
         blockers_known_red_adoption,
         evidence_ts_epoch,
         tests_exempt_cap_blocked_text,
@@ -1237,6 +1245,25 @@ LANDING_CONFLICT_PATCH_ID = "dev-lane-landing-conflict-rewind-v1"
 #: so an in-flight history keeps its recorded counter semantics on replay.
 ACC_FINDING_PATCH_ID = "dev-lane-acceptance-finding-counter-v1"
 
+#: t261027-26 (KI-382): the acceptance verdict block — an environment/refused/empty
+#: receipt blocks instead of bouncing, and a send-back that names no failed
+#: acceptance item is an observation. The gate takes a per-round `#<seq>` suffix
+#: (KI-061 shape, mirroring _blocked_over_limit): a single fixed id would be memoized
+#: False while the worker replays pre-fix history, so an in-flight ticket would never
+#: get the new rule. Each round evaluates a fresh id, so historical rounds keep the
+#: old path and the first live round takes the new one.
+ACC_WALKTHROUGH_VERDICT_PATCH_ID = "t261027-26-acceptance-verdict-v1"
+
+#: t261027-26: a failed walkthrough receipt that writes no report at all is not an
+#: observation — the engine cannot tell whether anything failed, so it stops and asks
+#: a human. The counter is untouched.
+_ACCEPTANCE_EMPTY_REPORT_WHY = (
+    "acceptance walkthrough reported failure without writing a report (status=failed, "
+    "report and summary are both empty): the engine cannot tell which acceptance item "
+    "failed, and an empty receipt is not an observation. The send-back counter is "
+    "untouched. Needs human review. Way out: send retry_qc to re-run the walkthrough, "
+    "or op=rework with a note that says what to fix.")
+
 #: 261020: the human gate requires a NAMED signature. Measured on t261019-32's
 #: walkthrough: a payload that lost its fields produced who="" and the merge
 #: booked with an empty signer. Patch-guarded for replay parity.
@@ -1460,6 +1487,10 @@ FLOW_BRIEF = {
         "（裸全量/口径漂移/第二趟全套=段结果红+票面点名 full_suite_violations）；"
         "④验收报告必含「对照证据」小节：同一场景名在闸回执与定点复跑回执两列"
         "耗时，缺数据面如实标注并给移交命令，不得以跨场景数字顶替。"
+        " Verdict shape (t261027-26): when the walkthrough fails, name WHICH acceptance "
+        "item failed as `failed_item=<n>` (write `failed_item=none` when every item "
+        "passes). A failure that names no failed acceptance item is recorded as an "
+        "observation and is not a send-back round."
         + ROLE_REPORT_ENGLISH_CLAUSE),
 }
 
@@ -1637,6 +1668,11 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         # seen during replay is remembered forever, so reusing an id means a live wake
         # eats a poisoned value).
         self._arb_over_limit_seq: int = 0
+        # t261027-26 (KI-382): per-round sequence for the acceptance verdict gate —
+        # same memoization reason as _arb_over_limit_seq (one fresh patch id per
+        # failed walkthrough round, so an in-flight ticket reaches the new rule on its
+        # next live round; a fixed id would be frozen False by the replay).
+        self._acc_verdict_seq: int = 0
         self._gens: Dict[str, int] = {}                   # activity name → entry count
         # t260915-01：详情数据面门缓存位（唯一求值点在 _init；缺省 False=UT 壳/异常
         # 形态走旧分支；所有使用点读 getattr 防御，@query 内禁调 workflow.patched）。
@@ -2881,6 +2917,203 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         norm = _re.sub(r"round \d+", "round N", norm)
         norm = _re.sub(r"gen\d+", "genN", norm)
         return _h.sha256(norm.encode("utf-8")).hexdigest()
+
+    # ---- t261027-26 (KI-382): the acceptance verdict block, the cap stop record and
+    # ---- the human cap lift. The cap used to be a dead end: every round counted, no
+    # ---- op could lift it, and a receipt that named no failed acceptance item still
+    # ---- pushed the counter (measured on t261026-18: 4 rounds, green gate, unchanged
+    # ---- HEAD). The new block classifies the receipt first, records the stop, and a
+    # ---- human lift cites the exact report it overrides.
+
+    def _acc_verdict_gate(self) -> bool:
+        """Per-round patched gate for the acceptance verdict block (KI-061 shape).
+
+        A single fixed id is evaluated for the first time while the worker replays
+        pre-fix history (the acceptance decision point exists there), so the SDK
+        memoizes False for the instance and an in-flight ticket never gets the new
+        rule. With the `#<seq>` suffix every round takes a fresh id: historical
+        rounds evaluate fresh ids, add zero commands and keep the old path; the first
+        live round after a wake evaluates a never-used id and takes the new rule.
+        The seq increments unconditionally, so old and new code advance it in the
+        same order at the same history point."""
+        self._acc_verdict_seq = int(getattr(self, "_acc_verdict_seq", 0)) + 1
+        return workflow.patched("%s#%d" % (ACC_WALKTHROUGH_VERDICT_PATCH_ID,
+                                           self._acc_verdict_seq))
+
+    def _acceptance_receipt_class(self, res: Any) -> str:
+        """Classify a failed walkthrough receipt (pure read, no IO, no command).
+
+        Classes, in priority order:
+          "env"      the receipt declares an environment-limited run (the
+                     t260917-08 signal) — never an observation;
+          "refused"  a front-door gate refused the receipt (structured reason code)
+                     — never an observation;
+          "empty"    the receipt says nothing at all (no report, no summary);
+          "observe"  a readable report that names no failed acceptance item;
+          "finding"  a readable report that names the failed item(s).
+
+        `StageResult` coerces report/summary to str, so None never arrives from the
+        workflow path; the detector's malformed matrix covers the direct-call face."""
+        if agent_env_failed_reason(res):
+            return "env"
+        refusal = getattr(res, "gate_refusal", None)
+        if isinstance(refusal, dict) and str(refusal.get("reason_code") or "").strip():
+            return "refused"
+        summary = str(getattr(res, "summary", "") or "")
+        report = str(getattr(res, "report", "") or "")
+        if not summary.strip() and not report.strip():
+            return "empty"
+        if acceptance_sendback_finding(summary, report).get("named"):
+            return "finding"
+        return "observe"
+
+    def _acceptance_refused_why(self, res: Any) -> str:
+        """Blocked text for a front-door-refused walkthrough receipt (never an
+        observation: a refusal is a gate verdict, not a walkthrough verdict)."""
+        refusal = getattr(res, "gate_refusal", None)
+        code = str((refusal or {}).get("reason_code") or "") \
+            if isinstance(refusal, dict) else ""
+        return ("acceptance walkthrough receipt was refused by a front-door gate "
+                "(%s): %s. The send-back counter is untouched; a refusal is never an "
+                "observation. Needs human review. Way out: fix the refusal, then send "
+                "retry_qc to re-run the walkthrough."
+                % (code or "unnamed", str(getattr(res, "summary", "") or "")[:200]))
+
+    def _acceptance_observe_note(self, res: Any, token: str) -> str:
+        """Face text for the observation route (the receipt named no failed item).
+
+        KI-382: such a receipt is not a send-back. The ticket proceeds to merge_check
+        and the human gate still signs; this text is what that human reads."""
+        finding = acceptance_sendback_finding(str(getattr(res, "summary", "") or ""),
+                                             str(getattr(res, "report", "") or ""))
+        return ("acceptance walkthrough observation: the receipt reported failure but "
+                "named no failed acceptance item (basis=%s), so it is NOT a send-back and "
+                "the send-back counter is unchanged. Report on file: %s. The ticket "
+                "proceeds to merge_check; the merge gate still needs a human signature, "
+                "and this observation stays visible on the timeline and in this handoff."
+                % (str(finding.get("basis") or "none"), token or "unknown"))
+
+    def _acceptance_report_token_now(self) -> str:
+        """Token of the report this round consumed.
+
+        `_run_agent_step` reads the gen BEFORE `_enter` increments it, so the consumed
+        report is `_gen(...) - 1`; the builder is `shared.acceptance_report_token`
+        (single derivation, source-locked against `result_file_for`)."""
+        return acceptance_report_token(ACCEPTANCE_REPORT_STAGE,
+                                       self._gen(str(ACCEPTANCE_REPORT_STAGE)) - 1)
+
+    def _acceptance_lift_ready(self, phase: str) -> bool:
+        """A live cap lift plus the stop record it cites (sync predicate).
+
+        Deliberately a SYNC predicate used as an `if` test: the branch body issues the
+        state change, so the branch carries no command-face await in its test (the
+        replay-gate scanner's shape) and the decision reads only state that the new
+        ruling grammar writes.
+
+        Two state writes live here on purpose (never silent): a live lift whose citation
+        is not the current stop, or whose stopped report is no longer the latest round, is
+        revoked with a named reason on the timeline and in the log, and the stop record is
+        cleared. A revoked lift can never fire later."""
+        if phase not in ("acceptance", "arb_acc_parallel"):
+            return False
+        stop = self.meta.get("acc_cap_stop")
+        if not isinstance(stop, dict):
+            return False
+        lift = acceptance_lift_live(self.meta.get("acceptance_cap_lifts"),
+                                    self._now_epoch())
+        if lift is None:
+            return False
+        cited = str(lift.get("report_token") or "")
+        stopped = str(stop.get("report_token") or "")
+        if not cited or not stopped or cited != stopped:
+            self._acceptance_lift_revoke(
+                "it cites %s but the current stop overrides %s"
+                % (cited or "no report", stopped or "no report"))
+            return False
+        # t261027-26 (arbitration F1): the lift may only override the report the cap
+        # stopped on, and only while that report is still the latest round. After a
+        # rework + implement + walkthrough the stopped report is history: applying the
+        # lift then would skip the verification the human asked for.
+        try:
+            stopped_gen = int(stop.get("report_gen"))
+        except (TypeError, ValueError):
+            stopped_gen = -1
+        latest_gen = self._gen(str(ACCEPTANCE_REPORT_STAGE)) - 1
+        if stopped_gen != latest_gen:
+            self._acceptance_lift_revoke(
+                "the stopped report (gen %s) is not the latest walkthrough round "
+                "(gen %s)" % (stopped_gen, latest_gen))
+            return False
+        return True
+
+    def _acceptance_lift_revoke(self, why: str) -> None:
+        """Retire an armed cap lift and the stop record it cites (state only).
+
+        Measured 261027 (arbitration F1): a lift armed at the cap survived a human
+        rework and was consumed at the next acceptance entry against the pre-rework
+        report, so the ticket skipped the arbitrate edge and the verification round the
+        human asked for. A rework — or any round that moved past the stopped report —
+        supersedes the lift: the stop is left, the lift is marked revoked (the audit
+        keeps the record, it just can never fire), and the face says so once."""
+        lifts = self.meta.get("acceptance_cap_lifts")
+        revoked: List[str] = []
+        for it in (lifts if isinstance(lifts, list) else []):
+            if not isinstance(it, dict) or it.get("used_at") or it.get("revoked_at"):
+                continue
+            if not str(it.get("report_token") or "").strip():
+                continue
+            it["revoked_at"] = self._now_epoch()
+            it["revoked_reason"] = why
+            revoked.append(str(it.get("report_token") or ""))
+        had_stop = isinstance(self.meta.get("acc_cap_stop"), dict)
+        self.meta.pop("acc_cap_stop", None)
+        if not (revoked or had_stop):
+            return
+        note = ("acceptance cap lift revoked (%s): the armed lift%s can no longer apply; "
+                "the next verification covers the current tree."
+                % (why, (" for %s" % ", ".join(revoked)) if revoked else ""))
+        self.timeline.append({"at": self._now_iso(),
+                              "stage": str(self.meta.get("stage") or ""),
+                              "state": "authorized", "reason": note})
+        self._log(note)
+        self._touch()
+
+    def _acceptance_lift_step(self) -> None:
+        """Consume the live cap lift (state only; no command).
+
+        Runs at the main loop top, before any walkthrough spawn, so the overridden
+        report is exactly the one the human cited — and no agent run is spent on a
+        round nobody will read. The lift is single use: the use record is appended
+        here and only here."""
+        lift = acceptance_lift_live(self.meta.get("acceptance_cap_lifts"),
+                                    self._now_epoch())
+        if lift is None:                     # defensive: state changed underneath
+            return
+        stop = self.meta.get("acc_cap_stop") if isinstance(
+            self.meta.get("acc_cap_stop"), dict) else {}
+        token = str(lift.get("report_token") or "")
+        now = self._now_epoch()
+        lift["used_at"] = now
+        lift.setdefault("uses", []).append(
+            {"ts": now, "stage": str(ACCEPTANCE_REPORT_STAGE),
+             "detail": "cap lifted; overrode report %s (rounds %s)"
+                       % (token, stop.get("rounds"))})
+        self.meta.pop("acc_cap_stop", None)
+        who = str(lift.get("who") or "?")
+        note = ("acceptance cap lifted under human ruling: who=%s, overrode report %s, "
+                "reason=%s. The walkthrough finding on that report is accepted by the "
+                "human; the ticket advances to merge_check, and the merge gate still "
+                "needs a signature." % (who, token, str(lift.get("reason") or "")))
+        self._finish(str(ACCEPTANCE_REPORT_STAGE), by="integration-agent", evidence=note)
+        self._handoff("acceptance", note)
+        self.timeline.append({"at": self._now_iso(),
+                              "stage": str(self.meta.get("stage") or ""),
+                              "state": "authorized",
+                              "reason": "acceptance cap lift used (%s): overrode report "
+                                        "%s; reason: %s" % (who, token,
+                                                            str(lift.get("reason") or ""))})
+        self._log("acceptance cap lift used (%s): overrode report %s" % (who, token))
+        self._touch()
 
     def _integ_round_stall(self, cur_integ) -> Dict[str, Any]:
         """本轮闸**测量面**与上一轮判过的逐字相同 ⇒ 判停（260929 宿主令直修）。
@@ -4739,6 +4972,12 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                             self._note_rework_held(_eff, _why)
                             _held = True
                 if not _held:
+                    # t261027-26 (arbitration F1): a consumed rework supersedes any armed
+                    # acceptance cap lift — the human asked for a fix, not for the finding
+                    # to be accepted. Retire it here, before any phase moves, so it can
+                    # never be applied to a later round's report. State-only and inert on
+                    # an old history (no lift keys).
+                    self._acceptance_lift_revoke("a human rework was consumed")
                     # KI-024: a rework leaving a parallel period (target is a serial
                     # section) must clear parallel_stages — otherwise the stale list
                     # pins edges that already left on UI ▶ forever (one of two
@@ -4782,6 +5021,18 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 # is exactly what the no-signal path would do next; a continue
                 # would re-enter the hold branch without ever running the round
                 # and spin forever).
+
+            # 1.5) t261027-26 (KI-382): a human acceptance cap lift is consumed HERE —
+            # after the rework branch above (a rework sent in the same breath is the
+            # more specific instruction and wins; the lift stays armed until it
+            # expires) and before any phase dispatch, so no walkthrough round is
+            # spawned for a report the human already overrode. The predicate is sync
+            # and reads only state the new ruling grammar writes (an old history has
+            # no lift key and no stop record, so it never enters this branch).
+            if self._acceptance_lift_ready(phase):
+                self._acceptance_lift_step()
+                phase = "merge_check"
+                continue
 
             # 2) create_plan ⇄ review_plan
             if phase == "create_plan":
@@ -6335,6 +6586,51 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                             acc_done = False
                             acc_res = None
                             continue
+                        # t261027-26 (KI-382): the same verdict block as the serial
+                        # site (one gate evaluation per failed, non-lane-dsh round).
+                        # The 261019 finding reset lives here too from now on: the
+                        # fork is the path every new ticket takes, so the cap must
+                        # measure real findings on both paths.
+                        _acc_token = self._acceptance_report_token_now()
+                        _sig = self._acc_finding_sig(acc_res)
+                        if self._acc_verdict_gate():
+                            _cls = self._acceptance_receipt_class(acc_res)
+                            if _cls == "env":
+                                await self._block_agent_failed("acceptance_walkthrough",
+                                                               acc_res)
+                                acc_done = False
+                                acc_res = None
+                                continue
+                            if _cls == "refused":
+                                await self._blocked("acceptance_walkthrough",
+                                                    self._acceptance_refused_why(acc_res))
+                                acc_done = False
+                                acc_res = None
+                                continue
+                            if _cls == "empty":
+                                await self._blocked("acceptance_walkthrough",
+                                                    _ACCEPTANCE_EMPTY_REPORT_WHY)
+                                acc_done = False
+                                acc_res = None
+                                continue
+                            if _cls == "observe":
+                                _obs = self._acceptance_observe_note(acc_res, _acc_token)
+                                self._finish("acceptance_walkthrough",
+                                             by="integration-agent", evidence=_obs)
+                                self._handoff("acceptance", _obs,
+                                              artifacts=acc_res.deliverables,
+                                              report=acc_res.report)
+                                self._log("acceptance observation (no named failed item): "
+                                          "counter unchanged, ticket proceeds to "
+                                          "merge_check")
+                                phase = "merge_check"
+                                continue
+                            # 261019: a send-back naming a NEW finding resets the
+                            # bounce counter (same rule as the serial site).
+                            _prev_sig = str(self.meta.get("acc_finding_sig") or "")
+                            if _sig and _sig != _prev_sig:
+                                acc_rounds = 0
+                                self.meta["acc_finding_sig"] = _sig
                         # Walkthrough edge reported failure: the existing acceptance
                         # send-back loop (same contract as the old acceptance branch)
                         acc_rounds += 1
@@ -6343,10 +6639,17 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                         self._handoff("acceptance", "Acceptance walkthrough back to implement (round %d)" % acc_rounds,
                                       report=acc_res.report)
                         if acc_rounds > MAX_ACCEPTANCE_ROUNDS:
+                            # t261027-26: stop record + the face that names the lift.
+                            self.meta["acc_cap_stop"] = {
+                                "rounds": acc_rounds,
+                                "report_gen": self._gen(str(ACCEPTANCE_REPORT_STAGE)) - 1,
+                                "report_token": _acc_token,
+                                "finding_sig": _sig,
+                                "at": self._now_epoch()}
                             await self._blocked("acceptance",
-                                                "acceptance walkthrough send-back "
-                                                "%d rounds over limit (cap %d)"
-                                                % (acc_rounds, MAX_ACCEPTANCE_ROUNDS))
+                                                acceptance_cap_blocked_text(
+                                                    acc_rounds, MAX_ACCEPTANCE_ROUNDS,
+                                                    _acc_token))
                             continue
                         self._log("acceptance 打回 → implement（第 %d 轮）" % acc_rounds)
                         impl_done = False
@@ -6547,11 +6850,42 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     # 重入。
                     await self._block_agent_failed("acceptance_walkthrough", res)
                     continue
+                # t261027-26 (KI-382): classify the receipt BEFORE any counter logic —
+                # one gate evaluation per failed, non-lane-dsh round, so the per-round
+                # patch id advances identically in replay and live (see
+                # _acc_verdict_gate). An environment refusal, a front-door refusal and
+                # an empty report are stops (never observations); a readable report
+                # that names no failed acceptance item is an observation and the ticket
+                # proceeds; only a named finding reaches the counter below.
+                _acc_token = self._acceptance_report_token_now()
+                _sig = self._acc_finding_sig(res)
+                if self._acc_verdict_gate():
+                    _cls = self._acceptance_receipt_class(res)
+                    if _cls == "env":
+                        await self._block_agent_failed("acceptance_walkthrough", res)
+                        continue
+                    if _cls == "refused":
+                        await self._blocked("acceptance_walkthrough",
+                                            self._acceptance_refused_why(res))
+                        continue
+                    if _cls == "empty":
+                        await self._blocked("acceptance_walkthrough",
+                                            _ACCEPTANCE_EMPTY_REPORT_WHY)
+                        continue
+                    if _cls == "observe":
+                        _obs = self._acceptance_observe_note(res, _acc_token)
+                        self._finish("acceptance_walkthrough", by="integration-agent",
+                                     evidence=_obs)
+                        self._handoff("acceptance", _obs, artifacts=res.deliverables,
+                                      report=res.report)
+                        self._log("acceptance observation (no named failed item): "
+                                  "counter unchanged, ticket proceeds to merge_check")
+                        phase = "merge_check"
+                        continue
                 # 261019: a send-back that names a NEW finding resets the bounce
                 # counter — the cap is for a repeated finding, not for progress
                 # (measured on t261019-32: eight different real defects, capped
                 # as if it were one loop).
-                _sig = self._acc_finding_sig(res)
                 _prev_sig = str(self.meta.get("acc_finding_sig") or "")
                 if workflow.patched(ACC_FINDING_PATCH_ID):
                     if _sig and _sig != _prev_sig:
@@ -6563,10 +6897,19 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 self._handoff("acceptance", "Acceptance walkthrough back to implement (round %d)" % acc_rounds,
                               report=res.report)
                 if acc_rounds > MAX_ACCEPTANCE_ROUNDS:
+                    # t261027-26: record the stopped round (report token + digest) so a
+                    # human cap lift can cite exactly this report; the face names the
+                    # way out (_ARBITRATION_CAP_EXITS shape).
+                    self.meta["acc_cap_stop"] = {
+                        "rounds": acc_rounds,
+                        "report_gen": self._gen(str(ACCEPTANCE_REPORT_STAGE)) - 1,
+                        "report_token": _acc_token,
+                        "finding_sig": _sig,
+                        "at": self._now_epoch()}
                     await self._blocked("acceptance",
-                                        "acceptance walkthrough send-back %d "
-                                        "rounds over limit (cap %d)"
-                                        % (acc_rounds, MAX_ACCEPTANCE_ROUNDS))
+                                        acceptance_cap_blocked_text(
+                                            acc_rounds, MAX_ACCEPTANCE_ROUNDS,
+                                            _acc_token))
                     continue
                 self._log("acceptance 打回 → implement（第 %d 轮）" % acc_rounds)
                 impl_done = False
@@ -7547,6 +7890,42 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                  "why": "note over limit (%d > %d chars), not entering "
                                         "event history — split and resend"
                                         % (len(note), HOST_RULING_NOTE_INPUT_LIMIT)})
+            return
+        # t261027-26 (KI-382): a ruling may carry the acceptance cap lift, one line:
+        #   lift=acceptance_cap report=<the stopped report> reason=<why>
+        # The marker is line-anchored and needs the stop record the cap wrote, so no
+        # pre-fix note can match it and an old history replays this handler unchanged
+        # (the enable_narrowed_anchor argument: a new shape that cannot exist in old
+        # history is replay-safe without workflow.patched). A malformed lift refuses
+        # the WHOLE ruling by name: nothing is written, and the host is told to resend.
+        _stop = self.meta.get("acc_cap_stop")
+        _stop_token = str(_stop.get("report_token") or "") \
+            if isinstance(_stop, dict) else ""
+        _lift, _lift_err = acceptance_cap_lift(note, who, _stop_token)
+        if _lift is not None:
+            rec = dict(_lift)
+            rec["at"] = self._now_epoch()      # stamped by the workflow, never the caller
+            _recs = self.meta.setdefault("acceptance_cap_lifts", [])
+            _recs.append(rec)
+            if len(_recs) > ACCEPTANCE_CAP_LIFT_MAX_RECORDS:
+                del _recs[0:len(_recs) - ACCEPTANCE_CAP_LIFT_MAX_RECORDS]
+            self.timeline.append(
+                {"at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
+                 "state": "authorized",
+                 "reason": "acceptance cap lift armed (%s): overrides report %s; reason: "
+                           "%s. Send retry_qc to wake the stopped stage (the ruling "
+                           "alone sends no wake-up)."
+                           % (rec["who"], rec["report_token"], rec["reason"])})
+            self._log("acceptance cap lift armed (%s): overrides report %s"
+                      % (rec["who"], rec["report_token"]))
+            self._touch()
+        elif _lift_err:
+            self.refused.append(
+                {"who": who, "want": "host_ruling(lift=acceptance_cap)",
+                 "why": "%s; the ruling was NOT recorded — resend with the full line or "
+                        "send a plain ruling without lift=" % _lift_err})
+            self._log("host ruling with a malformed acceptance cap lift refused (%s): %s"
+                      % (who, _lift_err))
             return
         self.meta.setdefault("host_rulings", []).append(
             {"ts": self._now_iso(), "who": who, "note": note})

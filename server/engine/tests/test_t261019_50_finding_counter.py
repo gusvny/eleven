@@ -72,6 +72,20 @@ def test_the_counter_resets_only_on_a_new_finding():
         "the previous finding has to be remembered across rounds"
 
 
+def test_the_fork_path_resets_too():
+    """t261027-26 (KI-382): the parallel acceptance branch never reset on a new
+    finding (the reset lived only on the serial site), so every new ticket — they all
+    use the fork — still accumulated distinct findings into the cap. The fork site now
+    carries the same reset, inside the same per-round verdict gate."""
+    src = open(DEV_LANE_PY, encoding="utf-8").read()
+    a = src.index("self._lane_dsh_refusal(acc_res)")
+    b = src.index("acc_rounds += 1", a)
+    window = src[a:b]
+    assert 'if self._acc_verdict_gate():' in window
+    assert "_sig != _prev_sig" in window and "acc_rounds = 0" in window, \
+        "the fork branch must reset the bounce counter on a new finding"
+
+
 def test_it_is_patch_guarded():
     assert 'ACC_FINDING_PATCH_ID = "dev-lane-acceptance-finding-counter-v1"' in \
         open(DEV_LANE_PY, encoding="utf-8").read()

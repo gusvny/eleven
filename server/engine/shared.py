@@ -1036,6 +1036,453 @@ _ARBITRATION_CAP_EXITS = (
     "(4) op=pause: pause and hand to a human")
 
 
+# ---- acceptance walkthrough cap (ticket t261027-26, KI-382) ----
+# Measured 261027 on t261026-18: the cap blocked the ticket forever while every
+# send-back report answered all four acceptance items at an unchanged HEAD, so the
+# counter climbed without a new finding and no human op could lift it (kind=
+# arbitration_verdict does not cover this cap). Two rules replace that dead end:
+#   1. a send-back counts only when its report names WHICH acceptance item failed;
+#      otherwise the receipt is an observation and the ticket proceeds;
+#   2. a human lifts the cap with an explicit lift that cites the walkthrough report
+#      it overrides (op=ruling, one line: lift=acceptance_cap report=<token> reason=).
+# The exit wording follows _ARBITRATION_CAP_EXITS: the same op vocabulary
+# (ruling/rework/pause) and the same "a signal alone sends no wake-up" warning.
+ACCEPTANCE_REPORT_STAGE = "acceptance_walkthrough"
+#: A lift expires (fail-closed, the same family as AUTHZ_EXPIRES_MAX_SEC) and is
+#: single use. 24 h is short enough that a forgotten lift cannot outlive the finding
+#: it was cut for, and long enough for a steward to finish a night shift.
+ACCEPTANCE_CAP_LIFT_TTL_SEC = 24 * 3600
+#: Human actions bound the record count; the cap keeps the event history small.
+ACCEPTANCE_CAP_LIFT_MAX_RECORDS = 16
+
+_ACCEPTANCE_REPORT_TOKEN_RE = re.compile(
+    r"stage_acceptance_walkthrough_gen(\d{1,6})\.json")
+#: The lift marker is line-anchored: a prose mention of "lift=" in an ordinary
+#: ruling neither arms a lift nor voids that ruling.
+_ACCEPTANCE_CAP_LIFT_LINE_RE = re.compile(
+    r"^[ \t]*lift[ \t]*=[ \t]*acceptance_cap(?![\w-])", re.I | re.M)
+_ACCEPTANCE_CAP_LIFT_OTHER_RE = re.compile(
+    r"^[ \t]*lift[ \t]*=[ \t]*([A-Za-z0-9_-]{1,40})", re.M)
+#: Paste decorations around the lift line: list bullets, numbering, a block quote,
+#: emphasis (bold / italic / underscore / strikethrough), a table cell, brackets /
+#: parentheses, and the backtick / quote wrap an operator copies from chat or the face.
+#: Measured 261027 (arbitration F2): bold, italic, underscore and table-cell shapes were
+#: silent no-ops before this set was completed.
+_ACCEPTANCE_DECORATION_RE = re.compile(
+    r"^[ \t]*(?:[-*+\u2022>|][ \t]+|\d{1,2}[.)][ \t]+|[*_~`]{1,4}|"
+    r"[\[\]()\"'\u201c\u2018|])+")
+#: The full grammar anywhere on a line: if it appears but not at the (undecorated) line
+#: start, the intake REFUSES BY NAME instead of storing a silent ordinary ruling.
+_ACCEPTANCE_CAP_LIFT_ANYWHERE_RE = re.compile(
+    r"lift[ \t]*=[ \t]*acceptance_cap(?![\w-])", re.I)
+_ACCEPTANCE_CAP_LIFT_REPORT_RE = re.compile(r"report[ \t]*=[ \t]*", re.I)
+_ACCEPTANCE_CAP_LIFT_REASON_RE = re.compile(r"reason[ \t]*=[ \t]*", re.I)
+#: "no failed item" values of the failed_item= marker (the prompt-contract shape).
+_ACCEPTANCE_NO_FINDING_VALUES = frozenset(
+    {"none", "no", "n/a", "na", "nil", "-", "nothing"})
+_ACCEPTANCE_FINDING_MARKER_RE = re.compile(
+    r"failed_items?[ \t]*[=:][ \t]*([^\n]{0,200})", re.I)
+_ACCEPTANCE_ITEM_REF_RE = re.compile(
+    r"(?:acceptance[ \t]+items?|items?)[ \t]*#?[ \t]*(\d{1,3})", re.I)
+#: Chinese item references (historical reports are partly Chinese): 验收项 2 /  # copy-lang-allow:t261027-26-vocabulary
+#: 条目 2 / 第 2 条. "第 3 轮" (a ROUND, not an item) is filtered in code.  # copy-lang-allow:t261027-26-vocabulary
+_ACCEPTANCE_CJK_REF_RE = re.compile(r"(?:验收项|验收条目|条目|第)[ \t]*(\d{1,3})")  # copy-lang-allow:t261027-26-vocabulary
+_ACCEPTANCE_HASH_REF_RE = re.compile(r"#(\d{1,3})")
+_ACCEPTANCE_CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+_ACCEPTANCE_FAIL_WORDS = re.compile(
+    r"(?i)(?<![\w-])(fail(?:ed|s|ing|ure)?|red|broken|missing|regression|"
+    r"not[ \t]+met|unmet|unsatisfied|absent)(?![\w-])")
+_ACCEPTANCE_FAIL_WORDS_CJK = ("失败", "未通过", "不通过", "缺失", "未满足", "不符", "报错")  # copy-lang-allow:t261027-26-vocabulary
+_ACCEPTANCE_PASS_LEAD = ("pass", "passed", "ok", "good", "yes", "✓", "✔", "通过")  # copy-lang-allow:t261027-26-vocabulary
+_ACCEPTANCE_FAIL_LEAD = ("fail", "failed", "failing", "red", "broken", "no", "partial",
+                         "✗", "❌", "失败", "未通过", "不通过")  # copy-lang-allow:t261027-26-vocabulary
+#: Hard bounds: a hostile receipt costs a fixed slice, never the workflow.
+_ACCEPTANCE_TEXT_LIMIT = 200_000
+_ACCEPTANCE_LINE_LIMIT = 4_000
+_ACCEPTANCE_ITEM_LIMIT = 16
+_ACCEPTANCE_ITEM_LEN_LIMIT = 64
+
+_ACCEPTANCE_CAP_EXITS_TEMPLATE = (
+    " Needs human review. Way out: (1) op=ruling carries a cap lift: put one line "
+    "lift=acceptance_cap report=%s reason=<why> in the ruling note (cite the report "
+    "this stop overrides: %s), then send retry_qc once to wake this stop "
+    "[IMPORTANT: a ruling alone sends no wake-up; you must send retry_qc afterwards]; "
+    "the lift is single use, expires in %d h, and it is recorded on the ticket face; "
+    "(2) op=rework: bounce back to implement/create_plan for a fix; "
+    "(3) op=pause: pause and hand to a human.")
+
+
+def acceptance_report_token(stage_id: Any = ACCEPTANCE_REPORT_STAGE,
+                            gen: Any = 0) -> str:
+    """The result-file token of one acceptance round (single builder, pure).
+
+    Mirrors result_file_for's basename ``stage_<stage>_gen<N>.json``. A source lock
+    asserts that equality, so the printed citation can never drift from the file the
+    human can read."""
+    try:
+        n = int(gen)
+    except (TypeError, ValueError):
+        n = 0
+    return "stage_%s_gen%d.json" % (str(stage_id or ACCEPTANCE_REPORT_STAGE), max(0, n))
+
+
+def parse_acceptance_report_token(text: Any) -> Optional[int]:
+    """Gen from a cited report (the full token or a bare number). None = unparseable.
+
+    Pure and defensive: non-str (None/bytes/dict), an empty string and any foreign
+    text return None, so the caller refuses the lift by name instead of guessing."""
+    if not isinstance(text, str):
+        return None
+    s = text.strip().strip("`'\"")
+    if not s:
+        return None
+    m = _ACCEPTANCE_REPORT_TOKEN_RE.search(s)
+    if m:
+        return int(m.group(1))
+    if s.isdigit():
+        return int(s) if int(s) >= 0 else None
+    return None
+
+
+def acceptance_cap_blocked_text(rounds: Any, cap: Any, token: Any = "") -> str:
+    """Blocked face of the acceptance walkthrough cap (pure, never raises).
+
+    The prefix is byte-identical to the pre-t261027-26 sentence, so operator habit
+    and existing assertions keep matching; the suffix names the way out, shaped like
+    _ARBITRATION_CAP_EXITS. The text carries "Needs human review" (a judgement marker
+    of classify_stop_tier), so an executor lift_stop keeps refusing this stop."""
+    try:
+        r, c = int(rounds), int(cap)
+    except (TypeError, ValueError):
+        r, c = -1, -1
+    cite = str(token or "").strip()
+    if not cite:
+        cite = acceptance_report_token(ACCEPTANCE_REPORT_STAGE, max(0, r - 1))
+    return ("acceptance walkthrough send-back %d rounds over limit (cap %d)"
+            % (r, c)
+            + _ACCEPTANCE_CAP_EXITS_TEMPLATE
+            % (cite, cite, ACCEPTANCE_CAP_LIFT_TTL_SEC // 3600))
+
+
+def _acceptance_undecorate(line: str) -> str:
+    """Strip the paste decorations an operator brings from chat or a ticket face.
+
+    List bullets, numbering, block quotes, emphasis, table cells, brackets, wraps and
+    quotes are decoration, not intent: with them in place the marker would not match,
+    the ruling would be stored silently and no lift would arm (measured 261027 on the
+    committed code: bullets, numbering, quotes, backticks, then emphasis and table cells
+    in the arbitration round). The marker still has to start the line after
+    undecoration, so a prose mention of "lift=" in the middle of a sentence stays an
+    ordinary ruling; the caller refuses BY NAME when the full grammar appears mid-line
+    (never a silent no-op)."""
+    s = _ACCEPTANCE_DECORATION_RE.sub("", str(line or ""))
+    return s.strip().rstrip("`\"'”’*_~|").strip()
+
+
+def _acceptance_lift_fields(line: str) -> Dict[str, str]:
+    """Read ``report=`` and ``reason=`` from the lift line (reason= must be last).
+
+    Spaces around ``=`` and any key case are tolerated (an operator types this by
+    hand); the values keep their own case."""
+    m_rep = _ACCEPTANCE_CAP_LIFT_REPORT_RE.search(line)
+    m_why = _ACCEPTANCE_CAP_LIFT_REASON_RE.search(line)
+    out: Dict[str, str] = {}
+    if m_rep is not None:
+        end = m_why.start() if (m_why is not None and m_why.start() > m_rep.end()) \
+            else len(line)
+        out["report"] = line[m_rep.end():end].strip().strip("`'\"")
+    if m_why is not None:
+        out["reason"] = line[m_why.end():].strip().rstrip("`\"'”’*_~|").strip()
+    return out
+
+
+def acceptance_cap_lift(note: Any, who: Any, stop_token: Any = ""
+                        ) -> Tuple[Optional[Dict[str, Any]], str]:
+    """Parse and validate the cap lift a ruling note carries (pure).
+
+    Three outcomes:
+      (record, "")  a valid lift; the caller arms it (it stamps ``at`` from
+                    workflow.now, never from the caller);
+      (None, "")    the note carries no lift marker — an ordinary ruling, and the
+                    caller's existing path stays byte-identical;
+      (None, err)   the marker is present and the lift is malformed; the caller
+                    refuses the WHOLE ruling by name (nothing is written), so the
+                    host knows to resend.
+
+    The citation must name the report this stop overrides: ``stop_token`` is the
+    token recorded at the cap, and a mismatch is refused here — the human can copy
+    the token straight out of the blocked face."""
+    if not isinstance(note, str) or not note:
+        return (None, "")
+    # t261027-26 (integration finding, 261027): the blocked face prints the lift line,
+    # and operators paste it from chat with list bullets, numbering, quotes, a block
+    # quote or backticks around it. Each line is undecorated before the marker test, so
+    # those shapes arm a lift instead of becoming a silent ordinary ruling (a named exit
+    # that silently does nothing is a defect of the exit itself).
+    marker_line = ""
+    for raw_line in note.split("\n"):
+        line = _acceptance_undecorate(raw_line)
+        if _ACCEPTANCE_CAP_LIFT_LINE_RE.match(line):
+            marker_line = line
+            break
+        other = _ACCEPTANCE_CAP_LIFT_OTHER_RE.match(line)
+        if other is not None:
+            return (None, "unknown lift kind %r: only lift=acceptance_cap exists, and a "
+                          "ruling that carries lift= must carry a known kind"
+                          % other.group(1))
+    if not marker_line:
+        # Never silence (261027 arbitration F2): if the full grammar is on a line but the
+        # marker could not match at the line start, refuse by name — the operator must not
+        # believe a lift is armed when the note is stored as an ordinary ruling.
+        if _ACCEPTANCE_CAP_LIFT_ANYWHERE_RE.search(note):
+            return (None, "the cap lift marker is present but does not start a line: put "
+                          "lift=acceptance_cap report=<the stopped report> reason=<why> on "
+                          "its own line with no text in front of it")
+        return (None, "")
+    err = identity_refusal(who)
+    if err:
+        return (None, err)
+    line = marker_line
+    fields = _acceptance_lift_fields(line)
+    raw_report = fields.get("report") or ""
+    if not raw_report:
+        return (None, "a cap lift must cite the walkthrough report it overrides "
+                      "(report=stage_acceptance_walkthrough_gen<N>.json)")
+    gen = parse_acceptance_report_token(raw_report)
+    if gen is None:
+        return (None, "report citation %r is not a walkthrough report token "
+                      "(expected stage_acceptance_walkthrough_gen<N>.json or N)"
+                      % raw_report[:80])
+    expected = str(stop_token or "").strip()
+    if not expected:
+        return (None, "no acceptance cap stop is recorded on this ticket: a cap lift "
+                      "applies to a stopped acceptance cap only")
+    if gen != parse_acceptance_report_token(expected):
+        return (None, "report citation names %s, but this stop overrides %s — cite the "
+                      "stopped report" % (acceptance_report_token(ACCEPTANCE_REPORT_STAGE, gen),
+                                          expected))
+    reason = (fields.get("reason") or "").strip()
+    if not reason:
+        return (None, "missing reason (a lift must answer \"lifted on what grounds\")")
+    if len(reason) > AUTHZ_REASON_MAX_LEN:
+        return (None, "reason too long (%d > %d)" % (len(reason), AUTHZ_REASON_MAX_LEN))
+    return ({"who": str(who).strip(),
+             "report_gen": gen,
+             "report_token": acceptance_report_token(ACCEPTANCE_REPORT_STAGE, gen),
+             "report_cited": raw_report[:200],
+             "reason": reason,
+             "uses": []}, "")
+
+
+def acceptance_lift_live(lifts: Any, now_epoch: Any) -> Optional[Dict[str, Any]]:
+    """The latest armed, unused, unexpired cap lift (pure, defensive).
+
+    Malformed stored entries are skipped, never a raise; a lift is dead once it is
+    used or older than ACCEPTANCE_CAP_LIFT_TTL_SEC (fail-closed, like an
+    authorization that must expire)."""
+    now = _authz_int(now_epoch)
+    best: Optional[Dict[str, Any]] = None
+    for it in (lifts if isinstance(lifts, (list, tuple)) else []):
+        if not isinstance(it, dict):
+            continue
+        if it.get("used_at") or it.get("revoked_at"):
+            continue
+        at = _authz_int(it.get("at"))
+        if at <= 0 or at + ACCEPTANCE_CAP_LIFT_TTL_SEC <= now:
+            continue
+        if not str(it.get("report_token") or "").strip():
+            continue
+        if best is None or at >= _authz_int(best.get("at")):
+            best = it
+    return best
+
+
+def _acceptance_text(summary: Any, report: Any) -> str:
+    """Join the receipt's readable fields (bounded); ignore non-str and empties."""
+    parts = []
+    for v in (summary, report):
+        if isinstance(v, str) and v.strip():
+            parts.append(v)
+    return "\n".join(parts)[:_ACCEPTANCE_TEXT_LIMIT]
+
+
+def _acceptance_tokens(raw: Any) -> List[str]:
+    """Item labels from a marker value (bounded, de-duplicated, order kept)."""
+    out: List[str] = []
+    for tok in re.split(r"[,\s]+", str(raw or "")):
+        tok = tok.strip().strip("*`|").strip()
+        if not tok:
+            continue
+        tok = tok[:_ACCEPTANCE_ITEM_LEN_LIMIT]
+        if tok not in out:
+            out.append(tok)
+        if len(out) >= _ACCEPTANCE_ITEM_LIMIT:
+            break
+    return out
+
+
+def _acceptance_cell_verdict(cell: str) -> str:
+    """'pass' | 'fail' | '' for one table cell (markdown emphasis stripped)."""
+    s = str(cell or "").replace("*", "").replace("`", "").replace("_", " ").strip().lower()
+    if not s:
+        return ""
+    for lead in _ACCEPTANCE_PASS_LEAD:
+        if s.startswith(lead):
+            return "pass"
+    for lead in _ACCEPTANCE_FAIL_LEAD:
+        if s.startswith(lead):
+            return "fail"
+    return ""
+
+
+def _acceptance_finding_from_table(text: str) -> Optional[List[str]]:
+    """Rows whose verdict cell names a failed item (header-located column).
+
+    A PASS cell wins over words in other cells: the real report shape carries
+    "fail-closed" inside evidence cells of passing rows, and that must never count
+    as a finding."""
+    items: List[str] = []
+    vcol: Optional[int] = None
+    for line in text.split("\n")[:_ACCEPTANCE_LINE_LIMIT]:
+        s = line.strip()
+        if not s.startswith("|") or s.count("|") < 2:
+            continue
+        cells = s.strip("|").split("|")
+        if vcol is None:
+            for idx, c in enumerate(cells):
+                cl = c.strip().strip("*`_ ").lower()
+                if cl in ("verdict", "result", "status", "conclusion", "判定", "结论"):  # copy-lang-allow:t261027-26-vocabulary
+                    vcol = idx
+                    break
+            if vcol is not None:
+                continue
+        if set(s) <= set("|-: "):
+            continue
+        label = ""
+        for c in cells:
+            cs = c.strip().strip("*`")
+            if cs.isdigit() and 0 < int(cs) < 1000:
+                label = str(int(cs))
+                break
+            if cs and cs[0] in _ACCEPTANCE_CIRCLED:
+                label = str(_ACCEPTANCE_CIRCLED.index(cs[0]) + 1)
+                break
+        cell = ""
+        if vcol is not None and vcol < len(cells):
+            cell = cells[vcol]
+        if _acceptance_cell_verdict(cell) != "fail":
+            if vcol is not None:
+                continue
+            cell = next((c for c in cells if _acceptance_cell_verdict(c)), "")
+            if _acceptance_cell_verdict(cell) != "fail":
+                continue
+        if label:
+            if label not in items:
+                items.append(label)
+        elif not items:
+            items.append("")
+        if len(items) >= _ACCEPTANCE_ITEM_LIMIT:
+            break
+    return items or None
+
+
+def _acceptance_ref_state_ok(tail: str) -> bool:
+    """Does the words right after an item reference say the item PASSED?
+
+    Measured shape that must not count: "the gate says fail-closed for a missing
+    token; item 4 passed" — an item reference plus a failure word in the same
+    evidence sentence, on a passing item."""
+    t = str(tail or "")[:24].lstrip().lstrip(":：= ").lower()
+    return bool(t) and any(t.startswith(p) for p in _ACCEPTANCE_PASS_LEAD)
+
+
+def _acceptance_finding_from_prose(text: str) -> Optional[List[str]]:
+    """A line that names an item AND carries a failure word (bounded scan)."""
+    items: List[str] = []
+    for line in text.split("\n")[:_ACCEPTANCE_LINE_LIMIT]:
+        s = line.strip()
+        if not s or s.startswith("|"):
+            continue
+        low = s.lower()
+        if any(low.startswith(p) for p in _ACCEPTANCE_PASS_LEAD):
+            continue
+        refs: List[str] = []
+        for m in _ACCEPTANCE_ITEM_REF_RE.finditer(s):
+            if not _acceptance_ref_state_ok(s[m.end():]):
+                refs.append(m.group(1))
+        for m in _ACCEPTANCE_HASH_REF_RE.finditer(s):
+            if not _acceptance_ref_state_ok(s[m.end():]):
+                refs.append(m.group(1))
+        for m in _ACCEPTANCE_CJK_REF_RE.finditer(s):
+            tail = s[m.end():m.end() + 4].lstrip()
+            if tail.startswith("轮"):  # 第 N 轮 is a round, not an item  # copy-lang-allow:t261027-26-vocabulary
+                continue
+            if not _acceptance_ref_state_ok(s[m.end():]):
+                refs.append(m.group(1))
+        for idx, ch in enumerate(_ACCEPTANCE_CIRCLED):
+            if ch in s:
+                if not _acceptance_ref_state_ok(s[s.index(ch) + 1:]):
+                    refs.append(str(idx + 1))
+        if not refs:
+            continue
+        failed = bool(_ACCEPTANCE_FAIL_WORDS.search(s)) or any(
+            w in s for w in _ACCEPTANCE_FAIL_WORDS_CJK)
+        if not failed:
+            continue
+        for r in refs:
+            r = str(r).lstrip("0") or "0"
+            if r not in items:
+                items.append(r[:_ACCEPTANCE_ITEM_LEN_LIMIT])
+        if len(items) >= _ACCEPTANCE_ITEM_LIMIT:
+            break
+    return items or None
+
+
+def acceptance_sendback_finding(summary: Any, report: Any = "") -> Dict[str, Any]:
+    """Does this walkthrough receipt name WHICH acceptance item failed? (pure)
+
+    The cap exists to stop a ticket bouncing on a real finding. KI-382 measured the
+    opposite: receipts that answered every item at an unchanged HEAD still counted,
+    so the cap became a dead end. This predicate answers "did the walkthrough say
+    which item failed", and the caller treats a "no" as an observation.
+
+    basis vocabulary (one vocabulary, no extra states):
+      "marker"  an explicit failed_item(s)= marker names the item(s);
+      "table"   a markdown row's verdict cell names a failed item;
+      "prose"   a line that names an item and carries a failure word;
+      "none"    a readable receipt that names no failed item;
+      "malformed" no readable text at all (absent/empty/non-string input) — the
+                caller must keep its STOP route for this class, never read it as
+                "no finding" (an empty receipt must never walk a tree to the gate).
+
+    Bounded and defensive: non-str input, an empty receipt and an oversized receipt
+    all return without raising, and the scan never reads past a fixed slice."""
+    text = _acceptance_text(summary, report)
+    if not text.strip():
+        return {"named": False, "items": [], "basis": "malformed",
+                "note": "no readable receipt text (absent, empty or non-string)"}
+    m = _ACCEPTANCE_FINDING_MARKER_RE.search(text)
+    if m is not None:
+        raw = re.split(r"[|;；。]", m.group(1))[0].strip()
+        tokens = _acceptance_tokens(raw)
+        if tokens and tokens[0].strip("*`").lower() in _ACCEPTANCE_NO_FINDING_VALUES:
+            return {"named": False, "items": [], "basis": "marker",
+                    "note": "explicit failed_item=%s" % tokens[0]}
+        if tokens:
+            return {"named": True, "items": tokens, "basis": "marker",
+                    "note": "failed_item marker"}
+    table = _acceptance_finding_from_table(text)
+    if table is not None:
+        return {"named": True, "items": table, "basis": "table",
+                "note": "a table row's verdict cell names a failed item"}
+    prose = _acceptance_finding_from_prose(text)
+    if prose is not None:
+        return {"named": True, "items": prose, "basis": "prose",
+                "note": "a line names an item and carries a failure word"}
+    return {"named": False, "items": [], "basis": "none",
+            "note": "no failed acceptance item is named"}
+
+
 #: 集成轮「测量面」签名的域分隔标记（防字段拼接歧义）
 _GATE_SIG_FIELDS = ("blockers", "env_red")
 
@@ -2203,6 +2650,37 @@ AUTHZ_SCOPE_ITEM_MAX_LEN = 256              # 单条 scope 长度上界
 # 两集合相等由单测源码锁定（防未来只改一处判定）。
 AUTHZ_AGENT_ROLE_NAMES = frozenset(
     {"developer", "integration", "ops", "product-operation", "artist"})
+
+
+def identity_refusal(who: Any, max_len: Any = None) -> str:
+    """Human-identity guard for every channel that lets a person lift an engine stop
+    (ticket t261027-26): returns "" when the identity is acceptable, else the named
+    refusal reason.
+
+    One definition, two call sites today (`authz_gates.validate_authorization` for
+    the authorization channel, `acceptance_cap_lift` for the acceptance cap lift), so
+    the role-name set and the ``-agent`` family can never drift apart. The messages
+    are the authorization channel's messages verbatim — that truth table is the
+    regression proof that this extraction changed nothing.
+
+    Pure and defensive: non-str who is refused as missing (an identity the caller
+    cannot state is not a human one)."""
+    if not isinstance(who, str):
+        return "missing who (the authorizer identity is injected by the caller)"
+    limit = AUTHZ_WHO_MAX_LEN if max_len is None else _authz_int(max_len)
+    if not who.strip():
+        return "missing who (the authorizer identity is injected by the caller)"
+    if limit > 0 and len(who) > limit:
+        return "who too long (%d > %d)" % (len(who), limit)
+    norm = who.strip().lower()
+    if norm in AUTHZ_AGENT_ROLE_NAMES:
+        return ("an agent must not self-authorize (who=%r is an agent role name; only "
+                "a human issues authorization)" % who)
+    if norm.endswith("-agent"):
+        return ("an agent must not self-authorize (who=%r is in the agent display-name "
+                "family: the -agent suffix)" % who)
+    return ""
+
 
 # settle 回执内嵌的机读键（path_gate_reason= 同族，t260910-13 先例）：
 #   path_gate_authz_used=<who>@<issued>:<file1,file2>

@@ -252,11 +252,12 @@ def test_malformed_refusal_receipt_is_not_mistaken_for_lane_dsh():
     assert dev_lane.DevLaneWorkflow._lane_dsh_refusal(None, good) is True
 
 
-def test_malformed_acceptance_receipt_takes_sendback_not_crash():
-    # walkthrough edge returns a failed receipt WITHOUT a lane_dsh refusal: the loop
-    # must treat it as the existing acceptance send-back (implement edge re-runs),
-    # not crash and not silently consume it as a pass.
-    class BadAccMachine(FakeMachine):
+def test_malformed_acceptance_receipt_without_a_named_item_is_an_observation():
+    # t261027-26 (KI-382): a failed walkthrough receipt WITHOUT a lane_dsh refusal and
+    # WITHOUT a named failed acceptance item is not a send-back — the ticket proceeds to
+    # merge_check (the observation face) and must not crash, not bounce, and not be
+    # silently consumed as a pass.
+    class NoFindingMachine(FakeMachine):
         bad_fired = False
 
         def spawn(self, stage):
@@ -266,12 +267,34 @@ def test_malformed_acceptance_receipt_takes_sendback_not_crash():
                                      summary="walkthrough found a defect")
             return super().spawn(stage)
 
-    m = BadAccMachine()
+    m = NoFindingMachine()
     m.retries_left = 6
     _, wf = _run_journey(m)
     stages = _blocked_stages(wf)
-    # the journey keeps moving after the bad receipt (implement re-runs on the
-    # send-back path); it must never hang silently on the walkthrough edge
+    assert stages == ["arbitrate"], stages       # no acceptance stop, no crash
+    assert m.bad_fired, "the scripted failed receipt never reached the edge"
+    assert m.calls.count("implement") == 1, m.calls   # an observation is not a send-back
+    assert any(e.get("stage") == "acceptance_walkthrough" and e.get("state") == "done"
+               for e in wf.timeline), wf.timeline[-6:]
+
+
+def test_failed_acceptance_receipt_that_names_an_item_still_bounces():
+    # the control half: the new rule must never turn the counter off — a receipt that
+    # names a failed acceptance item still sends the work back to implement.
+    class NamedFindingMachine(FakeMachine):
+        bad_fired = False
+
+        def spawn(self, stage):
+            if stage == "acceptance_walkthrough" and not self.bad_fired:
+                self.bad_fired = True
+                return _stage_result(status="failed",
+                                     summary="acceptance item 2 failed: the CLI exits 1")
+            return super().spawn(stage)
+
+    m = NamedFindingMachine()
+    m.retries_left = 6
+    _, wf = _run_journey(m)
+    stages = _blocked_stages(wf)
     assert "arbitrate" in stages, stages
     assert m.calls.count("implement") >= 2, (m.calls, stages)
 

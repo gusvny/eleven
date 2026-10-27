@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 341,
-      "scenarios": 813
+      "engine_tests": 349,
+      "scenarios": 855
     },
     "vocab": [
       "behaviour",
@@ -16,7 +16,7 @@
   "engine_tests": {
     "server/engine/tests/test_t261026_37_fork_selfheal.py": {
       "anchor": "behaviour",
-      "note": "t261026-37 KI-376: the lane-dsh missing-profile self-heal journey driven through the real dev_lane main loop with a stubbed activity seam (all live gates on): B-heal fork re-run -> join settle -> mechanical tests -> arb_acc fork double precheck refusal -> blocked(arbitrate) -> host retry -> arbitrate re-run (verdict=pass) -> gate-5 consumes the stranded FAILED walkthrough receipt -> blocked(acceptance_walkthrough) -> host retry -> walkthrough re-runs ok -> verdict consumes the ok receipt -> merge_check; pins edge call counts (implement/design/arbitrate/acceptance each exactly one real spawn) and the blocked stage order, plus malformed-refusal predicate matrix and a malformed walkthrough receipt taking the send-back path without a hang.",
+      "note": "t261026-37 KI-376: the lane-dsh missing-profile self-heal journey driven through the real dev_lane main loop with a stubbed activity seam (all live gates on): B-heal fork re-run -> join settle -> mechanical tests -> arb_acc fork double precheck refusal -> blocked(arbitrate) -> host retry -> arbitrate re-run (verdict=pass) -> gate-5 consumes the stranded FAILED walkthrough receipt -> blocked(acceptance_walkthrough) -> host retry -> walkthrough re-runs ok -> verdict consumes the ok receipt -> merge_check; pins edge call counts (implement/design/arbitrate/acceptance each exactly one real spawn) and the blocked stage order, plus the malformed-refusal predicate matrix and, from t261027-26, the split walkthrough-receipt face: a receipt naming no failed item becomes an observation (merge_check, implement not re-run) while a receipt naming an item still bounces to implement.",
       "sync_path": "server/engine/dev_lane.py"
     },
     "server/engine/tests/test_quickmanual_lane.py": {
@@ -1727,6 +1727,11 @@
     "server/engine/tests/test_t261027_10_terminal_release_engine_side.py": {
       "anchor": "behaviour",
       "note": "t261027-10 L1: the prompt arm — cancel/close-out notices set the replay-safe pending flag consumed behind TERMINAL_SLOT_PATCH_ID, the caller-side write blocked (PermissionError) still returns the slot, state-file bytes are asserted reader-side, the new-ticket acquire is immediate, and a marker-less history replays with no new command while release faults are named, never raised."
+    },
+    "server/engine/tests/test_t261027_26_acceptance_cap_lift.py": {
+      "anchor": "behaviour",
+      "note": "t261027-26 (KI-382) L1: the acceptance cap's named human lift and the findings-only counter, driven on the REAL main loop with stubbed activities and on the pure faces - the lift grammar/identity/citation truth table, the live filter (TTL/single use/latest wins), the blocked face (byte-identical prefix, only real CLI ops, wake honesty, TTL, single use, judgement tier), the intake write/refuse matrix, the observation route (no named item -> merge_check), the stop classes (empty receipt / environment refusal / front-door refusal -> blocked, counter untouched), a repeated named finding still reaching the cap, the lift consumed at the loop top with no extra walkthrough spawn, the per-round #seq gate on a memoized False face, and the detector shapes (PASS table with fail-closed, FAIL row, prose, Chinese forms, malformed basis, bounds)",
+      "sync_path": "server/engine/shared.py; server/engine/dev_lane.py; server/engine/authz_gates.py"
     }
   },
   "scenarios": {
@@ -2650,27 +2655,27 @@
     },
     "integration/t260910-12/sc_cwd_independence.py": {
       "anchor": "behaviour",
-      "note": "",
+      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
       "sync_path": ""
     },
     "integration/t260910-12/sc_full_capacity_queue.py": {
       "anchor": "behaviour",
-      "note": "",
+      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
       "sync_path": ""
     },
     "integration/t260910-12/sc_herd_no_crosstalk.py": {
       "anchor": "behaviour",
-      "note": "",
+      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
       "sync_path": ""
     },
     "integration/t260910-12/sc_holder_kill_reclaim.py": {
       "anchor": "behaviour",
-      "note": "",
+      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
       "sync_path": ""
     },
     "integration/t260910-12/sc_idempotent_reup.py": {
       "anchor": "behaviour",
-      "note": "",
+      "note": "t261027-11: migrated to the process bench (SANDBAR_STAGE_BACKEND=process); assertion anchors are now the bench/process public faces (proc_ids, process_bench.py status, booted_ts receipt) instead of docker ps/inspect — label unchanged (behaviour).",
       "sync_path": ""
     },
     "integration/t260910-12/sc_transient_retry_contract.py": {
@@ -5935,6 +5940,10 @@
       "anchor": "behaviour",
       "note": "t261026-25: the docker-carveout disposition holds and the t260905-02 family still runs green on docker - the exception table keeps the three rows with reasons naming the teardown-residue face, each scenario file still carries its own-stage residue+port-release assertions (not migrated; a fork-ruling lift fails here by name on purpose), and each of the three cases runs as its registry cmd to exit 0 with SUMMARY pass>0 fail=0 env_fail=0; child exit 2 is named env_fail per child, any other exit or a missing SUMMARY line is a named failure."
     },
+    "integration/t261027-16/sc_t261027_16_cert_receipt_bounded.py": {
+      "anchor": "behaviour",
+      "note": "t261027-16 L3: the certification read face stays bounded on a fat 3.6k-row run ledger - the real adapter subprocess over an isolated temp projects root answers ok:true under the declared 1,000,000-byte cap with runs_window {shown,total,older} naming the window, per-line runs bounded to the Rounds cap plus cited runs, a cert-cited run older than the window preserved, failed_detail never in the receipt bytes and per-run cases carrying header-level counts only; a deliberately oversized receipt (cap patched at the module seam) refuses 'receipt too large: N bytes, window ...'; the real reader over a stub maxBuffer error refuses by name, never 'not valid JSON', and a healthy receipt still parses carrying runs_window."
+    },
     "integration/t261027-10/sc_t261027_10_dead_holder_sweep_reclaims.py": {
       "anchor": "behaviour",
       "note": "t261027-10 scenario: the proof-of-death sweep drops workflow-gone holders (human-hold included), keeps alive and unknown holders fail-closed with named probe_errors and a bounded wait, refuses a corrupt ledger by name, and proves the reclaim reader-side (state bytes clean, waiter promoted, next acquire immediate)."
@@ -5942,6 +5951,21 @@
     "integration/t261027-10/sc_t261027_10_terminal_release_caller_blocked.py": {
       "anchor": "behaviour",
       "note": "t261027-10 scenario: with the caller-side ledger write physically blocked, the cancel receipt stays honest (released=false, reason naming the write failure) and the engine-side reclaim returns the slot — reader bytes clean, waiter promoted, next acquire immediate — without the caller writing."
+    },
+    "integration/t261027-26/sc_t261027_26_cap_exit_contract.py": {
+      "anchor": "contract",
+      "note": "t261027-26 (KI-382) grey-box L2: the acceptance-cap exit an operator reads is complete and truthful - prefix byte-identical to today's blocked sentence, every op= exists in the human CLI, the wake honesty (ruling then retry_qc) and the TTL/single-use lifetime match the engine constants, the printed citation is the real walkthrough report file name and round-trips through the reader (another stage's file and garbage refused), the shared identity guard refuses agent identities and still backs authorize, the stop classifies judgement (human-only), and the detail face projects timeline+refused so the lift is readable",
+      "sync_path": "server/engine/shared.py"
+    },
+    "integration/t261027-26/sc_t261027_26_finding_counter_shapes.py": {
+      "anchor": "behaviour",
+      "note": "t261027-26 (KI-382) grey-box L2: the counter counts real findings - the measured field shape (four PASS acceptance items, fail-closed in an evidence cell, green gate, unchanged HEAD) names no failed item and is not read as an unreadable receipt; a real finding still names its item (FAIL row, English prose, Chinese field forms); absent/malformed report text is a malformed basis (never a clean no-finding report) and never raises; the walkthrough brief names the failed_item marker and the detector reads exactly that form",
+      "sync_path": "server/engine/shared.py; server/engine/dev_lane.py"
+    },
+    "integration/t261027-11/sc_stage_process_backend_zero_docker.py": {
+      "anchor": "behaviour",
+      "note": "t261027-11 gate blocker: the migration's user-visible outcome on public faces only (zero docker containers for the project pattern, no silent backend fallback, dual-face zero residue incl. a delayed re-probe past the re-bind window).",
+      "sync_path": ""
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {
