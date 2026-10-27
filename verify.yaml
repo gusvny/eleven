@@ -49,6 +49,12 @@ integration:
   # 261027 宿主令：未来不允许再使用 docker。集成闸的 docker 供给要求已整条摘除
   # （见 supply 段注）；本仓测试不应再依赖 daemon/镜像/共享供给台。
   supply:
+    # 261027：docker 退役后，原先那条供给还顺带做了一件不涉 docker 的事——把主树的
+    # temporal CLI 软链进泳道（server/engine/bin/temporal）。摘掉整条后泳道里就没有
+    # 这个二进制，凡需 CLI 的用例一律 env-red（实测 t261027-18 的机器闸 1 ran / 1 env-red）。
+    # 本条只补回这一半，零 docker 接触：主树取 → 泳道软链 → 可执行自检，失败具名 exit 2。
+    - need: temporal CLI 在泳道在场（主树软链，零 docker；t261027-18 实锤）
+      cmd: 'MAIN="$(cd "$(git rev-parse --path-format=absolute --git-common-dir)/.." && pwd)"; SRC="$MAIN/server/engine/bin/temporal"; [ -x "$SRC" ] || { echo "ENV_FAIL: 主树 temporal CLI 缺失：$SRC"; exit 2; }; mkdir -p server/engine/bin; if [ ! -e server/engine/bin/temporal ]; then ln -s "$SRC" server/engine/bin/temporal || { echo "ENV_FAIL: 泳道软链失败：server/engine/bin/temporal -> $SRC"; exit 2; }; fi; [ -x server/engine/bin/temporal ] || { echo "ENV_FAIL: 软链后不可执行：server/engine/bin/temporal"; exit 2; }'
     # 261027 宿主令：未来不允许再使用 docker。原「docker 测试台在位」条整条摘除——
     # 集成闸不再要求 daemon/镜像/共享供给台；依赖 docker 的用例已在已知红册
     # （integration/known-red-baseline.json，home=「docker 面退出」）排除出常规轮次，
