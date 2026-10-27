@@ -123,6 +123,7 @@ import subprocess
 import sys
 import pathlib
 import tempfile
+import threading
 import time
 
 SCENARIOS = [
@@ -6205,6 +6206,321 @@ _HUNG_THIS_ROUND = set()
 #: the reap itself; the budget contract is CMD_TIMEOUT + this margin, test-locked)
 _KILL_GRACE_S = 10
 
+#: Case-exit reap (ticket t261028-05, KI-377). A case runs in its own session,
+#: so ONE killpg reaches everything that stayed in that session - but it never
+#: reaches a child that detached into a session of its own, and the engine spawns
+#: agent sessions exactly that way (agent_activities.py: start_new_session=True).
+#: Two ki067_park_stub.py agent stubs were still alive 25 and 52 minutes after
+#: their case exited, each holding a full agent session; machine memory climbed
+#: across the night until a restart, and only a manual kill reclaimed the load.
+#: The reap below therefore signals TWO faces on every terminal path: the case's
+#: process group (as before) and the ppid-descendant closure of every live group
+#: member (this is what reaches the detached agent child while its owner lives).
+#: Order is load-bearing: SNAPSHOT FIRST, then TERM, a bounded grace, then KILL -
+#: a killed parent reparents its children to pid 1 and the walk goes blind.
+_REAP_TERM_GRACE_S = 4
+#: grace between the case tree's SIGKILL and the settlement read. TERM grace +
+#: this stays strictly inside _KILL_GRACE_S, so the documented timeout bound
+#: (CMD_TIMEOUT + _KILL_GRACE_S) still holds with the TERM leg added.
+_REAP_KILL_GRACE_S = 3
+_REAP_POLL_S = 0.05
+
+#: A case that still owns a live descendant after TERM then KILL is a product
+#: red, never a green with a live agent session behind it (requirement 2).
+#: Distinct from -8 (spawn face) and -9 (timeout) so the verdict stays readable.
+_LIVE_DESCENDANTS = -10
+
+#: Cases in flight: name -> leader pid of the case's own session/group. The
+#: runner's own SIGTERM handler reaps exactly this set (see
+#: _install_case_signal_reap); a case name is unique within a round.
+_LIVE_CASES = {}
+#: Per-case NAMED receipt for the case row ("reaped N descendants" / "no live
+#: descendants"). A silent sweep is not acceptable (requirement 1).
+_REAP_RECEIPTS = {}
+_CASE_LOCK = threading.Lock()
+
+
+def _pid_alive(pid):
+    """True when the pid exists. A zombie counts as existing here; the reap's
+    settlement treats zombies as terminal - see _live_pids."""
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        return True
+    return True
+
+
+#: Reasons the ppid walk could not run during a reap (pgrep absent or refused by
+#: a restricted sandbox). The receipt NAMES them: a half-blind sweep that reports
+#: "no live descendants" without saying it never looked is the lying-receipt
+#: family, not an honest degrade.
+_PPID_WALK_NOTES = []
+
+
+def _note_ppid_walk(reason):
+    with _CASE_LOCK:
+        if reason not in _PPID_WALK_NOTES:
+            _PPID_WALK_NOTES.append(reason)
+
+
+def _proc_children(pid):
+    """Direct children of pid, from the public process-table face (pgrep -P).
+    pgrep exit 1 = "no match" (a normal answer); any other failure means the walk
+    could NOT run, which is noted so the receipt says so."""
+    try:
+        p = subprocess.run(["pgrep", "-P", str(int(pid))],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError) as ex:
+        _note_ppid_walk("pgrep unavailable (%s)" % type(ex).__name__)
+        return []
+    if p.returncode not in (0, 1):
+        _note_ppid_walk("pgrep refused (rc=%d)" % p.returncode)
+        return []
+    out = []
+    for tok in (p.stdout or "").split():
+        try:
+            out.append(int(tok))
+        except ValueError:
+            continue
+    return out
+
+
+def _group_members(pgid):
+    """Every pid still in that process group. A group OUTLIVES its leader, which
+    is why this handle still reaches a reparented same-group child after the
+    case's own child has been reaped. Empty when ps is absent or refused; the
+    group SIGNAL is sent regardless."""
+    try:
+        p = subprocess.run(["ps", "-A", "-o", "pid=,pgid="],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if p.returncode != 0:
+        return []
+    pids = []
+    for line in (p.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            if int(parts[1]) == int(pgid):
+                pids.append(int(parts[0]))
+    return pids
+
+
+def _case_tree_pids(leader_pid):
+    """Every process the case still owns when it is over: the members of its
+    process group plus the transitive children of each member.
+
+    The children walk is the half a group signal cannot do. KI-377's leak is an
+    agent session spawned with start_new_session=True - its own group and its own
+    session, so killpg(leader) never reaches it, but it is still a CHILD of a
+    group member while that parent lives. Snapshot semantics: call BEFORE any
+    signal (a signalled parent reparents its child to pid 1 and a ppid walk over
+    pid 1 is not ours to read). The class that is already parentless when the
+    case ends is the --sweep-orphans entry's job, by construction."""
+    roots = set(_group_members(leader_pid))
+    roots.add(int(leader_pid))
+    tree, frontier = set(), list(roots)
+    while frontier:
+        cur = frontier.pop()
+        for kid in _proc_children(cur):
+            if kid not in tree and kid not in roots:
+                tree.add(kid)
+                frontier.append(kid)
+    tree |= (roots - {int(leader_pid)})
+    return tree
+
+
+def _live_pids(pids):
+    """The subset still alive. A ZOMBIE is terminal: its code is gone and it
+    holds no session - reading it as alive would turn a correct reap into a
+    false red on the row."""
+    pids = {int(p) for p in pids}
+    if not pids:
+        return set()
+    zombies = set()
+    try:
+        p = subprocess.run(["ps", "-A", "-o", "pid=,stat="],
+                           capture_output=True, text=True, timeout=10)
+        if p.returncode == 0:
+            for line in (p.stdout or "").splitlines():
+                parts = line.split()
+                if (len(parts) >= 2 and parts[0].isdigit()
+                        and parts[1][:1] == "Z"):
+                    zombies.add(int(parts[0]))
+    except (OSError, subprocess.SubprocessError):
+        pass   # no ps: fall back to the existence probe alone (honest degrade)
+    return {p for p in pids if p not in zombies and _pid_alive(p)}
+
+
+def _signal_pids(pids, sig):
+    """Best-effort signal per pid: a process that is already gone is a terminal
+    state, never an error (that race is the normal shape)."""
+    for pid in pids:
+        try:
+            os.kill(int(pid), sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
+
+def _wait_dead(pids, grace):
+    """Poll until every pid is terminal or the grace expires; returns the
+    still-live subset (empty = all terminal). Returns as soon as the set is
+    empty, so a cooperative child costs one poll interval, not the grace."""
+    left = {int(p) for p in pids}
+    deadline = time.time() + max(0.0, float(grace))
+    while True:
+        left = _live_pids(left)
+        if not left or time.time() >= deadline:
+            return left
+        time.sleep(_REAP_POLL_S)
+
+
+def _term_then_kill(pids, term_grace=None, kill_grace=None):
+    """TERM, a bounded grace, then KILL for the survivors: returns
+    (survivors, escalated_count). Never raises for an already-dead pid."""
+    pids = {int(p) for p in pids}
+    if not pids:
+        return set(), 0
+    _signal_pids(pids, signal.SIGTERM)
+    left = _wait_dead(pids, _REAP_TERM_GRACE_S if term_grace is None else term_grace)
+    escalated = 0
+    if left:
+        escalated = len(left)
+        _signal_pids(left, signal.SIGKILL)
+        left = _wait_dead(left, _REAP_KILL_GRACE_S if kill_grace is None else kill_grace)
+    return left, escalated
+
+
+def _reap_case_tree(leader_pid, proc=None, tree=None, group_termed=False):
+    """Signal a case's whole tree on a terminal path and return its NAMED
+    receipt: (receipt, survivors).
+
+    Caller contract (ticket t261028-05 requirement 1): every terminal path of a
+    case goes through here - pass, red, timeout, and the runner's own SIGTERM -
+    so no case reports while a descendant it spawned still runs. `proc` (the
+    direct child, when the caller owns the Popen handle) is settled to a terminal
+    state under the same bounded grace. `tree` is a snapshot the CALLER took
+    before its own first signal (the order is load-bearing); `group_termed` says
+    the caller already sent the group's SIGTERM.
+    """
+    targets = {p for p in (tree if tree is not None else _case_tree_pids(leader_pid))
+               if _pid_alive(p)}
+    escalated = 0
+    survivors = set()
+    if targets:
+        if not group_termed:
+            try:
+                os.killpg(int(leader_pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass   # group already gone: the per-pid face below still names it
+        survivors, escalated = _term_then_kill(targets)
+        if survivors:
+            # Re-snapshot before the KILL: a TERM-ignoring descendant may have
+            # forked meanwhile, and a TERMed parent reparents its children (the
+            # group face still holds them, the ppid walk no longer does).
+            fresh = {p for p in _case_tree_pids(leader_pid) if _pid_alive(p)}
+            extra = fresh - targets
+            if extra:
+                try:
+                    os.killpg(int(leader_pid), signal.SIGKILL)
+                except (ProcessLookupError, PermissionError, OSError):
+                    pass
+                more, _ = _term_then_kill(extra, term_grace=0)
+                survivors |= more
+            targets |= extra
+    if proc is not None and proc.poll() is None:
+        # Settlement of the direct child itself (unchanged contract): bounded
+        # wait, then kill, then a last bounded wait; the verdict lands either way.
+        try:
+            proc.wait(timeout=_KILL_GRACE_S)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=_KILL_GRACE_S)
+            except subprocess.TimeoutExpired:
+                pass   # unreapable after two kills: verdict still lands
+    if not targets:
+        receipt = "no live descendants"
+    else:
+        reaped = len(targets) - len(survivors)
+        receipt = "reaped %d descendant%s" % (reaped, "" if reaped == 1 else "s")
+        if escalated:
+            receipt += " (%d ignored SIGTERM; SIGKILL sent)" % escalated
+        if survivors:
+            receipt += "; %d SURVIVED: %s" % (
+                len(survivors), ", ".join(str(p) for p in sorted(survivors)))
+    with _CASE_LOCK:
+        notes = list(_PPID_WALK_NOTES)
+        del _PPID_WALK_NOTES[:]
+    if notes:
+        # Precision over reassurance: the receipt says which half of the sweep
+        # could not look, so "no live descendants" is never a blind claim.
+        receipt += " (ppid walk degraded: %s)" % "; ".join(notes)
+    return receipt, survivors
+
+
+def _register_live_case(name, leader_pid):
+    with _CASE_LOCK:
+        _LIVE_CASES[name] = int(leader_pid)
+
+
+def _unregister_live_case(name):
+    with _CASE_LOCK:
+        _LIVE_CASES.pop(name, None)
+
+
+def _record_receipt(name, receipt):
+    with _CASE_LOCK:
+        _REAP_RECEIPTS[name] = receipt
+
+
+def case_receipt(name):
+    """The NAMED case-exit receipt for this case's row ('' = not judged yet, e.g.
+    the entry never spawned). Read by both row writers (the pool path and the
+    targeted --only path) so the receipt reaches the round log/face instead of
+    living only in this process's memory."""
+    with _CASE_LOCK:
+        return _REAP_RECEIPTS.get(name, "")
+
+
+def _install_case_signal_reap():
+    """The runner's OWN SIGTERM/SIGINT is a terminal path too (requirement 1):
+    before this process dies it reaps every case still in flight, otherwise the
+    default death hands the round's whole process tree to init - the KI-377 shape
+    (a case's children outliving the round that spawned them).
+
+    Installed from the CLI run path only (_cli), never from main(): main() is also
+    called in-process by the gate (verify_lane), whose process already has its own
+    SIGTERM contract - replacing that handler from here would be this ticket's
+    change breaking another component's shutdown."""
+    def _handler(signum, _frame):
+        try:
+            signame = signal.Signals(signum).name
+        except (ValueError, AttributeError):
+            signame = str(signum)
+        with _CASE_LOCK:
+            live = sorted(set(_LIVE_CASES.values()))
+        receipts = []
+        for pid in live:
+            try:
+                receipt, _survivors = _reap_case_tree(pid)
+            except Exception as ex:   # noqa: BLE001 - never die of the reap itself
+                receipt = "reap failed (%s: %s)" % (type(ex).__name__, ex)
+            receipts.append("%d: %s" % (pid, receipt))
+        print("INTEG_RUNNER_SIGNAL %s - reaped %d live case group(s): %s"
+              % (signame, len(live), "; ".join(receipts) or "none"), flush=True)
+        os._exit(128 + int(signum))
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError, RuntimeError):
+            pass   # not the main thread / unsupported: degrade, never raise
+
 
 def _read_back(fhs):
     """Decode both captured output files (replace-chars, per t260911-04 gen3).
@@ -6304,6 +6620,9 @@ def _run_entry(entry):
     # kill (read back AFTER reap; fds closed on every path below).
     out_fh = err_fh = None
     proc = None
+    receipt = ""
+    result = None
+    surviving = set()
     try:
         out_fh = tempfile.TemporaryFile()
         err_fh = tempfile.TemporaryFile()
@@ -6319,30 +6638,19 @@ def _run_entry(entry):
                 fh.close()
         return (name, _SPAWN_FAIL, "spawn 失败: %s: %s" % (type(ex).__name__, ex),
                 time.time() - t_start, t_start, "")
+    # t261028-05: the live-case register is what the runner's own SIGTERM handler
+    # reaps. Registered right after the spawn so no window exists where a case
+    # runs unreachable by the shutdown path.
+    _register_live_case(name, proc.pid)
     try:
         # proc.wait (not communicate): with no pipes to drain it is the honest
         # primitive (review comment 1); the files carry the evidence.
         try:
             proc.wait(timeout=wait_s)
         except subprocess.TimeoutExpired:
-            # The budget is real now: kill the WHOLE session/group (the direct
-            # /bin/sh child AND every grandchild), never only the direct pid.
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass   # already gone / unreapable: still sweep the direct pid below
-            try:
-                proc.wait(timeout=_KILL_GRACE_S)
-            except subprocess.TimeoutExpired:
-                try:
-                    proc.kill()
-                except OSError:
-                    pass
-                try:
-                    proc.wait(timeout=_KILL_GRACE_S)
-                except subprocess.TimeoutExpired:
-                    pass   # unreapable after two SIGKILLs: verdict still lands
             _HUNG_THIS_ROUND.add(name)
+            # Evidence is read BEFORE the reap: the case is hung, so its output
+            # files are still open and the tail must be the state it reached.
             out = _read_back((out_fh, err_fh))
             elapsed = time.time() - t_start
             if budget_s:
@@ -6350,66 +6658,75 @@ def _run_entry(entry):
                 # BY NAME with its elapsed wall time (the entry's own tail is
                 # kept, so the reader still sees the last state it reached).
                 reason = ("ENTRY_BUDGET_EXCEEDED [%s]: ran %.1fs over its "
-                          "declared budget: %ds (waited %ds) — the process "
-                          "group was SIGKILLed" %
+                          "declared budget: %ds (waited %ds) — the case tree was "
+                          "SIGTERMed then SIGKILLed" %
                           (name, elapsed, budget_s, wait_s))
             else:
-                reason = "超时（>%ds，进程组已 SIGKILL）" % CMD_TIMEOUT
-            return (name, -9, reason, elapsed, t_start,
-                    (out + "\n" + reason) if out else reason)
-        # 解码加固（t260911-04 仲裁 gen3 实锤）：输出按替换字符净化，判定仍严格由
-        # 退出码承载——不弱化三态契约，只堵条目丢失/穿透。
-        out = _read_back((out_fh, err_fh))
-        return (name, proc.returncode, out[-1500:], time.time() - t_start,
-                t_start, out)
+                reason = "超时（>%ds，进程组已收到 SIGTERM 与 SIGKILL）" % CMD_TIMEOUT
+            result = (name, -9, reason, elapsed, t_start,
+                      (out + "\n" + reason) if out else reason)
+        else:
+            # 解码加固（t260911-04 仲裁 gen3 实锤）：输出按替换字符净化，判定仍严格由
+            # 退出码承载——不弱化三态契约，只堵条目丢失/穿透。
+            out = _read_back((out_fh, err_fh))
+            result = (name, proc.returncode, out[-1500:],
+                      time.time() - t_start, t_start, out)
     except Exception as e:  # noqa: BLE001
         # 丢单防御（t260910-14 arbitrate gen3）：起跑侧任何异常若穿出到 drain 线程，
         # 该场景将零结果行（gen0 实锤：登记 196 实跑 195、t02 静默消失）——兜底记
         # ENV 口径一行留痕（起跑失败=环境/供给事件，非产品红），计数保持诚实。
         # （6 元组形态随 main 侧协议扩展对齐；OSError 已由 spawn 支路专用码承接。）
-        return (name, 2,
-                "runner 捕获场景进程异常（留痕不静默丢场景）：%r" % (e,),
-                time.time() - t_start, t_start, "")
+        result = (name, 2,
+                  "runner 捕获场景进程异常（留痕不静默丢场景）：%r" % (e,),
+                  time.time() - t_start, t_start, "")
     finally:
-        # Full-terminal-state discipline (t261012-02 arbitrate gen0): the
-        # group is swept on EVERY terminal path — normal and red exits too.
-        # A case that backgrounds a grandchild and exits leaves that
-        # grandchild alive holding the (deleted-but-open) output file: the
-        # pid-51249 orphan class from the ticket body. The session is already
-        # isolated (start_new_session=True), so one bounded killpg(SIGKILL)
-        # here reaches every descendant that did not detach into its own
-        # session; own-session helpers (stage hold legs) are outside the
-        # group by design and stay untouched. fd close also happens on every
-        # path, read-back raising included.
+        # Full-terminal-state discipline (t261012-02 arbitrate gen0), extended by
+        # t261028-05 to EVERY terminal path of the case - pass, red, timeout and
+        # the runner's own SIGTERM: the case's tree is signalled TERM, a bounded
+        # grace, then KILL, and the row carries a NAMED receipt. One reap site,
+        # so no path can return without one.
         if proc is not None:
-            # pgid == proc.pid (the child is its own group leader via
-            # start_new_session=True); getpgid(proc.pid) would FAIL once the
-            # direct child is reaped — exactly the normal/red paths — so the
-            # pid recorded at spawn is the only reliable handle (arbitrate
-            # gen0 leg B evidence: a backgrounded sleep 31 survived the old
-            # getpgid-based sweep).
+            # Snapshot FIRST: a signalled parent reparents its children to pid 1
+            # and the ppid walk goes blind. Then the group face (the t261012-02
+            # contract: the group is signalled from this seam, and a group id
+            # outlives its leader, so it still reaches a reparented same-group
+            # child). The helper then does the per-pid TERM/grace/KILL over the
+            # snapshot - that is the half a group signal cannot reach (KI-377's
+            # agent children, spawned with start_new_session=True).
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (OSError, ProcessLookupError):
-                pass   # group already gone: terminal state
-            if proc.poll() is None:
+                tree = _case_tree_pids(proc.pid)
                 try:
-                    proc.wait(timeout=_KILL_GRACE_S)
-                except subprocess.TimeoutExpired:
-                    try:
-                        proc.kill()
-                    except OSError:
-                        pass
-                    try:
-                        proc.wait(timeout=_KILL_GRACE_S)
-                    except subprocess.TimeoutExpired:
-                        pass   # unreapable after two SIGKILLs: verdict still landed
+                    os.killpg(proc.pid, signal.SIGTERM)
+                except (ProcessLookupError, PermissionError, OSError):
+                    pass   # group already gone: the per-pid face below still names it
+                receipt, surviving = _reap_case_tree(proc.pid, proc, tree=tree,
+                                                     group_termed=True)
+            except Exception as ex:   # noqa: BLE001 - the reap never eats the verdict
+                receipt = "reap failed (%s: %s)" % (type(ex).__name__, ex)
+            _unregister_live_case(name)
+            _record_receipt(name, receipt)
         for fh in (out_fh, err_fh):
             if fh is not None:
                 try:
                     fh.close()
                 except OSError:
                     pass
+    if surviving and result is not None:
+        # Requirement 2: a case that still holds a live descendant when it reports
+        # is a NAMED red - never a green with a live agent session behind it (a
+        # non-green verdict keeps its own code and gains the named note).
+        note = ("LIVE_DESCENDANTS_AFTER_REAP [%s]: pid(s) %s survived SIGTERM then "
+                "SIGKILL — a live session is never a green (KI-377)"
+                % (name, ", ".join(str(p) for p in sorted(surviving))))
+        full = (result[5] + "\n" + note) if result[5] else note
+        if result[1] == 0:
+            return (result[0], _LIVE_DESCENDANTS, note, result[3], result[4], full)
+        return (result[0], result[1], (result[2] + " | " + note) if result[2] else note,
+                result[3], result[4], full)
+    if result is None:   # defensive: no path may drop an entry's result (t260910-14)
+        return (name, 2, "runner 捕获场景进程异常（result 缺席）",
+                time.time() - t_start, t_start, "")
+    return result
 
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -7199,8 +7516,10 @@ def reprobe_main(names) -> int:
                 env_failed += 1
             entries.append({"name": name, "exit": int(code), "dur_s": round(dur, 1)})
             mark = "过" if code == 0 else ("败" if code == 1 else "环境红")
-            print("  复跑 [%s] %s（exit=%s，%.0fs）%s"
-                  % (name, mark, code, dur, tail.strip().replace("\n", " ⏎ ")[:200]),
+            receipt = case_receipt(name)
+            print("  复跑 [%s] %s（exit=%s，%.0fs）%s%s"
+                  % (name, mark, code, dur, tail.strip().replace("\n", " ⏎ ")[:200],
+                     ("（case-exit reap: %s）" % receipt) if receipt else ""),
                   flush=True)
     finally:
         _summary(ran, passed, failed, env_failed, [], "", entries)
@@ -7623,6 +7942,10 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
         return 2
     os.environ[INNER_RUN_ENV] = str(os.getpid())
+    # t261028-05: a round starts with no case-exit receipts (they are per case
+    # name; a stale one must never be printed against a case that did not spawn).
+    with _CASE_LOCK:
+        _REAP_RECEIPTS.clear()
     # t260925-08：引擎缺省已翻 refuse（undeclared=拒收）。集成跑台是测试台：大量场景
     # 以仓内 cwd 直调 ticket/client（身份=undeclared）做同项目票操作，语义上并非跨项目
     # 越权——整台显式选入 record 记名策略，生产面（引擎 spawn 链已注入的 lane agent 与
@@ -8082,6 +8405,12 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         else:
             block = (["FAIL [%s] exit=%d%s" % (name, exit_code, dur_tag)]
                      + [_echo_tail(ln) for ln in tail_out.splitlines()[-6:]])
+        # t261028-05: the case row carries the NAMED case-exit receipt, right
+        # under its verdict (a silent sweep is not acceptable). '' = this entry
+        # never spawned a process (spawn refusal, hung-twice skip, reuse).
+        receipt = case_receipt(name)
+        if receipt:
+            block.insert(1, "  case-exit reap: " + receipt)
         with lock:
             ran += 1
             passed += (exit_code == 0)
@@ -8711,6 +9040,152 @@ def _recursion_guard() -> bool:
     return True
 
 
+# ------------------------------------------- orphan sweep (ticket t261028-05, KI-377)
+#: The agent-child families THIS suite can leave behind when a case dies without
+#: reaping them, and the meaning of each name. `ki067_park_stub` is the agent stub
+#: the t260910-06 audit case hands to a ticket worker (KI-377's measured leak: two
+#: of them alive 25 and 52 minutes past their case); `lane-agent` is the engine's
+#: own agent command shape (agent_activities.py default: `dsh --profile
+#: sandbar-headless`), which is what a lane agent session looks like in the table.
+ORPHAN_FAMILIES = {
+    "ki067_park_stub": "ki067_park_stub",
+    "lane-agent": "sandbar-headless",
+}
+
+#: Never signalled, matched or not (requirement 3's hard floor): the console on
+#: port 3099 is the host's operation face, a ticket worker belongs to the engine,
+#: and the ticket CLI is not this suite's to kill.
+SWEEP_NEVER = ("3099", "stage_console", "console.ts", "worker.py", "ticket.py")
+
+
+def _sweep_snapshot():
+    """pid -> (ppid, etime, command) for every process the host lets us see.
+    Returns (table, error): on failure the caller reports BY NAME and signals
+    nothing (a blind sweep must never look like a clean one)."""
+    try:
+        p = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,etime=,command="],
+                           capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as ex:
+        return None, "ps unavailable (%s: %s)" % (type(ex).__name__, ex)
+    if p.returncode != 0:
+        return None, "ps refused the process table (rc=%d)" % p.returncode
+    table = {}
+    for line in (p.stdout or "").splitlines():
+        parts = line.split(None, 3)
+        if len(parts) < 4 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+        table[int(parts[0])] = (int(parts[1]), parts[2], parts[3])
+    return table, ""
+
+
+def _pid_cwd(pid):
+    """cwd of pid (lsof is the portable face here); '-' when it cannot be read -
+    honest absence, never a fabricated path."""
+    try:
+        p = subprocess.run(["lsof", "-a", "-p", str(int(pid)), "-d", "cwd", "-Fn"],
+                           capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return "-"
+    for line in (p.stdout or "").splitlines():
+        if line.startswith("n") and len(line) > 1:
+            return line[1:]
+    return "-"
+
+
+def _orphan_judgement(pid, table, families):
+    """(is_orphan, matched_family_or_None, keep_reason).
+
+    A process is OURS only when a family pattern matches AND no live parent
+    exists: ppid 1, or a ppid that is not in the visible table. A child whose
+    parent is still ALIVE is never touched - the hard negative rod. The
+    never-touch guard is applied before the orphan test, so a matched console or
+    ticket-worker shape can never be reaped by a pattern accident."""
+    cmd = table[pid][2]
+    matched = None
+    for fam, needle in families.items():
+        if needle in cmd:
+            matched = fam
+            break
+    if matched is None:
+        return False, None, ""
+    for tok in SWEEP_NEVER:
+        if tok in cmd:
+            return False, matched, "never-touch guard (%s)" % tok
+    ppid = table[pid][0]
+    if ppid == 1 or ppid not in table:
+        return True, matched, ""
+    return False, matched, "parent alive (ppid=%d)" % ppid
+
+
+def sweep_orphans(targets=None, apply=False, families=None, out=None):
+    """Find (and with `apply`, reap) agent children whose owning case is gone.
+
+    DRY-RUN by default: nothing is signalled unless apply=True. `targets` are
+    family names from the table (an unknown name is refused BY NAME, never a
+    traceback); `families` overrides the table for a caller that knows its own
+    family (the L1 battery points it at its own fixtures). Returns the process
+    exit code: 0 = report landed (dry-run or all reaped), 1 = some target survived
+    the reap (named), 2 = named refusal (nothing scanned, nothing signalled).
+
+    Scope by construction: only processes whose parent is GONE are candidates, so
+    a live parent case - and therefore any console or ticket worker it holds -
+    is out of reach even before the never-touch guard is applied.
+    """
+    say = out or (lambda line: print(line, flush=True))
+    fams = dict(families or ORPHAN_FAMILIES)
+    if targets:
+        unknown = [t for t in targets if t not in fams]
+        if unknown:
+            say("SWEEP_ERROR [__orphan_sweep__] unknown sweep target(s): %s — "
+                "known families: %s. Nothing was scanned, nothing was signalled."
+                % (", ".join(unknown), ", ".join(sorted(fams))))
+            return 2
+        fams = {k: fams[k] for k in targets}
+    table, err = _sweep_snapshot()
+    if table is None:
+        say("SWEEP_ERROR [__orphan_sweep__] %s — nothing was scanned, nothing "
+            "was signalled." % err)
+        return 2
+    say("SWEEP [__orphan_sweep__] mode=%s families=%s — %s"
+        % ("apply" if apply else "dry-run", ",".join(sorted(fams)),
+           "reaping TERM then KILL" if apply else
+           "no signals are sent (--apply to reap)"))
+    mine = os.getpid()
+    orphans, kept = [], 0
+    for pid in sorted(table):
+        if pid == mine:
+            continue
+        is_orphan, matched, why = _orphan_judgement(pid, table, fams)
+        if matched and not is_orphan:
+            kept += 1
+        if not is_orphan:
+            continue
+        orphans.append({"pid": pid, "ppid": table[pid][0], "pattern": matched,
+                        "age": table[pid][1], "cwd": _pid_cwd(pid)})
+    reaped = survived = 0
+    for row in orphans:
+        action = "would-reap"
+        if apply:
+            left, _escalated = _term_then_kill([row["pid"]])
+            if left:
+                action = "SURVIVED"
+                survived += 1
+            else:
+                action = "reaped"
+                reaped += 1
+        say("SWEEP_ORPHAN pid=%d ppid=%d pattern=%s age=%s cwd=%s action=%s"
+            % (row["pid"], row["ppid"], row["pattern"], row["age"], row["cwd"],
+               action))
+    say("SWEEP_SUMMARY " + json.dumps(
+        {"mode": "apply" if apply else "dry-run",
+         "families": sorted(fams), "scanned": len(table),
+         "orphans": len(orphans), "reaped": reaped, "survived": survived,
+         "kept_live_parent": kept}, ensure_ascii=False))
+    if survived:
+        return 1
+    return 0
+
+
 def _cli(argv):
     import atexit as _atexit
 
@@ -8762,6 +9237,25 @@ def _cli(argv):
         i = argv.index("--print-own-set")
         return print_own_set_declaration(
             argv[i + 1] if i + 1 < len(argv) else "")
+    # --sweep-orphans (t261028-05, KI-377): the orphan-agent face. A read-only
+    # operation (starts no case, takes no round lock), DRY-RUN by default. Each
+    # target must be a family name; an unknown name is refused BY NAME (exit 2).
+    if "--sweep-orphans" in argv:
+        i = argv.index("--sweep-orphans")
+        rest = argv[i + 1:]
+        bad_flags = [t for t in rest if t.startswith("--") and t != "--apply"]
+        if bad_flags:
+            print("SWEEP_ERROR [__orphan_sweep__] unknown flag(s): %s — usage: "
+                  "--sweep-orphans [family ...] [--apply]. Nothing was scanned, "
+                  "nothing was signalled." % ", ".join(bad_flags), flush=True)
+            return 2
+        return sweep_orphans(targets=[t for t in rest if not t.startswith("--")],
+                             apply="--apply" in rest)
+    if "--apply" in argv and "--sweep-orphans" not in argv:
+        print("SWEEP_ERROR [__orphan_sweep__] --apply is only meaningful with "
+              "--sweep-orphans — nothing was scanned, nothing was signalled.",
+              flush=True)
+        return 2
     if not _runner_cap_guard():
         print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
         return 2
@@ -8779,6 +9273,11 @@ def _cli(argv):
         return reprobe_main([x for x in raw.split(",") if x.strip()])
     if _acquire_run_lock() == -1:
         return 2
+    # t261028-05: this process's own SIGTERM/SIGINT is a case terminal path - every
+    # case still in flight is reaped before the round dies. Installed here (the CLI
+    # run path) and not in main(), because main() also runs in-process inside the
+    # gate, which has its own shutdown contract.
+    _install_case_signal_reap()
     # --only（t260922-12 ④）：只跑点名条目；与 --exclude-pools 可叠加。None=未
     # 指定（main 内读 env 缺省面）；空串=显式空名单（=全量跑，与未指定同效）。
     only_raw = None
