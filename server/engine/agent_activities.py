@@ -5903,6 +5903,9 @@ def _repair_foreign_files(tree: Path, foreign: List[str],
     # t261016-11 ③ self-consistency floor: a removal whose module is still
     # imported refuses the WHOLE repair (no rm, no restore, no commit) — a
     # tree that cannot import its own engine is the measured bb73e620 defect.
+    # KI-379: the floor judges importability, so a non-module artifact (a JSON
+    # stamp, a data file) is never an importer hit and never blocks its own
+    # removal; foreign_write.importers_remain owns that judgment.
     planned_rm = [f for f in foreign
                   if isinstance(f, str) and f.strip()
                   and _blob_hash(tree, src, f) is None]
@@ -5914,7 +5917,8 @@ def _repair_foreign_files(tree: Path, foreign: List[str],
                 "self-consistency floor: removing %s would leave importers "
                 "(%s) — the whole repair is refused; the tree must stay "
                 "importable" % (", ".join(m for _i, m in importers[:6]),
-                                "; ".join(sorted({i for i, _m in importers}))[:200]))
+                                "; ".join("%s imports %s" % (i, m)
+                                          for i, m in importers[:6])[:240]))
             return out
     for f in foreign:
         if not isinstance(f, str) or not f.strip():

@@ -1732,6 +1732,10 @@
       "anchor": "behaviour",
       "note": "t261027-26 (KI-382) L1: the acceptance cap's named human lift and the findings-only counter, driven on the REAL main loop with stubbed activities and on the pure faces - the lift grammar/identity/citation truth table, the live filter (TTL/single use/latest wins), the blocked face (byte-identical prefix, only real CLI ops, wake honesty, TTL, single use, judgement tier), the intake write/refuse matrix, the observation route (no named item -> merge_check), the stop classes (empty receipt / environment refusal / front-door refusal -> blocked, counter untouched), a repeated named finding still reaching the cap, the lift consumed at the loop top with no extra walkthrough spawn, the per-round #seq gate on a memoized False face, and the detector shapes (PASS table with fail-closed, FAIL row, prose, Chinese forms, malformed basis, bounds)",
       "sync_path": "server/engine/shared.py; server/engine/dev_lane.py; server/engine/authz_gates.py"
+    },
+    "server/engine/tests/test_t261028_03_foreign_artifact_repair.py": {
+      "anchor": "behaviour",
+      "note": "t261028-04 (KI-379) L1: the foreign repair's self-consistency floor judges importability, not path shape - at the merge_check floor seam over REAL temp git repos, a foreign .json build stamp whose blob main lacks is REMOVED by the sanctioned repair (green item, one engine repair commit, no floor refusal, the ticket's own in-write-set write untouched), a foreign .py that is genuinely still imported is still REFUSED whole by name (the text names the importer file and the module, never <not-a-module>, zero writes, no commit), and with both in one round the artifact is never the reason (whole refusal, artifact left in place, its path absent from the refusal text)"
     }
   },
   "scenarios": {

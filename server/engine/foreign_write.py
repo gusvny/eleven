@@ -204,6 +204,12 @@ def importers_remain(tree_root, module_paths: Iterable,
     and its tail `y`; a bare `m.py` -> `m`) and matched against `import X` /
     `from X import ...` statements parsed with stdlib `ast`.
 
+    The judgment is IMPORTABILITY, not path shape (KI-379): only a `.py` path
+    is a module candidate. A path that cannot be imported — a JSON/text stamp
+    or any other data artifact — contributes NO target and is never reported
+    as an importer hit, so it never blocks its own removal (a build stamp such
+    as `server/plugins/workbench/.build-stamp.json` is exactly that shape).
+
     Fail-closed shapes (never silently read as "no importers"):
       - a `.py` file that cannot be parsed counts as ONE unknown importer pair
         ("<file>", "<unparseable>") — the refusal names it, a human looks;
@@ -220,22 +226,19 @@ def importers_remain(tree_root, module_paths: Iterable,
     import os as _os
     root = _os.fspath(tree_root)
     targets: List[Tuple[str, str]] = []
-    raw_paths: List[str] = []
     for p in module_paths or ():
         if not isinstance(p, str) or not p.strip():
             targets.append(("<malformed>", repr(p)))
             continue
-        raw_paths.append(p)
         rel = p.strip().lstrip("./")
         parts = [x for x in rel.split("/") if x]
-        if parts and parts[-1].endswith(".py"):
-            stem = parts[-1][:-3]
-            dotted = ".".join(parts[:-1] + [stem])
-            for name in ([dotted] if dotted != stem else []) + [stem]:
-                if (name, p) not in targets:
-                    targets.append((name, p))
-        else:
-            targets.append(("<not-a-module>", p))
+        if not parts or not parts[-1].endswith(".py"):
+            continue  # not an importable module: no target, no importer hit
+        stem = parts[-1][:-3]
+        dotted = ".".join(parts[:-1] + [stem])
+        for name in ([dotted] if dotted != stem else []) + [stem]:
+            if (name, p) not in targets:
+                targets.append((name, p))
     names = {t[0] for t in targets if not t[0].startswith("<")}
     out: List[Tuple[str, str]] = []
     seen = set()

@@ -8,6 +8,9 @@ remain must refuse the WHOLE repair, by name, with zero tree writes.
 
 Batteries: dict-backed injected reader (repo-free truth tables) plus real
 tempfile-tree cases (the default reader face) and the deformed-input set.
+KI-379: the floor judges IMPORTABILITY — a non-module path (a JSON/build stamp,
+a data file) is never an importer hit (test_non_module_path_yields_no_importer_hit
+replaced the assertion that pinned the old, defective shape).
 """
 import importlib.util
 import os
@@ -111,10 +114,17 @@ def test_malformed_module_path_still_refuses(tmp_path):
     assert out2 and out2[0][0] == "<malformed>", out2
 
 
-def test_non_module_path_named(tmp_path):
-    root = _tree(tmp_path, ["a.py"])
-    out = fw.importers_remain(root, ["notes/x.md"], read_text=_reader({}))
-    assert out and "<not-a-module>" in out[0], out
+def test_non_module_path_yields_no_importer_hit(tmp_path):
+    # KI-379 rewrite of test_non_module_path_named: the OLD assertion pinned the
+    # defect (a non-module path reported as "<not-a-module>", refusing the whole
+    # repair of a data file such as server/plugins/workbench/.build-stamp.json).
+    # The contract is importability: only a .py path is a module candidate, so a
+    # JSON/text artifact contributes no target and never blocks its own removal.
+    files = {"a.py": "import m\n"}
+    root = _tree(tmp_path, files.keys())
+    out = fw.importers_remain(root, ["notes/x.md", "plugins/w/.build-stamp.json"],
+                              read_text=_reader(files))
+    assert out == [], out
 
 
 def test_duplicate_reporting_is_deduped(tmp_path):
