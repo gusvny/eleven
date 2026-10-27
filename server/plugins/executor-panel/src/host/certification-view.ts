@@ -337,6 +337,23 @@ export function buildRoundsRows(rf: unknown, runs: unknown, engineRunning?: bool
 }
 
 /**
+ * The runs window the certification receipt states (t261027-16 deliverable a):
+ * the adapter keeps the cited runs plus the newest `cap` headers — the receipt
+ * names the bound so the panel repeats it, never a silent truncate. Absent on
+ * older receipts: nothing renders.
+ */
+export function runsWindowNote(win: unknown): string {
+  if (typeof win !== 'object' || win === null || Array.isArray(win)) return ''
+  const w = win as Record<string, unknown>
+  const older = typeof w.older === 'number' && Number.isFinite(w.older) ? w.older : 0
+  if (older <= 0) return ''
+  const shown = typeof w.shown === 'number' ? w.shown : 0
+  const total = typeof w.total === 'number' ? w.total : 0
+  const cap = typeof w.cap === 'number' ? w.cap : 0
+  return `<div class="who" id="certRunsWindow">runs window: showing ${shown} of ${total} run headers (${older} ${ROUND_COPIES.older}, cap ${cap})</div>`
+}
+
+/**
  * The Rounds card's degrade banner: the section's own named error (an
  * unreadable rounds path) — the table above keeps its last readable state
  * (the page holds the last good section; degrade scope is THIS table only).
@@ -483,7 +500,8 @@ export function buildCertificationCore(data: Record<string, unknown>): string {
     + `<div class="card"><h3>${ROUND_COPIES.rounds}</h3><div class="pad">`
     + roundsSectionNote(rf)
     + `<table><thead><tr><th>Round</th><th>${ROUND_COPIES.started}</th><th>${ROUND_COPIES.trigger}</th><th>${ROUND_COPIES.result}</th><th>${ROUND_COPIES.verdict}</th><th title="the revision set the round measured: the line head — what would be delivered if the certified part were promoted">${ROUND_COPIES.measured}</th></tr></thead><tbody id="certRoundRows">${rf ? buildRoundsRows(rf, runs, str(face.roundState) === 'running') : ''}</tbody></table>`
-    + `<div class="who" id="certRunNote">${CERT_COPIES.queuePickup}</div></div></div>`
+    + `<div class="who" id="certRunNote">${CERT_COPIES.queuePickup}</div>`
+    + runsWindowNote(data.runs_window) + '</div></div>'
 }
 
 /**

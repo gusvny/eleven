@@ -5925,6 +5925,10 @@
       "anchor": "behaviour",
       "note": "t261026-25: the docker-carveout disposition holds and the t260905-02 family still runs green on docker - the exception table keeps the three rows with reasons naming the teardown-residue face, each scenario file still carries its own-stage residue+port-release assertions (not migrated; a fork-ruling lift fails here by name on purpose), and each of the three cases runs as its registry cmd to exit 0 with SUMMARY pass>0 fail=0 env_fail=0; child exit 2 is named env_fail per child, any other exit or a missing SUMMARY line is a named failure."
     },
+    "integration/t261027-16/sc_t261027_16_cert_receipt_bounded.py": {
+      "anchor": "behaviour",
+      "note": "t261027-16 L3: the certification read face stays bounded on a fat 3.6k-row run ledger - the real adapter subprocess over an isolated temp projects root answers ok:true under the declared 1,000,000-byte cap with runs_window {shown,total,older} naming the window, per-line runs bounded to the Rounds cap plus cited runs, a cert-cited run older than the window preserved, failed_detail never in the receipt bytes and per-run cases carrying header-level counts only; a deliberately oversized receipt (cap patched at the module seam) refuses 'receipt too large: N bytes, window ...'; the real reader over a stub maxBuffer error refuses by name, never 'not valid JSON', and a healthy receipt still parses carrying runs_window."
+    },
     "integration/t261027-10/sc_t261027_10_dead_holder_sweep_reclaims.py": {
       "anchor": "behaviour",
       "note": "t261027-10 scenario: the proof-of-death sweep drops workflow-gone holders (human-hold included), keeps alive and unknown holders fail-closed with named probe_errors and a bounded wait, refuses a corrupt ledger by name, and proves the reclaim reader-side (state bytes clean, waiter promoted, next acquire immediate)."

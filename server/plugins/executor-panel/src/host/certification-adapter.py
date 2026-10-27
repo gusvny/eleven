@@ -85,6 +85,18 @@ ROUNDS_CAP = 20
 #: A run id is a single path segment of the writer's own minting vocabulary
 #: (`run-YYMMDD-HHMM` family): strict charset, no separators, no `..`.
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+#: The certification receipt's own size cap — the same number the panel spawns
+#: with (certification-reader.ts SPAWN_MAX_BUFFER). The adapter serializes the
+#: receipt BEFORE emitting and refuses BY NAME when it would exceed the cap,
+#: so the reader never again degrades a size death into "not valid JSON"
+#: (t261027-16 deliverable c).
+RECEIPT_MAX_BYTES = 1_000_000
+#: The runs window: the newest N headers the receipt keeps, plus every run a
+#: certification cites (the certification range must stay derivable). The
+#: Rounds section's copy already says older rounds are not shown; the receipt
+#: carries the window itself so the panel can name the bound — never a silent
+#: truncate (t261027-16 deliverable a).
+RUNS_WINDOW_CAP = ROUNDS_CAP
 
 
 def _fail(reason):
@@ -126,6 +138,59 @@ def read_run_headers():
     except OSError as e:
         return None, [], "run headers ledger unreadable: %s (%s)" % (raw, e)
     return headers, bad[:10], None
+
+
+def projected_cases(cases):
+    """Header-level case counts only — the aggregate roll-up the panel's model
+    already reads (verdictFace consumes ran/passed/failed/env_failed). Every
+    per-case payload (failed_detail evidence tails from t261026-15,
+    fail_receipts, the name lists) stays out of the certification face: it
+    belongs to the round dialog's own `round` mode (t261027-16 deliverable b).
+    A header whose `cases` is not an aggregate object yields a named absence —
+    never guessed counts."""
+    if isinstance(cases, dict):
+        out = {}
+        for k in ("ran", "passed", "failed", "env_failed"):
+            v = cases.get(k)
+            out[k] = v if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+        return out
+    return {"ran": 0, "passed": 0, "failed": 0, "env_failed": 0,
+            "absent": "cases unreadable on the run header"}
+
+
+def bounded_runs(headers, cited_ids, cap=RUNS_WINDOW_CAP):
+    """The receipt's run list: every run a certification cites (the
+    certification range must stay derivable) plus the newest `cap` headers by
+    started_at (id tiebreak) — the same "older rounds are not shown" stance
+    the Rounds section's copy declares. Returns (runs, window); the window is
+    stated on the receipt so the panel can name the bound, never silently
+    truncate (t261027-16 deliverable a). Each kept run is projected to
+    header-level counts/verdict/revision only (deliverable b)."""
+    def sort_key(h):
+        st = h.get("started_at")
+        return (st if isinstance(st, (int, float)) and not isinstance(st, bool) else 0,
+                str(h.get("id") or ""))
+
+    ordered = sorted(headers, key=sort_key, reverse=True)
+    seen, runs = set(), []
+
+    def keep(h):
+        hid = h.get("id")
+        if hid in seen:
+            return
+        seen.add(hid)
+        runs.append({"id": hid, "cases": projected_cases(h.get("cases")),
+                     "verdict": h.get("verdict"), "source": h.get("source"),
+                     "started_at": h.get("started_at"), "repos": h.get("repos")})
+
+    for h in ordered[:cap]:
+        keep(h)
+    for h in ordered:
+        if h.get("id") in cited_ids:
+            keep(h)
+    window = {"shown": len(runs), "total": len(headers),
+              "older": max(0, len(headers) - len(runs)), "cap": cap}
+    return runs, window
 
 
 def ticket_meta(project, tickets):
@@ -630,10 +695,13 @@ def main(argv):
     # blockers = fail + env). One caliber, both sides.
     green_ids = {hid for hid, h in by_id.items()
                  if h.get("verdict") == "green"}
-    runs = [{"id": h.get("id"), "cases": h.get("cases"),
-             "verdict": h.get("verdict"),
-             "source": h.get("source"), "started_at": h.get("started_at"),
-             "repos": h.get("repos")} for h in headers]
+    # t261027-16: the receipt's runs are BOUNDED — the certification range
+    # (every run a cert cites) plus the newest RUNS_WINDOW_CAP headers, each
+    # projected to header-level counts/verdict/revision. The judgment above
+    # still reads ALL headers (it needs id+verdict only), so the green
+    # caliber is byte-identical to the unbounded read.
+    cited_ids = {r.get("run") for r in allrows if r.get("kind") == dc.KIND_CERT}
+    runs, runs_window = bounded_runs(headers, cited_ids)
 
     now_ms = int(time.time() * 1000)
     per_line, meta_notes, lost_runs_notes = {}, [], []
@@ -677,7 +745,7 @@ def main(argv):
             per_line[line_id] = {"ok": False,
                                  "reason": "%s: %s" % (type(e).__name__, e)}
 
-    _emit({
+    doc = {
         "ok": True,
         "project": project,
         "lines": [{"line_id": l.line_id, "scope": l.scope, "owner": l.owner}
@@ -685,12 +753,31 @@ def main(argv):
         "per_line": per_line,
         "meta_notes": meta_notes,
         "runs_note": "; ".join(x for x in ([hwhy or ""] + lost_runs_notes) if x),
+        # t261027-16: the runs window the receipt states — the panel names the
+        # bound instead of discovering a silent truncate.
+        "runs_window": runs_window,
         # t261012-03: the Rounds table's own source — the faces the runner
         # publishes at the stable path. A section-level error (unreadable
         # path) degrades the TABLE by name while the rest of the tab's
         # receipt stays usable; it never fails the whole receipt.
         "round_faces": rounds_section,
-    })
+    }
+    # t261027-16 deliverable c: serialize BEFORE emitting; a receipt that
+    # would overflow the panel's spawn buffer refuses BY NAME (tiny refusal,
+    # any buffer survives it) instead of dying as "stdout maxBuffer length
+    # exceeded" and reading back as malformed JSON.
+    payload = json.dumps(doc, ensure_ascii=False, separators=(",", ":"))
+    size = len(payload.encode("utf-8"))
+    if size > RECEIPT_MAX_BYTES:
+        _emit({"ok": False,
+               "reason": "receipt too large: %d bytes, window shown=%d total=%d older=%d cap=%d"
+                         % (size, runs_window["shown"], runs_window["total"],
+                            runs_window["older"], runs_window["cap"]),
+               # the window travels structured too — the panel names the bound
+               # even on the refusal face
+               "runs_window": runs_window})
+        return 0
+    sys.stdout.write(payload + "\n")
     return 0
 
 

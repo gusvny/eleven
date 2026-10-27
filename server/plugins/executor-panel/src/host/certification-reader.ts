@@ -53,6 +53,8 @@ export type CertRead =
       per_line: Record<string, CertLineRead>
       meta_notes: string[]
       runs_note: string
+      /** t261027-16: the runs window the adapter applied to `runs`. */
+      runs_window?: CertRunsWindow
       /** t261012-03: the Rounds table's source — the runner's published faces. */
       round_faces: RoundFacesSection
     }
@@ -63,7 +65,30 @@ export type CertRead =
        *  section when the adapter managed to read it — the Rounds table is
        *  independent of the line declaration's readability. */
       round_faces?: RoundFacesSection
+      /** t261027-16: an oversize refusal names the window it would have
+       *  needed (the adapter's own "receipt too large" refusal). */
+      runs_window?: CertRunsWindow
     }
+
+/** t261027-16: the adapter receipt's runs window — the bound the adapter
+ *  applied to the runs list (deliverable a: the panel names the window,
+ *  never a silent truncate). */
+export interface CertRunsWindow {
+  shown: number
+  total: number
+  older: number
+  cap: number
+}
+
+/** Soft validation for the window the receipt carries: absent on older
+ *  adapters, never guessed. */
+function parseRunsWindow(v: unknown): CertRunsWindow | undefined {
+  if (!isObj(v)) return undefined
+  const nums = ['shown', 'total', 'older', 'cap'].map((k) =>
+    typeof v[k] === 'number' && Number.isFinite(v[k]) ? v[k] : undefined)
+  if (nums.some((n) => n === undefined)) return undefined
+  return { shown: nums[0] as number, total: nums[1] as number, older: nums[2] as number, cap: nums[3] as number }
+}
 
 /** The route's answer: the derived face plus the raw input arrays the panel
  *  needs to build links (certs, runs, outcomes ride along verbatim). */
@@ -76,13 +101,15 @@ export type CertFaceRead =
       face: CertificationFace
       raw: CertificationInput
       notes: string[]
+      /** t261027-16: the runs window the receipt stated (deliverable a). */
+      runs_window?: CertRunsWindow
       /** t261016-09 (D3): the Rounds table's source travels on the SUCCESS
        *  envelope too. It used to ride only the refusal path, so the page saw
        *  `round_faces === undefined` on every readable receipt and the Rounds
        *  table rendered its no-section banner over an empty tbody. */
       round_faces: RoundFacesSection
     }
-  | { ok: false; reason: string; round_faces?: RoundFacesSection }
+  | { ok: false; reason: string; round_faces?: RoundFacesSection; runs_window?: CertRunsWindow }
 
 export type CertReadFace = (
   args: { project: string; line?: string },
@@ -156,6 +183,7 @@ export function parseCertReceipt(stdout: string): CertRead {
     return {
       ok: false,
       reason: typeof doc.reason === 'string' && doc.reason ? doc.reason : 'certification read refused (reason absent)',
+      runs_window: parseRunsWindow(doc.runs_window),
       round_faces: rfSection
         ? {
             dir: typeof rfSection.dir === 'string' ? rfSection.dir : '',
@@ -194,6 +222,7 @@ export function parseCertReceipt(stdout: string): CertRead {
     per_line: perLine,
     meta_notes: Array.isArray(doc.meta_notes) ? (doc.meta_notes as string[]) : [],
     runs_note: typeof doc.runs_note === 'string' ? doc.runs_note : '',
+    runs_window: parseRunsWindow(doc.runs_window),
     round_faces: {
       dir: typeof section?.dir === 'string' ? section.dir : '',
       error: typeof section?.error === 'string'
@@ -273,6 +302,11 @@ function withRunsLedger(
 }
 
 type SpawnResult<T> = { parse: (stdout: string) => T; label: string }
+/** t261027-16: the spawn buffer, named once. The adapter's own size guard
+ *  (RECEIPT_MAX_BYTES, the same number) refuses first in practice; this is
+ *  the honest backstop — an oversize death names itself, it never reads back
+ *  as "not valid JSON". */
+const SPAWN_MAX_BUFFER = 1_000_000
 function spawnAdapter<T>(
   argvTail: string[],
   spec: SpawnResult<T>,
@@ -287,17 +321,26 @@ function spawnAdapter<T>(
     }
     try {
       run(enginePython(opts.env), [scriptPath, ...argvTail],
-        { timeout: opts.timeoutMs ?? 30_000, maxBuffer: 1_000_000, env: opts.env },
+        { timeout: opts.timeoutMs ?? 30_000, maxBuffer: SPAWN_MAX_BUFFER, env: opts.env },
         (err, stdout) => {
           // A non-zero exit may still carry the full JSON receipt on stdout —
           // parseable wins over the error text (same stance as the grants face).
           const out = String(stdout ?? '')
           if (err && out.trim() === '') {
             const killed = (err as NodeJS.ErrnoException & { killed?: boolean }).killed === true
+            const msg = String(err.message ?? err)
+            const code = (err as NodeJS.ErrnoException).code
+            // t261027-16 deliverable c: a size death refuses BY NAME — the
+            // reader cannot know the receipt's byte count, so it names the
+            // buffer it exceeded instead of degrading to "not valid JSON".
+            if (!killed && (code === 'ENOBUFS' || /maxBuffer/i.test(msg))) {
+              finish({ ok: false, reason: `${spec.label} receipt too large: exceeded the ${SPAWN_MAX_BUFFER}-byte spawn buffer (the receipt's own byte count and window are not knowable at the reader)` })
+              return
+            }
             finish({ ok: false, reason: (killed
               ? `${spec.label} timed out and was killed: `
               : `${spec.label} failed: `)
-              + String(err.message ?? err).slice(0, 300) }) // LIST-CAP-OK: error-message length limit, not a list cap
+              + msg.slice(0, 300) }) // LIST-CAP-OK: error-message length limit, not a list cap
             return
           }
           finish(spec.parse(out))
@@ -357,13 +400,14 @@ export async function certificationFace(
   opts: { execFileFn?: typeof execFileCb; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
 ): Promise<CertFaceRead> {
   const read = await spawnCertificationRead(args.project, opts)
-  if (read.ok === false) return { ok: false, reason: read.reason }
+  if (read.ok === false) return { ok: false, reason: read.reason, round_faces: read.round_faces, runs_window: read.runs_window }
   const pick = pickLine(read, args.line)
   if (pick.ok === false) return { ok: false, reason: pick.reason }
   const one = read.per_line[pick.line]
   if (!one) return { ok: false, reason: `line '${pick.line}' has no receipt slice (adapter inconsistency)` }
   if (one.ok === false) return { ok: false, reason: one.reason }
   const face = deriveCertificationFace(one.input)
+  const win = read.runs_window
   return {
     ok: true,
     project: read.project,
@@ -371,7 +415,14 @@ export async function certificationFace(
     lines: read.lines,
     face,
     raw: one.input,
-    notes: [...read.meta_notes, ...(read.runs_note ? [read.runs_note] : [])],
+    notes: [...read.meta_notes,
+      ...(read.runs_note ? [read.runs_note] : []),
+      // t261027-16 deliverable a: the panel names the window, never a silent
+      // truncate — older rounds exist and the bound is stated.
+      ...(win && win.older > 0
+        ? [`runs window: showing ${win.shown} of ${win.total} run headers (${win.older} older not shown, cap ${win.cap})`]
+        : [])],
+    runs_window: win,
     // t261016-09 (D3): the section rides the success envelope (see the type).
     round_faces: read.round_faces,
   }

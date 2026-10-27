@@ -190,5 +190,53 @@ function seedRunsOther(home) {
 assert(typeof certificationAdapterPath() === 'string' && certificationAdapterPath().endsWith('certification-adapter.py'), 'adapter path resolves to its sibling file')
 n += 1
 
+// ---- 5. t261027-16: the size death refuses BY NAME; the window travels ----
+{
+  // the spawn buffer death: execFile answers "stdout maxBuffer length exceeded"
+  // with EMPTY stdout — the refusal must name the size, never "not valid JSON"
+  const stub = (code, msg) => (cmd, args, opts, cb) => {
+    const e = new Error(msg)
+    if (code) e.code = code
+    cb(e, '')
+  }
+  const byCode = await spawnCertificationRead('p', { execFileFn: stub('ENOBUFS', 'spawn ENOBUFS') })
+  assert(byCode.ok === false && byCode.reason.includes('receipt too large')
+    && byCode.reason.includes('spawn buffer'), 'ENOBUFS refuses by name (receipt too large)')
+  assert(!byCode.reason.includes('not valid JSON'), 'the size death never reads back as malformed JSON')
+  const byMsg = await spawnCertificationRead('p', { execFileFn: stub(null, 'stdout maxBuffer length exceeded') })
+  assert(byMsg.ok === false && byMsg.reason.includes('receipt too large'), 'maxBuffer message refuses by name')
+  // a maxBuffer-shaped error WITH a parseable receipt still parses (receipt wins)
+  const withReceipt = await spawnCertificationRead('p', {
+    execFileFn: (cmd, args, opts, cb) => {
+      const e = new Error('stdout maxBuffer length exceeded'); e.code = 'ENOBUFS'
+      cb(e, JSON.stringify({ ok: false, reason: 'receipt too large: 1406555 bytes, window shown=20 total=3600 older=3580 cap=20', runs_window: { shown: 20, total: 3600, older: 3580, cap: 20 } }))
+    },
+  })
+  assert(withReceipt.ok === false && withReceipt.reason.startsWith('receipt too large:')
+    && withReceipt.runs_window && withReceipt.runs_window.total === 3600, 'adapter oversize refusal + window travel verbatim')
+  n += 4
+
+  // the window rides the success receipt; absent on older receipts; a
+  // malformed window degrades to absent (soft validation, never guessed)
+  const mk = (extra) => parseCertReceipt(JSON.stringify({
+    ok: true, project: 'p', lines: [{ line_id: 'l1' }],
+    per_line: { l1: { ok: true, input: {} } }, meta_notes: [], runs_note: '', ...extra,
+  }))
+  const win = mk({ runs_window: { shown: 20, total: 3600, older: 3580, cap: 20 } })
+  assert(win.ok === true && win.runs_window && win.runs_window.older === 3580, 'success receipt carries runs_window')
+  const noWin = mk({})
+  assert(noWin.ok === true && noWin.runs_window === undefined, 'window absent on older receipts (never guessed)')
+  const badWin = mk({ runs_window: { shown: 'many', total: 3600 } })
+  assert(badWin.ok === true && badWin.runs_window === undefined, 'malformed window degrades to absent')
+  n += 3
+
+  // the real adapter on a small ledger: no window, nothing hidden
+  const home = tmp()
+  const runsPath = seedProject(home)
+  const face = await certificationFace({ project: P }, { env: adapterEnv(home, runsPath) })
+  assert(face.ok === true && face.runs_window && face.runs_window.older === 0, 'small ledger: window states nothing hidden (older 0)')
+  n += 1
+}
+
 cleanup(dirs)
 done(n)
