@@ -9,7 +9,15 @@ worker face in a fresh process keeps the contract under test real: a genuinely
 running activity must survive TERM without the fast idle exit arming.
 
 Prints PASS/FAIL lines on stdout; exit 0 = all green, 1 = any red,
-2 = environment (no temporal server / import failure).
+2 = environment (no provisioned Temporal CLI / no temporal server / import
+failure).
+
+The dev server runs from the PROVISIONED Temporal CLI (t261028-07, KI-380):
+$SANDBAR_TEMPORAL_BIN if set, else the repo copy
+server/engine/bin/temporal, resolved by lib_temporal_cli (the same resolution
+point the scenario face uses). The path is handed to start_local as
+dev_server_existing_path, so no code path downloads a CLI; a provisioning miss
+is exit 2 (ENV_FAIL), which the parent relays as an environment red.
 """
 
 import asyncio
@@ -21,11 +29,32 @@ from pathlib import Path
 
 ENGINE = Path(__file__).resolve().parents[2] / "server" / "engine"
 sys.path.insert(0, str(ENGINE))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib_temporal_cli import TemporalCliMissing, resolve_temporal_cli  # noqa: E402
 
 IDLE_DEADLINE_ENV = "SANDBAR_WORKER_IDLE_SHUTDOWN_DEADLINE_SEC"
 
 _failures = []
 _checks = 0
+
+
+def env_fail(reason):
+    """Environment red: print ENV_FAIL and exit 2 (the suite convention)."""
+    print("ENV_FAIL: %s" % reason, flush=True)
+    sys.exit(2)
+
+
+def provision_dev_server_cli():
+    """The provisioned Temporal CLI this face hands to start_local (KI-380).
+
+    A miss is an ENVIRONMENT red naming the env key and the paths looked at,
+    never an assertion failure.
+    """
+    try:
+        return resolve_temporal_cli()
+    except TemporalCliMissing as exc:
+        env_fail(str(exc))
 
 
 def ok(cond, name, evidence=""):
@@ -38,6 +67,10 @@ def ok(cond, name, evidence=""):
 
 
 async def main():
+    # Provision the CLI BEFORE temporalio is imported: a miss is an environment
+    # red and must not even reach the SDK (KI-380: no download, ever).
+    cli = provision_dev_server_cli()
+
     from selfcheck_graceful_stop_probe import CTRL, ProbeWorkflow, guarded_probe
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import Worker
@@ -60,7 +93,18 @@ async def main():
     # real default (1800s) inside a test. The contract is "not cut", not the
     # grace length.
     os.environ["SANDBAR_WORKER_GRACEFUL_SHUTDOWN_SEC"] = "20"
-    async with await WorkflowEnvironment.start_local() as env:
+    # dev_server_existing_path turns the download path off by contract ("If
+    # present, no download will be attempted").
+    try:
+        env_handle = await WorkflowEnvironment.start_local(
+            dev_server_existing_path=cli)
+    except Exception as exc:                     # noqa: BLE001
+        # An unstartable dev server is an environment red, never a content red
+        # (KI-380 was exactly this failure misclassified, freezing the line).
+        env_fail("temporal dev server could not start from the provisioned CLI "
+                 "%s: %s: %s" % (cli, type(exc).__name__, exc))
+
+    async with env_handle as env:
         # Same construction order and shape as selfcheck_worker_graceful_stop
         # (_run_scenario): workflow first, then a plain Worker + run task (the
         # `async with Worker` form trips a validate panic in this SDK build).

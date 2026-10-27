@@ -10,6 +10,16 @@ touches production 3099/7233; the server is one temporalio
 WorkflowEnvironment.start_local on a random port shared by both faces (the
 temporalio runtime admits only ONE ephemeral server per process).
 
+The dev server runs from the PROVISIONED Temporal CLI (t261028-07, KI-380):
+$SANDBAR_TEMPORAL_BIN if set, else the repo copy
+server/engine/bin/temporal, resolved through integration/bench.py (the suite's
+one asset resolver) by lib_temporal_cli.resolve_temporal_cli. The path is
+handed to start_local as dev_server_existing_path, so no code path downloads a
+CLI. A provisioning miss (or a dev server that cannot start from that binary)
+is an environment red: ENV_FAIL exit 2 naming the env key and the paths looked
+for. It must never be booked as a content red — a network condition did exactly
+that once and froze the line.
+
 User-perceivable behavior under contract (the 261019 incident, twice measured):
   A TERM an idle worker -> the process is GONE in seconds and exits 0.
     Pre-fix it logged "no in-flight agent activities" and then pinned for
@@ -52,6 +62,11 @@ ENGINE = ROOT / "server" / "engine"
 VENV_PY = ENGINE / ".venv" / "bin" / "python"
 WORKER_PY = ENGINE / "worker.py"
 
+# The provisioned-CLI resolution (KI-380) lives next to this file and is shared
+# with the face B driver; it is the ONE place that decides which binary runs.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib_temporal_cli import TemporalCliMissing, resolve_temporal_cli  # noqa: E402
+
 IDLE_DEADLINE_ENV = "SANDBAR_WORKER_IDLE_SHUTDOWN_DEADLINE_SEC"
 
 # Wall-clock budget (a guardrail; the assertion is the order of magnitude):
@@ -76,6 +91,20 @@ def ok(cond, name, evidence=""):
 def env_fail(reason):
     print("ENV_FAIL: %s" % reason, flush=True)
     sys.exit(2)
+
+
+def provision_dev_server_cli():
+    """The provisioned Temporal CLI this scenario hands to start_local.
+
+    KI-380: start_local() without an existing binary path makes temporalio
+    download the CLI; a slow or refused download surfaced as a content red. A
+    miss here is an ENVIRONMENT red (ENV_FAIL exit 2) naming the env key and
+    the paths looked at — never an assertion failure.
+    """
+    try:
+        return resolve_temporal_cli()
+    except TemporalCliMissing as exc:
+        env_fail(str(exc))
 
 
 # ---- Face A/C: REAL worker.py process, idle, TERM -> gone in seconds --------
@@ -175,6 +204,10 @@ def _face_b():
 
 
 async def _main():
+    # Provision the CLI BEFORE temporalio is imported: a miss is an environment
+    # red and must not even reach the SDK (KI-380: no download, ever).
+    cli = provision_dev_server_cli()
+
     from temporalio.testing import WorkflowEnvironment
 
     if not VENV_PY.exists():
@@ -189,7 +222,18 @@ async def _main():
     port = s.getsockname()[1]
     s.close()
 
-    async with await WorkflowEnvironment.start_local(port=port) as env:
+    # dev_server_existing_path turns the download path off by contract: the SDK
+    # documents "If present, no download will be attempted".
+    try:
+        env_handle = await WorkflowEnvironment.start_local(
+            port=port, dev_server_existing_path=cli)
+    except Exception as exc:                     # noqa: BLE001
+        # An unstartable dev server is an environment red. KI-380 was exactly
+        # this failure booked as a content red and freezing the line.
+        env_fail("temporal dev server could not start from the provisioned CLI "
+                 "%s: %s: %s" % (cli, type(exc).__name__, exc))
+
+    async with env_handle as env:
         await _face_a(env, "127.0.0.1:%d" % port)
         _face_b()
 
