@@ -2,339 +2,6 @@ window.__ModuleLoader__.load({ id: "sandbar-workbench", factory: (require) => { 
 Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 let react = require("react");
 let react_jsx_runtime = require("react/jsx-runtime");
-//#region src/client/problems-model.ts
-const asString$1 = (v) => typeof v === "string" ? v : "";
-const asFinite = (v) => typeof v === "number" && Number.isFinite(v) ? v : null;
-/** gate_runs 末条（容忍 detail/gate_runs 畸形：非对象/非数组 → undefined）。 */
-function lastGateRun(detail) {
-	if (detail === null || typeof detail !== "object") return void 0;
-	const runs = detail.gate_runs;
-	if (!Array.isArray(runs) || runs.length === 0) return void 0;
-	const g = runs[runs.length - 1];
-	return g !== null && typeof g === "object" ? g : void 0;
-}
-/** gate 的展示标签：label 优先、stage 兜底，畸形 → 'gate'。 */
-function gateStageLabel(g) {
-	if (!g) return "gate";
-	return asString$1(g.label) || asString$1(g.stage) || "gate";
-}
-/** merge_check 形态：checks 数组里的红项 → 行（项内畸形逐条跳过不抛）。 */
-function rowsFromChecks(checks) {
-	if (!Array.isArray(checks)) return [];
-	const out = [];
-	for (let i = 0; i < checks.length; i++) {
-		const c = checks[i];
-		if (c === null || typeof c !== "object") continue;
-		const co = c;
-		if (co.green === true) continue;
-		const item = asString$1(co.item) || asString$1(co.id) || `check #${i}`;
-		out.push({
-			key: `check-${i}-${item}`,
-			text: `merge_check red: ${item}`,
-			dim: asString$1(co.detail) || void 0
-		});
-	}
-	return out;
-}
-/** 轻道闸形态（无 checks 键）：自带字段 → 人话原因行。 */
-function rowsFromLightGate(g) {
-	const out = [];
-	const err = asString$1(g.error);
-	if (err) out.push({
-		key: "error",
-		text: `gate error: ${err}`
-	});
-	const counts = g.counts;
-	if (counts !== null && typeof counts === "object" && !Array.isArray(counts)) {
-		const parts = [];
-		for (const [k, v] of Object.entries(counts)) {
-			const n = asFinite(v);
-			if (n !== null) parts.push(`${k}=${n}`);
-		}
-		if (parts.length > 0) out.push({
-			key: "counts",
-			text: `gate counts: ${parts.join(" / ")}`
-		});
-	}
-	const red = asFinite(g.red_count);
-	if (red !== null && red > 0) out.push({
-		key: "red_count",
-		text: `${red} red item(s) this round`
-	});
-	const exit = asFinite(g.exit_code);
-	if (exit !== null && exit !== 0) out.push({
-		key: "exit_code",
-		text: `exit_code=${exit}`
-	});
-	return out;
-}
-/**
-* gate_runs 末条 → 原因行（问题区主数据源，形态容忍）：
-* - red（green === false）：checks 形态走逐项行；否则走轻道自带字段；
-*   两面都空也要点名「该闸红但无明细」（绝不静默空白）。
-* - 非 red / 畸形 / 缺席：空数组（调用方回落 timeline reason / 兜底行）。
-*/
-function gateProblemRows(detail) {
-	const g = lastGateRun(detail);
-	if (!g || g.green !== false) return [];
-	const label = gateStageLabel(g);
-	const rows = Array.isArray(g.checks) ? rowsFromChecks(g.checks) : rowsFromLightGate(g);
-	if (rows.length === 0) rows.push({
-		key: "no-detail",
-		text: `${label}: red (no per-item detail recorded)`
-	});
-	return rows;
-}
-/**
-* 槽条目渲染崩溃 → 边界 fallback 文案（t261001-11 第二缺陷：一个坏记录
-* 曾能打掉整个侧栏——现在边界兜住，点名故障、其余 UI 存活）。
-* 畸形 error（非 Error/空 message）也有可读文案，绝不渲染空白。
-*/
-function slotFaultMessage(error) {
-	return `Workbench panel crashed while rendering: ${(error instanceof Error ? error.message : typeof error === "string" ? error : "") || "unknown fault"} — the rest of the console stays usable.`;
-}
-//#endregion
-//#region ../knowledge/src/client/markdown.ts
-/**
-* markdown.ts — 无依赖的轻量 Markdown 渲染器（供 sandbar-knowledge 知识库插件用）。
-*
-* 支持（docs knowledge-base-design §5.1）：
-*   - 标题（#~######）、表格（GFM）、围栏代码块（带语法高亮 + 复制按钮）、
-*     块引用、有序/无序列表、分隔线、段落
-*   - 行内：粗体/斜体/删除线、行内代码、链接、图片
-*
-* 安全口径：先转义所有文本再拼 HTML；链接 URL 拒绝 javascript:/data:/vbscript:。
-* 纯函数（string → string），不碰 DOM，方便 node 冒烟。
-*/
-function escapeHtml(s) {
-	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-function safeUrl(url) {
-	const u = url.trim();
-	if (/^(javascript|data|vbscript):/i.test(u)) return "#";
-	return u;
-}
-function inline(text) {
-	return escapeHtml(text).split(/`([^`]*)`/g).map((p, idx) => {
-		if (idx % 2 === 1) return `<code>${p}</code>`;
-		return inlineFormat(p);
-	}).join("");
-}
-function inlineFormat(s) {
-	s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt, url) => `<img alt="${alt}" src="${safeUrl(url)}" />`);
-	s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, txt, url) => `<a href="${safeUrl(url)}">${txt}</a>`);
-	s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-	s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-	s = s.replace(/(^|[^0-9A-Za-z_])__([^_]+)__(?![0-9A-Za-z_])/g, "$1<strong>$2</strong>");
-	s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
-	s = s.replace(/(^|[^0-9A-Za-z_])_([^_\n]+)_(?![0-9A-Za-z_])/g, "$1<em>$2</em>");
-	return s;
-}
-const KEYWORDS_JS = "const|let|var|function|return|if|else|for|while|import|export|from|class|interface|type|new|async|await|this|extends|implements|public|private|readonly|typeof|of|in|throw|try|catch|finally|switch|case|break|default";
-const KEYWORDS_PY = "def|return|import|from|if|elif|else|for|while|class|try|except|finally|with|as|not|in|is|lambda|yield|raise|None|True|False|and|or|pass|global|nonlocal";
-const KEYWORDS_BASH = "if|then|else|fi|for|while|do|done|case|esac|function|echo|export|local|return|source|cd|set|unset";
-const KEYWORDS_JSON = "true|false|null";
-function specOf(lang) {
-	const l = lang.toLowerCase();
-	if ([
-		"js",
-		"javascript",
-		"ts",
-		"tsx",
-		"typescript",
-		"jsx"
-	].includes(l)) return { re: new RegExp(`(?<comment>\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)|(?<string>'[^'\\n]*'|"[^"\\n]*"|\`[^\`]*\`)|(?<kw>\\b(?:${KEYWORDS_JS})\\b)|(?<num>\\b\\d+(?:\\.\\d+)?\\b)`) };
-	if (["py", "python"].includes(l)) return { re: new RegExp(`(?<comment>#[^\\n]*)|(?<string>'[^'\\n]*'|"[^"\\n]*")|(?<kw>\\b(?:${KEYWORDS_PY})\\b)|(?<num>\\b\\d+(?:\\.\\d+)?\\b)`) };
-	if ([
-		"bash",
-		"sh",
-		"shell",
-		"zsh"
-	].includes(l)) return { re: new RegExp(`(?<comment>#[^\\n]*)|(?<string>'[^'\\n]*'|"[^"\\n]*")|(?<var>\\$\\w+|\\$\\{[^}]+\\})|(?<kw>\\b(?:${KEYWORDS_BASH})\\b)|(?<num>\\b\\d+\\b)`) };
-	if (["json"].includes(l)) return { re: new RegExp(`(?<string>"(?:\\\\.|[^"\\\\])*")|(?<kw>\\b(?:${KEYWORDS_JSON})\\b)|(?<num>-?\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b)`) };
-	if (["yaml", "yml"].includes(l)) return { re: new RegExp(`(?<comment>#[^\\n]*)|(?<string>'[^'\\n]*'|"[^"\\n]*")|(?<kw>\\b(?:${KEYWORDS_JSON})\\b)|(?<num>\\b\\d+(?:\\.\\d+)?\\b)`) };
-	if ([
-		"html",
-		"xml",
-		"css",
-		"scss",
-		"less"
-	].includes(l)) return { re: new RegExp(`(?<comment>\\/\\*[\\s\\S]*?\\*\\/|<!--[\\s\\S]*?-->)|(?<string>'[^'\\n]*'|"[^"\\n]*")|(?<num>#?[0-9a-fA-F]{3,8}\\b|\\b\\d+(?:\\.\\d+)?(?:px|em|rem|%|vh|vw)?\\b)`) };
-	return { re: new RegExp(`(?<comment>\\/\\/[^\\n]*|#[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)|(?<string>'[^'\\n]*'|"[^"\\n]*"|\`[^\`]*\`)|(?<num>\\b\\d+(?:\\.\\d+)?\\b)`) };
-}
-const TOKEN_CLASS = {
-	comment: "tok-c",
-	string: "tok-s",
-	kw: "tok-k",
-	num: "tok-n",
-	var: "tok-v"
-};
-function highlight(code, lang) {
-	const { re } = specOf(lang);
-	let out = "";
-	let i = 0;
-	let guard = 0;
-	while (i < code.length) {
-		const sub = code.slice(i);
-		const m = re.exec(sub);
-		if (!m) {
-			out += escapeHtml(sub);
-			break;
-		}
-		if (m.index > 0) out += escapeHtml(sub.slice(0, m.index));
-		const g = m.groups ?? {};
-		const cls = Object.keys(g).find((k) => g[k] !== void 0) ?? "";
-		const span = cls && TOKEN_CLASS[cls] ? `<span class="${TOKEN_CLASS[cls]}">${escapeHtml(m[0])}</span>` : escapeHtml(m[0]);
-		out += span;
-		i += m.index + m[0].length;
-		if (++guard > 1e5) {
-			out += escapeHtml(code.slice(i));
-			break;
-		}
-	}
-	return out;
-}
-function codeBlock(code, lang) {
-	const body = lang ? highlight(code, lang) : escapeHtml(code);
-	return `<div class="md-code">${lang ? `<span class="md-cl">${escapeHtml(lang)}</span>` : ""}<button class="md-copy" data-code="${encodeURIComponent(code)}">复制</button><pre><code>${body}\n</code></pre></div>`;
-}
-/** 把源码按行拆成 HTML。 */
-function renderMarkdown(src) {
-	const lines = src.replace(/\r\n?/g, "\n").split("\n");
-	let html = "";
-	let i = 0;
-	const n = lines.length;
-	const isBlank = (s) => s.trim() === "";
-	while (i < n) {
-		const line = lines[i];
-		if (isBlank(line)) {
-			i++;
-			continue;
-		}
-		const fence = line.match(/^```\s*([\w+-]*)/);
-		if (fence) {
-			const lang = fence[1] ?? "";
-			const buf = [];
-			i++;
-			while (i < n && !/^```\s*$/.test(lines[i])) {
-				buf.push(lines[i]);
-				i++;
-			}
-			if (i < n) i++;
-			html += codeBlock(buf.join("\n"), lang);
-			continue;
-		}
-		if (/^ {4}/.test(line)) {
-			const buf = [];
-			while (i < n && (/^ {4}/.test(lines[i]) || isBlank(lines[i]))) {
-				buf.push(lines[i].replace(/^ {4}/, ""));
-				i++;
-			}
-			html += codeBlock(buf.join("\n"), "");
-			continue;
-		}
-		const h = line.match(/^(#{1,6})\s+(.*)$/);
-		if (h) {
-			html += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`;
-			i++;
-			continue;
-		}
-		if (/^\s*(---+|\*\*\*+|___+)\s*$/.test(line)) {
-			html += "<hr/>";
-			i++;
-			continue;
-		}
-		if (/^>\s?/.test(line)) {
-			const buf = [];
-			while (i < n && /^>\s?/.test(lines[i])) {
-				buf.push(lines[i].replace(/^>\s?/, ""));
-				i++;
-			}
-			html += `<blockquote>${buf.map(inline).join("<br/>")}</blockquote>`;
-			continue;
-		}
-		if (line.includes("|") && i + 1 < n && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes("-")) {
-			const headerCells = splitRow(line);
-			i += 2;
-			const rows = [];
-			while (i < n && lines[i].includes("|") && !isBlank(lines[i])) {
-				rows.push(splitRow(lines[i]));
-				i++;
-			}
-			let t = "<table><thead><tr>" + headerCells.map((c) => `<th>${inline(c)}</th>`).join("") + "</tr></thead><tbody>";
-			for (const r of rows) t += "<tr>" + r.map((c) => `<td>${inline(c)}</td>`).join("") + "</tr>";
-			t += "</tbody></table>";
-			html += t;
-			continue;
-		}
-		const ul = line.match(/^\s*([-*+])\s+(.*)$/);
-		const ol = line.match(/^\s*(\d+)\.\s+(.*)$/);
-		if (ul || ol) {
-			const isOl = !!ol;
-			const items = [];
-			while (i < n) {
-				const m = isOl ? lines[i].match(/^\s*\d+\.\s+(.*)$/) : lines[i].match(/^\s*[-*+]\s+(.*)$/);
-				if (!m) break;
-				items.push(inline(m[1]));
-				i++;
-			}
-			const tag = isOl ? "ol" : "ul";
-			html += `<${tag}>` + items.map((it) => `<li>${it}</li>`).join("") + `</${tag}>`;
-			continue;
-		}
-		const buf = [line];
-		i++;
-		while (i < n && !isBlank(lines[i]) && !/^(#{1,6}\s|```|>\s?|\s*[-*+]\s|\s*\d+\.\s)/.test(lines[i])) {
-			buf.push(lines[i]);
-			i++;
-		}
-		html += `<p>${buf.map(inline).join("<br/>")}</p>`;
-	}
-	return html;
-}
-function splitRow(line) {
-	let s = line.trim();
-	if (s.startsWith("|")) s = s.slice(1);
-	if (s.endsWith("|")) s = s.slice(0, -1);
-	return s.split("|").map((c) => c.trim());
-}
-//#endregion
-//#region ../knowledge/src/shared/blocks.ts
-/** 表格行 → 单元格数组（client 做单元格级对齐也用）。 */
-function splitCells$1(line) {
-	let s = line.trim();
-	if (s.startsWith("|")) s = s.slice(1);
-	if (s.endsWith("|")) s = s.slice(0, -1);
-	return s.split("|").map((c) => c.trim());
-}
-//#endregion
-//#region src/shared/parts.ts
-const PART_ICON = {
-	agent: "🤖",
-	script: "⚙️",
-	human: "👤"
-};
-/** 悬停说明里的人读标签。 */
-const PART_LABEL = {
-	agent: "agent",
-	script: "script / programmatic",
-	human: "human"
-};
-/** 徽标串：parts 直接拼接（如 ['agent','script'] → '🤖⚙️'）；空/undefined → '—'。 */
-function partsIcons(parts) {
-	if (!parts || parts.length === 0) return "—";
-	return parts.map((p) => PART_ICON[p] ?? "❓").join("");
-}
-/** 悬停一行说明：「执行主体：🤖 agent 执行 + ⚙️ 脚本/程序化」；空/undefined → 旧数据口径说明。 */
-function partsTitle(parts) {
-	if (!parts || parts.length === 0) return "Executed by: — (legacy data has no static parts declaration; actual runtime is authoritative)";
-	return `Executed by: ${parts.map((p) => {
-		const icon = PART_ICON[p];
-		const label = PART_LABEL[p];
-		return icon ? `${icon} ${label}` : `❓ unknown executor ${p}`;
-	}).join(" + ")} (static declaration; dynamic source of truth = Temporal history)`;
-}
-//#endregion
 //#region src/client/lane-states.ts
 /** 就地段信号（t260912-03 授权通道 authorized / retry_qc 信号 retry-requested）：
 *  引擎 raw append 落当前段、不重进段——显示口径见规则 2 的受阻期判定。 */
@@ -1338,7 +1005,7 @@ function laneMapScene(model) {
 		cursor
 	};
 }
-function asString(v) {
+function asString$1(v) {
 	return typeof v === "string" ? v : "";
 }
 function asStringArray$1(v) {
@@ -1357,7 +1024,7 @@ function firstClockMs(detail) {
 	if (!Array.isArray(detail.timeline)) return null;
 	for (const e of detail.timeline) {
 		if (e === null || typeof e !== "object") continue;
-		const at = asString(e.at);
+		const at = asString$1(e.at);
 		if (!at) continue;
 		const ms = Date.parse(at);
 		if (Number.isFinite(ms)) return ms;
@@ -1379,9 +1046,9 @@ function parseTopology(raw) {
 	for (const n of r.nodes) {
 		if (n === null || typeof n !== "object") continue;
 		const o = n;
-		const id = asString(o.id);
-		const label = asString(o.label);
-		const kind = asString(o.kind);
+		const id = asString$1(o.id);
+		const label = asString$1(o.label);
+		const kind = asString$1(o.kind);
 		if (!id || !label) continue;
 		if (kind !== "agent" && kind !== "gate" && kind !== "human") continue;
 		if (ids.has(id)) continue;
@@ -1390,9 +1057,9 @@ function parseTopology(raw) {
 			id,
 			label,
 			kind,
-			role: asString(o.role),
+			role: asString$1(o.role),
 			parts: asStringArray$1(o.parts),
-			...asString(o.optional) ? { optional: asString(o.optional) } : {}
+			...asString$1(o.optional) ? { optional: asString$1(o.optional) } : {}
 		});
 	}
 	if (nodes.length === 0) return null;
@@ -1406,18 +1073,18 @@ function parseTopology(raw) {
 	if (Array.isArray(r.groups)) for (const g of r.groups) {
 		if (g === null || typeof g !== "object") continue;
 		const o = g;
-		const id = asString(o.id);
+		const id = asString$1(o.id);
 		const members = asStringArray$1(o.members).filter((m) => ids.has(m));
 		if (id && members.length >= 2) groups.push({
 			id,
 			members,
-			phase: asString(o.phase)
+			phase: asString$1(o.phase)
 		});
 	}
 	return {
-		version: asString(r.version) || void 0,
-		template: asString(r.template) || "unknown",
-		name: asString(r.name) || void 0,
+		version: asString$1(r.version) || void 0,
+		template: asString$1(r.template) || "unknown",
+		name: asString$1(r.name) || void 0,
 		nodes,
 		edges,
 		groups
@@ -1429,16 +1096,16 @@ function timelineOf(detail) {
 	for (const e of detail.timeline) {
 		if (e === null || typeof e !== "object") continue;
 		const o = e;
-		const stage = asString(o.stage);
-		const state = asString(o.state);
+		const stage = asString$1(o.stage);
+		const state = asString$1(o.state);
 		if (!stage || !state) continue;
 		out.push({
 			stage,
 			state,
-			at: asString(o.at) || void 0,
-			reason: asString(o.reason) || void 0,
+			at: asString$1(o.at) || void 0,
+			reason: asString$1(o.reason) || void 0,
 			gen: typeof o.gen === "number" && Number.isFinite(o.gen) ? o.gen : void 0,
-			phase: asString(o.phase) || void 0
+			phase: asString$1(o.phase) || void 0
 		});
 	}
 	return out;
@@ -1464,11 +1131,11 @@ function handoffsOf(detail) {
 	for (const h of detail.handoffs) {
 		if (h === null || typeof h !== "object") continue;
 		const o = h;
-		const stage = asString(o.stage);
+		const stage = asString$1(o.stage);
 		if (!stage) continue;
 		out.push({
 			stage,
-			summary: asString(o.summary) || void 0,
+			summary: asString$1(o.summary) || void 0,
 			gen: typeof o.gen === "number" && Number.isFinite(o.gen) ? o.gen : void 0
 		});
 	}
@@ -1566,9 +1233,94 @@ function rowVerdict(co) {
 	return signals.every((s) => s === true);
 }
 /**
+* THE receipt-row accessor (t261028-48). This is the only place that decides
+* what a `gate_runs[*].checks[*]` row is called and whether it is green; every
+* reader of the receipt face goes through it, so the faces cannot disagree
+* about the same engine data (host methodology 260907: one reported symptom is
+* a sample of a family).
+*
+* Reads BOTH engine shapes (measured on live faces, t261028-46):
+*   - SCRIPT gates: `{check, level: 'green'|'red', count}` — no `item`,
+*     no `green`;
+*   - AGENT/HUMAN gates: `{item, by, done, green, id, detail, note, …}`.
+* Name = `item` || `check` || `id`; verdict = green || level || verdict ||
+* done (conflicting signals resolve red). Detail/note/count/reason_code/
+* files/next_action are carried verbatim.
+*
+* Returns null only for a row that carries nothing: a malformed value, a blank
+* scalar, or a green row with neither a name nor a payload. A red row is
+* always returned — an unproven receipt is shown, never hidden.
+*/
+function receiptRowView(raw) {
+	if (typeof raw === "string" || typeof raw === "number") {
+		const text = String(raw).trim();
+		return text ? {
+			green: false,
+			item: text
+		} : null;
+	}
+	if (raw === null || typeof raw !== "object") return null;
+	const co = raw;
+	const green = rowVerdict(co) === true;
+	const checkId = asString$1(co.id) || void 0;
+	const name = asString$1(co.item) || asString$1(co.check) || checkId || "";
+	const detail = asString$1(co.detail) || void 0;
+	const note = asString$1(co.note) || void 0;
+	const count = typeof co.count === "number" && Number.isFinite(co.count) ? co.count : void 0;
+	if (green && !name && !detail && !note && count === void 0) return null;
+	return {
+		green,
+		item: name || UNNAMED_CHECK,
+		detail,
+		note,
+		count,
+		checkId,
+		reasonCode: asString$1(co.reason_code) || void 0,
+		files: asStringArray$1(co.files),
+		nextAction: asString$1(co.next_action) || void 0
+	};
+}
+/** Every informative row of one `checks` array, through the one accessor. */
+function receiptRowViews(checks) {
+	if (!Array.isArray(checks)) return [];
+	const out = [];
+	for (const c of checks) {
+		const v = receiptRowView(c);
+		if (v !== null) out.push(v);
+	}
+	return out;
+}
+/**
+* Run-level verdict through the same field reader the rows use (script-gate
+* run rows may write `level`/`verdict`; agent runs write `green`). No written
+* verdict -> {green: undefined, source: 'rows'}, never an invented green.
+*/
+function readGateRunVerdict(run) {
+	const wroteGreen = receiptBool(run.green);
+	const wroteLevel = receiptBool(run.level);
+	const wroteVerdict = receiptBool(run.verdict);
+	if (wroteGreen !== void 0) return {
+		green: wroteGreen,
+		source: "green"
+	};
+	if (wroteLevel !== void 0) return {
+		green: wroteLevel,
+		source: "level"
+	};
+	if (wroteVerdict !== void 0) return {
+		green: wroteVerdict,
+		source: "verdict"
+	};
+	return {
+		green: void 0,
+		source: "rows"
+	};
+}
+/**
 * gate_runs → Check-details row model (newest run first). Reads both receipt
-* shapes with one implementation. Malformed entries degrade row by row and
-* never throw; a row that carries information is never dropped.
+* shapes through the one accessor (receiptRowView / readGateRunVerdict).
+* Malformed entries degrade row by row and never throw; a row that carries
+* information is never dropped.
 */
 function buildChecksDetail(detail) {
 	if (detail === null || typeof detail !== "object") return [];
@@ -1578,53 +1330,20 @@ function buildChecksDetail(detail) {
 	for (const run of [...runs].reverse()) {
 		if (run === null || typeof run !== "object") continue;
 		const o = run;
-		const stage = asString(o.stage);
+		const stage = asString$1(o.stage);
 		if (!stage) continue;
-		const rows = [];
-		if (Array.isArray(o.checks)) for (const c of o.checks) {
-			if (typeof c === "string" || typeof c === "number") {
-				const text = String(c).trim();
-				if (text) rows.push({
-					green: false,
-					item: text
-				});
-				continue;
-			}
-			if (c === null || typeof c !== "object") continue;
-			const co = c;
-			const green = rowVerdict(co) === true;
-			const checkId = asString(co.id) || void 0;
-			const name = asString(co.item) || asString(co.check) || checkId || "";
-			const detailText = asString(co.detail) || void 0;
-			const note = asString(co.note) || void 0;
-			const count = typeof co.count === "number" && Number.isFinite(co.count) ? co.count : void 0;
-			if (green && !name && !detailText && !note && count === void 0) continue;
-			rows.push({
-				green,
-				item: name || UNNAMED_CHECK,
-				detail: detailText,
-				note,
-				count,
-				checkId,
-				reasonCode: asString(co.reason_code) || void 0,
-				files: asStringArray$1(co.files),
-				nextAction: asString(co.next_action) || void 0
-			});
-		}
+		const rows = receiptRowViews(o.checks);
 		const rowsGreen = rows.every((r) => r.green);
-		const wroteGreen = receiptBool(o.green);
-		const wroteLevel = receiptBool(o.level);
-		const wroteVerdict = receiptBool(o.verdict);
-		const written = wroteGreen !== void 0 ? wroteGreen : wroteLevel !== void 0 ? wroteLevel : wroteVerdict;
-		const verdictSource = wroteGreen !== void 0 ? "green" : wroteLevel !== void 0 ? "level" : wroteVerdict !== void 0 ? "verdict" : "rows";
+		const verdict = readGateRunVerdict(o);
+		const written = verdict.green;
 		const redCount = typeof o.red_count === "number" && Number.isFinite(o.red_count) ? o.red_count : rows.filter((r) => !r.green).length;
 		const contradiction = rows.length > 0 && written !== rowsGreen || written === true && redCount > 0;
 		out.push({
 			stage,
-			label: asString(o.label) || stage,
+			label: asString$1(o.label) || stage,
 			green: written !== void 0 ? written : rowsGreen,
 			redCount,
-			verdictSource,
+			verdictSource: verdict.source,
 			rowsGreen,
 			disagreement: written !== void 0 && contradiction,
 			gen: typeof o.gen === "number" && Number.isFinite(o.gen) ? o.gen : void 0,
@@ -1731,7 +1450,7 @@ function buildLaneMap(topologyRaw, detailRaw, opts) {
 		return g ? g.members : [nodes[id]].filter(Boolean);
 	};
 	const isLive = (m) => m.vis === "running" || m.vis === "awaiting-human" || m.vis === "blocked";
-	const ptr = asString(detail.stage);
+	const ptr = asString$1(detail.stage);
 	const curItem = (ptr ? items.find((it) => itemMembers(it.id).some((m) => m.node.id === ptr)) : void 0) ?? items.find((it) => itemMembers(it.id).some(isLive)) ?? items[items.length - 1];
 	const nowLabel = curItem ? itemMembers(curItem.id).map((m) => stageDisplayLabel(m.node.id, m.node.label)).join(" ∥ ") : "";
 	const nowItem = curItem?.id ?? null;
@@ -1754,6 +1473,384 @@ function buildLaneMap(topologyRaw, detailRaw, opts) {
 		header,
 		nowItem
 	};
+}
+//#endregion
+//#region src/client/problems-model.ts
+/**
+* problems-model.ts —— 问题区（D2Problems）行模型的纯函数单写者（t261001-11）。
+*
+* 根因：D2Problems 曾假设 gate_runs 末条必带 `checks` 数组（dev-lane 的
+* merge_check 形态），而轻道 run_integration_tests 的闸记录根本无该键
+* （键族=stage/label/green/red_count/exit_code/counts/error/narrowed/
+* excluded_pools/known_red_skipped）→ `g.checks.filter` 抛 TypeError →
+* 槽条目整体崩 → 侧栏退回 dsh 默认 UI。本文件把「gate 记录→人话原因行」
+* 收成形态容忍的纯函数：checks 形态走逐项行，轻道形态走自带字段
+* （counts/red_count/error），任何畸形输入不抛、至少给出 stage 标签 +
+* 为什么红。两形态都由引擎各自落账（不在引擎侧统一形态），读者必须双吃。
+*
+* t261028-48 (family sweep): the row verdict and the row NAME are not decided
+* here any more — they come from the one accessor in lane-map-model
+* (`receiptRowView`). Before this, this reader judged rows with `green === true`
+* and named them from `item`, so on a red SCRIPT gate ({check, level, count})
+* it listed every row as "red" (the green ones included) and could not name
+* any of them.
+*/
+const asString = (v) => typeof v === "string" ? v : "";
+const asFinite = (v) => typeof v === "number" && Number.isFinite(v) ? v : null;
+/** gate_runs 末条（容忍 detail/gate_runs 畸形：非对象/非数组 → undefined）。 */
+function lastGateRun(detail) {
+	if (detail === null || typeof detail !== "object") return void 0;
+	const runs = detail.gate_runs;
+	if (!Array.isArray(runs) || runs.length === 0) return void 0;
+	const g = runs[runs.length - 1];
+	return g !== null && typeof g === "object" ? g : void 0;
+}
+/** gate 的展示标签：label 优先、stage 兜底，畸形 → 'gate'。 */
+function gateStageLabel(g) {
+	if (!g) return "gate";
+	return asString(g.label) || asString(g.stage) || "gate";
+}
+/**
+* Receipt rows of a red gate → problem rows (t261028-48).
+*
+* The row verdict and the row name both come from the ONE shape-tolerant
+* accessor (`receiptRowView`), so a green SCRIPT row ({check, level: 'green',
+* count}) is never listed as a problem, and a red one is named from whichever
+* identity field the engine wrote (item / check / id) and carries its own
+* detail, note or count as the dim half.
+*
+* The prefix names the stage whose receipt this is (`stage` id, else the
+* human label): a red script gate must say "cs-machine-qc red: …", not a
+* borrowed "merge_check red: …".
+*
+* A scalar entry is skipped: this face judges receipt rows, and a bare word
+* carries no verdict field. Nothing is lost — when no row survives,
+* `gateProblemRows` still names the gate in the no-detail fallback row.
+*/
+function rowsFromChecks(checks, prefix) {
+	const out = [];
+	for (let i = 0; i < checks.length; i++) {
+		const raw = checks[i];
+		if (raw === null || typeof raw !== "object") continue;
+		const view = receiptRowView(raw);
+		if (view === null || view.green) continue;
+		const dim = view.detail || view.note || (view.count !== void 0 ? `count ${view.count}` : "");
+		out.push({
+			key: `check-${i}-${view.item}`,
+			text: `${prefix} red: ${view.item}`,
+			dim: dim || void 0
+		});
+	}
+	return out;
+}
+/** 轻道闸形态（无 checks 键）：自带字段 → 人话原因行。 */
+function rowsFromLightGate(g) {
+	const out = [];
+	const err = asString(g.error);
+	if (err) out.push({
+		key: "error",
+		text: `gate error: ${err}`
+	});
+	const counts = g.counts;
+	if (counts !== null && typeof counts === "object" && !Array.isArray(counts)) {
+		const parts = [];
+		for (const [k, v] of Object.entries(counts)) {
+			const n = asFinite(v);
+			if (n !== null) parts.push(`${k}=${n}`);
+		}
+		if (parts.length > 0) out.push({
+			key: "counts",
+			text: `gate counts: ${parts.join(" / ")}`
+		});
+	}
+	const red = asFinite(g.red_count);
+	if (red !== null && red > 0) out.push({
+		key: "red_count",
+		text: `${red} red item(s) this round`
+	});
+	const exit = asFinite(g.exit_code);
+	if (exit !== null && exit !== 0) out.push({
+		key: "exit_code",
+		text: `exit_code=${exit}`
+	});
+	return out;
+}
+/**
+* Last gate run → problem rows (the main data source of the Problems area; it
+* accepts every receipt shape):
+* - Red. The verdict comes from the shared reader `readGateRunVerdict`, so a
+*   gate that writes `level` is read too. When the engine wrote no verdict,
+*   the row evidence decides. A checks array gives one row per red item; a
+*   gate without one gives the field rows (counts / red_count / error).
+*   If both are empty, one row still names the red gate with no detail. The
+*   area is never silently blank.
+* - Not red, malformed or absent: an empty array. The caller falls back to
+*   the timeline reason or a plain stuck line.
+*/
+function gateProblemRows(detail) {
+	const g = lastGateRun(detail);
+	if (!g) return [];
+	const label = gateStageLabel(g);
+	const prefix = asString(g.stage) || label;
+	const checks = Array.isArray(g.checks) ? g.checks : null;
+	const rowProblems = checks !== null ? rowsFromChecks(checks, prefix) : null;
+	const written = readGateRunVerdict(g).green;
+	if (!(written !== void 0 ? written === false : rowProblems !== null && rowProblems.length > 0)) return [];
+	const rows = rowProblems !== null ? rowProblems : rowsFromLightGate(g);
+	if (rows.length === 0) rows.push({
+		key: "no-detail",
+		text: `${label}: red (no per-item detail recorded)`
+	});
+	return rows;
+}
+/**
+* 槽条目渲染崩溃 → 边界 fallback 文案（t261001-11 第二缺陷：一个坏记录
+* 曾能打掉整个侧栏——现在边界兜住，点名故障、其余 UI 存活）。
+* 畸形 error（非 Error/空 message）也有可读文案，绝不渲染空白。
+*/
+function slotFaultMessage(error) {
+	return `Workbench panel crashed while rendering: ${(error instanceof Error ? error.message : typeof error === "string" ? error : "") || "unknown fault"} — the rest of the console stays usable.`;
+}
+//#endregion
+//#region ../knowledge/src/client/markdown.ts
+/**
+* markdown.ts — 无依赖的轻量 Markdown 渲染器（供 sandbar-knowledge 知识库插件用）。
+*
+* 支持（docs knowledge-base-design §5.1）：
+*   - 标题（#~######）、表格（GFM）、围栏代码块（带语法高亮 + 复制按钮）、
+*     块引用、有序/无序列表、分隔线、段落
+*   - 行内：粗体/斜体/删除线、行内代码、链接、图片
+*
+* 安全口径：先转义所有文本再拼 HTML；链接 URL 拒绝 javascript:/data:/vbscript:。
+* 纯函数（string → string），不碰 DOM，方便 node 冒烟。
+*/
+function escapeHtml(s) {
+	return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function safeUrl(url) {
+	const u = url.trim();
+	if (/^(javascript|data|vbscript):/i.test(u)) return "#";
+	return u;
+}
+function inline(text) {
+	return escapeHtml(text).split(/`([^`]*)`/g).map((p, idx) => {
+		if (idx % 2 === 1) return `<code>${p}</code>`;
+		return inlineFormat(p);
+	}).join("");
+}
+function inlineFormat(s) {
+	s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt, url) => `<img alt="${alt}" src="${safeUrl(url)}" />`);
+	s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, txt, url) => `<a href="${safeUrl(url)}">${txt}</a>`);
+	s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+	s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+	s = s.replace(/(^|[^0-9A-Za-z_])__([^_]+)__(?![0-9A-Za-z_])/g, "$1<strong>$2</strong>");
+	s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+	s = s.replace(/(^|[^0-9A-Za-z_])_([^_\n]+)_(?![0-9A-Za-z_])/g, "$1<em>$2</em>");
+	return s;
+}
+const KEYWORDS_JS = "const|let|var|function|return|if|else|for|while|import|export|from|class|interface|type|new|async|await|this|extends|implements|public|private|readonly|typeof|of|in|throw|try|catch|finally|switch|case|break|default";
+const KEYWORDS_PY = "def|return|import|from|if|elif|else|for|while|class|try|except|finally|with|as|not|in|is|lambda|yield|raise|None|True|False|and|or|pass|global|nonlocal";
+const KEYWORDS_BASH = "if|then|else|fi|for|while|do|done|case|esac|function|echo|export|local|return|source|cd|set|unset";
+const KEYWORDS_JSON = "true|false|null";
+function specOf(lang) {
+	const l = lang.toLowerCase();
+	if ([
+		"js",
+		"javascript",
+		"ts",
+		"tsx",
+		"typescript",
+		"jsx"
+	].includes(l)) return { re: new RegExp(`(?<comment>\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)|(?<string>'[^'\\n]*'|"[^"\\n]*"|\`[^\`]*\`)|(?<kw>\\b(?:${KEYWORDS_JS})\\b)|(?<num>\\b\\d+(?:\\.\\d+)?\\b)`) };
+	if (["py", "python"].includes(l)) return { re: new RegExp(`(?<comment>#[^\\n]*)|(?<string>'[^'\\n]*'|"[^"\\n]*")|(?<kw>\\b(?:${KEYWORDS_PY})\\b)|(?<num>\\b\\d+(?:\\.\\d+)?\\b)`) };
+	if ([
+		"bash",
+		"sh",
+		"shell",
+		"zsh"
+	].includes(l)) return { re: new RegExp(`(?<comment>#[^\\n]*)|(?<string>'[^'\\n]*'|"[^"\\n]*")|(?<var>\\$\\w+|\\$\\{[^}]+\\})|(?<kw>\\b(?:${KEYWORDS_BASH})\\b)|(?<num>\\b\\d+\\b)`) };
+	if (["json"].includes(l)) return { re: new RegExp(`(?<string>"(?:\\\\.|[^"\\\\])*")|(?<kw>\\b(?:${KEYWORDS_JSON})\\b)|(?<num>-?\\b\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b)`) };
+	if (["yaml", "yml"].includes(l)) return { re: new RegExp(`(?<comment>#[^\\n]*)|(?<string>'[^'\\n]*'|"[^"\\n]*")|(?<kw>\\b(?:${KEYWORDS_JSON})\\b)|(?<num>\\b\\d+(?:\\.\\d+)?\\b)`) };
+	if ([
+		"html",
+		"xml",
+		"css",
+		"scss",
+		"less"
+	].includes(l)) return { re: new RegExp(`(?<comment>\\/\\*[\\s\\S]*?\\*\\/|<!--[\\s\\S]*?-->)|(?<string>'[^'\\n]*'|"[^"\\n]*")|(?<num>#?[0-9a-fA-F]{3,8}\\b|\\b\\d+(?:\\.\\d+)?(?:px|em|rem|%|vh|vw)?\\b)`) };
+	return { re: new RegExp(`(?<comment>\\/\\/[^\\n]*|#[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)|(?<string>'[^'\\n]*'|"[^"\\n]*"|\`[^\`]*\`)|(?<num>\\b\\d+(?:\\.\\d+)?\\b)`) };
+}
+const TOKEN_CLASS = {
+	comment: "tok-c",
+	string: "tok-s",
+	kw: "tok-k",
+	num: "tok-n",
+	var: "tok-v"
+};
+function highlight(code, lang) {
+	const { re } = specOf(lang);
+	let out = "";
+	let i = 0;
+	let guard = 0;
+	while (i < code.length) {
+		const sub = code.slice(i);
+		const m = re.exec(sub);
+		if (!m) {
+			out += escapeHtml(sub);
+			break;
+		}
+		if (m.index > 0) out += escapeHtml(sub.slice(0, m.index));
+		const g = m.groups ?? {};
+		const cls = Object.keys(g).find((k) => g[k] !== void 0) ?? "";
+		const span = cls && TOKEN_CLASS[cls] ? `<span class="${TOKEN_CLASS[cls]}">${escapeHtml(m[0])}</span>` : escapeHtml(m[0]);
+		out += span;
+		i += m.index + m[0].length;
+		if (++guard > 1e5) {
+			out += escapeHtml(code.slice(i));
+			break;
+		}
+	}
+	return out;
+}
+function codeBlock(code, lang) {
+	const body = lang ? highlight(code, lang) : escapeHtml(code);
+	return `<div class="md-code">${lang ? `<span class="md-cl">${escapeHtml(lang)}</span>` : ""}<button class="md-copy" data-code="${encodeURIComponent(code)}">复制</button><pre><code>${body}\n</code></pre></div>`;
+}
+/** 把源码按行拆成 HTML。 */
+function renderMarkdown(src) {
+	const lines = src.replace(/\r\n?/g, "\n").split("\n");
+	let html = "";
+	let i = 0;
+	const n = lines.length;
+	const isBlank = (s) => s.trim() === "";
+	while (i < n) {
+		const line = lines[i];
+		if (isBlank(line)) {
+			i++;
+			continue;
+		}
+		const fence = line.match(/^```\s*([\w+-]*)/);
+		if (fence) {
+			const lang = fence[1] ?? "";
+			const buf = [];
+			i++;
+			while (i < n && !/^```\s*$/.test(lines[i])) {
+				buf.push(lines[i]);
+				i++;
+			}
+			if (i < n) i++;
+			html += codeBlock(buf.join("\n"), lang);
+			continue;
+		}
+		if (/^ {4}/.test(line)) {
+			const buf = [];
+			while (i < n && (/^ {4}/.test(lines[i]) || isBlank(lines[i]))) {
+				buf.push(lines[i].replace(/^ {4}/, ""));
+				i++;
+			}
+			html += codeBlock(buf.join("\n"), "");
+			continue;
+		}
+		const h = line.match(/^(#{1,6})\s+(.*)$/);
+		if (h) {
+			html += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`;
+			i++;
+			continue;
+		}
+		if (/^\s*(---+|\*\*\*+|___+)\s*$/.test(line)) {
+			html += "<hr/>";
+			i++;
+			continue;
+		}
+		if (/^>\s?/.test(line)) {
+			const buf = [];
+			while (i < n && /^>\s?/.test(lines[i])) {
+				buf.push(lines[i].replace(/^>\s?/, ""));
+				i++;
+			}
+			html += `<blockquote>${buf.map(inline).join("<br/>")}</blockquote>`;
+			continue;
+		}
+		if (line.includes("|") && i + 1 < n && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes("-")) {
+			const headerCells = splitRow(line);
+			i += 2;
+			const rows = [];
+			while (i < n && lines[i].includes("|") && !isBlank(lines[i])) {
+				rows.push(splitRow(lines[i]));
+				i++;
+			}
+			let t = "<table><thead><tr>" + headerCells.map((c) => `<th>${inline(c)}</th>`).join("") + "</tr></thead><tbody>";
+			for (const r of rows) t += "<tr>" + r.map((c) => `<td>${inline(c)}</td>`).join("") + "</tr>";
+			t += "</tbody></table>";
+			html += t;
+			continue;
+		}
+		const ul = line.match(/^\s*([-*+])\s+(.*)$/);
+		const ol = line.match(/^\s*(\d+)\.\s+(.*)$/);
+		if (ul || ol) {
+			const isOl = !!ol;
+			const items = [];
+			while (i < n) {
+				const m = isOl ? lines[i].match(/^\s*\d+\.\s+(.*)$/) : lines[i].match(/^\s*[-*+]\s+(.*)$/);
+				if (!m) break;
+				items.push(inline(m[1]));
+				i++;
+			}
+			const tag = isOl ? "ol" : "ul";
+			html += `<${tag}>` + items.map((it) => `<li>${it}</li>`).join("") + `</${tag}>`;
+			continue;
+		}
+		const buf = [line];
+		i++;
+		while (i < n && !isBlank(lines[i]) && !/^(#{1,6}\s|```|>\s?|\s*[-*+]\s|\s*\d+\.\s)/.test(lines[i])) {
+			buf.push(lines[i]);
+			i++;
+		}
+		html += `<p>${buf.map(inline).join("<br/>")}</p>`;
+	}
+	return html;
+}
+function splitRow(line) {
+	let s = line.trim();
+	if (s.startsWith("|")) s = s.slice(1);
+	if (s.endsWith("|")) s = s.slice(0, -1);
+	return s.split("|").map((c) => c.trim());
+}
+//#endregion
+//#region ../knowledge/src/shared/blocks.ts
+/** 表格行 → 单元格数组（client 做单元格级对齐也用）。 */
+function splitCells$1(line) {
+	let s = line.trim();
+	if (s.startsWith("|")) s = s.slice(1);
+	if (s.endsWith("|")) s = s.slice(0, -1);
+	return s.split("|").map((c) => c.trim());
+}
+//#endregion
+//#region src/shared/parts.ts
+const PART_ICON = {
+	agent: "🤖",
+	script: "⚙️",
+	human: "👤"
+};
+/** 悬停说明里的人读标签。 */
+const PART_LABEL = {
+	agent: "agent",
+	script: "script / programmatic",
+	human: "human"
+};
+/** 徽标串：parts 直接拼接（如 ['agent','script'] → '🤖⚙️'）；空/undefined → '—'。 */
+function partsIcons(parts) {
+	if (!parts || parts.length === 0) return "—";
+	return parts.map((p) => PART_ICON[p] ?? "❓").join("");
+}
+/** 悬停一行说明：「执行主体：🤖 agent 执行 + ⚙️ 脚本/程序化」；空/undefined → 旧数据口径说明。 */
+function partsTitle(parts) {
+	if (!parts || parts.length === 0) return "Executed by: — (legacy data has no static parts declaration; actual runtime is authoritative)";
+	return `Executed by: ${parts.map((p) => {
+		const icon = PART_ICON[p];
+		const label = PART_LABEL[p];
+		return icon ? `${icon} ${label}` : `❓ unknown executor ${p}`;
+	}).join(" + ")} (static declaration; dynamic source of truth = Temporal history)`;
 }
 //#endregion
 //#region src/client/lane-map.tsx
@@ -1988,6 +2085,14 @@ function LaneMap({ model }) {
 * 检查明细区（mock ① ck-rows）：gate_runs 逐轮逐条 ✓/✗ + item + detail，
 * 原始输出 details 折叠可展开；红行带文件点名与下一步（与状态卡同一
 * blocked_detail/gate_runs 数据源，天然联动）。最新一轮在最上，最多显 3 轮。
+*
+* t261028-48 (family sweep): the row view now carries `count` and `note` (the
+* script gates write `{check, level, count, note}`); this face rendered
+* neither, so the engine's own words were carried and thrown away. Both are
+* printed verbatim — `count N` is the engine's field name (never re-worded),
+* the note is the engine's own sentence (data is not translated), and the
+* full note stays available in the expanded fold (a truncated summary must not
+* be the only copy).
 */
 function ChecksDetail({ runs, cap = 3 }) {
 	if (!runs || runs.length === 0) return null;
@@ -2029,15 +2134,26 @@ function ChecksDetail({ runs, cap = 3 }) {
 						className: "wb-ck-name",
 						children: row.item || row.checkId || "(unnamed check)"
 					}),
+					row.count !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-ck-count",
+						children: `count ${row.count}`
+					}) : null,
 					row.detail ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						className: "wb-ck-detail",
 						children: row.detail
+					}) : null,
+					row.note ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-ck-note",
+						title: row.note,
+						children: row.note
 					}) : null
 				] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-ck-more",
 					children: [
 						row.checkId ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: ["check_id: ", row.checkId] }) : null,
 						row.reasonCode ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: ["reason_code: ", row.reasonCode] }) : null,
+						row.count !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: ["count: ", row.count] }) : null,
+						row.note ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: ["note: ", row.note] }) : null,
 						row.files && row.files.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: ["Files: ", row.files.join(", ")] }) : null,
 						row.nextAction ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: ["Next: ", row.nextAction] }) : null,
 						row.detail ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", { children: row.detail }) : null
@@ -13491,6 +13607,28 @@ function SpecBlock({ body, spec, acceptance, writeSet, redLine, specHtml }) {
 }
 //#endregion
 //#region src/client/ticket-detail-column-model.ts
+/**
+* ticket-detail-column-model — pure model layer for the single-column ticket
+* detail (t261008-07, host order 261008 option 2).
+*
+* Visual baseline: notes/discussions/261004-concurrency-limit-mock.html v11,
+* function ticketView(). Design rule (261004 concurrency design notes, sec 7.3): the detail is
+* a decision surface, not an information surface — a section with no data
+* renders NOTHING (no empty scaffolding), and wording is stated, never implied.
+*
+* Zero react / platform deps; node imports it directly (type stripping, same
+* layering as queue-model.ts / ticket-list-model.ts). Its one import is the
+* pure receipt-row accessor (lane-map-model.receiptRowViews, t261028-48) —
+* also pure, also node-loadable, so the layering holds. Every consumer face is
+* `unknown`-tolerant: malformed entries are skipped, never thrown — the column
+* renders only what the faces actually carry.
+*
+* Block order is the acceptance baseline (host order supersedes design §7.5's
+* spec-before-decision for the column layout; recorded on the ticket):
+* crumb → head → actions → decision card → spec → lane map → two columns
+* (timeline + stage notes | receipts + changes + requests) → collapsed heavy
+* sections.
+*/
 function asStr(v) {
 	return typeof v === "string" ? v : "";
 }
@@ -13537,6 +13675,14 @@ function decisionCard(detail, queuePosition) {
 * face the checks detail consumes. Rows: `<label>: <green> of <total> green`,
 * plus the suite counts and the env red count ONLY when the face carries them.
 * Absent/empty/malformed face → null (render nothing).
+*
+* t261028-48 (family sweep): greens are counted through the one receipt-row
+* accessor (lane-map-model.receiptRowViews), not through a private
+* `green === true` test. The engine writes two row shapes — script gates
+* `{check, level: 'green'|'red', count}` and agent/human gates
+* `{item, by, done, green}` — so before this fix a fully green script gate
+* rendered "0 of 3 green" here. Total = the rows the accessor keeps, so this
+* box and the checks-details face always agree about the same receipt.
 */
 function receiptRows(gateRuns) {
 	if (!Array.isArray(gateRuns)) return null;
@@ -13551,9 +13697,9 @@ function receiptRows(gateRuns) {
 	if (last === null) return null;
 	const rows = [];
 	const label = asStr(last.label) || asStr(last.stage) || "check";
-	const checks = last.checks;
-	const total = checks.length;
-	const green = checks.filter((c) => c !== null && typeof c === "object" && c.green === true).length;
+	const views = receiptRowViews(last.checks);
+	const total = views.length;
+	const green = views.filter((v) => v.green).length;
 	rows.push({
 		k: label,
 		v: total > 0 ? `${green} of ${total} green` : "no checks recorded"
@@ -15052,7 +15198,7 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-ck-mark{font-weight:700;width:16px;flex:none}
 .wb-ck-mark.g{color:var(--dsw-derive-success,#116329)}
 .wb-ck-mark.r{color:var(--dsw-derive-danger,#cf222e)}
-.wb-ck-name{font-weight:600;flex:none}
+.wb-ck-name{font-weight:600;flex:none}/* t261028-48: the two new row slots stay on ONE line with their neighbour. Every added line here shifts the line-anchored L28 face-dash exemption table (integration/face_dash_exemptions.json, shrink-only) and turns a clean edit into a gate red. */.wb-ck-count{font-size:11px;color:var(--dsw-derive-muted,#57606a);flex:none}.wb-ck-note{color:var(--dsw-derive-muted,#57606a);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wb-ck-detail{color:var(--dsw-derive-muted,#57606a);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wb-ck-more{padding:4px 10px 8px;font-size:11.5px;color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-border,#d0d7de)}
 .wb-ck-more pre{margin:4px 0 0;padding:6px 8px;font-size:11px;background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:auto}.wb-ck-disagree{margin:4px 0 8px;padding:5px 10px;font-size:11.5px;line-height:1.6;border-radius:6px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#d4a72c);word-break:break-all}

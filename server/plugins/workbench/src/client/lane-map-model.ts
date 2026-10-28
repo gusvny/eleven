@@ -1032,7 +1032,7 @@ const UNNAMED_CHECK = 'unnamed check'
  * value (missing, null, another word) stays undefined: the reader degrades,
  * it never invents a verdict.
  */
-function receiptBool(v: unknown): boolean | undefined {
+export function receiptBool(v: unknown): boolean | undefined {
   if (v === true) return true
   if (v === false) return false
   if (typeof v === 'string') {
@@ -1057,9 +1057,95 @@ function rowVerdict(co: Record<string, unknown>): boolean | undefined {
 }
 
 /**
+ * THE receipt-row accessor (t261028-48). This is the only place that decides
+ * what a `gate_runs[*].checks[*]` row is called and whether it is green; every
+ * reader of the receipt face goes through it, so the faces cannot disagree
+ * about the same engine data (host methodology 260907: one reported symptom is
+ * a sample of a family).
+ *
+ * Reads BOTH engine shapes (measured on live faces, t261028-46):
+ *   - SCRIPT gates: `{check, level: 'green'|'red', count}` — no `item`,
+ *     no `green`;
+ *   - AGENT/HUMAN gates: `{item, by, done, green, id, detail, note, …}`.
+ * Name = `item` || `check` || `id`; verdict = green || level || verdict ||
+ * done (conflicting signals resolve red). Detail/note/count/reason_code/
+ * files/next_action are carried verbatim.
+ *
+ * Returns null only for a row that carries nothing: a malformed value, a blank
+ * scalar, or a green row with neither a name nor a payload. A red row is
+ * always returned — an unproven receipt is shown, never hidden.
+ */
+export function receiptRowView(raw: unknown): CheckRowView | null {
+  // A bare string/number row still names something: keep it as a named row
+  // instead of dropping the information.
+  if (typeof raw === 'string' || typeof raw === 'number') {
+    const text = String(raw).trim()
+    return text ? { green: false, item: text } : null
+  }
+  if (raw === null || typeof raw !== 'object') return null
+  const co = raw as Record<string, unknown>
+  const green = rowVerdict(co) === true
+  const checkId = asString(co.id) || undefined
+  // item (agent/human) || check (script) || id (id-only green item,
+  // agent_activities D4 shape) — every real row gets a readable name.
+  const name = asString(co.item) || asString(co.check) || checkId || ''
+  const detail = asString(co.detail) || undefined
+  const note = asString(co.note) || undefined
+  const count = typeof co.count === 'number' && Number.isFinite(co.count) ? co.count : undefined
+  // A green row with no name and no payload adds nothing to the face.
+  // A red row, or any row carrying detail/note/count, is always shown.
+  if (green && !name && !detail && !note && count === undefined) return null
+  return {
+    green,
+    item: name || UNNAMED_CHECK,
+    detail,
+    note,
+    count,
+    checkId,
+    reasonCode: asString(co.reason_code) || undefined,
+    files: asStringArray(co.files),
+    nextAction: asString(co.next_action) || undefined,
+  }
+}
+
+/** Every informative row of one `checks` array, through the one accessor. */
+export function receiptRowViews(checks: unknown): CheckRowView[] {
+  if (!Array.isArray(checks)) return []
+  const out: CheckRowView[] = []
+  for (const c of checks) {
+    const v = receiptRowView(c)
+    if (v !== null) out.push(v)
+  }
+  return out
+}
+
+/** One run's written verdict, and which receipt field it came from. */
+export interface GateRunVerdict {
+  /** undefined = the run wrote no verdict field (the rows decide). */
+  green: boolean | undefined
+  source: GateVerdictSource
+}
+
+/**
+ * Run-level verdict through the same field reader the rows use (script-gate
+ * run rows may write `level`/`verdict`; agent runs write `green`). No written
+ * verdict -> {green: undefined, source: 'rows'}, never an invented green.
+ */
+export function readGateRunVerdict(run: Record<string, unknown>): GateRunVerdict {
+  const wroteGreen = receiptBool(run.green)
+  const wroteLevel = receiptBool(run.level)
+  const wroteVerdict = receiptBool(run.verdict)
+  if (wroteGreen !== undefined) return { green: wroteGreen, source: 'green' }
+  if (wroteLevel !== undefined) return { green: wroteLevel, source: 'level' }
+  if (wroteVerdict !== undefined) return { green: wroteVerdict, source: 'verdict' }
+  return { green: undefined, source: 'rows' }
+}
+
+/**
  * gate_runs → Check-details row model (newest run first). Reads both receipt
- * shapes with one implementation. Malformed entries degrade row by row and
- * never throw; a row that carries information is never dropped.
+ * shapes through the one accessor (receiptRowView / readGateRunVerdict).
+ * Malformed entries degrade row by row and never throw; a row that carries
+ * information is never dropped.
  */
 export function buildChecksDetail(detail: unknown): GateRunView[] {
   if (detail === null || typeof detail !== 'object') return []
@@ -1071,51 +1157,11 @@ export function buildChecksDetail(detail: unknown): GateRunView[] {
     const o = run as Record<string, unknown>
     const stage = asString(o.stage)
     if (!stage) continue
-    const rows: CheckRowView[] = []
-    if (Array.isArray(o.checks)) {
-      for (const c of o.checks) {
-        // A bare string/number row still names something: keep it as a named
-        // row instead of dropping the information.
-        if (typeof c === 'string' || typeof c === 'number') {
-          const text = String(c).trim()
-          if (text) rows.push({ green: false, item: text })
-          continue
-        }
-        if (c === null || typeof c !== 'object') continue
-        const co = c as Record<string, unknown>
-        const green = rowVerdict(co) === true
-        const checkId = asString(co.id) || undefined
-        // item (agent/human) || check (script) || id (id-only green item,
-        // agent_activities D4 shape) — every real row gets a readable name.
-        const name = asString(co.item) || asString(co.check) || checkId || ''
-        const detailText = asString(co.detail) || undefined
-        const note = asString(co.note) || undefined
-        const count = typeof co.count === 'number' && Number.isFinite(co.count) ? co.count : undefined
-        // A green row with no name and no payload adds nothing to the face.
-        // A red row, or any row carrying detail/note/count, is always shown.
-        if (green && !name && !detailText && !note && count === undefined) continue
-        rows.push({
-          green,
-          item: name || UNNAMED_CHECK,
-          detail: detailText,
-          note,
-          count,
-          checkId,
-          reasonCode: asString(co.reason_code) || undefined,
-          files: asStringArray(co.files),
-          nextAction: asString(co.next_action) || undefined,
-        })
-      }
-    }
+    const rows: CheckRowView[] = receiptRowViews(o.checks)
     const rowsGreen = rows.every(r => r.green)
-    // Run-level verdict: whatever the engine writes (`green` today; `level` /
-    // `verdict` accepted for script-gate run rows), else the rows decide.
-    const wroteGreen = receiptBool(o.green)
-    const wroteLevel = receiptBool(o.level)
-    const wroteVerdict = receiptBool(o.verdict)
-    const written = wroteGreen !== undefined ? wroteGreen : wroteLevel !== undefined ? wroteLevel : wroteVerdict
-    const verdictSource: GateVerdictSource = wroteGreen !== undefined ? 'green'
-      : wroteLevel !== undefined ? 'level' : wroteVerdict !== undefined ? 'verdict' : 'rows'
+    // Run-level verdict: whatever the engine writes, else the rows decide.
+    const verdict = readGateRunVerdict(o)
+    const written = verdict.green
     const redCount = typeof o.red_count === 'number' && Number.isFinite(o.red_count) ? o.red_count : rows.filter(r => !r.green).length
     // Header and rows may only agree when the receipt agrees: a green verdict
     // with red rows (or a non-zero red count) is a genuine engine disagreement
@@ -1126,7 +1172,7 @@ export function buildChecksDetail(detail: unknown): GateRunView[] {
       label: asString(o.label) || stage,
       green: written !== undefined ? written : rowsGreen,
       redCount,
-      verdictSource,
+      verdictSource: verdict.source,
       rowsGreen,
       disagreement: written !== undefined && contradiction,
       gen: typeof o.gen === 'number' && Number.isFinite(o.gen) ? o.gen : undefined,

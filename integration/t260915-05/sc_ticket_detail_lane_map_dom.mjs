@@ -347,6 +347,10 @@ const DETAIL_MALFORMED = detailBase({
 // no `item` and no `green`. The detail face must name those rows from `check`
 // and show them green; before the fix it rendered them red and unnamed under
 // an "all green" header. The two agent-gate runs stay byte-identical.
+// t261028-48 re-anchor: a script row also carries `count`, and (third row here)
+// the engine's own `note`. Both must reach the face — the row view carried
+// them and the component dropped them. The note is the live verify_lane
+// wording (data is not translated).
 const GATE_RUNS_PAIR = [
   { stage: 'merge_check', label: 'merge_check（程序化检查）', green: false, red_count: 1, exit_code: 0,
     checks: [{ item: 'In-lane verify_lane code is green', green: false,
@@ -360,6 +364,8 @@ const GATE_RUNS_PAIR = [
     checks: [
       { check: '溯源校验（checkpoint 可指回内容源位置）', level: 'green', count: 0 },
       { check: '契约校验（四件套/定位符）', level: 'green', count: 0 },
+      { check: '写集白名单', level: 'green', count: 0,
+        note: '未传 base，写集白名单未验（要验就显式传 base；合并闸须传 require_base=true）' },
     ] },
 ]
 const DETAIL_CHECKS = detailBase({
@@ -675,6 +681,8 @@ async function scenarioChecksArea(page) {
   }
   // t261028-46: the script-gate run ({check, level, count} rows) renders its
   // rows NAMED and GREEN, and its header verdict agrees with them.
+  // t261028-48: the row's `count` and `note` reach the face too (they were
+  // carried by the view model and dropped by the renderer).
   const scriptArea = await page.evaluate(`(() => {
     const run = document.querySelector('.wb-ck-run[data-stage="cs-machine-qc"]');
     if (!run) return null;
@@ -684,12 +692,20 @@ async function scenarioChecksArea(page) {
       verdict: v ? v.textContent : '',
       rows: [...run.querySelectorAll('details.wb-ck-row')].map(r => {
         const n = r.querySelector('.wb-ck-name');
-        return { green: r.getAttribute('data-green'), name: n ? n.textContent : '' };
+        const c = r.querySelector('.wb-ck-count');
+        const nt = r.querySelector('.wb-ck-note');
+        return {
+          green: r.getAttribute('data-green'),
+          name: n ? n.textContent : '',
+          count: c ? c.textContent : '',
+          note: nt ? nt.textContent : '',
+          noteTitle: nt ? (nt.getAttribute('title') || '') : '',
+        };
       }),
     };
   })()`)
   if (!scriptArea) return '检查明细区缺脚本门轮（cs-machine-qc 夹具未渲染）'
-  if (scriptArea.rows.length < 2) return `脚本门轮行数不足（应 2，实得 ${scriptArea.rows.length}）`
+  if (scriptArea.rows.length < 3) return `脚本门轮行数不足（应 3，实得 ${scriptArea.rows.length}）`
   if (scriptArea.rows.some(r => r.green !== 'true')) {
     return `脚本门行被判红（{check,level:"green"} 口径未读）: ${JSON.stringify(scriptArea.rows)}`
   }
@@ -701,6 +717,21 @@ async function scenarioChecksArea(page) {
   }
   if (scriptArea.headerGreen !== 'true' || scriptArea.verdict !== 'all green') {
     return `脚本门轮表头与行不一致（header=${scriptArea.headerGreen} verdict=${scriptArea.verdict}）`
+  }
+  // t261028-48: `count` is the engine's own field name — printed verbatim,
+  // never re-worded, and never dropped as falsy (count 0 is real evidence).
+  if (scriptArea.rows.some(r => r.count !== 'count 0')) {
+    return `脚本门行缺/错 count 槽（应逐行 "count 0"）: ${JSON.stringify(scriptArea.rows.map(r => r.count))}`
+  }
+  // t261028-48: `note` (the engine's own sentence) is shown, untranslated, and
+  // the full text survives on the summary element for the truncated case.
+  const noted = scriptArea.rows.find(r => r.name === '写集白名单')
+  if (!noted) return '脚本门夹具的写集白名单行未渲染（note 无从核对）'
+  if (!noted.note.includes('写集白名单未验')) {
+    return `脚本门行 note 未上屏（引擎原文未渲染）: ${JSON.stringify(noted.note)}`
+  }
+  if (noted.noteTitle !== noted.note) {
+    return `脚本门行 note 的 hover 全文与显示文本不一致（截断后无全文可查）`
   }
   // Consistent engine data must NOT raise the disagreement notice.
   if (await page.evaluate(`document.querySelectorAll('.wb-ck-disagree').length`) !== 0) {

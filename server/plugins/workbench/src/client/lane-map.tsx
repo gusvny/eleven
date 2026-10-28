@@ -203,6 +203,14 @@ export function LaneMap({ model }: { model: LaneMapModel }) {
  * 检查明细区（mock ① ck-rows）：gate_runs 逐轮逐条 ✓/✗ + item + detail，
  * 原始输出 details 折叠可展开；红行带文件点名与下一步（与状态卡同一
  * blocked_detail/gate_runs 数据源，天然联动）。最新一轮在最上，最多显 3 轮。
+ *
+ * t261028-48 (family sweep): the row view now carries `count` and `note` (the
+ * script gates write `{check, level, count, note}`); this face rendered
+ * neither, so the engine's own words were carried and thrown away. Both are
+ * printed verbatim — `count N` is the engine's field name (never re-worded),
+ * the note is the engine's own sentence (data is not translated), and the
+ * full note stays available in the expanded fold (a truncated summary must not
+ * be the only copy).
  */
 export function ChecksDetail({ runs, cap = 3 }: { runs: GateRunView[]; cap?: number }) {
   if (!runs || runs.length === 0) return null
@@ -221,11 +229,15 @@ export function ChecksDetail({ runs, cap = 3 }: { runs: GateRunView[]; cap?: num
               <summary>
                 <b className={`wb-ck-mark ${row.green ? 'g' : 'r'}`}>{row.green ? '✓' : '✗'}</b>
                 <span className="wb-ck-name">{row.item || row.checkId || '(unnamed check)'}</span>
+                {row.count !== undefined ? <span className="wb-ck-count">{`count ${row.count}`}</span> : null}
                 {row.detail ? <span className="wb-ck-detail">{row.detail}</span> : null}
+                {row.note ? <span className="wb-ck-note" title={row.note}>{row.note}</span> : null}
               </summary>
               <div className="wb-ck-more">
                 {row.checkId ? <div>check_id: {row.checkId}</div> : null}
                 {row.reasonCode ? <div>reason_code: {row.reasonCode}</div> : null}
+                {row.count !== undefined ? <div>count: {row.count}</div> : null}
+                {row.note ? <div>note: {row.note}</div> : null}
                 {row.files && row.files.length > 0 ? (
                   <div>Files: {row.files.join(', ')}</div>
                 ) : null}

@@ -8,7 +8,9 @@
  * renders NOTHING (no empty scaffolding), and wording is stated, never implied.
  *
  * Zero react / platform deps; node imports it directly (type stripping, same
- * layering as queue-model.ts / ticket-list-model.ts). Every consumer face is
+ * layering as queue-model.ts / ticket-list-model.ts). Its one import is the
+ * pure receipt-row accessor (lane-map-model.receiptRowViews, t261028-48) —
+ * also pure, also node-loadable, so the layering holds. Every consumer face is
  * `unknown`-tolerant: malformed entries are skipped, never thrown — the column
  * renders only what the faces actually carry.
  *
@@ -18,6 +20,8 @@
  * (timeline + stage notes | receipts + changes + requests) → collapsed heavy
  * sections.
  */
+
+import { receiptRowViews } from './lane-map-model.ts'
 
 /** The mock's single-column section order. Asserted by the unit layer and
  *  re-asserted end to end by the scenario layer (sc_t26100807). */
@@ -99,6 +103,14 @@ export function decisionCard(detail: DecisionDetail, queuePosition: number | nul
  * face the checks detail consumes. Rows: `<label>: <green> of <total> green`,
  * plus the suite counts and the env red count ONLY when the face carries them.
  * Absent/empty/malformed face → null (render nothing).
+ *
+ * t261028-48 (family sweep): greens are counted through the one receipt-row
+ * accessor (lane-map-model.receiptRowViews), not through a private
+ * `green === true` test. The engine writes two row shapes — script gates
+ * `{check, level: 'green'|'red', count}` and agent/human gates
+ * `{item, by, done, green}` — so before this fix a fully green script gate
+ * rendered "0 of 3 green" here. Total = the rows the accessor keeps, so this
+ * box and the checks-details face always agree about the same receipt.
  */
 export function receiptRows(gateRuns: unknown): KvRow[] | null {
   if (!Array.isArray(gateRuns)) return null
@@ -113,9 +125,9 @@ export function receiptRows(gateRuns: unknown): KvRow[] | null {
   if (last === null) return null
   const rows: KvRow[] = []
   const label = asStr(last.label) || asStr(last.stage) || 'check'
-  const checks = last.checks as unknown[]
-  const total = checks.length
-  const green = checks.filter(c => c !== null && typeof c === 'object' && (c as Record<string, unknown>).green === true).length
+  const views = receiptRowViews(last.checks)
+  const total = views.length
+  const green = views.filter(v => v.green).length
   rows.push({ k: label, v: total > 0 ? `${green} of ${total} green` : 'no checks recorded' })
   // Suite counts: additive face key (suite = {ran, passed, known?}); a run that
   // does not carry it (older snapshots / non-suite gates) renders no suite row.

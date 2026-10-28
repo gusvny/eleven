@@ -9,7 +9,16 @@
  * 收成形态容忍的纯函数：checks 形态走逐项行，轻道形态走自带字段
  * （counts/red_count/error），任何畸形输入不抛、至少给出 stage 标签 +
  * 为什么红。两形态都由引擎各自落账（不在引擎侧统一形态），读者必须双吃。
+ *
+ * t261028-48 (family sweep): the row verdict and the row NAME are not decided
+ * here any more — they come from the one accessor in lane-map-model
+ * (`receiptRowView`). Before this, this reader judged rows with `green === true`
+ * and named them from `item`, so on a red SCRIPT gate ({check, level, count})
+ * it listed every row as "red" (the green ones included) and could not name
+ * any of them.
  */
+
+import { receiptRowView, readGateRunVerdict } from './lane-map-model.ts'
 
 /** 一条原因行：text 主体，dim 为灰色补充（与旧 D2Problems 行同构）。 */
 export interface ProblemRow {
@@ -37,17 +46,37 @@ export function gateStageLabel(g: Record<string, unknown> | undefined): string {
   return asString(g.label) || asString(g.stage) || 'gate'
 }
 
-/** merge_check 形态：checks 数组里的红项 → 行（项内畸形逐条跳过不抛）。 */
-function rowsFromChecks(checks: unknown): ProblemRow[] {
-  if (!Array.isArray(checks)) return []
+/**
+ * Receipt rows of a red gate → problem rows (t261028-48).
+ *
+ * The row verdict and the row name both come from the ONE shape-tolerant
+ * accessor (`receiptRowView`), so a green SCRIPT row ({check, level: 'green',
+ * count}) is never listed as a problem, and a red one is named from whichever
+ * identity field the engine wrote (item / check / id) and carries its own
+ * detail, note or count as the dim half.
+ *
+ * The prefix names the stage whose receipt this is (`stage` id, else the
+ * human label): a red script gate must say "cs-machine-qc red: …", not a
+ * borrowed "merge_check red: …".
+ *
+ * A scalar entry is skipped: this face judges receipt rows, and a bare word
+ * carries no verdict field. Nothing is lost — when no row survives,
+ * `gateProblemRows` still names the gate in the no-detail fallback row.
+ */
+function rowsFromChecks(checks: unknown[], prefix: string): ProblemRow[] {
   const out: ProblemRow[] = []
   for (let i = 0; i < checks.length; i++) {
-    const c = checks[i]
-    if (c === null || typeof c !== 'object') continue
-    const co = c as Record<string, unknown>
-    if (co.green === true) continue
-    const item = asString(co.item) || asString(co.id) || `check #${i}`
-    out.push({ key: `check-${i}-${item}`, text: `merge_check red: ${item}`, dim: asString(co.detail) || undefined })
+    const raw = checks[i]
+    if (raw === null || typeof raw !== 'object') continue
+    const view = receiptRowView(raw)
+    if (view === null || view.green) continue
+    const dim = view.detail || view.note
+      || (view.count !== undefined ? `count ${view.count}` : '')
+    out.push({
+      key: `check-${i}-${view.item}`,
+      text: `${prefix} red: ${view.item}`,
+      dim: dim || undefined,
+    })
   }
   return out
 }
@@ -76,16 +105,30 @@ function rowsFromLightGate(g: Record<string, unknown>): ProblemRow[] {
 }
 
 /**
- * gate_runs 末条 → 原因行（问题区主数据源，形态容忍）：
- * - red（green === false）：checks 形态走逐项行；否则走轻道自带字段；
- *   两面都空也要点名「该闸红但无明细」（绝不静默空白）。
- * - 非 red / 畸形 / 缺席：空数组（调用方回落 timeline reason / 兜底行）。
+ * Last gate run → problem rows (the main data source of the Problems area; it
+ * accepts every receipt shape):
+ * - Red. The verdict comes from the shared reader `readGateRunVerdict`, so a
+ *   gate that writes `level` is read too. When the engine wrote no verdict,
+ *   the row evidence decides. A checks array gives one row per red item; a
+ *   gate without one gives the field rows (counts / red_count / error).
+ *   If both are empty, one row still names the red gate with no detail. The
+ *   area is never silently blank.
+ * - Not red, malformed or absent: an empty array. The caller falls back to
+ *   the timeline reason or a plain stuck line.
  */
 export function gateProblemRows(detail: unknown): ProblemRow[] {
   const g = lastGateRun(detail)
-  if (!g || g.green !== false) return []
+  if (!g) return []
   const label = gateStageLabel(g)
-  const rows = Array.isArray(g.checks) ? rowsFromChecks(g.checks) : rowsFromLightGate(g)
+  const prefix = asString(g.stage) || label
+  const checks = Array.isArray(g.checks) ? g.checks : null
+  const rowProblems = checks !== null ? rowsFromChecks(checks, prefix) : null
+  const written = readGateRunVerdict(g).green
+  // No written verdict: the row evidence decides. A light gate carries no
+  // rows, so its red evidence stays the counts/error fields below.
+  const red = written !== undefined ? written === false : (rowProblems !== null && rowProblems.length > 0)
+  if (!red) return []
+  const rows = rowProblems !== null ? rowProblems : rowsFromLightGate(g)
   if (rows.length === 0) rows.push({ key: 'no-detail', text: `${label}: red (no per-item detail recorded)` })
   return rows
 }

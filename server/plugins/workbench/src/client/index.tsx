@@ -486,7 +486,7 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-ck-mark{font-weight:700;width:16px;flex:none}
 .wb-ck-mark.g{color:var(--dsw-derive-success,#116329)}
 .wb-ck-mark.r{color:var(--dsw-derive-danger,#cf222e)}
-.wb-ck-name{font-weight:600;flex:none}
+.wb-ck-name{font-weight:600;flex:none}/* t261028-48: the two new row slots stay on ONE line with their neighbour. Every added line here shifts the line-anchored L28 face-dash exemption table (integration/face_dash_exemptions.json, shrink-only) and turns a clean edit into a gate red. */.wb-ck-count{font-size:11px;color:var(--dsw-derive-muted,#57606a);flex:none}.wb-ck-note{color:var(--dsw-derive-muted,#57606a);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wb-ck-detail{color:var(--dsw-derive-muted,#57606a);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wb-ck-more{padding:4px 10px 8px;font-size:11.5px;color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-border,#d0d7de)}
 .wb-ck-more pre{margin:4px 0 0;padding:6px 8px;font-size:11px;background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:auto}.wb-ck-disagree{margin:4px 0 8px;padding:5px 10px;font-size:11.5px;line-height:1.6;border-radius:6px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#d4a72c);word-break:break-all}
