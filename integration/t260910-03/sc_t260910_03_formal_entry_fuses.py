@@ -294,7 +294,7 @@ try:
                     ticket_id=defect_tid, worktree=str(dlane),
                     branch="lane/" + defect_tid, base_ref="", write_set=list(WS))))
                 fuse_items = [c for c in (mc.checks or [])
-                              if "物化" in str(c.get("item", ""))]
+                              if "fuse B" in str(c.get("item", ""))]
                 check("G7b 清单缺失×成员仓写集：merge_check 红灯且物化检查项红点名仓",
                       (not mc.green) and fuse_items
                       and all(c.get("green") is False for c in fuse_items)
@@ -349,7 +349,7 @@ try:
                     shared.MergeCheckArgs,
                     ticket_id=gtid, worktree=str(glane),
                     branch="lane/" + gtid, base_ref="", write_set=list(WSFULL))))
-                fuse2 = [c for c in (mc2.checks or []) if "物化" in str(c.get("item", ""))]
+                fuse2 = [c for c in (mc2.checks or []) if "fuse B" in str(c.get("item", ""))]
                 check("G7f 物化齐全对照：物化检查项绿（红灯不扩大化）",
                       bool(fuse2) and all(c.get("green") is True for c in fuse2),
                       "prep=%r fuse=%r" % (gprep, fuse2))

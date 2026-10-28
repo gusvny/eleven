@@ -177,7 +177,7 @@ def behavior_legs():
 
     def dirty_items(mc):
         return [c for c in (mc.checks or [])
-                if "合并前" in str(c.get("item", "")) and "未提交" in str(c.get("item", ""))]
+                if "pre-merge dirty check" in str(c.get("item", ""))]
 
     with tempfile.TemporaryDirectory(prefix="ki048-gate-") as td:
         root = Path(td)

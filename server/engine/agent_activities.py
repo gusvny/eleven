@@ -5114,7 +5114,7 @@ def _parse_conflict_files(merge_tree_output: str) -> List[str]:
 # Internal marker used only by merge_check's conflict classification: the item
 # prefix of check 4 (the merge rehearsal); the ticket console / an investigator can
 # grep for this prefix.
-MERGE_REHEARSAL_ITEM = "merge 预演无冲突"
+MERGE_REHEARSAL_ITEM = "merge dry-run has no conflict"
 
 # Config file for project-level extra checks (repo-relative path; the mechanism
 # lives in the engine while the policy follows the project repo — see the merge_check
@@ -5347,7 +5347,7 @@ def _gitlink_check_item(base_ref: str, branch: str, repo: Path) -> Dict[str, Any
     （红项 skip 码，第 1 项已因基线缺失红点名，不新增分类面）。
     位次契约（调用方保证）：插在 verify_lane 项之前 → 落 checks[:-1] → other_red=True
     → conflict=False → 红=blocked 交人工，绝不进自动消解回路（KI-047 教训）。"""
-    item = {"item": "泳道差集无 gitlink（嵌套仓）", "id": "no_gitlink"}
+    item = {"item": "lane diff has no gitlink (nested repo)", "id": "no_gitlink"}
     if not base_ref:
         return {**item, "green": False,
                 "detail": "base_ref missing, gitlink check not run (item 1 already named red for the missing baseline)",
@@ -5390,7 +5390,7 @@ def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path)
         指向 rework——t260920-04 实证该指向打回一轮结论不变只烧机时）。
     查询失败/异常 → 红项 reason_code="commit_query_failed"（fail-closed），与
     「实现未落盘」严格分叉：报错必须与事实同向。红灯不抛（本活动契约）。"""
-    item_base = "泳道分支有 commit（%s..%s）" % ((base_ref or "")[:7], branch)
+    item_base = "Lane branch has commits (%s..%s)" % ((base_ref or "")[:7], branch)
     # t261018-05: an empty base_ref is not decidable — `git log "..branch"` silently
     # answers 0 (git parses the empty side as HEAD, and HEAD==branch in a clean lane)
     # while `git diff --name-only ""` fails rc=128, so both faces lie. Fail-closed
@@ -5504,7 +5504,7 @@ def _lane_commits_check_item(base_ref: str, branch: str, repo: Path, tree: Path)
                  "id": "lane_commits", "reason_code": "no_commits",
                  "next_action": next_action}, n)
     except Exception as e:  # 查询异常同查询失败：fail-closed 红，不断言未落盘
-        return ({"item": "泳道分支有 commit", "green": False,
+        return ({"item": "Lane branch has commits", "green": False,
                  "detail": "git query error: %s" % e, "id": "lane_commits",
                  "reason_code": "commit_query_failed",
                  "next_action": "泳道 commit 查询异常——排查泳道仓后发 retry_qc"},
@@ -6478,7 +6478,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             detail = ("干净" if clean else "未提交：%s" % "、".join(dirty[:5]))
             if auto_settle_note:
                 detail = "%s ｜ %s" % (detail, auto_settle_note)
-            item = {"item": "工作区干净（无未提交改动）", "green": clean,
+            item = {"item": "Worktree is clean (no uncommitted changes)", "green": clean,
                     "detail": detail,
                     "id": "worktree_clean"}  # t260915-01 ② D4：检查项 id（绿项只带 id）
             if not clean:
@@ -6493,7 +6493,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     item["gate_refusal"] = dict(clean_gate_refusal)
             checks.append(item)
         else:
-            checks.append({"item": "工作区干净（无未提交改动）", "green": False,
+            checks.append({"item": "Worktree is clean (no uncommitted changes)", "green": False,
                            "detail": "git status failed: %s" % (p.stderr or "")[-200:],
                            "id": "worktree_clean", "reason_code": "status_failed",
                            "next_action": path_gates.next_action_hint("status_failed")})
@@ -6701,7 +6701,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 green, detail = False, (v_stderr or v_stdout or "无输出").strip()[-300:]
             finally:
                 unregister_owned_spawn(vp)
-            checks.append({"item": "泳道内 verify_lane code 绿灯", "green": green, "detail": detail,
+            checks.append({"item": "In-lane verify_lane code is green", "green": green, "detail": detail,
                            "id": "verify_lane_code",
                            # t261009-38: a whitelist green that admitted a declared
                            # rebuilt output carries the named rule note on the
@@ -6718,7 +6718,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             if not green and _red_names:
                 checks[-1]["red_items"] = [{"name": n} for n in _red_names]
     except Exception as e:
-        checks.append({"item": "泳道内 verify_lane code 绿灯", "green": False,
+        checks.append({"item": "In-lane verify_lane code is green", "green": False,
                        "detail": "verify_lane error: %s" % e,
                        "id": "verify_lane_code", "reason_code": "verify_red"})
 
@@ -6769,9 +6769,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                         state, detail, diff_files = _bundle_freshness_rebuild(
                             sc["tree"], out, key[0], key[1] if key[1] else 600)
                         green = state == "rebuilt-and-identical"
-                        # copy-lang-allow:bundle-freshness-item — surviving copy: the check item label
-                        # and next_action are the registered identity cited by tickets/lean logs (t260827-02 shape), not new copy.
-                        checks.append({"item": "bundle 新鲜度（%s → %s）" % (src, out),  # copy-lang-allow:bundle-freshness-item
+                        # copy-lang-allow:bundle-freshness-item — surviving copy: the next_action
+                        # is the registered identity cited by tickets/lean logs (t260827-02 shape), not new copy.
+                        checks.append({"item": "bundle freshness (%s → %s)" % (src, out),
                                        "green": green,
                                        "detail": detail,
                                        "id": "bundle_freshness",
@@ -6791,7 +6791,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                   "freshness could not be established mechanically")
                     rebuilt = any(f.startswith(out) for f in changed)
                     # copy-lang-allow:bundle-freshness-item — same surviving copy as above (legacy verdict face).
-                    checks.append({"item": "bundle 新鲜度（%s → %s）" % (src, out),  # copy-lang-allow:bundle-freshness-item
+                    checks.append({"item": "bundle freshness (%s → %s)" % (src, out),
                                    "green": rebuilt,
                                    "detail": detail if not rebuilt else
                                              "no build entry declared; out rebuilt in the same batch (diff heuristic)",
@@ -6801,7 +6801,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                        "files": [str(src), str(out)],
                                        "next_action": "泳道内重建产物（tsdown）后发 retry_qc 重验"})})  # copy-lang-allow:bundle-freshness-item
     except Exception as e:
-        checks.append({"item": "bundle 新鲜度（%s）" % MERGE_CHECKS_CFG, "green": False,
+        checks.append({"item": "bundle freshness (%s)" % MERGE_CHECKS_CFG, "green": False,
                        "detail": "extended check error: %s" % e,
                        "id": "bundle_freshness", "reason_code": "bundle_stale"})
 
@@ -6856,7 +6856,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             # ④a Malformed declaration: fail-closed red naming the field (malformed ≠
             # absent, per contract ②'s three-state master rule)
             checks.append({
-                "item": "UI 截图证据（ui_evidence 声明）",
+                "item": "UI screenshot evidence (ui_evidence declaration)",
                 "green": False,
                 "detail": "ui_evidence declaration malformed fail-closed: %s (fix ui_evidence.dirs "
                           "in verify.yaml, or remove the declaration to fall back to the "
@@ -6870,7 +6870,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 # ③ Declaration absent + healthy diff: green + a visible note (the
                 # behavior is visible, not silent)
                 checks.append({
-                    "item": "UI 截图证据（ui_evidence 声明）",
+                    "item": "UI screenshot evidence (ui_evidence declaration)",
                     "green": True,
                     "detail": "ui_evidence not declared: screenshot evidence item absent per project "
                               "declaration (KI-050 declaration system; to enable the screenshot "
@@ -6880,7 +6880,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 # ④b Declaration absent but the diff is faulty: a mechanism fault is
                 # not absorbed — red
                 checks.append({
-                    "item": "UI 截图证据（ui_evidence 声明）",
+                    "item": "UI screenshot evidence (ui_evidence declaration)",
                     "green": False,
                     "detail": "ui_evidence not declared and diff faulty fail-closed: %s" % (diff_err or "baseline missing"),
                     "id": "ui_evidence", "reason_code": "ui_evidence_missing",
@@ -6919,7 +6919,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
         dirty_verdict = _classify_main_dirty(sc["repo"], sc["branch"])
         dirty_kind = dirty_verdict.get("kind") or ""
         human = _dirty_block_note(dirty_verdict)
-        checks.append({"item": "main 工作区无未提交改动（合并前脏检查）",
+        checks.append({"item": "Main worktree has no uncommitted changes (pre-merge dirty check)",
                        "green": not dirty_kind,
                        "detail": ("clean (no uncommitted changes, no untracked files colliding with this ticket's close-out paths)"
                                   if not dirty_kind else human),
@@ -6929,7 +6929,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                            "next_action": "在 main 提交或暂存（git stash）这些改动，或在票面说明后"
                                           "发 retry_qc 重验（引擎不自动 stash/提交）"})})
     except Exception as e:  # a fault in this read-only pre-check goes red honestly, the activity never raises
-        checks.append({"item": "main 工作区无未提交改动（合并前脏检查）",
+        checks.append({"item": "Main worktree has no uncommitted changes (pre-merge dirty check)",
                        "green": False, "detail": "dirty check error: %s" % e,
                        "id": "main_untouched", "reason_code": "main_dirty"})
 
@@ -6949,7 +6949,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             out = (p.stdout or "") + ("\n" + p.stderr if p.stderr else "")
             conflict_files = _parse_conflict_files(out)
             merge_tree_excerpt = out.strip()[:1500]
-        checks.append({"item": "%s（merge-tree main × %s）" % (MERGE_REHEARSAL_ITEM, sc["branch"]),
+        checks.append({"item": "%s (merge-tree main × %s)" % (MERGE_REHEARSAL_ITEM, sc["branch"]),
                        "green": rehearsal_green,
                        "detail": "no conflict" if rehearsal_green else
                                  ("conflict files: %s" % "、".join(conflict_files) if conflict_files
@@ -7780,13 +7780,13 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     fuse_b_err = multirepo_materialization_error(wt, args.write_set, scopes)
     if fuse_b_err:
         checks.insert(max(len(checks) - 1, 0),
-                      {"item": "repo_worktrees 逐仓物化（t260910-03 保险丝B）",
+                      {"item": "repo_worktrees materialized per repo (t260910-03 fuse B)",
                        "green": False, "detail": fuse_b_err,
                        "id": "fuse_b_materialize", "reason_code": "fuse_b_incomplete"})
     elif multi and args.write_set:
         # 绿对照可见项（红灯不扩大化的反面：全绿也不静默——多仓票恒有物化闸记录）
         checks.insert(max(len(checks) - 1, 0),
-                      {"item": "repo_worktrees 逐仓物化（t260910-03 保险丝B）",
+                      {"item": "repo_worktrees materialized per repo (t260910-03 fuse B)",
                        "green": True,
                        "detail": "multi-repo write set materialized per repo (%d repos)" % len(scopes),
                        "id": "fuse_b_materialize"})
@@ -7802,7 +7802,7 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
         scope_commit_counts, bool(args.no_file_changes))
     if zero_commit_err:
         checks.insert(max(len(checks) - 1, 0),
-                      {"item": "整票至少一个仓有 commit（t260921-09 全局闸）",
+                      {"item": "Whole ticket: at least one repo has commits (t260921-09 global gate)",
                        "green": False, "detail": zero_commit_err,
                        "id": "all_repos_zero_commits",
                        "reason_code": "all_repos_zero_commits",

@@ -247,12 +247,12 @@ def test_pin_merge_red_detail_lists_all_reds_with_class_and_disposition():
     且既有键（首红那套）逐字节不变——blocked_detail 被 6 个测试文件 41 处引用，
     「只加不改」是硬约束。"""
     checks = [
-        {"item": "泳道分支有 commit", "green": True, "detail": "2 个 commit", "id": "lane_commits"},
-        {"item": "工作区干净", "green": False, "detail": "未提交：a.py", "id": "worktree_clean",
+        {"item": "Lane branch has commits", "green": True, "detail": "2 个 commit", "id": "lane_commits"},  # copy-lang-allow:fixture
+        {"item": "Worktree is clean", "green": False, "detail": "未提交：a.py", "id": "worktree_clean",  # copy-lang-allow:fixture
          "reason_code": "worktree_dirty", "files": ["a.py"], "next_action": "提交或暂存"},
-        {"item": "泳道内 verify_lane code 绿灯", "green": False, "detail": "red=1", "id": "verify_lane_code",
+        {"item": "In-lane verify_lane code is green", "green": False, "detail": "red=1", "id": "verify_lane_code",
          "reason_code": "verify_red", "next_action": "按红灯项修复后 retry_qc"},
-        {"item": "merge 预演无冲突", "green": False, "detail": "冲突：x.py", "id": "merge_rehearsal",
+        {"item": "merge dry-run has no conflict", "green": False, "detail": "冲突：x.py", "id": "merge_rehearsal",  # copy-lang-allow:fixture
          "reason_code": "merge_conflict", "files": ["x.py"], "next_action": "自动打回 implement 消解"},
     ]
     wf = _mk_wf(True)
@@ -276,8 +276,8 @@ def test_pin_merge_red_detail_lists_all_reds_with_class_and_disposition():
 
 def test_pin_merge_red_detail_first_red_and_fallback():
     checks = [
-        {"item": "泳道分支有 commit", "green": True, "detail": "2 个 commit", "id": "lane_commits"},
-        {"item": "工作区干净", "green": False, "detail": "未提交：a.py", "id": "worktree_clean",
+        {"item": "Lane branch has commits", "green": True, "detail": "2 个 commit", "id": "lane_commits"},  # copy-lang-allow:fixture
+        {"item": "Worktree is clean", "green": False, "detail": "未提交：a.py", "id": "worktree_clean",  # copy-lang-allow:fixture
          "reason_code": "worktree_dirty", "files": ["a.py", "b.py"],
          "next_action": "收回写集内"},
     ]
@@ -307,7 +307,7 @@ def test_pin_merge_red_detail_first_red_and_fallback():
 
 
 def test_pin_merge_red_detail_inner_gate_refusal_wins():
-    checks = [{"item": "工作区干净", "green": False, "detail": "…[auto-settle] 拒绝",
+    checks = [{"item": "Worktree is clean", "green": False, "detail": "…[auto-settle] 拒绝",  # copy-lang-allow:fixture
                "id": "worktree_clean",
                "gate_refusal": {"reason_code": "protected_path", "files": ["verify.yaml"]}}]
     wf = _mk_wf(True)

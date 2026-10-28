@@ -140,12 +140,12 @@ def _mock_merge_check(repo: Path, branch: str,
     checks = []
     p = _git(repo, "log", "--oneline", "main..%s" % branch)
     n = len([ln for ln in p.stdout.splitlines() if ln.strip()]) if p.returncode == 0 else 0
-    checks.append({"item": "泳道分支有 commit", "green": n > 0})
+    checks.append({"item": "Lane branch has commits", "green": n > 0})
     wt = repo / ".worktrees" / "t-self"
     p = _git(wt if wt.is_dir() else repo, "status", "--porcelain")
     dirty = [ln for ln in p.stdout.splitlines() if ln.strip()] if p.returncode == 0 else ["?"]
-    checks.append({"item": "工作区干净", "green": not dirty})
-    checks.append({"item": "merge 预演无冲突", "green": not rehearsal_red})
+    checks.append({"item": "Worktree is clean", "green": not dirty})
+    checks.append({"item": "merge dry-run has no conflict", "green": not rehearsal_red})
     conflict_files = sorted(files) if rehearsal_red else []
     other_red = any(not c["green"] for c in checks[:-1])
     green = all(c["green"] for c in checks)

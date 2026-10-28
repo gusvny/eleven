@@ -204,13 +204,13 @@ def _rehearsal_item():
 
 
 def _amber_item():
-    return {"item": "泳道分支有 commit——零改动确认", "green": True,
+    return {"item": "Lane branch has commits — zero-change confirmed", "green": True,
             "detail": "0 个 commit 且提交面/未提交面均无差异",
             "id": "lane_commits", "reason_code": "no_changes_no_diff"}
 
 
 def _green_item(n=2):
-    return {"item": "泳道分支有 commit", "green": True,
+    return {"item": "Lane branch has commits", "green": True,
             "detail": "%d 个 commit" % n, "id": "lane_commits"}
 
 
@@ -328,7 +328,7 @@ def test_merge_check_multirepo_one_repo_zero_changes_passes(tmp_path, monkeypatc
 def test_merge_check_zero_commit_with_diff_still_red(tmp_path, monkeypatch):
     # 工单验收②：多仓×某仓零 commit×有 diff → 仍红，非冲突类（blocked 交人）
     lane = _mk_multi_lane(tmp_path)
-    red = {"item": "泳道分支有 commit", "green": False,
+    red = {"item": "Lane branch has commits", "green": False,
            "detail": "0 个 commit；工作区有未提交改动（1 个文件）——实现未落盘",
            "id": "lane_commits", "reason_code": "no_commits",
            "next_action": "实现未落盘（有改动未入轨）"}
@@ -384,7 +384,7 @@ def test_merge_check_query_failed_repo_skips_global_gate(tmp_path, monkeypatch):
 
     async def stub(args, sc, lane_root, multi):
         if sc["name"] == "r1":
-            return {"checks": [{"item": "泳道分支有 commit", "green": False,
+            return {"checks": [{"item": "Lane branch has commits", "green": False,
                                 "detail": "git log 失败", "id": "lane_commits",
                                 "reason_code": "commit_query_failed"},
                                _rehearsal_item()],

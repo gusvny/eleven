@@ -213,7 +213,7 @@ def test_ui_surface_change_is_named_and_actionable_at_merge_check():
     wf = _mk_wf()
     mc = SimpleNamespace(
         green=False, error="",
-        checks=[{"item": "泳道分支有 commit", "green": True},
+        checks=[{"item": "Lane branch has commits", "green": True},
                 {"item": "UI 截图证据（.sandbar/screenshots/）", "green": False,
                  "id": "ui_evidence", "reason_code": light_lane.LightLaneWorkflow.UI_EVIDENCE_RED,
                  "detail": "命中 2 个 UI 路径", "files": ["server/plugins/workbench/src/client/a.ts",
@@ -237,10 +237,10 @@ def test_ui_surface_change_is_named_and_actionable_at_merge_check():
         "轻道自产的 UI 闸专段必须英文"
     # 非 UI 红的常规文案不变（专段只在命中该 reason_code 时出现）
     mc2 = SimpleNamespace(green=False, error="",
-                          checks=[{"item": "工作区干净（无未提交改动）", "green": False,
+                          checks=[{"item": "Worktree is clean (no uncommitted changes)", "green": False,
                                    "reason_code": "merge_dirty", "files": ["x.py"]}],
                           conflict=False, conflict_files=[])
-    text2 = wf._light_merge_blocked_text(mc2, "工作区干净（无未提交改动）: 红")
+    text2 = wf._light_merge_blocked_text(mc2, "Worktree is clean (no uncommitted changes): 红")  # copy-lang-allow:fixture
     assert "UI-surface change detected" not in text2
     assert "the merge check is red" in text2 and "retry_qc" in text2
     # 票面纪律（宿主 260930）：merge 阻断面同样是**一屏摘要**（行数/字数/无机器清单片段）
@@ -1265,7 +1265,7 @@ def test_light_lane_merge_red_hint_is_rewritten_too():
         {"id": "path_gate", "item": "Stage × allowed-face path gate", "green": False, "detail": "write set missing",
          "reason_code": "write_set_missing", "files": ["a.md"],
          "next_action": path_gates.next_action_hint("write_set_missing")},
-        {"item": "泳道分支有 commit", "green": True},
+        {"item": "Lane branch has commits", "green": True},
     ]
     wf._pin_merge_red_detail(checks, None, disposition="light lane")
     d = wf.meta["blocked_detail"]

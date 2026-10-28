@@ -152,7 +152,7 @@ def main():
         orig = aa._merge_check_one_scope
 
         async def stub_zero(args, sc, lane_root, multi):
-            return {"checks": [{"item": "泳道分支有 commit——零改动确认", "green": True,
+            return {"checks": [{"item": "Lane branch has commits — zero-change confirmed", "green": True,
                                 "detail": "0 个 commit 且两差异面均无差异",
                                 "id": "lane_commits", "reason_code": "no_changes_no_diff"},
                                {"item": aa.MERGE_REHEARSAL_ITEM, "green": True,
@@ -161,7 +161,7 @@ def main():
                     "merge_tree_excerpt": "", "lane_commits": 0}
 
         async def stub_query_failed(args, sc, lane_root, multi):
-            return {"checks": [{"item": "泳道分支有 commit", "green": False,
+            return {"checks": [{"item": "Lane branch has commits", "green": False,
                                 "detail": "git log 失败", "id": "lane_commits",
                                 "reason_code": "commit_query_failed"},
                                {"item": aa.MERGE_REHEARSAL_ITEM, "green": True,

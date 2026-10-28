@@ -434,7 +434,7 @@ def test_merge_check_dirty_main_red_not_conflict_class(repo_lane, monkeypatch):
     monkeypatch.setattr(aa.asyncio, "create_subprocess_exec", _no_verify_spawn)
     core = asyncio.run(_run_scope(root, lane, br))
     checks = core["checks"]
-    dirty = [c for c in checks if "合并前脏检查" in c["item"]]
+    dirty = [c for c in checks if "pre-merge dirty check" in c["item"]]
     assert len(dirty) == 1 and not dirty[0]["green"]
     assert "f.txt" in dirty[0]["detail"]  # 点名挡事文件（验收 a 前半）
     # 位置钉死：rehearsal 恒 checks[-1]，脏检查项恒落 checks[:-1] 非冲突类
@@ -446,7 +446,7 @@ def test_merge_check_clean_main_item_green(repo_lane, monkeypatch):
     root, lane, br = repo_lane
     monkeypatch.setattr(aa.asyncio, "create_subprocess_exec", _no_verify_spawn)
     core = asyncio.run(_run_scope(root, lane, br))
-    dirty = [c for c in core["checks"] if "合并前脏检查" in c["item"]]
+    dirty = [c for c in core["checks"] if "pre-merge dirty check" in c["item"]]
     assert len(dirty) == 1 and dirty[0]["green"]
     assert "clean" in dirty[0]["detail"]
 

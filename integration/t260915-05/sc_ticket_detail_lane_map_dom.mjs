@@ -240,7 +240,7 @@ const DETAIL_RED_VERIFY = detailBase({
   stage: 'merge_check', stage_name: '合并检查', stage_state: 'blocked',
   blocked_reason: 'merge_check 红灯：泳道内 verify_lane code 绿灯: exit=1 red=1',
   blocked_detail: {
-    check_id: 'verify_lane_code', item: '泳道内 verify_lane code 绿灯', red: true,
+    check_id: 'verify_lane_code', item: 'In-lane verify_lane code is green', red: true,
     reason_code: 'verify_red', files: [],
     next_action: '按 detail 里的红灯项修复后发 retry_qc 重验',
     evidence: '改动文件不在本票写集: server/zz_t26091505_probe.py',
@@ -271,9 +271,9 @@ const DETAIL_RED_DIRTY = detailBase({
 const DETAIL_HUMAN = detailBase({
   stage: 'merge', stage_name: '合并', stage_state: 'awaiting-human',
   human_context: { merge: { context_text: '签字要点：merge_check 已全绿；改动清单 2 文件；落账后泳道拆除' } },
-  stage_acceptance: ['泳道分支有 commit', '泳道内 verify_lane code 绿灯'],
+  stage_acceptance: ['Lane branch has commits', 'In-lane verify_lane code is green'],
   gate_runs: [{ stage: 'merge_check', label: 'merge_check（程序化检查）', green: true, red_count: 0,
-    exit_code: 0, checks: [{ item: '泳道分支有 commit', green: true, detail: '2 commits', id: 'lane_commits' }] }],
+    exit_code: 0, checks: [{ item: 'Lane branch has commits', green: true, detail: '2 commits', id: 'lane_commits' }] }],
   results: { create_plan: { status: 'ok', gen: 1 }, review_plan: { status: 'ok', gen: 1 },
     merge_check: { status: 'ok', gen: 1 } },
   timeline: [tle('create_plan', 'done', '', 1), tle('review_plan', 'done', '', 1),
@@ -314,7 +314,7 @@ const DETAIL_CLOSED = detailBase({
   gens: { create_plan: 2, review_plan: 2, implement: 1, design_integration_tests: 1,
     run_integration_tests: 1, arbitrate: 1, acceptance_walkthrough: 1, merge_check: 1, merge: 1 },
   gate_runs: [{ stage: 'merge_check', label: 'merge_check（程序化检查）', green: true, red_count: 0,
-    exit_code: 0, checks: [{ item: '泳道分支有 commit', green: true, detail: '3 commits', id: 'lane_commits' }] }],
+    exit_code: 0, checks: [{ item: 'Lane branch has commits', green: true, detail: '3 commits', id: 'lane_commits' }] }],
   signatures: [{ who: '宿主', gate: 'merge', decision: 'approve', note: 'ok', ts: T }],
 })
 
@@ -342,19 +342,19 @@ const DETAIL_MALFORMED = detailBase({
 // L8 检查明细区：gate_runs 两轮（红含探针点名＋绿）＋红卡文件联动
 const GATE_RUNS_PAIR = [
   { stage: 'merge_check', label: 'merge_check（程序化检查）', green: false, red_count: 1, exit_code: 0,
-    checks: [{ item: '泳道内 verify_lane code 绿灯', green: false,
+    checks: [{ item: 'In-lane verify_lane code is green', green: false,
       detail: 'exit=1 red=1；改动文件不在本票写集: server/zz_t26091505_probe.py',
       id: 'verify_lane_code', reason_code: 'verify_red',
       next_action: '按 detail 里的红灯项修复后发 retry_qc 重验' }] },
   { stage: 'merge_check', label: 'merge_check（程序化检查）', green: true, red_count: 0, exit_code: 0,
-    checks: [{ item: '泳道分支有 commit', green: true, detail: '3 commits', id: 'lane_commits' },
-      { item: '泳道内 verify_lane code 绿灯', green: true, detail: 'exit=0 red=0', id: 'verify_lane_code' }] },
+    checks: [{ item: 'Lane branch has commits', green: true, detail: '3 commits', id: 'lane_commits' },
+      { item: 'In-lane verify_lane code is green', green: true, detail: 'exit=0 red=0', id: 'verify_lane_code' }] },
 ]
 const DETAIL_CHECKS = detailBase({
   ...DETAIL_RED_DIRTY,
   gate_runs: GATE_RUNS_PAIR,
   blocked_detail: {
-    check_id: 'verify_lane_code', item: '泳道内 verify_lane code 绿灯', red: true,
+    check_id: 'verify_lane_code', item: 'In-lane verify_lane code is green', red: true,
     reason_code: 'verify_red', files: ['server/zz_t26091505_probe.py'],
     next_action: '按 detail 里的红灯项修复后发 retry_qc 重验',
     evidence: '改动文件不在本票写集: server/zz_t26091505_probe.py',
@@ -568,7 +568,7 @@ async function scenarioBlueCard(page) {
   }
   if (!card.text.includes('签')) return `蓝卡未列「签什么」：${card.text.slice(0, 160)}`
   if (!card.text.includes('签字要点')) return `蓝卡缺 human_context.merge.context_text 内容（签什么数据源）`
-  if (!card.text.includes('泳道分支有 commit')) return `蓝卡缺 stage_acceptance 内容（签前看什么数据源）`
+  if (!card.text.includes('Lane branch has commits')) return `蓝卡缺 stage_acceptance 内容（签前看什么数据源）`
   return null
 }
 
@@ -648,8 +648,8 @@ async function scenarioChecksArea(page) {
   if (!area.marksR || !area.marksG) return `✓/✗ 记号不齐（✗=${area.marksR} ✓=${area.marksG}，红绿轮各一）`
   const txt = await page.evaluate(domDrawerText)
   // 逐轮逐条 item 名（第 1 轮红项＋第 2 轮绿项）
-  if (!txt.includes('泳道内 verify_lane code 绿灯')) return `检查明细区缺 item 名（verify_lane 项）`
-  if (!txt.includes('泳道分支有 commit')) return `检查明细区缺绿轮 item 名`
+  if (!txt.includes('In-lane verify_lane code is green')) return `检查明细区缺 item 名（verify_lane 项）`
+  if (!txt.includes('Lane branch has commits')) return `检查明细区缺绿轮 item 名`
   // 红行点名文件与状态卡联动：同一文件名在检查明细区与卡面同时可见
   if (!txt.includes('server/zz_t26091505_probe.py')) {
     return `检查明细区/卡面未点名越界文件（红行与状态卡文件清单联动）`

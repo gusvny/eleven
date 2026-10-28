@@ -85,7 +85,7 @@ PROJ = "t26091505"
 WRITE_SET = ["docs/"]
 
 # 桩脑（改自 t260915-01 DETAIL_STUB）：files_changed 带 docs 改动（merge_check 第 1 项
-# 「泳道分支有 commit」需泳道有 commit；探针提交由场景另行入轨），分叉两 Edge 各睡数秒
+# 「Lane branch has commits」需泳道有 commit；探针提交由场景另行入轨），分叉两 Edge 各睡数秒
 # 拉宽并行窗（探针提交窗口）。
 LANE_RED_STUB = r"""
 import json, os, re, sys, time

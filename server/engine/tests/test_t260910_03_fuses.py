@@ -242,7 +242,7 @@ def test_merge_check_fuse_only_red_is_not_conflict_class(multirepo, monkeypatch)
         write_set=["repo_a/src/a.py", "repo_b/lib/b.py"])))
     assert not res.green
     assert res.conflict is False  # 仅保险丝红 → 非冲突类，blocked 直达不进消解回路
-    fuse = [c for c in res.checks if "保险丝B" in c["item"]]
+    fuse = [c for c in res.checks if "fuse B" in c["item"]]
     assert len(fuse) == 1 and not fuse[0]["green"]
     # 位置钉死：rehearsal 恒为 checks[-1]，保险丝项在其之前（恒落 checks[:-1]）
     assert aa.MERGE_REHEARSAL_ITEM in res.checks[-1]["item"]
@@ -263,7 +263,7 @@ def test_merge_check_all_green_stays_green(multirepo, monkeypatch):
         last_green_run=face)))
     assert res.green and not res.conflict
     # 全绿也出绿色物化项（可见闸记录，不静默），且在 rehearsal 之前
-    fuse = [c for c in res.checks if "保险丝B" in c["item"]]
+    fuse = [c for c in res.checks if "fuse B" in c["item"]]
     assert len(fuse) == 1 and fuse[0]["green"] is True
     assert res.checks.index(fuse[0]) < len(res.checks) - 1
 

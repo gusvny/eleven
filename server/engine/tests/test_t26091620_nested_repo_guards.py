@@ -303,9 +303,9 @@ def test_gitlink_check_item_skip_and_fault(lane_repo):
 async def _stub_scope_gitlink_red(args, sc, lane_root, multi):
     """标准项绿 + gitlink 红项（中段位）+ rehearsal 绿且在最后（同真实函数形）。"""
     return {"checks": [
-        {"item": "泳道分支有 commit", "green": True, "detail": ""},
-        {"item": "工作区干净", "green": True, "detail": ""},
-        {"item": "泳道差集无 gitlink（嵌套仓）", "green": False,
+        {"item": "Lane branch has commits", "green": True, "detail": ""},
+        {"item": "Worktree is clean", "green": True, "detail": ""},
+        {"item": "lane diff has no gitlink (nested repo)", "green": False,
          "reason_code": "gitlink_present", "files": ["content"], "detail": "红"},
         {"item": aa.MERGE_REHEARSAL_ITEM, "green": True, "detail": "无冲突"},
     ], "rehearsal_green": True, "conflict_files": [], "merge_tree_excerpt": ""}
