@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 354,
+      "engine_tests": 355,
       "scenarios": 855
     },
     "vocab": [
@@ -1753,6 +1753,10 @@
     "server/engine/tests/test_t261028_24_request_sweep_archive_citation.py": {
       "anchor": "behaviour",
       "note": "t261028-25: the request sweep cites the ticket ARCHIVE for a residue head whose subject ticket left Temporal's retention window, and the `request` class gets a named rule. Pins the writer-derived witness (only a `terminal_status` recorded by the ticket-archive-terminal exit, whose describe guard refuses a non-terminal execution, is citable; `meta.status` is a mid-run snapshot and is never the witness, pinned in BOTH directions), the named refusals that keep the head open (missing manifest -> not_listed_unarchived, unreadable/non-schema-v1 -> archive_malformed, legacy:true -> archive_legacy_uncited because both legacy writers share one shape and one of them checks no status, close-path manifest without a witness -> archive_no_terminal_witness, a listed non-terminal ticket never consults the archive, an unavailable channel is named), the request-class rule (same cited-terminal evidence as a blocker: projection / ledger landing / archive; an uncited request head stays open, so no residue_class_unhandled:request exists), and the bounds that must not move (finding/question rows byte-identical, an answered head untouched, a second sweep appends nothing) plus the receipt's named-and-counted residue_buckets carried on the watch tick. Fixture project roots via SANDBAR_PROJECTS_DIR / SANDBAR_PANEL_DIR; zero production ledger, zero Temporal."
+    },
+    "server/engine/tests/test_t261028_28_post_close_witness.py": {
+      "anchor": "behaviour",
+      "note": "t261028-30 L1: the post-close terminal witness - a terminal close through the real client.cmd_ticket_close_out entry writes exactly one closed.json in the ticket data dir with schema/ticket_id/terminal_status/closed_at/workflow_id/engine_version/written_by, a torn post-terminate read or a failed one writes none and names why, the merge-stage archive activity (agent_activities.archive_ticket) never writes one, idempotence (second write a no-op, bytes unchanged, a foreign file never overwritten), the refusal faces (absent / malformed / unknown schema / unattributed writer or engine_version / non-terminal status / ticket mismatch) are no witness and named, all five terminal statuses citable, the other close entries (archive-terminal, cancel, archive-legacy, prune before delete + fail-closed keep) record the same marker, and the request sweep closes a blocker/request head on the marker (evidence cites the marker path and terminal_status) while a missing or hand-made marker keeps the head open in archive_no_terminal_witness with both refusals named."
     }
   },
   "scenarios": {

@@ -1046,6 +1046,72 @@ async def cmd_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
 _TICKET_CANCEL_ALIVE = ("RUNNING", "CONTINUED_AS_NEW")
 
 
+#: Writer ids for the post-close witness (t261028-30). The ids live in
+#: shared.CLOSED_WITNESS_WRITERS; the aliases below keep the call sites readable.
+WITNESS_CLOSE_OUT = "engine:client.ticket-close-out"
+WITNESS_CANCEL = "engine:client.ticket-cancel"
+WITNESS_ARCHIVE_TERMINAL = "engine:client.ticket-archive-terminal"
+WITNESS_ARCHIVE_LEGACY = "engine:client.ticket-archive-legacy"
+WITNESS_PRUNE = "engine:client.ticket-prune"
+
+
+def _observed_close_time(desc: Any) -> str:
+    """The workflow's own close time as ISO-8601 ("" when unreadable — the witness
+    then records the write time instead, never a guess)."""
+    try:
+        ct = getattr(desc, "close_time", None)
+        if ct is not None and hasattr(ct, "isoformat"):
+            return ct.isoformat(timespec="seconds")
+    except Exception:  # noqa: BLE001 — a missing field is not a failure
+        pass
+    return ""
+
+
+async def _post_close_witness(handle: Any, ticket: str, project: str, writer: str,
+                              observed_by: str) -> Dict[str, Any]:
+    """Write the post-close witness and return the receipt fragment (t261028-30).
+
+    The terminal fact is OBSERVED, never inferred: a fresh describe runs after the
+    irreversible act (terminate / the terminal archive guard), and only a status in
+    client._TICKET_TERMINAL_STATUSES minus CONTINUED_AS_NEW counts. A describe that
+    fails, or reports a live status, writes nothing and names why — the ticket then has
+    no witness, which a reader treats as "no closure evidence" rather than guessing.
+
+    Best-effort for the caller's receipt: the close already happened, so a witness
+    problem is a named note (`written: false` + reason), never a failed close. The
+    marker never lands outside the ticket's own data dir (path = ticket_data_dir + the
+    shared fixture name)."""
+    face = {"written": False, "skipped": False, "path": "", "state": "",
+            "terminal_status": "", "reason": ""}
+    try:
+        desc = await handle.describe()
+    except Exception as e:  # noqa: BLE001 — an unreadable terminal fact is a named skip
+        face["reason"] = ("post_close_describe_failed:%s: %s (no witness written — a "
+                          "terminal status is never inferred)" % (type(e).__name__, e))
+        return face
+    status = desc.status.name if getattr(desc, "status", None) is not None else ""
+    if status not in _TICKET_TERMINAL_STATUSES or status == "CONTINUED_AS_NEW":
+        face["reason"] = ("post_close_status_not_terminal:%s (no witness written — only "
+                          "an observed terminal status counts)" % (status or "unknown"))
+        return face
+    if not project:
+        face["reason"] = ("closed_witness_path_invalid:no project key on the observed "
+                          "ticket (the data dir is never guessed)")
+        return face
+    try:
+        path = ticket_data_dir(project, ticket) / shared.CLOSED_WITNESS_FILE
+    except ValueError as e:
+        face["reason"] = "closed_witness_path_invalid:%s" % e
+        return face
+    res = shared.write_closed_witness_at(path, ticket, status, writer,
+                                         workflow_id=ticket, observed_by=observed_by,
+                                         closed_at=_observed_close_time(desc),
+                                         project_key=project)
+    for key in ("written", "skipped", "path", "state", "terminal_status", "reason"):
+        face[key] = res.get(key, face[key])
+    return face
+
+
 def _release_slot_after_cancel(project: str, ticket: str) -> Dict[str, Any]:
     """Return the cancelled ticket's concurrency slot (261019).
 
@@ -1171,10 +1237,16 @@ async def cmd_ticket_cancel(args: Dict[str, Any]) -> Dict[str, Any]:
     # here, where a live actor still exists, and NEVER fail the cancel because
     # of it (a slot left behind is repairable with
     # `ticket.py op=concurrency reconcile=true`; a half-done cancel is not).
-    _slot = _release_slot_after_cancel(
-        str(((gate or {}).get("snap") or {}).get("meta", {}).get("project") or ""), tid)
+    _cancel_project = str(
+        ((gate or {}).get("snap") or {}).get("meta", {}).get("project") or "")
+    _slot = _release_slot_after_cancel(_cancel_project, tid)
+    # t261028-30: the execution is terminal NOW — record the post-close witness from
+    # this observed fact (best-effort; a witness problem never fails the cleanup).
+    _witness = await _post_close_witness(
+        handle, tid, _cancel_project, WITNESS_CANCEL,
+        observed_by="temporal-describe after ticket-cancel terminate")
     return _gate_receipt(_ok({"ticket_id": tid, "terminated": True,
-                              "slot_released": _slot,
+                              "slot_released": _slot, "post_close_witness": _witness,
                               "reason": reason, "who": who,
                               "signal": "cancel_notice", "delivered": True,
                               "receipt_note": ("delivered=signal 已落事件历史（不承诺 "
@@ -1262,10 +1334,23 @@ async def cmd_ticket_close_out(args: Dict[str, Any]) -> Dict[str, Any]:
     # t261019-31/-40: the workflow is dead — release its concurrency slot here
     # (best-effort, named either way; the close-out itself never fails on it).
     _slot = _release_slot_after_cancel(gate["stamp"] if gate else _project_from_describe(desc), tid)
+    # t261028-30: the workflow is terminal NOW, so record the post-close witness (the
+    # merge-stage archive cannot carry this fact — it is written while the ticket is
+    # still open). Best-effort and named: a witness problem never fails the close-out.
+    # The project key is the TARGET ticket's (the gate snapshot's meta, else the
+    # describe search attribute) — never the caller's stamp, which on a lawful
+    # cross-project close-out names a different project and would splice the marker
+    # into the wrong data dir.
+    _target_project = str(
+        ((gate or {}).get("snap") or {}).get("meta", {}).get("project") or "") \
+        or _project_from_describe(desc)
+    _witness = await _post_close_witness(
+        handle, tid, _target_project, WITNESS_CLOSE_OUT,
+        observed_by="temporal-describe after ticket-close-out terminate")
     return _gate_receipt(_ok({"ticket_id": tid, "terminated": True,
                               "reason": reason, "terminate_reason": term_reason,
                               "who": who, "signal": "close_out_notice", "delivered": True,
-                              "slot_released": _slot,
+                              "slot_released": _slot, "post_close_witness": _witness,
                               "receipt_note": ("delivered=signal 已落事件历史（不承诺 "
                                                "handler 已执行，KI-081）；权威对账=事件"
                                                "历史（close_out_notice 先于 terminated）"
@@ -1446,12 +1531,19 @@ async def cmd_ticket_archive_terminal(args: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as ex:
         return _err("archive manifest write failed (%s: %s) — nothing recorded, "
                     "retry safe" % (type(ex).__name__, str(ex)[:300]))
+    # t261028-30: the describe's terminal guard above IS the observation, so record the
+    # post-close witness from it (additive: the manifest's own shape is untouched).
+    _witness = shared.write_closed_witness_at(
+        dpath / shared.CLOSED_WITNESS_FILE, tid, exec_status,
+        WITNESS_ARCHIVE_TERMINAL, workflow_id=tid,
+        observed_by="temporal-describe terminal guard (ticket-archive-terminal)",
+        closed_at=_observed_close_time(desc), project_key=project)
     return _gate_receipt(_ok({"ticket_id": tid, "archived": True,
                               "exec_status": exec_status,
                               "terminal_status": exec_status,
                               "project": project or None,
                               "reason": reason, "who": who,
-                              "path": str(dpath),
+                              "path": str(dpath), "post_close_witness": _witness,
                               "receipt_note": ("two-phase disposition, stated "
                                                "honestly: pre-prune the board row "
                                                "stays visible with its terminal "
@@ -4514,6 +4606,13 @@ async def cmd_ticket_prune(args: Dict[str, Any], entries: "Optional[List[Dict[st
     seam is an injected deleter function (signature deleter(workflow_id) -> None; the SDK
     implementation goes through workflow_service-level DeleteWorkflowExecution, so tests
     can inject a fake deleter without a real Temporal).
+
+    Post-close witness (ticket t261028-30): on the --execute path the pass writes the
+    ticket's post-close witness (`closed.json`, shared.CLOSED_WITNESS_FILE) BEFORE it
+    deletes the workflow - the delete removes the only remaining proof that the ticket
+    was terminal, so the witness is written first. A witness that cannot be recorded
+    keeps that ticket (named in `failed`), the same fail-closed stance as the three
+    deletion conditions above. Dry-run writes nothing at all.
     Per-ticket deletion is bounded by an asyncio.wait_for timeout; errors are caught one
     by one into failed without interrupting the batch.
     entries/deleter are test-injection seams: by default it works on live Temporal data
@@ -4552,6 +4651,8 @@ async def cmd_ticket_prune(args: Dict[str, Any], entries: "Optional[List[Dict[st
     skipped_archived_legacy: List[str] = []
     skipped_not_archived: List[str] = []
     failed: List[Dict[str, str]] = []
+    witness_written: List[str] = []
+    witness_skipped: List[str] = []
     for e in entries:
         tid = e["id"]
         if project and e["sa_project"] != project:
@@ -4569,6 +4670,30 @@ async def cmd_ticket_prune(args: Dict[str, Any], entries: "Optional[List[Dict[st
         if dry_run:
             deleted.append(tid)   # dry-run counts into the "would delete" list (deleter never called)
             continue
+        # t261028-30: this entry comes from the completed-workflow listing (the live
+        # path is ExecutionStatus=Completed), and the delete below is the LAST moment
+        # the terminal fact can be written down — after it, no reader can prove the
+        # ticket ended. Record the post-close witness first. A witness that cannot be
+        # written keeps the ticket (never destroy the last proof); it is named in
+        # failed like every other fail-closed condition of this pass.
+        try:
+            wpath = ticket_data_dir(e["sa_project"], tid) / shared.CLOSED_WITNESS_FILE
+        except ValueError as wex:
+            failed.append({"id": tid, "why": "closed_witness_path_invalid: %s" % wex})
+            continue
+        wres = shared.write_closed_witness_at(
+            wpath, tid, "COMPLETED", WITNESS_PRUNE, workflow_id=tid,
+            observed_by="temporal-visibility listing (ExecutionStatus=Completed)",
+            project_key=e["sa_project"])
+        if wres["written"]:
+            witness_written.append(tid)
+        elif wres["skipped"]:
+            witness_skipped.append(tid)
+        else:
+            failed.append({"id": tid,
+                           "why": "post-close witness not recorded, ticket kept: %s"
+                                  % wres["reason"]})
+            continue
         try:
             await asyncio.wait_for(deleter(tid), timeout=per_ticket_timeout)
             deleted.append(tid)
@@ -4579,6 +4704,8 @@ async def cmd_ticket_prune(args: Dict[str, Any], entries: "Optional[List[Dict[st
     return _ok({"dry_run": dry_run, "allow_legacy": allow_legacy, "project": project or None,
                 "deleted": deleted, "skipped_not_archived": skipped_not_archived,
                 "skipped_legacy": skipped_archived_legacy, "failed": failed,
+                "post_close_witness": {"written": witness_written,
+                                       "skipped": witness_skipped},
                 "summary": "prune %s：将删/已删 %d，未归档跳过 %d，legacy 待确认 %d，失败 %d"
                            % ("dry-run" if dry_run else "execute",
                               len(deleted), len(skipped_not_archived),
@@ -4594,7 +4721,11 @@ async def cmd_ticket_archive_legacy(args: Dict[str, Any],
     (M1-3 R4).
 
     Only COMPLETED tickets without an archive.json are processed; a ticket that already
-    has a manifest is skipped (a real archive is never overwritten). The meta snapshot
+    has a manifest is skipped (a real archive is never overwritten). Every entry of the
+    pass is a terminal (COMPLETED) workflow, so the pass also records the ticket's
+    post-close witness (t261028-30) for it - the legacy manifest itself cannot prove
+    terminality by contract, and this is the batch face that reaches historical tickets.
+    The meta snapshot
     comes from the workflow's terminal result() (no worker needed for COMPLETED); when
     unavailable an empty meta is recorded and written into detail. A write failure counts
     that ticket into failed without interrupting the batch.
@@ -4619,10 +4750,33 @@ async def cmd_ticket_archive_legacy(args: Dict[str, Any],
     written: List[Dict[str, Any]] = []
     skipped: List[str] = []
     failed: List[Dict[str, str]] = []
+    witness_written: List[str] = []
+    witness_skipped: List[str] = []
+    witness_failed: List[Dict[str, str]] = []
     for e in entries:
         tid = e["id"]
         if project and e["sa_project"] != project:
             continue
+        # t261028-30: every entry of this pass is a COMPLETED workflow read off the
+        # terminal listing, so the post-close witness can be recorded for it whether or
+        # not it needs a legacy manifest (the manifest itself stays witness-less by
+        # contract - `legacy:true` proves no terminal fact). The witness write never
+        # decides the posting: a failure is named and the manifest work continues.
+        try:
+            wpath = ticket_data_dir(e["sa_project"], tid) / shared.CLOSED_WITNESS_FILE
+            wres = shared.write_closed_witness_at(
+                wpath, tid, "COMPLETED", WITNESS_ARCHIVE_LEGACY, workflow_id=tid,
+                observed_by="temporal-visibility listing (ExecutionStatus=Completed)",
+                project_key=e["sa_project"])
+        except ValueError as wex:
+            wres = {"written": False, "skipped": False,
+                    "reason": "closed_witness_path_invalid: %s" % wex}
+        if wres["written"]:
+            witness_written.append(tid)
+        elif wres["skipped"]:
+            witness_skipped.append(tid)
+        else:
+            witness_failed.append({"id": tid, "why": wres["reason"]})
         m = _read_archive_manifest(tid, e["sa_project"])
         if m["state"] == "ok":
             skipped.append(tid)   # a real archive already exists (or was already legacy-posted) — idempotent, no overwrite
@@ -4654,6 +4808,9 @@ async def cmd_ticket_archive_legacy(args: Dict[str, Any],
             failed.append({"id": tid, "why": "%s: %s" % (type(ex).__name__, str(ex)[:300])})
     return _ok({"project": project or None, "written": written, "skipped": skipped,
                 "failed": failed,
+                "post_close_witness": {"written": witness_written,
+                                       "skipped": witness_skipped,
+                                       "failed": witness_failed},
                 "summary": "archive-legacy：过账 %d，已有档跳过 %d，失败 %d"
                            % (len(written), len(skipped), len(failed))})
 

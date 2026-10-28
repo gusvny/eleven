@@ -7302,6 +7302,292 @@ def ticket_data_dir(project_key: str, ticket_id: str) -> pathlib.Path:
     return perkey_projects_root() / key / "data" / "tickets" / tid
 
 
+# ======================================================================================
+# The post-close witness (ticket t261028-30)
+#
+# The problem it solves (measured 261028): a ticket's archive manifest is written by
+# TWO different writers, and neither proves that the ticket reached a terminal state.
+# The merge-stage close path writes its manifest BEFORE the workflow finishes, so the
+# file exists on tickets that are still open; `meta.status` in it is a mid-run snapshot
+# (460 of 460 production manifests read status=dispatched). The terminal-archive exit
+# (`client.cmd_ticket_archive_terminal`) writes `terminal_status` from a refused-if-live
+# guard, but it only takes FAILED/CANCELED/TIMED_OUT/TERMINATED, and no production
+# ticket has ever gone through it. A reader therefore cannot cite an archive as closure.
+#
+# The witness below is the missing fact: a small, additive, versioned marker written in
+# the ticket's data dir by an ACTOR THAT HAS JUST OBSERVED THE WORKFLOW TERMINAL. It is
+# never written from inside the ticket workflow (a workflow cannot act after its own
+# completion, and a marker written before completion is exactly the false claim this
+# ticket exists to remove). It is not the archive manifest and never rewrites one.
+#
+# Shape (`<projects>/<key>/data/tickets/<id>/closed.json`):
+#   schema          - the marker's own schema id (never the archive's "v1")
+#   ticket_id       - the ticket this witness is about
+#   project         - the project key the data dir belongs to
+#   terminal_status - the execution status the writer OBSERVED, verbatim
+#   closed_at       - ISO-8601 UTC, taken from the observed close time when readable
+#   workflow_id     - the Temporal workflow the observation was made on
+#   engine_version  - the engine's v2 marker version (shared.ENGINE_VERSION_V2)
+#   written_by      - the writing entry's registered id (CLOSED_WITNESS_WRITERS)
+#   observed_by     - the face the terminal fact was read from (human-readable)
+#
+# Attribution (spec 2): a hand-made file is told apart by `schema` + `written_by` +
+# `engine_version`. A missing, malformed, unknown-schema or unattributed file is NO
+# witness, and every refusal names which check failed.
+#
+# Idempotence (spec 1): a valid witness is never rewritten (a second write returns
+# skipped=true and the file stays byte-identical); an existing file that is not a valid
+# witness is never overwritten either (evidence is not silently regenerated) - the write
+# is refused by name.
+# ======================================================================================
+CLOSED_WITNESS_SCHEMA = "post-close-witness-v1"
+CLOSED_WITNESS_FILE = "closed.json"
+#: The writer ids the engine itself emits. A reader only accepts these: a file carrying
+#: any other identity (or none) was not produced by the close path.
+CLOSED_WITNESS_WRITERS = frozenset((
+    "engine:client.ticket-close-out",
+    "engine:client.ticket-cancel",
+    "engine:client.ticket-archive-terminal",
+    "engine:client.ticket-archive-legacy",
+    "engine:client.ticket-prune",
+))
+#: The terminal execution statuses a witness may record. This is the engine's own
+#: terminal set (client._TICKET_TERMINAL_STATUSES) minus CONTINUED_AS_NEW, which is an
+#: unclosed watcher handover (KI-025) and never a closure. The set is NOT redefined
+#: here: nothing about "what counts as a terminal ticket" changes.
+CLOSED_WITNESS_STATUSES = ("COMPLETED", "FAILED", "CANCELED", "TIMED_OUT", "TERMINATED")
+#: The bucket a refused witness is reported under by the request sweep (t261028-25's
+#: existing name for "this archive carries no terminal witness"). The refusal keeps the
+#: bucket stable and names the exact failing check in its reason.
+CLOSED_WITNESS_REFUSAL_BUCKET = "archive_no_terminal_witness"
+CLOSED_WITNESS_CITABLE_BUCKET = "archived_closed"
+
+
+def closed_witness_path(project_key: str, ticket_id: str) -> pathlib.Path:
+    """The post-close witness path inside the ticket's own data dir. Raises ValueError
+    on an invalid project key / ticket id (same whitelist as ticket_data_dir, which is
+    the only path this function adds a filename to - nothing is written elsewhere)."""
+    return ticket_data_dir(project_key, ticket_id) / CLOSED_WITNESS_FILE
+
+
+def _closed_witness_doc(project_key: str, ticket_id: str, terminal_status: str,
+                        workflow_id: str, writer: str, observed_by: str,
+                        closed_at: str) -> Dict[str, Any]:
+    return {"schema": CLOSED_WITNESS_SCHEMA,
+            "ticket_id": str(ticket_id).strip(),
+            "project": str(project_key).strip(),
+            "terminal_status": terminal_status,
+            "closed_at": closed_at,
+            "workflow_id": str(workflow_id or ticket_id).strip(),
+            "engine_version": ENGINE_VERSION_V2,
+            "written_by": writer,
+            "observed_by": str(observed_by or "")}
+
+
+def _utc_now_iso() -> str:
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+
+
+def write_closed_witness(project_key: str, ticket_id: str, terminal_status: str,
+                         writer: str, workflow_id: str = "",
+                         observed_by: str = "", closed_at: str = "") -> Dict[str, Any]:
+    """Record the post-close witness through the canonical path resolver."""
+    try:
+        path = closed_witness_path(project_key, ticket_id)
+    except ValueError as e:
+        return {"written": False, "skipped": False, "path": "", "state": "path_invalid",
+                "terminal_status": "", "reason": "closed_witness_path_invalid:%s" % e,
+                "doc": None}
+    return write_closed_witness_at(path, ticket_id, terminal_status, writer,
+                                   workflow_id=workflow_id, observed_by=observed_by,
+                                   closed_at=closed_at, project_key=project_key)
+
+
+def write_closed_witness_at(path: pathlib.Path, ticket_id: str, terminal_status: str,
+                            writer: str, workflow_id: str = "",
+                            observed_by: str = "", closed_at: str = "",
+                            project_key: str = "") -> Dict[str, Any]:
+    """Record the post-close witness at `path`. Never raises; the caller reports the
+    receipt.
+
+    `path` is the caller's ticket data dir plus CLOSED_WITNESS_FILE - the close entries
+    in client.py derive it from ticket_data_dir, so the marker always lands inside the
+    ticket's own data dir (this function adds no path of its own).
+
+    Order: argument checks (writer identity, observed status) -> existing file check (a
+    valid witness = skipped, an invalid file = refused, evidence is never regenerated)
+    -> atomic write (temp file in the same directory + os.replace, so a reader never
+    sees a partial file). Returns:
+      {"written": bool, "skipped": bool, "path": str, "state": str,
+       "terminal_status": str, "reason": str, "doc": dict|None}
+    """
+    out: Dict[str, Any] = {"written": False, "skipped": False, "path": str(path),
+                           "state": "", "terminal_status": "", "reason": "",
+                           "doc": None}
+    token = str(terminal_status or "").strip().upper()
+    if token not in CLOSED_WITNESS_STATUSES:
+        out["reason"] = ("closed_witness_terminal_status_invalid:%r (a witness only "
+                         "records an observed terminal status, legal set=%s)"
+                         % (terminal_status, ", ".join(CLOSED_WITNESS_STATUSES)))
+        return out
+    wid = str(writer or "").strip()
+    if wid not in CLOSED_WITNESS_WRITERS:
+        out["reason"] = ("closed_witness_writer_unknown:%r (only the engine's registered "
+                         "close entries may write a witness: %s)"
+                         % (writer, ", ".join(sorted(CLOSED_WITNESS_WRITERS))))
+        return out
+    out["terminal_status"] = token
+    if path.exists():
+        prev = read_closed_witness_at(path, ticket_id)
+        out["state"] = prev["state"]
+        if prev["witness"]:
+            # idempotent: a valid witness is never rewritten (same bytes stay on disk)
+            out["skipped"] = True
+            out["doc"] = prev["doc"]
+            out["reason"] = "closed_witness_already_recorded:%s" % path
+            return out
+        out["reason"] = ("closed_witness_exists_and_is_not_a_witness:%s:%s "
+                         "(never silently regenerated - handle manually): %s"
+                         % (prev["state"], prev["reason"], path))
+        return out
+    doc = _closed_witness_doc(project_key, ticket_id, token, workflow_id, wid,
+                              observed_by, closed_at or _utc_now_iso())
+    tmp = path.with_name(path.name + ".tmp-%d" % os.getpid())
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as e:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        out["reason"] = ("closed_witness_write_failed:%s: %s: %s"
+                         % (path, type(e).__name__, e))
+        return out
+    out.update({"written": True, "state": "ok", "doc": doc})
+    return out
+
+
+def read_closed_witness(project_key: str, ticket_id: str) -> Dict[str, Any]:
+    """Read the post-close witness through the canonical path resolver."""
+    try:
+        path = closed_witness_path(project_key, ticket_id)
+    except ValueError as e:
+        return {"witness": False, "state": "path_invalid", "reason":
+                "closed_witness_path_invalid:%s" % e, "path": "", "schema": "",
+                "terminal_status": "", "closed_at": "", "written_by": "", "doc": None}
+    return read_closed_witness_at(path, ticket_id)
+
+
+def read_closed_witness_at(path: pathlib.Path, ticket_id: str) -> Dict[str, Any]:
+    """Read the post-close witness at `path`. Never raises.
+
+    Returns {"witness": bool, "state": str, "reason": str, "path": str,
+             "schema": str, "terminal_status": str, "closed_at": str,
+             "written_by": str, "doc": dict|None}. `witness` is True only for state
+    "ok"; every other state is a named refusal:
+      missing / unreadable / malformed / unknown_schema / unattributed /
+      ticket_mismatch / terminal_status_invalid
+    """
+    out: Dict[str, Any] = {"witness": False, "state": "", "reason": "", "path": str(path),
+                           "schema": "", "terminal_status": "", "closed_at": "",
+                           "written_by": "", "doc": None}
+    out["path"] = str(path)
+    if not path.is_file():
+        out.update({"state": "missing", "reason": "closed_witness_absent:%s" % path})
+        return out
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as e:
+        out.update({"state": "unreadable",
+                    "reason": "closed_witness_unreadable:%s: %s: %s"
+                              % (path, type(e).__name__, e)})
+        return out
+    except ValueError as e:
+        out.update({"state": "malformed",
+                    "reason": "closed_witness_malformed:%s: %s: %s"
+                              % (path, type(e).__name__, e)})
+        return out
+    if not isinstance(doc, dict):
+        out.update({"state": "malformed",
+                    "reason": "closed_witness_malformed:%s: top level is %s, not an object"
+                              % (path, type(doc).__name__)})
+        return out
+    out["doc"] = doc
+    schema = str(doc.get("schema") or "")
+    out["schema"] = schema
+    if schema != CLOSED_WITNESS_SCHEMA:
+        out.update({"state": "unknown_schema",
+                    "reason": "closed_witness_schema_unknown:%s (schema=%r, known=%r)"
+                              % (path, schema, CLOSED_WITNESS_SCHEMA)})
+        return out
+    writer = str(doc.get("written_by") or "")
+    out["written_by"] = writer
+    if writer not in CLOSED_WITNESS_WRITERS:
+        out.update({"state": "unattributed",
+                    "reason": "closed_witness_unattributed:%s (written_by=%r is not a "
+                              "registered engine writer)" % (path, writer)})
+        return out
+    try:
+        ver = int(doc.get("engine_version"))
+    except (TypeError, ValueError):
+        ver = 0
+    if ver < 1:
+        out.update({"state": "unattributed",
+                    "reason": "closed_witness_unattributed:%s (engine_version=%r is not "
+                              "an engine version)" % (path, doc.get("engine_version"))})
+        return out
+    if str(doc.get("ticket_id") or "").strip() != str(ticket_id).strip():
+        out.update({"state": "ticket_mismatch",
+                    "reason": "closed_witness_ticket_mismatch:%s (marker is about %r, "
+                              "cited %r)" % (path, doc.get("ticket_id"), ticket_id)})
+        return out
+    status = str(doc.get("terminal_status") or "").strip().upper()
+    out["terminal_status"] = status
+    out["closed_at"] = str(doc.get("closed_at") or "")
+    if status not in CLOSED_WITNESS_STATUSES:
+        out.update({"state": "terminal_status_invalid",
+                    "reason": "closed_witness_terminal_status_invalid:%s "
+                              "(terminal_status=%r, legal set=%s)"
+                              % (path, doc.get("terminal_status"),
+                                 ", ".join(CLOSED_WITNESS_STATUSES))})
+        return out
+    out.update({"witness": True, "state": "ok"})
+    return out
+
+
+def closed_witness_citation(project_key: str, ticket_id: str) -> Dict[str, Any]:
+    """The sweep-facing face: can this ticket's post-close witness be cited as
+    closure evidence? Same return shape family as the archive citation so the request
+    sweep's rule can consult it as a second witness:
+
+      {"citable": bool, "evidence": str, "bucket": str, "reason": str,
+       "path": str, "state": str, "terminal_status": str}
+
+    A citable witness names the marker path and the terminal status it proves. Any
+    refusal keeps the sweep's existing `archive_no_terminal_witness` bucket and puts
+    the exact failing check in `reason` - a missing, malformed, unknown-schema or
+    unattributed marker proves nothing and is never inferred into closure."""
+    read = read_closed_witness(project_key, ticket_id)
+    if read["witness"]:
+        evidence = ("%s proves closure: terminal_status=%s (post-close witness, "
+                    "schema=%s, written_by=%s after the workflow was terminal%s)"
+                    % (read["path"], read["terminal_status"], read["schema"],
+                       read["written_by"],
+                       ", closed_at=%s" % read["closed_at"] if read["closed_at"] else ""))
+        return {"citable": True, "evidence": evidence,
+                "bucket": CLOSED_WITNESS_CITABLE_BUCKET, "reason": "",
+                "path": read["path"], "state": read["state"],
+                "terminal_status": read["terminal_status"]}
+    return {"citable": False, "evidence": "",
+            "bucket": CLOSED_WITNESS_REFUSAL_BUCKET, "reason": read["reason"],
+            "path": read["path"], "state": read["state"],
+            "terminal_status": ""}
+
+
 # ---- Contract ①d: the project.yaml paths section — in-project path declarations
 # (ticket t260903-03) ----
 # The engine may not hardcode 「some fixed path inside the project」 (a precondition of

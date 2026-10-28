@@ -183,6 +183,19 @@ ARCHIVE_SCHEMA = "v1"
 #: writer by name, so a manifest claiming them was not written by it.
 ARCHIVE_TERMINAL_WITNESSES = ("FAILED", "CANCELED", "TIMED_OUT", "TERMINATED")
 
+# ---- t261028-30: the POST-CLOSE WITNESS, the second on-disk witness --------
+# Measured 261028: 460 of 460 production manifests are the close-path shape, so
+# the archive rule above closes no head at all. The engine now also writes a
+# marker AFTER the workflow is terminal (`shared.CLOSED_WITNESS_FILE`,
+# `closed.json`, in the ticket's data dir) from the close entries themselves
+# (close-out / cancel / terminal-archive / archive-legacy / prune). Its status
+# set is the engine's terminal set INCLUDING COMPLETED, because a normal merge
+# close ends COMPLETED - the four-status set above stays exactly what it was and
+# keeps applying to archive MANIFESTS only. The marker's schema/attribution/
+# idempotence contract lives in shared.py (single source); this module only
+# resolves its path and cites it. A refused marker keeps the existing
+# `archive_no_terminal_witness` bucket with the failing check named.
+
 # ---- residue buckets (named on the receipt, always counted) ----------------
 BUCKET_CLOSED = "closed"
 BUCKET_ARCHIVED_CLOSED = "archived_closed"
@@ -720,6 +733,52 @@ def archive_terminal_citation(ticket: str, project_key: str,
             "bucket": BUCKET_ARCHIVED_CLOSED, "reason": "", "path": loc}
 
 
+def post_close_witness_citation(ticket: str, project_key: str,
+                                env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """t261028-30: the ticket's POST-CLOSE WITNESS as the second archive-side citation.
+
+    Why a second witness is needed (measured 261028): every production archive
+    manifest is the merge-stage shape, which records no terminal fact, so the
+    archive rule above closes nothing and the residue cannot be retired lawfully.
+    The witness (`<projects>/<key>/data/tickets/<id>/closed.json`) is written by an
+    engine CLOSE entry AFTER the workflow went terminal - the manifest's own writers
+    cannot make that claim (the merge stage writes its manifest while the ticket is
+    still open). The marker's contract (schema / observed terminal status / writer
+    identity / engine version / idempotence) lives in shared.py; this function only
+    resolves the path from the INJECTED env (never bare os.environ) and hands the
+    read to that one reader.
+
+    Return shape matches `archive_terminal_citation`. A validation failure is never
+    a witness: missing / malformed / unknown-schema / unattributed markers keep the
+    sweep's named `archive_no_terminal_witness` bucket, and the reason names the
+    exact check that failed."""
+    shared = shared_module()
+    key = str(project_key or "").strip()
+    tid = str(ticket or "").strip()
+    if not shared.PROJECT_KEY_RE.match(key) or not shared.PROJECT_KEY_RE.match(tid):
+        return {"citable": False, "evidence": "",
+                "bucket": BUCKET_ARCHIVE_NO_TERMINAL_WITNESS,
+                "reason": "closed_witness_path_invalid: project=%r ticket=%r (both are "
+                          "spliced into the path)" % (key[:40], tid[:40]),
+                "path": "", "state": "path_invalid", "terminal_status": ""}
+    path = (archive_projects_root(env) / key / "data" / "tickets" / tid
+            / shared.CLOSED_WITNESS_FILE)
+    read = shared.read_closed_witness_at(path, tid)
+    if read["witness"]:
+        return {"citable": True,
+                "evidence": ("%s proves closure: terminal_status=%s (post-close witness, "
+                             "schema=%s, written_by=%s after the workflow was terminal%s)"
+                             % (read["path"], read["terminal_status"], read["schema"],
+                                read["written_by"],
+                                ", closed_at=%s" % read["closed_at"]
+                                if read["closed_at"] else "")),
+                "bucket": BUCKET_ARCHIVED_CLOSED, "reason": "", "path": read["path"],
+                "state": read["state"], "terminal_status": read["terminal_status"]}
+    return {"citable": False, "evidence": "",
+            "bucket": BUCKET_ARCHIVE_NO_TERMINAL_WITNESS, "reason": read["reason"],
+            "path": read["path"], "state": read["state"], "terminal_status": ""}
+
+
 def cited_terminal_evidence(ticket: str, ledger_rows: List[Dict[str, Any]],
                             ticket_status_fn: Callable[[str], Optional[Tuple[str, str]]],
                             project_key: str,
@@ -732,11 +791,16 @@ def cited_terminal_evidence(ticket: str, ledger_rows: List[Dict[str, Any]],
     "" for a head that stays open. Faces, in order:
       1. a landing row on the delivery ledger naming the ticket (a cited row);
       2. the ticket's list projection reading `closed` (a cited row);
-      3. the ticket no longer being listed -> the ARCHIVE is consulted, and only
-         a manifest carrying the terminal-archive exit's own witness closes it.
+      3. the ticket no longer being listed -> the on-disk evidence is consulted,
+         and only a post-terminal fact closes it: an archive manifest carrying the
+         terminal-archive exit's own witness, OR the post-close witness marker
+         (t261028-30). Both are on-disk witnesses under the ticket's data dir, so
+         both report via="archive" (the receipt's `archived_closed` tally counts
+         on-disk-witness closes).
     Anything else keeps the head open, named: `uncited` when the projection
-    reads a non-terminal status, and the archive buckets when the archive
-    cannot prove closure. No inference, no meta.status, no default close."""
+    reads a non-terminal status, and the archive buckets when neither on-disk
+    witness proves closure (the reason names BOTH refusals). No inference, no
+    meta.status, no default close."""
     verdict, evidence, note = eval_landing_on_line(ticket, ledger_rows)
     if verdict is VERDICT_TRUE:
         return VERDICT_TRUE, evidence, "ticket_landed:%s" % ticket, BUCKET_CLOSED, \
@@ -759,7 +823,16 @@ def cited_terminal_evidence(ticket: str, ledger_rows: List[Dict[str, Any]],
     if citation["citable"]:
         return VERDICT_TRUE, citation["evidence"], \
             "archive_terminal:%s" % ticket, BUCKET_ARCHIVED_CLOSED, "archive"
-    return VERDICT_FALSE, "", citation["reason"], citation["bucket"], ""
+    # t261028-30: the post-close witness is the second on-disk witness. It is
+    # consulted for every manifest shape that failed above - the marker's own
+    # validity decides, never the manifest's absence (a legacy or missing
+    # manifest neither proves nor disproves closure; the marker does).
+    witness = post_close_witness_citation(ticket, project_key, env)
+    if witness["citable"]:
+        return VERDICT_TRUE, witness["evidence"], \
+            "post_close_witness:%s" % ticket, BUCKET_ARCHIVED_CLOSED, "archive"
+    return VERDICT_FALSE, "", "%s; %s" % (citation["reason"], witness["reason"]), \
+        citation["bucket"], ""
 
 
 def residue_bucket_counts(entries: List[Dict[str, Any]]) -> Dict[str, int]:
@@ -798,8 +871,10 @@ def close_legacy_residue(head_rows: Dict[str, Dict[str, Any]], states: Dict[str,
         ticket's projection reading closed, or an archive manifest that proves
         terminal closure;
       - a cited ticket Temporal no longer lists is NOT closable on its absence:
-        the archive decides, and a missing / malformed / legacy / witness-less
-        manifest keeps the head open in its own named bucket;
+        the ON-DISK evidence decides - an archive manifest carrying a terminal
+        witness, or the post-close witness marker (t261028-30) - and a missing /
+        malformed / legacy / witness-less pair keeps the head open in its own
+        named bucket with both refusals named;
       - anything else without a citable ending row stays open (bucket
         `uncited`, with the reason named).
     Each close appends ONE resolved state row whose evidence names the exact
