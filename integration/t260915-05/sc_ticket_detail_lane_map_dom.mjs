@@ -22,6 +22,8 @@
 //      不炸、零 pageerror；
 //   L8 检查明细区（mock ① 成分）：gate_runs 逐轮逐条 ✓/✗＋item＋detail，红行点名
 //      文件与状态卡文件清单联动，<details> 折叠可展开。
+//      t261028-46: both engine receipt shapes are pinned here — script-gate rows
+//      ({check, level, count}) must render NAMED and GREEN, agent rows stay as is.
 //
 // 分工（防 intent 级重复）：t260911-05 sc_ki048_status_card_dom 已锁 merge-dirty 族
 // 红卡四件 payload→pixel 与畸形 blocked_detail 不捏造文件——本条 L2 用 verify_red /
@@ -340,6 +342,11 @@ const DETAIL_MALFORMED = detailBase({
 })
 
 // L8 检查明细区：gate_runs 两轮（红含探针点名＋绿）＋红卡文件联动
+// t261028-46 re-anchor: the engine writes TWO receipt shapes. The third run
+// below is a SCRIPT gate (cs-machine-qc): rows are {check, level, count}, with
+// no `item` and no `green`. The detail face must name those rows from `check`
+// and show them green; before the fix it rendered them red and unnamed under
+// an "all green" header. The two agent-gate runs stay byte-identical.
 const GATE_RUNS_PAIR = [
   { stage: 'merge_check', label: 'merge_check（程序化检查）', green: false, red_count: 1, exit_code: 0,
     checks: [{ item: 'In-lane verify_lane code is green', green: false,
@@ -349,6 +356,11 @@ const GATE_RUNS_PAIR = [
   { stage: 'merge_check', label: 'merge_check（程序化检查）', green: true, red_count: 0, exit_code: 0,
     checks: [{ item: 'Lane branch has commits', green: true, detail: '3 commits', id: 'lane_commits' },
       { item: 'In-lane verify_lane code is green', green: true, detail: 'exit=0 red=0', id: 'verify_lane_code' }] },
+  { stage: 'cs-machine-qc', label: 'cs_machine_qc contract（script gate）', green: true, red_count: 0, exit_code: 0,
+    checks: [
+      { check: '溯源校验（checkpoint 可指回内容源位置）', level: 'green', count: 0 },
+      { check: '契约校验（四件套/定位符）', level: 'green', count: 0 },
+    ] },
 ]
 const DETAIL_CHECKS = detailBase({
   ...DETAIL_RED_DIRTY,
@@ -660,6 +672,39 @@ async function scenarioChecksArea(page) {
   await det.locator('summary').first().click({ timeout: 3000 }).catch(() => {})
   if (!(await waitFor(async () => (await det.textContent().catch(() => '')).includes('exit=1'), 4000))) {
     return `红行折叠展开后不见该轮 detail 原文（${(await det.textContent().catch(() => '')).slice(0, 120)}）`
+  }
+  // t261028-46: the script-gate run ({check, level, count} rows) renders its
+  // rows NAMED and GREEN, and its header verdict agrees with them.
+  const scriptArea = await page.evaluate(`(() => {
+    const run = document.querySelector('.wb-ck-run[data-stage="cs-machine-qc"]');
+    if (!run) return null;
+    const v = run.querySelector('.wb-ck-run-verdict');
+    return {
+      headerGreen: run.getAttribute('data-green'),
+      verdict: v ? v.textContent : '',
+      rows: [...run.querySelectorAll('details.wb-ck-row')].map(r => {
+        const n = r.querySelector('.wb-ck-name');
+        return { green: r.getAttribute('data-green'), name: n ? n.textContent : '' };
+      }),
+    };
+  })()`)
+  if (!scriptArea) return '检查明细区缺脚本门轮（cs-machine-qc 夹具未渲染）'
+  if (scriptArea.rows.length < 2) return `脚本门轮行数不足（应 2，实得 ${scriptArea.rows.length}）`
+  if (scriptArea.rows.some(r => r.green !== 'true')) {
+    return `脚本门行被判红（{check,level:"green"} 口径未读）: ${JSON.stringify(scriptArea.rows)}`
+  }
+  if (scriptArea.rows.some(r => !r.name || r.name === '(unnamed check)')) {
+    return `脚本门行 unnamed（名字未从 check 字段取到）: ${JSON.stringify(scriptArea.rows)}`
+  }
+  if (scriptArea.rows.every(r => !r.name.includes('溯源校验') && !r.name.includes('契约校验'))) {
+    return `脚本门行名不是 check 原文: ${JSON.stringify(scriptArea.rows)}`
+  }
+  if (scriptArea.headerGreen !== 'true' || scriptArea.verdict !== 'all green') {
+    return `脚本门轮表头与行不一致（header=${scriptArea.headerGreen} verdict=${scriptArea.verdict}）`
+  }
+  // Consistent engine data must NOT raise the disagreement notice.
+  if (await page.evaluate(`document.querySelectorAll('.wb-ck-disagree').length`) !== 0) {
+    return '一致的门回执上出现了判词冲突提示（表头/行本无冲突）'
   }
   return null
 }

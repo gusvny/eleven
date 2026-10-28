@@ -489,7 +489,7 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-ck-name{font-weight:600;flex:none}
 .wb-ck-detail{color:var(--dsw-derive-muted,#57606a);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wb-ck-more{padding:4px 10px 8px;font-size:11.5px;color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-border,#d0d7de)}
-.wb-ck-more pre{margin:4px 0 0;padding:6px 8px;font-size:11px;background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:auto}
+.wb-ck-more pre{margin:4px 0 0;padding:6px 8px;font-size:11px;background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:auto}.wb-ck-disagree{margin:4px 0 8px;padding:5px 10px;font-size:11.5px;line-height:1.6;border-radius:6px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#d4a72c);word-break:break-all}
 .wb-drawer-id{font-size:12px;color:var(--dsw-derive-muted,#57606a);word-break:break-all}
 /* 终态失败票详情面板（t260919-02）：红系结构件——色全部走 theme.ts 既有 danger
  * 令牌声明位（消费位 var() fallback，hex-clean/KI-055 家族纪律，零新增裸 hex）。 */
@@ -4545,6 +4545,22 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
               ))}
               {/* t260915-05：检查明细区（mock ①）——gate_runs 逐轮逐条直译。 */}
               {detail.kind !== 'inspection' && <ChecksDetail runs={checksRuns} />}
+              {/* t261028-46: the run verdict is read from whichever field the engine
+                  wrote (green -> level -> verdict -> the rows themselves). When the
+                  engine's own verdict really contradicts its rows, both are printed
+                  side by side: no invented verdict, no silent reconciliation. */}
+              {detail.kind !== 'inspection' && checksRuns.some(r => r.disagreement) ? (
+                <div className="wb-ck-disagree" data-testid="checks-verdict-disagreement">
+                  {'Verdict disagreement (engine data verbatim, nothing reconciled): '}
+                  {checksRuns.filter(r => r.disagreement).map(r => {
+                    const redRows = r.rows.filter(x => !x.green).length
+                    const rowVerdictText = r.rows.length === 0
+                      ? 'no rows'
+                      : (redRows === 0 ? 'all rows green' : `${redRows} red row(s)`)
+                    return `${r.label} [${r.stage}]: run verdict ${r.green ? 'green' : 'red'} (from ${r.verdictSource}) vs ${rowVerdictText}`
+                  }).join(' · ')}
+                </div>
+              ) : null}
               {(() => { const st = d2StatusLine(detail, selWf); return (
                 <div className="wb-d2-status" data-s={st.s}>{st.text}</div>
               ) })()}

@@ -1532,7 +1532,44 @@ function deriveRounds(stageId, detail) {
 	});
 	return rounds;
 }
-/** gate_runs → 检查明细区行模型（最新在前）。畸形条目逐条跳过不抛。 */
+/** Name shown when a row carries data but no identity field. */
+const UNNAMED_CHECK = "unnamed check";
+/**
+* Boolean from one receipt verdict field. Accepts the booleans the agent
+* gates write and the `green`/`red` strings the script gates write. Any other
+* value (missing, null, another word) stays undefined: the reader degrades,
+* it never invents a verdict.
+*/
+function receiptBool(v) {
+	if (v === true) return true;
+	if (v === false) return false;
+	if (typeof v === "string") {
+		const s = v.trim().toLowerCase();
+		if (s === "green") return true;
+		if (s === "red") return false;
+	}
+}
+/**
+* Row verdict across both shapes, in receipt-field order: `green` (agent and
+* human gates) -> `level` (script gates) -> `verdict` -> `done`. Conflicting
+* signals resolve red: a reader never upgrades a row. No signal -> undefined
+* (the caller shows the row red, still named and still visible).
+*/
+function rowVerdict(co) {
+	const signals = [
+		receiptBool(co.green),
+		receiptBool(co.level),
+		receiptBool(co.verdict),
+		receiptBool(co.done)
+	].filter((s) => s !== void 0);
+	if (signals.length === 0) return void 0;
+	return signals.every((s) => s === true);
+}
+/**
+* gate_runs → Check-details row model (newest run first). Reads both receipt
+* shapes with one implementation. Malformed entries degrade row by row and
+* never throw; a row that carries information is never dropped.
+*/
 function buildChecksDetail(detail) {
 	if (detail === null || typeof detail !== "object") return [];
 	const runs = detail.gate_runs;
@@ -1545,27 +1582,51 @@ function buildChecksDetail(detail) {
 		if (!stage) continue;
 		const rows = [];
 		if (Array.isArray(o.checks)) for (const c of o.checks) {
+			if (typeof c === "string" || typeof c === "number") {
+				const text = String(c).trim();
+				if (text) rows.push({
+					green: false,
+					item: text
+				});
+				continue;
+			}
 			if (c === null || typeof c !== "object") continue;
 			const co = c;
-			const item = asString(co.item);
-			const green = co.green === true;
+			const green = rowVerdict(co) === true;
 			const checkId = asString(co.id) || void 0;
-			if (green && !item && !checkId) continue;
+			const name = asString(co.item) || asString(co.check) || checkId || "";
+			const detailText = asString(co.detail) || void 0;
+			const note = asString(co.note) || void 0;
+			const count = typeof co.count === "number" && Number.isFinite(co.count) ? co.count : void 0;
+			if (green && !name && !detailText && !note && count === void 0) continue;
 			rows.push({
 				green,
-				item: item || checkId || "",
-				detail: asString(co.detail) || void 0,
+				item: name || UNNAMED_CHECK,
+				detail: detailText,
+				note,
+				count,
 				checkId,
 				reasonCode: asString(co.reason_code) || void 0,
 				files: asStringArray$1(co.files),
 				nextAction: asString(co.next_action) || void 0
 			});
 		}
+		const rowsGreen = rows.every((r) => r.green);
+		const wroteGreen = receiptBool(o.green);
+		const wroteLevel = receiptBool(o.level);
+		const wroteVerdict = receiptBool(o.verdict);
+		const written = wroteGreen !== void 0 ? wroteGreen : wroteLevel !== void 0 ? wroteLevel : wroteVerdict;
+		const verdictSource = wroteGreen !== void 0 ? "green" : wroteLevel !== void 0 ? "level" : wroteVerdict !== void 0 ? "verdict" : "rows";
+		const redCount = typeof o.red_count === "number" && Number.isFinite(o.red_count) ? o.red_count : rows.filter((r) => !r.green).length;
+		const contradiction = rows.length > 0 && written !== rowsGreen || written === true && redCount > 0;
 		out.push({
 			stage,
 			label: asString(o.label) || stage,
-			green: o.green === true,
-			redCount: typeof o.red_count === "number" && Number.isFinite(o.red_count) ? o.red_count : rows.filter((r) => !r.green).length,
+			green: written !== void 0 ? written : rowsGreen,
+			redCount,
+			verdictSource,
+			rowsGreen,
+			disagreement: written !== void 0 && contradiction,
 			gen: typeof o.gen === "number" && Number.isFinite(o.gen) ? o.gen : void 0,
 			conflict: o.conflict === true,
 			rows
@@ -14994,7 +15055,7 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 .wb-ck-name{font-weight:600;flex:none}
 .wb-ck-detail{color:var(--dsw-derive-muted,#57606a);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wb-ck-more{padding:4px 10px 8px;font-size:11.5px;color:var(--dsw-derive-muted,#57606a);border-top:1px dashed var(--dsw-derive-border,#d0d7de)}
-.wb-ck-more pre{margin:4px 0 0;padding:6px 8px;font-size:11px;background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:auto}
+.wb-ck-more pre{margin:4px 0 0;padding:6px 8px;font-size:11px;background:var(--dsw-derive-surface,#f6f8fa);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:auto}.wb-ck-disagree{margin:4px 0 8px;padding:5px 10px;font-size:11.5px;line-height:1.6;border-radius:6px;color:var(--dsw-derive-warn-deep,#7d4e00);background:var(--dsw-derive-warn-bg,#fff8c5);border:1px solid var(--dsw-derive-warn-border,#d4a72c);word-break:break-all}
 .wb-drawer-id{font-size:12px;color:var(--dsw-derive-muted,#57606a);word-break:break-all}
 /* 终态失败票详情面板（t260919-02）：红系结构件——色全部走 theme.ts 既有 danger
  * 令牌声明位（消费位 var() fallback，hex-clean/KI-055 家族纪律，零新增裸 hex）。 */
@@ -19137,6 +19198,15 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 							nowMs: stageDurs.nowMs
 						})),
 						detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ChecksDetail, { runs: checksRuns }),
+						detail.kind !== "inspection" && checksRuns.some((r) => r.disagreement) ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-ck-disagree",
+							"data-testid": "checks-verdict-disagreement",
+							children: ["Verdict disagreement (engine data verbatim, nothing reconciled): ", checksRuns.filter((r) => r.disagreement).map((r) => {
+								const redRows = r.rows.filter((x) => !x.green).length;
+								const rowVerdictText = r.rows.length === 0 ? "no rows" : redRows === 0 ? "all rows green" : `${redRows} red row(s)`;
+								return `${r.label} [${r.stage}]: run verdict ${r.green ? "green" : "red"} (from ${r.verdictSource}) vs ${rowVerdictText}`;
+							}).join(" · ")]
+						}) : null,
 						(() => {
 							const st = d2StatusLine(detail, selWf);
 							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {

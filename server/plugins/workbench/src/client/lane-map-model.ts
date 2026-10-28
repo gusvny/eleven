@@ -977,27 +977,90 @@ export function deriveRounds(stageId: string, detail: DetailLike): LaneRound[] {
 
 /* ── 检查明细区（mock ① ck-rows：gate_runs 逐条渲染） ── */
 
+/**
+ * One Check-details row. The engine writes TWO receipt shapes into
+ * `gate_runs[*].checks[*]` (measured on live ticket faces, t261028-46):
+ *
+ *   - SCRIPT gates (cs-machine-qc / verify_lane code / release ledger):
+ *     `{check, level: 'green'|'red', count}` — no `item`, no `green`;
+ *   - AGENT and HUMAN gates: `{item, by, done, green, id, detail, reason_code,
+ *     files, next_action}` — no `level`.
+ *
+ * Both land in this one row shape: name = `item` || `check` || `id`,
+ * green = `green === true` || `level === 'green'`. A script row is never
+ * judged by its missing `green` field, and an agent row keeps its rendering.
+ */
 export interface CheckRowView {
   green: boolean
   item: string
   detail?: string
+  note?: string
+  count?: number
   checkId?: string
   reasonCode?: string
   files?: string[]
   nextAction?: string
 }
 
+/** Receipt field behind a run's verdict. `rows` = the run wrote no verdict
+ *  field, so the row evidence decides (never an invented green). */
+export type GateVerdictSource = 'green' | 'level' | 'verdict' | 'rows'
+
 export interface GateRunView {
   stage: string
   label: string
   green: boolean
   redCount: number
+  /** Which receipt field the run-level verdict came from (t261028-46). */
+  verdictSource: GateVerdictSource
+  /** Every row green: the evidence the stage header must not contradict. */
+  rowsGreen: boolean
+  /** The written verdict and the receipt's own red evidence genuinely
+   *  disagree. Both are shown verbatim; the reader reconciles nothing. */
+  disagreement: boolean
   gen?: number
   conflict?: boolean
   rows: CheckRowView[]
 }
 
-/** gate_runs → 检查明细区行模型（最新在前）。畸形条目逐条跳过不抛。 */
+/** Name shown when a row carries data but no identity field. */
+const UNNAMED_CHECK = 'unnamed check'
+
+/**
+ * Boolean from one receipt verdict field. Accepts the booleans the agent
+ * gates write and the `green`/`red` strings the script gates write. Any other
+ * value (missing, null, another word) stays undefined: the reader degrades,
+ * it never invents a verdict.
+ */
+function receiptBool(v: unknown): boolean | undefined {
+  if (v === true) return true
+  if (v === false) return false
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase()
+    if (s === 'green') return true
+    if (s === 'red') return false
+  }
+  return undefined
+}
+
+/**
+ * Row verdict across both shapes, in receipt-field order: `green` (agent and
+ * human gates) -> `level` (script gates) -> `verdict` -> `done`. Conflicting
+ * signals resolve red: a reader never upgrades a row. No signal -> undefined
+ * (the caller shows the row red, still named and still visible).
+ */
+function rowVerdict(co: Record<string, unknown>): boolean | undefined {
+  const signals = [receiptBool(co.green), receiptBool(co.level), receiptBool(co.verdict), receiptBool(co.done)]
+    .filter((s): s is boolean => s !== undefined)
+  if (signals.length === 0) return undefined
+  return signals.every(s => s === true)
+}
+
+/**
+ * gate_runs → Check-details row model (newest run first). Reads both receipt
+ * shapes with one implementation. Malformed entries degrade row by row and
+ * never throw; a row that carries information is never dropped.
+ */
 export function buildChecksDetail(detail: unknown): GateRunView[] {
   if (detail === null || typeof detail !== 'object') return []
   const runs = (detail as Record<string, unknown>).gate_runs
@@ -1011,16 +1074,32 @@ export function buildChecksDetail(detail: unknown): GateRunView[] {
     const rows: CheckRowView[] = []
     if (Array.isArray(o.checks)) {
       for (const c of o.checks) {
+        // A bare string/number row still names something: keep it as a named
+        // row instead of dropping the information.
+        if (typeof c === 'string' || typeof c === 'number') {
+          const text = String(c).trim()
+          if (text) rows.push({ green: false, item: text })
+          continue
+        }
         if (c === null || typeof c !== 'object') continue
         const co = c as Record<string, unknown>
-        const item = asString(co.item)
-        const green = co.green === true
+        const green = rowVerdict(co) === true
         const checkId = asString(co.id) || undefined
-        if (green && !item && !checkId) continue // 无字绿项无信息量
+        // item (agent/human) || check (script) || id (id-only green item,
+        // agent_activities D4 shape) — every real row gets a readable name.
+        const name = asString(co.item) || asString(co.check) || checkId || ''
+        const detailText = asString(co.detail) || undefined
+        const note = asString(co.note) || undefined
+        const count = typeof co.count === 'number' && Number.isFinite(co.count) ? co.count : undefined
+        // A green row with no name and no payload adds nothing to the face.
+        // A red row, or any row carrying detail/note/count, is always shown.
+        if (green && !name && !detailText && !note && count === undefined) continue
         rows.push({
           green,
-          item: item || checkId || '', // 绿项常只带 id（agent_activities D4 口径）——id 即可读锚
-          detail: asString(co.detail) || undefined,
+          item: name || UNNAMED_CHECK,
+          detail: detailText,
+          note,
+          count,
           checkId,
           reasonCode: asString(co.reason_code) || undefined,
           files: asStringArray(co.files),
@@ -1028,11 +1107,28 @@ export function buildChecksDetail(detail: unknown): GateRunView[] {
         })
       }
     }
+    const rowsGreen = rows.every(r => r.green)
+    // Run-level verdict: whatever the engine writes (`green` today; `level` /
+    // `verdict` accepted for script-gate run rows), else the rows decide.
+    const wroteGreen = receiptBool(o.green)
+    const wroteLevel = receiptBool(o.level)
+    const wroteVerdict = receiptBool(o.verdict)
+    const written = wroteGreen !== undefined ? wroteGreen : wroteLevel !== undefined ? wroteLevel : wroteVerdict
+    const verdictSource: GateVerdictSource = wroteGreen !== undefined ? 'green'
+      : wroteLevel !== undefined ? 'level' : wroteVerdict !== undefined ? 'verdict' : 'rows'
+    const redCount = typeof o.red_count === 'number' && Number.isFinite(o.red_count) ? o.red_count : rows.filter(r => !r.green).length
+    // Header and rows may only agree when the receipt agrees: a green verdict
+    // with red rows (or a non-zero red count) is a genuine engine disagreement
+    // and is surfaced, not smoothed over.
+    const contradiction = (rows.length > 0 && written !== rowsGreen) || (written === true && redCount > 0)
     out.push({
       stage,
       label: asString(o.label) || stage,
-      green: o.green === true,
-      redCount: typeof o.red_count === 'number' && Number.isFinite(o.red_count) ? o.red_count : rows.filter(r => !r.green).length,
+      green: written !== undefined ? written : rowsGreen,
+      redCount,
+      verdictSource,
+      rowsGreen,
+      disagreement: written !== undefined && contradiction,
       gen: typeof o.gen === 'number' && Number.isFinite(o.gen) ? o.gen : undefined,
       conflict: o.conflict === true,
       rows,
