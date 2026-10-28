@@ -1,12 +1,24 @@
 /**
  * review-comments.ts — the lane-file comment store for the changed-files
- * markdown reviewer (t261022-14).
+ * reviewer (t261022-14 markdown blocks; t261028-23 line anchors for code).
+ *
+ * ANCHOR SHAPES (t261028-23, additive):
+ *   - block anchor (markdown reviewer, unchanged): {index, hash, neighbour}
+ *   - line anchor (code file line diff, new):
+ *       {kind:'line', side:'new'|'old', line, hunk, contextHash}
+ *   A line anchor carries no `index`; the sanitizer accepts a thread when ONE
+ *   of the two shapes is structurally usable. Documents written before this
+ *   change (block anchors only) load byte-identically: every new field is
+ *   optional and is omitted when absent, never defaulted into the record.
+ *   A thread may also carry the owning file `path` (also additive) so one
+ *   lane document can hold threads of several files without mixing them.
  *
  * The lane is the store (ticket requirement 6): every reviewer comment lives in
- * `<lane>/.sandbar/review-comments.json`, one document per (ticket, file path).
- * Nothing is written to any server-side store; this module is plain file IO
- * that the console host half performs on the browser's behalf (a browser cannot
- * touch the filesystem).
+ * `<lane>/.sandbar/review-comments.json` — ONE document per lane whose threads
+ * each name their owning file (`path`), so every changed file of the ticket is
+ * reviewed from the same small file and nothing is written to a server-side
+ * store; this module is plain file IO that the console host half performs on
+ * the browser's behalf (a browser cannot touch the filesystem).
  *
  * Precedent copied (fault-mode tradeoff table in the ticket plan §F):
  *   - the `ticket show → t.worktree → anchorGuard` chain from
@@ -37,6 +49,8 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 export const REVIEW_COMMENTS_MAX_BYTES = 512 * 1024
 /** Request-body cap applied at the module layer too (route also caps at 64KB). */
 export const REVIEW_COMMENTS_MAX_THREADS = 500
+/** Highest accepted 1-based line number of a line anchor (garbage-shaped input is refused). */
+export const REVIEW_COMMENTS_MAX_LINE = 10_000_000
 const TEMP_SUFFIX = '.tmp'
 
 /* ---------------------------------------------------------------- schema */
@@ -49,6 +63,27 @@ export interface ReviewCommentRecord {
   text: string
 }
 
+/** Which side of the diff a line anchor points at: the changed file ('new') or its base ('old'). */
+export type ReviewLineSide = 'new' | 'old'
+
+/** Markdown reviewer anchor (t261022-14): block index + text hash + neighbour snippet. */
+export interface ReviewBlockAnchorRecord {
+  index: number
+  hash: string
+  neighbour: string
+}
+
+/** Line reviewer anchor (t261028-23): side + 1-based line + hunk id + row text hash. */
+export interface ReviewLineAnchorRecord {
+  kind: 'line'
+  side: ReviewLineSide
+  line: number
+  hunk: string
+  contextHash: string
+}
+
+export type ReviewAnchorRecord = ReviewBlockAnchorRecord | ReviewLineAnchorRecord
+
 /**
  * One thread: a root comment plus nested replies (ticket requirement 5).
  * parentId === null marks the root; replies carry their parent thread id.
@@ -56,17 +91,21 @@ export interface ReviewCommentRecord {
 export interface ReviewThreadRecord {
   id: string
   parentId: string | null
-  /** The block this thread is anchored to: index + text hash + neighbour snippet (requirement 7). */
-  anchor: {
-    index: number
-    hash: string
-    neighbour: string
-  }
+  /** What this thread is anchored to: a markdown block or a diff line. */
+  anchor: ReviewAnchorRecord
+  /** Owning file (repo-relative). Absent in legacy documents: such a thread
+   *  belongs to the document's own `path`. */
+  path?: string
   author: string
   at: number
   text: string
   resolved: boolean
   replies: ReviewCommentRecord[]
+}
+
+/** True when the anchor is the line-anchored shape (code files, t261028-23). */
+export function isLineAnchor(a: ReviewAnchorRecord): a is ReviewLineAnchorRecord {
+  return (a as ReviewLineAnchorRecord).kind === 'line'
 }
 
 /** The whole persisted document (one ticket × one file path). */
@@ -99,9 +138,8 @@ export function sanitizeThread(raw: unknown): ReviewThreadRecord | null {
   const id = asStr(r.id, 200)
   if (id === '') return null
   const anchorRaw = (r.anchor ?? {}) as Record<string, unknown>
-  const index = asInt(anchorRaw.index)
-  const hash = asStr(anchorRaw.hash, 200)
-  if (index === null || index < 0) return null
+  const anchor = sanitizeAnchor(anchorRaw)
+  if (anchor === null) return null
   const resolved = r.resolved === true
   const parentId = r.parentId === null || r.parentId === undefined ? null : asStr(r.parentId, 200) || null
   const at = asInt(r.at) ?? 0
@@ -116,16 +154,46 @@ export function sanitizeThread(raw: unknown): ReviewThreadRecord | null {
       if (replies.length >= 200) break
     }
   }
-  return {
+  const out: ReviewThreadRecord = {
     id,
     parentId,
-    anchor: { index, hash, neighbour: asStr(anchorRaw.neighbour, 400) },
+    anchor,
     author: asStr(r.author, 200),
     at,
     text: asStr(r.text),
     resolved,
     replies,
   }
+  // Additive: only carried when present, so legacy records keep their exact shape.
+  const owner = asStr(r.path, 1000)
+  if (owner !== '') out.path = owner
+  return out
+}
+
+/**
+ * Sanitize one anchor object. Line anchors (kind:'line') need a valid side and
+ * a 1-based line; block anchors need a non-negative index. Anything else is
+ * unusable — the caller names the drop instead of guessing a position.
+ */
+export function sanitizeAnchor(raw: Record<string, unknown>): ReviewAnchorRecord | null {
+  if (raw.kind === 'line') {
+    const sideRaw = raw.side
+    if (sideRaw !== 'new' && sideRaw !== 'old') return null
+    const line = asInt(raw.line)
+    if (line === null || line < 1 || line > REVIEW_COMMENTS_MAX_LINE) return null
+    return {
+      kind: 'line',
+      side: sideRaw,
+      line,
+      hunk: asStr(raw.hunk, 200),
+      contextHash: asStr(raw.contextHash, 200),
+    }
+  }
+  // Legacy / implicit block anchor: `kind` absent or 'block'.
+  if (raw.kind !== undefined && raw.kind !== 'block') return null
+  const index = asInt(raw.index)
+  if (index === null || index < 0) return null
+  return { index, hash: asStr(raw.hash, 200), neighbour: asStr(raw.neighbour, 400) }
 }
 
 /**
@@ -262,10 +330,21 @@ export async function mergeReviewComments(
     if (incThreads.length > REVIEW_COMMENTS_MAX_THREADS) {
       return { ok: false, file, reason: `too many threads in one request (max ${REVIEW_COMMENTS_MAX_THREADS})`, code: 'oversize' as const }
     }
+    const incomingIds = new Set<string>()
     for (const raw of incThreads) {
       const s = sanitizeThread(raw)
       if (s === null) { dropped += 1; continue }
+      incomingIds.add(s.id)
       byId.set(s.id, s)
+    }
+    // Backfill the owning file on threads written before the field existed: at
+    // write time the document's own `path` is still the file they were created
+    // for (a legacy client always wrote its own path). Without the stamp a
+    // legacy thread would drift to whichever file wrote last.
+    if (base.path !== '') {
+      for (const t of byId.values()) {
+        if (t.path === undefined && !incomingIds.has(t.id)) t.path = base.path
+      }
     }
     const doc: ReviewCommentsDoc = {
       schema: 'review-comments-v1',

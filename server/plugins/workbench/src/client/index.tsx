@@ -3216,7 +3216,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }: {
       <div className="wb-d-fhead">
         <span className="wb-d-badge" data-s={f.status}>{STATUS_LABEL[f.status]}</span>
         <span className="wb-d-type">{KIND_LABEL[f.kind]}</span>
-        <button className="wb-d-fpath wb-d-flink" title="Open read-only as of this ticket"
+        <button className="wb-d-fpath wb-d-flink" title="Open in the reviewer (line comments land in the lane file)"
           onClick={() => onOpenFile(f.path, 'settle')}>{f.path}</button>
         {f.kind === 'code' && f.unified !== undefined && (() => {
           const st = unifiedStats(f.unified)
@@ -3599,6 +3599,36 @@ function AgentLogsTab({ detail, wf, onMsg }: { detail: TicketDetail; wf?: Wf; on
   )
 }
 
+/** t261028-23: the line-diff review face for code files — same reviewer, line
+ * mode. Declared with the panel (not in the shared stylesheet) so the reviewer
+ * carries its own skin; the class names are the reviewer's own wb-rv-* family. */
+const REVIEW_LINE_CSS = `/* t261028-23: line-diff review face for code files — same reviewer, line mode.
+   The row is a flex line; its threads and composer sit UNDER it (block flow),
+   which is why .wb-rv-line is a column container, not the flex row itself. */
+.wb-rv-diffdoc{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:6px 8px 40px}
+.wb-rv-hunk{margin:10px 0 4px;padding:2px 8px;border-radius:4px;background:var(--dsw-derive-surface-2,#eaeef2);
+  color:var(--dsw-derive-muted,#57606a);white-space:pre-wrap;overflow-wrap:anywhere}
+.wb-rv-line{border-radius:4px;padding:1px 0 2px}
+.wb-rv-line:hover{outline:1px solid var(--dsw-derive-border,#d0d7de);outline-offset:-1px}
+.wb-rv-line.s-added{background:var(--dsw-derive-success-bg,#dafbe1)}
+.wb-rv-line.s-removed{background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-rv-linerow{display:flex;align-items:flex-start;gap:8px;padding:0 6px}
+.wb-rv-ln{flex:0 0 46px;text-align:right;color:var(--dsw-derive-muted,#8c959f);user-select:none}
+.wb-rv-mark{flex:0 0 12px;text-align:center;user-select:none;color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-line.s-added .wb-rv-mark{color:var(--dsw-derive-success-deep,#116329);font-weight:700}
+.wb-rv-line.s-removed .wb-rv-mark{color:var(--dsw-derive-danger,#cf222e);font-weight:700}
+.wb-rv-line.s-removed .wb-rv-code{text-decoration:line-through;color:var(--dsw-derive-danger,#cf222e)}
+.wb-rv-code{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.wb-rv-lineactions{display:flex;align-items:center;gap:4px;flex:0 0 auto}
+.wb-rv-line:hover .wb-rv-addc{opacity:1}
+.wb-rv-line .wb-rv-threadbox,.wb-rv-line .wb-rv-compose{margin-left:60px}
+.wb-rv-stat{display:inline-flex;gap:6px;font-size:12px}
+.wb-rv-stat .add{color:var(--dsw-derive-success-deep,#116329);font-weight:600}
+.wb-rv-stat .del{color:var(--dsw-derive-danger,#cf222e);font-weight:600}
+.wb-rv-ticket{font-size:11px;color:var(--dsw-derive-muted,#57606a);
+  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;padding:0 6px}
+`
+
 /** 工单列表分页大小（260824 用户拍板⑥）。 */
 const PAGE_SIZE = 20
 
@@ -3652,11 +3682,16 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
   // （切工单不清除，查看器自洽读打开时那张票；遮罩/Esc 关闭即回收）。
   const [fileViewer, setFileViewer] = useState<{ ticketId: string; path: string; mode: TicketTimeMode } | null>(null)
   // t261022-14: markdown files open the block-comment reviewer instead of the
-  // raw viewer; JSON/code keep the raw view (ticket non-goal).
+  // raw viewer; t261028-23: EVERY changed file opens the reviewer — markdown in
+  // block mode (unchanged), any other file as a line-based diff with the same
+  // comment machinery.
   const [reviewer, setReviewer] = useState<ReviewerTarget | null>(null)
-  /** Doc files go to the reviewer; everything else keeps the raw viewer. */
+  /** The changed-set faces ('settle') open the reviewer; a background reference
+   *  (mode 'base') is not part of this ticket's changed set and keeps the
+   *  read-only baseline viewer. The reviewer offers that viewer as a fallback
+   *  for a file it has no diff for (status-card files). */
   const openChangedFile = (ticketId: string, p: string, m: TicketTimeMode) => {
-    if (/\.(md|markdown)$/i.test(p)) setReviewer({ ticketId, path: p })
+    if (m === 'settle' || /\.(md|markdown)$/i.test(p)) setReviewer({ ticketId, path: p })
     else setFileViewer({ ticketId, path: p, mode: m })
   }
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -4651,12 +4686,17 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
           onClose={() => setFileViewer(null)}
         />
       )}
-      {/* t261022-14: the markdown reviewer overlay (doc files only; Esc via its
-          own close control — it is a working surface, not a read-only modal). */}
+      {/* t261022-14: the reviewer overlay (markdown blocks); t261028-23: every
+          changed file opens here — markdown keeps block mode, code renders a
+          line diff. Esc via its own close control — it is a working surface,
+          not a read-only modal. The dialog label is the one t260905-05 records
+          for this overlay (unchanged; the panel head names the active mode). */}
       {reviewer !== null && (
         <div className="wb-modal" role="dialog" aria-modal="true" aria-label="Markdown review">
           <div className="wb-rv-modalbox">
-            <MarkdownReviewer target={reviewer} onClose={() => setReviewer(null)} />
+            <style>{REVIEW_LINE_CSS}</style>
+            <MarkdownReviewer target={reviewer} onClose={() => setReviewer(null)}
+              onFallback={(tid, p) => { setReviewer(null); setFileViewer({ ticketId: tid, path: p, mode: 'settle' }) }} />
           </div>
         </div>
       )}

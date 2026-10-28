@@ -3,11 +3,16 @@
  * sc_t26102214_review_panel_face.mjs — t261022-14, real-browser face leg.
  *
  * User story: the host opens a ticket's changed files in the workbench. A
- * markdown file now opens the block-comment reviewer — rendered document on
+ * markdown file opens the block-comment reviewer — rendered document on
  * the right, a collapsible rail on the left (changed doc files → per-file TOC
  * h1/h2 + the comments list filtered Open/All/Resolved), diff marks per BLOCK,
- * a minimap rail, and per-block comment threads. A JSON/code file keeps
- * today's raw viewer (ticket non-goal). Every comment lands in the ticket's
+ * a minimap rail, and per-block comment threads. Every OTHER changed file opens
+ * the SAME reviewer in LINE mode (t261028-23, re-anchored here by ticket
+ * t261028-31): a line-based diff — hunk headers, old AND new line numbers, +/-
+ * markers — with a thread rendered under the row it anchors to, the same
+ * composer / reply / resolve / filter affordances and the same lane-file store.
+ * A code-file click that lands in the read-only viewer instead FAILS this case.
+ * Every comment lands in the ticket's
  * lane file <lane>/.sandbar/review-comments.json and the panel says so
  * (requirement 9) — the lane agents read that file at their next turn.
  *
@@ -21,12 +26,16 @@
  * the sibling offline entry t261022-14-review-comments-lane-store (S1 there is
  * the dead-button source lock). Assertions anchor the panel's DECLARED
  * data-testid faces (reviewer-panel / reviewer-block / hide-removed / toc-entry
- * / comment-filter / minimap-mark / lane-info / outdated-thread), never
+ * / comment-filter / minimap-mark / lane-info / outdated-thread / diff-line /
+ * diff-hunk / diff-stat / review-ticket-id / line-comment-btn), never
  * internal class layouts. Zero docker/Temporal, never touches 3099/7233.
  *
  * Cases (acceptance mapping):
- *   P1 a .md click opens the reviewer panel; a .json click keeps the raw
- *      viewer (non-goal guard, both in one journey).
+ *   P1 a .md click opens the reviewer panel in BLOCK mode; a code-file click
+ *      opens the SAME reviewer in LINE mode — its diff-line / diff-stat faces,
+ *      the file path named, a thread rendered under its own row, a line anchor
+ *      in the lane file — and NOT the read-only viewer (both in one journey;
+ *      the line-mode half is probe P1b).
  *   P2 block diff marks (a): added/removed/modified statuses render as marked
  *      blocks; a modified block carries word-level inline marks (del struck,
  *      ins inserted); hide-removed defaults OFF (removed visible) and hides
@@ -44,6 +53,11 @@
  *   P8 lane-info names the lane file path and states the lane agents read it
  *      (requirement 9).
  *   P9 the rail toggle collapses the rail and the document stays visible (1c).
+ *   P1b a code-file click opens the reviewer's LINE mode (diff rows with both
+ *      line numbers and +/- markers, the file path and ticket named), a comment
+ *      on a row renders as a thread UNDER that row and lands in the lane file
+ *      with a line anchor — and the read-only viewer is NOT what answered the
+ *      click (the re-anchored non-goal guard, t261028-31).
  *   P10 light AND dark captures (KI-055); zero pageerror across the journey.
  *
  * Three states (t260904-12): last line SUMMARY pass=N fail=K env_fail=E na=W;
@@ -81,6 +95,8 @@ function summarize() {
 
 const DOC_PATH = 'docs/design/notes.md'
 const CODE_PATH = 'src/util.json'
+/** A row text unique to the code fixture's diff — where probe P1b puts its line comment. */
+const CODE_NEEDLE = '"extra": "added",'
 const diffFiles = [
   {
     path: DOC_PATH, kind: 'doc', status: 'modified',
@@ -94,7 +110,20 @@ const diffFiles = [
       { type: 'heading', level: 2, status: 'unchanged', summary: 'h2: Notes', oldText: 'Notes', newText: 'Notes' },
     ],
   },
-  { path: CODE_PATH, kind: 'code', status: 'modified' },
+  {
+    // t261028-23 / t261028-31: a code entry carries the unified diff the REAL
+    // diff face ships for it, so the reviewer's line mode has rows to render and
+    // a comment can anchor to one line of it.
+    path: CODE_PATH, kind: 'code', status: 'modified',
+    unified: [
+      '@@ -1,3 +1,4 @@',
+      ' {"util": true,',
+      '-  "count": 2,',
+      '+  "count": 3,',
+      '+  "extra": "added",',
+      '  "name": "util"',
+    ].join('\n'),
+  },
 ]
 /** Pristine deep copy of the diff face — P5 mutates it to simulate an edit; each theme resets to this. */
 const PRISTINE_DIFF = JSON.parse(JSON.stringify(diffFiles))
@@ -119,7 +148,15 @@ function lanePut(body) {
   try {
     const doc = JSON.parse(body)
     if (!Array.isArray(doc.threads)) return { ok: true, result: { ok: false, reason: 'threads not an array' } }
-    threads = doc.threads
+    // Mirror the REAL route contract (host review-comments.ts mergeReviewComments):
+    // threads MERGE by id, last write wins per thread — the PUT carries only the
+    // writing FILE's threads. A replacement would drop the other reviewed files'
+    // threads, which the line-mode half of this journey (P1b) now exercises on
+    // the same lane document. Not a loosening: every probe still reads the
+    // threads it asserts from this file on disk.
+    const byId = new Map(threads.filter((t) => t && typeof t.id === 'string').map((t) => [t.id, t]))
+    for (const t of doc.threads) if (t && typeof t.id === 'string') byId.set(t.id, t)
+    threads = [...byId.values()]
     mkdirSync(join(LANE, '.sandbar'), { recursive: true })
     writeFileSync(LANE_FILE, JSON.stringify({ schema: 'review-comments-v1', ticketId: TICKET_ID, path: DOC_PATH, updatedAt: Date.now(), threads }, null, 2))
     return { ok: true, result: { ok: true, dropped: 0 } }
@@ -273,7 +310,8 @@ for (const theme of ['light', 'dark']) {
   }
   await page.waitForTimeout(600)
 
-  // P1 doc click opens the reviewer; code click keeps the raw viewer
+  // P1 doc click opens the reviewer in block mode (the code-file click → line
+  // mode half is probe P1b, at the end of the journey)
   const opened = await openReviewer(page)
   record(`P1/${theme} md-click opens reviewer`, opened ? 'pass' : 'fail',
     opened ? '' : 'notes.md row not found or panel did not appear (pre-implement red expected)')
@@ -405,25 +443,56 @@ for (const theme of ['light', 'dark']) {
       record(`P9/${theme} collapsed rail keeps document visible`, docVisible ? 'pass' : 'fail', '')
     }
 
-    // P1b code-kind click keeps the raw viewer (non-goal), checked at journey end
+    // P1b code-kind click opens the reviewer in LINE mode (t261028-23 routing,
+    // re-anchored by t261028-31). The teeth are kept: a click that silently
+    // lands in the read-only viewer fails this probe.
     const codeBtn = page.locator(`button:has-text("${CODE_PATH}")`).first()
-    // the code file lives in the changes tab behind the reviewer overlay; the
-    // non-goal face is observable by the viewer target state, asserted after close
+    // the code file lives in the changes tab behind the reviewer overlay: close
+    // the doc panel first so the click target is reachable
     await page.locator('[data-testid="reviewer-panel"] button[aria-label="Close reviewer"]').click({ timeout: 4000 }).catch(() => {})
     await waitFor(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => n === 0), 4000)
-    let codeOk = false
+    let lineOk = false
+    let lineDetail = 'changes row missing'
     if (await codeBtn.count()) {
-      await codeBtn.click().catch(() => {})
-      await page.waitForTimeout(500)
-      const reviewerGone = (await page.locator('[data-testid="reviewer-panel"]').count()) === 0
-      const rawSeen = (await page.locator('.wb-ttv, pre').count()) > 0
-      codeOk = reviewerGone && rawSeen
-      // close the raw viewer so it cannot mask the rest of the journey
-      await page.locator('.wb-ttv-close').first().click().catch(() => {})
-      await page.keyboard.press('Escape').catch(() => {})
-      await page.waitForTimeout(400)
+      await codeBtn.click({ timeout: 5000 }).catch(() => {})
+      const panelUp = await waitFor(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => n > 0), 6000)
+      const rowsUp = panelUp
+        ? await waitFor(() => page.locator('[data-testid="diff-line"]').count().then((n) => n > 0), 8000)
+        : false
+      const statUp = (await page.locator('[data-testid="diff-stat"]').count()) > 0
+      const pathNamed = (await page.locator('[data-testid="reviewer-panel"]').filter({ hasText: CODE_PATH }).count()) > 0
+      const ticketNamed = (await page.locator('[data-testid="review-ticket-id"]').filter({ hasText: TICKET_ID }).count()) > 0
+      const rawViewer = (await page.locator('.wb-ttv').count()) > 0
+      lineOk = panelUp && rowsUp && statUp && pathNamed && ticketNamed && !rawViewer
+      lineDetail = `panel=${panelUp} rows=${await page.locator('[data-testid="diff-line"]').count()} stat=${statUp}`
+        + ` path=${pathNamed} ticket=${ticketNamed} rawViewer=${rawViewer}`
+      // a comment on one row renders as a thread UNDER that row and reaches the
+      // lane file with a line anchor (reader-side disk read, never a receipt)
+      if (lineOk) {
+        const row = page.locator('[data-testid="diff-line"]').filter({ hasText: CODE_NEEDLE }).first()
+        const rowIdx = await row.getAttribute('data-row-index').catch(() => null)
+        await row.locator('[data-testid="line-comment-btn"]').click({ timeout: 4000 }).catch(() => {})
+        const ta = row.locator('[data-testid="composer"] textarea').first()
+        const taUp = await ta.waitFor({ state: 'visible', timeout: 3000 }).then(() => true).catch(() => false)
+        if (taUp) {
+          await ta.fill('comment on a code line').catch(() => {})
+          await row.locator('[data-testid="composer"] button.wb-rv-primary').click({ timeout: 4000 }).catch(() => {})
+        }
+        const underRow = rowIdx !== null && (await waitFor(() => page.locator(
+          `[data-testid="diff-line"][data-row-index="${rowIdx}"] [data-testid="thread"]`)
+          .filter({ hasText: 'comment on a code line' }).count().then((n) => n > 0), 6000))
+        const disk = laneDisk()
+        const anchored = Array.isArray(disk?.threads) && disk.threads.some((t) => t?.path === CODE_PATH
+          && t?.anchor?.kind === 'line' && (t.anchor.side === 'new' || t.anchor.side === 'old')
+          && typeof t.anchor.line === 'number' && typeof t.anchor.contextHash === 'string' && t.anchor.contextHash !== '')
+        lineOk = lineOk && underRow && anchored
+        lineDetail += ` threadUnderRow=${underRow} lineAnchorOnDisk=${anchored}`
+      }
+      // close the reviewer so it cannot mask the rest of the journey
+      await page.locator('[data-testid="reviewer-panel"] button[aria-label="Close reviewer"]').click({ timeout: 4000 }).catch(() => {})
+      await waitFor(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => n === 0), 4000)
     }
-    record(`P1/${theme} json-click keeps raw viewer`, codeOk ? 'pass' : 'fail', 'non-goal: only .md/.markdown routes to the reviewer')
+    record(`P1b/${theme} code-click opens the reviewer line mode`, lineOk ? 'pass' : 'fail', lineDetail)
     // full panel reload: close the reviewer and open it again — the component
     // refetches diff + comments on mount, so the threads must come back
     await page.locator('[data-testid="reviewer-panel"] button[aria-label="Close reviewer"]').click({ timeout: 4000 }).catch(() => {})

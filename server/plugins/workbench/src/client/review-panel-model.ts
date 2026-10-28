@@ -321,9 +321,12 @@ export function placeThreads(blocks: PanelBlock[], threads: Thread[]): { index: 
  * store's sanitizer rightly refuses it). This is the ONLY serialization seam:
  * persist() goes through it, so a panel write can never diverge from the
  * schema the lane agents read.
+ *
+ * `path` (t261028-23, optional) stamps the owning file so one lane document can
+ * carry threads of several files; callers that omit it keep the legacy shape.
  */
-export function toStoreThread(t: Thread): Record<string, unknown> {
-  return {
+export function toStoreThread(t: Thread, path = ''): Record<string, unknown> {
+  const out: Record<string, unknown> = {
     id: t.id,
     parentId: t.parentId,
     anchor: { index: t.blockIndex, hash: t.hash, neighbour: t.neighbour },
@@ -333,6 +336,35 @@ export function toStoreThread(t: Thread): Record<string, unknown> {
     resolved: t.resolved,
     replies: t.replies.map((r) => ({ at: r.at, author: r.author, text: r.text })),
   }
+  if (path !== '') out.path = path
+  return out
+}
+
+/* --------------------------------------------------------- per-file scope */
+
+/** The owning file of a raw thread record; '' when the record predates the field. */
+export function threadOwner(raw: unknown): string {
+  if (raw === null || typeof raw !== 'object') return ''
+  const p = (raw as Record<string, unknown>).path
+  return typeof p === 'string' ? p.slice(0, 1000) : ''
+}
+
+/**
+ * Keep only the threads that belong to `path` (t261028-23).
+ *
+ * One lane document holds the threads of every reviewed file (`path` per
+ * thread). A record without its own `path` predates the field and belongs to
+ * the document's own `path` — so a legacy markdown-only document still loads
+ * completely for the file it was written for, and its threads are not shown
+ * under a different file.
+ */
+export function scopeThreads(raw: unknown, path: string, docPath: string): unknown[] {
+  const arr = Array.isArray(raw) ? raw : []
+  return arr.filter((t) => {
+    const owner = threadOwner(t)
+    if (owner !== '') return owner === path
+    return docPath === path
+  })
 }
 
 /* -------------------------------------------------------------- TOC + map */

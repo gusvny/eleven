@@ -10304,10 +10304,10 @@ function setViewProject(project) {
 * skipped with a count the panel face surfaces.
 */
 /** Tolerant string (everything else → ''). */
-function asStr$1(v, cap = 4e3) {
+function asStr$2(v, cap = 4e3) {
 	return typeof v === "string" ? v.slice(0, cap) : "";
 }
-function asNum(v) {
+function asNum$1(v) {
 	return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 /** djb2-style hex hash over the block text — the anchor hash on both write and resolve sides. */
@@ -10391,12 +10391,12 @@ function buildBlocks(rawBlocks) {
 	for (const raw of rawBlocks) {
 		if (raw === null || typeof raw !== "object") continue;
 		const r = raw;
-		const type = asStr$1(r.type, 40);
+		const type = asStr$2(r.type, 40);
 		if (type === "") continue;
 		const status = cleanStatus(r.status);
-		const level = asNum(r.level) ?? (type === "heading" ? 1 : 0);
-		const oldText = asStr$1(r.oldText);
-		const newText = asStr$1(r.newText);
+		const level = asNum$1(r.level) ?? (type === "heading" ? 1 : 0);
+		const oldText = asStr$2(r.oldText);
+		const newText = asStr$2(r.newText);
 		const text = status === "removed" ? oldText : newText;
 		if (type === "table-head" || type === "table-row") {
 			const oldCells = splitCells(oldText);
@@ -10434,7 +10434,7 @@ function buildBlocks(rawBlocks) {
 				neighbour
 			});
 		}
-		const summary = asStr$1(r.summary, 200);
+		const summary = asStr$2(r.summary, 200);
 		neighbour = summary !== "" ? summary : (out[out.length - 1]?.text ?? "").slice(0, 80);
 	}
 	return out;
@@ -10454,9 +10454,9 @@ function normalizeThreads(raw) {
 			continue;
 		}
 		const r = item;
-		const id = asStr$1(r.id, 200);
+		const id = asStr$2(r.id, 200);
 		const anchor = r.anchor ?? {};
-		const blockIndex = asNum(anchor.index);
+		const blockIndex = asNum$1(anchor.index);
 		if (id === "" || blockIndex === null || blockIndex < 0 || seen.has(id)) {
 			dropped++;
 			continue;
@@ -10466,23 +10466,23 @@ function normalizeThreads(raw) {
 		if (Array.isArray(r.replies)) for (const rep of r.replies) {
 			if (rep === null || typeof rep !== "object") continue;
 			const rr = rep;
-			const text = asStr$1(rr.text);
+			const text = asStr$2(rr.text);
 			if (text === "") continue;
 			replies.push({
-				author: asStr$1(rr.author, 200),
-				at: asNum(rr.at) ?? 0,
+				author: asStr$2(rr.author, 200),
+				at: asNum$1(rr.at) ?? 0,
 				text
 			});
 		}
 		threads.push({
 			id,
-			parentId: r.parentId === null || r.parentId === void 0 ? null : asStr$1(r.parentId, 200) || null,
+			parentId: r.parentId === null || r.parentId === void 0 ? null : asStr$2(r.parentId, 200) || null,
 			blockIndex: Math.trunc(blockIndex),
-			hash: asStr$1(anchor.hash, 200),
-			neighbour: asStr$1(anchor.neighbour, 400),
-			author: asStr$1(r.author, 200),
-			at: asNum(r.at) ?? 0,
-			text: asStr$1(r.text),
+			hash: asStr$2(anchor.hash, 200),
+			neighbour: asStr$2(anchor.neighbour, 400),
+			author: asStr$2(r.author, 200),
+			at: asNum$1(r.at) ?? 0,
+			text: asStr$2(r.text),
 			resolved: r.resolved === true,
 			replies
 		});
@@ -10556,9 +10556,12 @@ function placeThreads(blocks, threads) {
 * store's sanitizer rightly refuses it). This is the ONLY serialization seam:
 * persist() goes through it, so a panel write can never diverge from the
 * schema the lane agents read.
+*
+* `path` (t261028-23, optional) stamps the owning file so one lane document can
+* carry threads of several files; callers that omit it keep the legacy shape.
 */
-function toStoreThread(t) {
-	return {
+function toStoreThread(t, path = "") {
+	const out = {
 		id: t.id,
 		parentId: t.parentId,
 		anchor: {
@@ -10576,6 +10579,30 @@ function toStoreThread(t) {
 			text: r.text
 		}))
 	};
+	if (path !== "") out.path = path;
+	return out;
+}
+/** The owning file of a raw thread record; '' when the record predates the field. */
+function threadOwner(raw) {
+	if (raw === null || typeof raw !== "object") return "";
+	const p = raw.path;
+	return typeof p === "string" ? p.slice(0, 1e3) : "";
+}
+/**
+* Keep only the threads that belong to `path` (t261028-23).
+*
+* One lane document holds the threads of every reviewed file (`path` per
+* thread). A record without its own `path` predates the field and belongs to
+* the document's own `path` — so a legacy markdown-only document still loads
+* completely for the file it was written for, and its threads are not shown
+* under a different file.
+*/
+function scopeThreads(raw, path, docPath) {
+	return (Array.isArray(raw) ? raw : []).filter((t) => {
+		const owner = threadOwner(t);
+		if (owner !== "") return owner === path;
+		return docPath === path;
+	});
 }
 /** h1/h2 entries in document order (requirement 1a / acceptance f). */
 function buildToc(blocks) {
@@ -10601,23 +10628,525 @@ function buildMinimap(blocks, threads) {
 	return marks;
 }
 //#endregion
+//#region src/client/diff-rows-model.ts
+/**
+* diff-rows-model.ts — pure unified-diff row model for the file reviewer
+* (t261028-23). Zero React / DOM / node imports; unit-tested directly by
+* tests/t261028-23-diff-rows-model.mjs.
+*
+* Input is the `unified` string the diff face already carries for code files
+* (host changes.ts: `git diff <base> -- <path>`, or the synthesised all-`+`
+* form for an added file, or the degraded removed-then-added form when a JSON
+* file fails to parse). This model produces:
+*   - rows: one per diff line, carrying BOTH line numbers, the change kind,
+*     the hunk it belongs to and the row text;
+*   - hunks: the hunk list a view needs (header label + row range);
+*   - the anchor <-> row mapping a comment needs (side/line/hunk/contextHash).
+*
+* Anchor discipline (same family as the markdown reviewer's block anchor):
+* a thread records what the reviewer SAW, and resolution later requires it to
+* still match. `rowMatchesAnchor` is the exact match; `rowMatchesAnchorLoosely`
+* accepts the same side+line+text under a different hunk header (an insert
+* above shifts hunk boundaries, the line itself did not move).
+*
+* Malformed input NEVER throws and never invents rows: it returns a NAMED
+* empty state (`empty-diff` / `malformed-diff` / `no-unified-diff`) with a
+* reason the panel shows. A silently empty diff would read as "no changes".
+*/
+/** The diff carried no hunk header (added file / degraded view): one stable synthetic hunk. */
+const SYNTHETIC_HUNK_ID = "@@ synthetic @@";
+const SYNTHETIC_HUNK_LABEL = "@@ synthetic (no hunk header in this diff) @@";
+/** Named empty states — the panel renders these by name, never as a blank view. */
+const DIFF_EMPTY = "empty-diff";
+const DIFF_MALFORMED = "malformed-diff";
+const DIFF_NO_UNIFIED = "no-unified-diff";
+const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
+/** File-level preamble a `git diff` emits before the hunks. */
+const PREAMBLE_RE = /^(diff --git |index |new file mode |deleted file mode |old mode |new mode |similarity index |dissimilarity index |rename from |rename to |Binary files .* differ$)/;
+/** Short, always-single-line snippet of a line for a named reason. */
+function snippet(line, cap = 90) {
+	const s = line.length > cap ? line.slice(0, cap) + "…" : line;
+	return JSON.stringify(s);
+}
+/**
+* Parse the unified diff of ONE file into rows + hunks.
+* Never throws; unusable input yields a named empty state.
+*/
+function parseUnifiedDiff(unified) {
+	if (typeof unified !== "string") return {
+		ok: false,
+		state: DIFF_NO_UNIFIED,
+		reason: "the diff face carries no unified diff for this file (structural view only)"
+	};
+	const text = unified.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+	if (text.trim() === "") return {
+		ok: false,
+		state: DIFF_EMPTY,
+		reason: "the diff face returned an empty unified diff for this file"
+	};
+	const lines = text.split("\n");
+	const rows = [];
+	const hunks = [];
+	let synthetic = false;
+	let skipped = 0;
+	let oldNo = 0;
+	let newNo = 0;
+	let cur = null;
+	let firstSkipped = "";
+	/** A `diff --git`/`--- …`/`+++ …` header was seen: later `--- `/`+++ ` lines are headers too. */
+	let sawFileHeader = false;
+	const closeHunk = () => {
+		if (cur === null) return;
+		hunks.push({
+			id: cur.id,
+			label: cur.label,
+			oldStart: cur.oldStart,
+			oldCount: cur.oldCount,
+			newStart: cur.newStart,
+			newCount: cur.newCount,
+			firstRow: cur.firstRow,
+			rowCount: rows.length - cur.firstRow
+		});
+		cur = null;
+	};
+	const openHunk = (line) => {
+		const m = HUNK_RE.exec(line);
+		if (m === null) return;
+		closeHunk();
+		const oldStart = Number(m[1]);
+		const oldCount = m[2] === void 0 ? 1 : Number(m[2]);
+		const newStart = Number(m[3]);
+		const newCount = m[4] === void 0 ? 1 : Number(m[4]);
+		cur = {
+			id: line.trim(),
+			label: line.trim(),
+			oldStart,
+			oldCount,
+			newStart,
+			newCount,
+			oldLeft: oldCount,
+			newLeft: newCount,
+			firstRow: rows.length,
+			synthetic: false
+		};
+		oldNo = oldStart;
+		newNo = newStart;
+	};
+	const openSyntheticHunk = () => {
+		closeHunk();
+		synthetic = true;
+		oldNo = 1;
+		newNo = 1;
+		cur = {
+			id: SYNTHETIC_HUNK_ID,
+			label: SYNTHETIC_HUNK_LABEL,
+			oldStart: 0,
+			oldCount: 0,
+			newStart: 0,
+			newCount: 0,
+			oldLeft: Number.POSITIVE_INFINITY,
+			newLeft: Number.POSITIVE_INFINITY,
+			firstRow: rows.length,
+			synthetic: true
+		};
+	};
+	const pushRow = (marker, body) => {
+		if (cur === null) return;
+		const kind = marker === "+" ? "added" : marker === "-" ? "removed" : "context";
+		const oldLine = kind === "added" ? null : oldNo;
+		const newLine = kind === "removed" ? null : newNo;
+		if (kind !== "added") oldNo += 1;
+		if (kind !== "removed") newNo += 1;
+		rows.push({
+			index: rows.length,
+			key: `L${oldLine === null ? "-" : oldLine}N${newLine === null ? "-" : newLine}`,
+			kind,
+			oldLine,
+			newLine,
+			text: body,
+			hunk: cur.id,
+			hash: blockHash(body)
+		});
+	};
+	const countSkipped = (line) => {
+		skipped += 1;
+		if (firstSkipped === "") firstSkipped = line;
+	};
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i] ?? "";
+		const marker = line === "" ? "" : line[0] ?? "";
+		if (cur !== null && (cur.oldLeft > 0 || cur.newLeft > 0)) {
+			if (marker === "+" || marker === "-" || marker === " ") {
+				pushRow(marker, line.slice(1));
+				if (cur !== null && !cur.synthetic) {
+					if (marker !== "+") cur.oldLeft -= 1;
+					if (marker !== "-") cur.newLeft -= 1;
+				}
+				continue;
+			}
+			if (marker === "\\") continue;
+			closeHunk();
+		}
+		if (cur !== null && !HUNK_RE.test(line)) closeHunk();
+		if (line === "" || marker === "\\") continue;
+		if (HUNK_RE.test(line)) {
+			openHunk(line);
+			continue;
+		}
+		if (PREAMBLE_RE.test(line)) {
+			sawFileHeader = true;
+			continue;
+		}
+		if (cur === null && (sawFileHeader || hunks.length === 0 && !synthetic && rows.length === 0) && line.startsWith("--- ") && (lines[i + 1] ?? "").startsWith("+++ ")) {
+			sawFileHeader = true;
+			i += 1;
+			continue;
+		}
+		if (marker === " " && cur === null && rows.length === 0) {
+			countSkipped(line);
+			continue;
+		}
+		if (marker === "+" || marker === "-" || marker === " ") {
+			if (cur === null && !synthetic && hunks.length === 0) openSyntheticHunk();
+			if (cur !== null) pushRow(marker, line.slice(1));
+			else countSkipped(line);
+			continue;
+		}
+		countSkipped(line);
+	}
+	closeHunk();
+	if (rows.length === 0) return {
+		ok: false,
+		state: DIFF_MALFORMED,
+		reason: firstSkipped === "" ? "no hunk header and no +/- line in this diff" : `no hunk header and no +/- line in this diff (first unrecognised line: ${snippet(firstSkipped)})`
+	};
+	let added = 0;
+	let removed = 0;
+	for (const r of rows) if (r.kind === "added") added += 1;
+	else if (r.kind === "removed") removed += 1;
+	return {
+		ok: true,
+		rows,
+		hunks,
+		added,
+		removed,
+		synthetic,
+		skipped
+	};
+}
+/** The anchor a comment on this row records: removed rows anchor to the base side. */
+function rowAnchor(row) {
+	const side = row.kind === "removed" ? "old" : "new";
+	const line = side === "old" ? row.oldLine : row.newLine;
+	if (line === null || line < 1) return null;
+	return {
+		kind: "line",
+		side,
+		line,
+		hunk: row.hunk,
+		contextHash: row.hash
+	};
+}
+/** True when the row is the exact line the anchor recorded (all four fields match). */
+function rowMatchesAnchor(row, a) {
+	if (a.line < 1 || a.contextHash === "") return false;
+	const line = a.side === "old" ? row.oldLine : row.newLine;
+	if (line === null || line !== a.line) return false;
+	if (row.hunk !== a.hunk) return false;
+	return row.hash === a.contextHash;
+}
+/**
+* True when the row is the same line with the same text under a different hunk
+* id (an insert above shifts hunk boundaries; the line itself did not move).
+*/
+function rowMatchesAnchorLoosely(row, a) {
+	if (a.line < 1 || a.contextHash === "") return false;
+	const line = a.side === "old" ? row.oldLine : row.newLine;
+	if (line === null || line !== a.line) return false;
+	return row.hash === a.contextHash;
+}
+//#endregion
+//#region src/client/review-line-model.ts
+function asStr$1(v, cap = 4e3) {
+	return typeof v === "string" ? v.slice(0, cap) : "";
+}
+function asNum(v) {
+	return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+/** Read the line anchor out of a raw store record; null when it is not one. */
+function readLineAnchor(raw) {
+	if (raw === null || typeof raw !== "object") return null;
+	const a = raw;
+	if (a.kind !== "line") return null;
+	const side = a.side;
+	if (side !== "new" && side !== "old") return null;
+	const line = asNum(a.line);
+	if (line === null || !Number.isInteger(line) || line < 1) return null;
+	return {
+		kind: "line",
+		side,
+		line,
+		hunk: asStr$1(a.hunk, 200),
+		contextHash: asStr$1(a.contextHash, 200)
+	};
+}
+/**
+* Normalize whatever the lane file (or the network) carried into line threads.
+* Records that are not line-anchored are counted as dropped — the panel names
+* the count (the markdown reviewer's "never silent" rule).
+*/
+function normalizeLineThreads(raw) {
+	const threads = [];
+	let dropped = 0;
+	const arr = Array.isArray(raw) ? raw : [];
+	const seen = /* @__PURE__ */ new Set();
+	for (const item of arr) {
+		if (item === null || typeof item !== "object") {
+			dropped += 1;
+			continue;
+		}
+		const r = item;
+		const id = asStr$1(r.id, 200);
+		if (id === "" || seen.has(id)) {
+			dropped += 1;
+			continue;
+		}
+		const anchor = readLineAnchor(r.anchor);
+		if (anchor === null) {
+			dropped += 1;
+			continue;
+		}
+		seen.add(id);
+		const replies = [];
+		if (Array.isArray(r.replies)) for (const rep of r.replies) {
+			if (rep === null || typeof rep !== "object") continue;
+			const rr = rep;
+			const text = asStr$1(rr.text);
+			if (text === "") continue;
+			replies.push({
+				author: asStr$1(rr.author, 200),
+				at: asNum(rr.at) ?? 0,
+				text
+			});
+			if (replies.length >= 200) break;
+		}
+		threads.push({
+			id,
+			parentId: r.parentId === null || r.parentId === void 0 ? null : asStr$1(r.parentId, 200) || null,
+			anchor,
+			author: asStr$1(r.author, 200),
+			at: asNum(r.at) ?? 0,
+			text: asStr$1(r.text),
+			resolved: r.resolved === true,
+			replies
+		});
+	}
+	return {
+		threads,
+		dropped
+	};
+}
+/**
+* The single serialization seam of line mode: model thread -> store record.
+* `path` stamps the owning file so one lane document can hold threads of
+* several files without mixing them.
+*/
+function toStoreLineThread(t, path = "") {
+	const out = {
+		id: t.id,
+		parentId: t.parentId,
+		anchor: {
+			kind: "line",
+			side: t.anchor.side,
+			line: t.anchor.line,
+			hunk: t.anchor.hunk,
+			contextHash: t.anchor.contextHash
+		},
+		author: t.author,
+		at: t.at,
+		text: t.text,
+		resolved: t.resolved,
+		replies: t.replies.map((r) => ({
+			at: r.at,
+			author: r.author,
+			text: r.text
+		}))
+	};
+	if (path !== "") out.path = path;
+	return out;
+}
+/** Resolve one anchor against the current rows (exact, then same-line/same-text). */
+function resolveLineAnchor(rows, anchor) {
+	for (const r of rows) if (rowMatchesAnchor(r, anchor)) return {
+		kind: "exact",
+		row: r.index
+	};
+	for (const r of rows) if (rowMatchesAnchorLoosely(r, anchor)) return {
+		kind: "relocated",
+		row: r.index
+	};
+	return {
+		kind: "outdated",
+		row: null
+	};
+}
+/** Place every thread; nothing is ever dropped from the result. */
+function placeLineThreads(rows, threads) {
+	return threads.map((thread) => ({
+		thread,
+		resolution: resolveLineAnchor(rows, thread.anchor)
+	})).sort((a, b) => a.thread.at - b.thread.at);
+}
+/** Threads the panel prints under one row (resolved ones included: the badge needs both). */
+function threadsForRow(placed, row) {
+	return placed.filter((p) => p.resolution.row === row).map((p) => p.thread);
+}
+function openCountForRow(placed, row) {
+	return threadsForRow(placed, row).filter((t) => !t.resolved).length;
+}
+/** Badge-grey rule carried over from the markdown reviewer. */
+function hasOnlyResolvedForRow(placed, row) {
+	const ts = threadsForRow(placed, row);
+	return ts.length > 0 && ts.every((t) => t.resolved);
+}
+function filterLineThreads(threads, f) {
+	if (f === "open") return threads.filter((t) => !t.resolved);
+	if (f === "resolved") return threads.filter((t) => t.resolved);
+	return threads;
+}
+/**
+* Flatten rows + hunks + threads into what the view prints, in order:
+* each hunk header, then its rows (each row followed by its threads), then the
+* outdated threads at the end of the diff. The record id of an outdated thread
+* never changes and no row is invented for it.
+*/
+function buildLineRender(rows, hunks, threads) {
+	const placed = placeLineThreads(rows, threads);
+	const out = [];
+	const hunkAt = /* @__PURE__ */ new Map();
+	for (const h of hunks) hunkAt.set(h.firstRow, h);
+	for (const row of rows) {
+		const h = hunkAt.get(row.index);
+		if (h !== void 0) out.push({
+			kind: "hunk",
+			hunk: h
+		});
+		out.push({
+			kind: "row",
+			row,
+			threads: threadsForRow(placed, row.index)
+		});
+	}
+	for (const p of placed) if (p.resolution.kind === "outdated") out.push({
+		kind: "outdated",
+		thread: p.thread
+	});
+	return out;
+}
+/** Sidebar entry per hunk: its display header and the row it jumps to. */
+function hunkToc(hunks) {
+	return hunks.map((h) => ({
+		id: h.id,
+		label: h.label,
+		row: h.firstRow
+	}));
+}
+//#endregion
+//#region src/client/review-thread-box.tsx
+function ThreadBox({ thread, outdated = null, replying, replyDraft, onReplyDraft, onStartReply, onCancelReply, onSubmitReply, onSetResolved }) {
+	const tag = outdated ?? null;
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: `wb-rv-threadbox${thread.resolved ? " resolved" : ""}${tag !== null ? " outdated" : ""}`,
+		"data-testid": tag !== null ? "outdated-thread" : "thread",
+		"data-thread-id": thread.id,
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-rv-threadhead",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: thread.author }),
+					" ",
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-rv-time",
+						children: new Date(thread.at).toLocaleString()
+					}),
+					tag !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-rv-outdated-tag",
+						children: tag
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "wb-rv-spacer" }),
+					thread.resolved ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						"data-testid": "reopen",
+						onClick: () => onSetResolved(false),
+						children: "Reopen"
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						"data-testid": "resolve",
+						onClick: () => onSetResolved(true),
+						children: "Resolve"
+					})
+				]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-rv-threadtext",
+				children: thread.text
+			}),
+			thread.replies.map((rep, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-rv-reply",
+				children: [
+					"↩ ",
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: rep.author }),
+					" ",
+					rep.text
+				]
+			}, i)),
+			replying ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-rv-compose",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+					value: replyDraft,
+					autoFocus: true,
+					onChange: (e) => onReplyDraft(e.target.value)
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "wb-rv-cbtns",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "wb-rv-primary",
+						onClick: () => onSubmitReply(replyDraft.trim()),
+						children: "Reply"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						onClick: onCancelReply,
+						children: "Cancel"
+					})]
+				})]
+			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				className: "wb-rv-addc",
+				"data-testid": "reply-btn",
+				onClick: onStartReply,
+				children: "Reply"
+			})
+		]
+	});
+}
+//#endregion
 //#region src/client/review-panel.tsx
 /**
-* review-panel.tsx — the changed-files markdown reviewer panel (t261022-14).
+* review-panel.tsx — the changed-files reviewer panel (t261022-14 markdown
+* blocks; t261028-23 line-based diffs for every other file).
 *
-* Layout (ticket requirement 1): a left rail (changed doc files → per-file TOC,
-* the comment list in document order with an Open/All/Resolved filter, the rail
-* collapses from its own control and never overlays the document) and the
-* rendered markdown on the right, split into blocks (requirement 2) with diff
-* marks (requirement 3), a minimap rail (requirement 4) and per-block comment
-* threads (requirement 5).
+* ONE panel, two render modes, one comment machinery:
+*   - block mode (`.md`/`.markdown`, unchanged from t261022-14): rendered
+*     markdown split into blocks, block diff marks, per-block threads;
+*   - line mode (any other changed file, t261028-23): the unified diff parsed
+*     into rows with old/new line numbers and +/- markers, threads rendered
+*     inline under the row they anchor to.
+* Both modes share the rail (changed files → navigation → comments with the
+* Open/All/Resolved filter → where this lives), the ThreadBox face, the
+* composer / reply / resolve affordances, the back-to-changes behaviour
+* (onClose) and the lane-file persistence seam.
 *
 * Persistence (requirement 6): every thread lives in the ticket's lane file
 * `<lane>/.sandbar/review-comments.json` via the host's GET/PUT
 * `/wf/tickets/<id>/review-comments` route — this component holds the threads
 * in memory, PUTs the full list on every change, and reads it back on mount
-* (survives a panel reload). The header shows the lane file path and states
-* plainly that the lane agents read it (requirement 9).
+* (survives a panel reload). Threads carry their owning file path, so one
+* document serves every reviewed file of the lane without mixing them.
 *
 * The visual baseline is the host-approved mock (~/Documents/markdown-reviewer-mock.html);
 * behaviour is reproduced, none of its code is copied. Product sources only —
@@ -10649,15 +11178,23 @@ function withProject$1(path) {
 	if (!viewProject) return path;
 	return path + (path.includes("?") ? "&" : "?") + "project=" + encodeURIComponent(viewProject);
 }
-function MarkdownReviewer({ target, onClose }) {
+function isDocPath(p) {
+	return /\.(md|markdown)$/i.test(p);
+}
+function MarkdownReviewer({ target, onClose, onFallback }) {
 	const { ticketId } = target;
 	const [path, setPath] = (0, react.useState)(target.path);
-	const [docFiles, setDocFiles] = (0, react.useState)([]);
+	const [files, setFiles] = (0, react.useState)([]);
+	const [entry, setEntry] = (0, react.useState)(void 0);
 	const [rawBlocks, setRawBlocks] = (0, react.useState)([]);
+	const [parse, setParse] = (0, react.useState)(void 0);
 	const [lane, setLane] = (0, react.useState)("");
 	const [loadErr, setLoadErr] = (0, react.useState)("");
+	const [loaded, setLoaded] = (0, react.useState)(false);
 	const [threads, setThreads] = (0, react.useState)([]);
 	const [dropped, setDropped] = (0, react.useState)(0);
+	const [lineThreads, setLineThreads] = (0, react.useState)([]);
+	const [lineDropped, setLineDropped] = (0, react.useState)(0);
 	const [filter, setFilter] = (0, react.useState)("open");
 	const [hideRemoved, setHideRemoved] = (0, react.useState)(false);
 	const [railOpen, setRailOpen] = (0, react.useState)(true);
@@ -10669,28 +11206,50 @@ function MarkdownReviewer({ target, onClose }) {
 	const [viewportIndex, setViewportIndex] = (0, react.useState)(0);
 	const [saveState, setSaveState] = (0, react.useState)("");
 	const docRef = (0, react.useRef)(null);
+	const lineMode = !isDocPath(path);
 	const blocks = (0, react.useMemo)(() => buildBlocks(rawBlocks), [rawBlocks]);
 	const commentsEndpoint = `${API$1}/tickets/${encodeURIComponent(ticketId)}/review-comments?path=${encodeURIComponent(path)}`;
 	(0, react.useEffect)(() => {
 		let dead = false;
 		(async () => {
+			setLoadErr("");
+			setLoaded(false);
+			setRawBlocks([]);
+			setParse(void 0);
+			setEntry(void 0);
+			setThreads([]);
+			setDropped(0);
+			setLineThreads([]);
+			setLineDropped(0);
+			setComposing(null);
+			setOpenThread(null);
 			try {
 				const d = await fetch(withProject$1(`${API$1}/tickets/${encodeURIComponent(ticketId)}/diff`)).then((r) => r.json());
 				if (dead) return;
 				if (d?.ok !== true) throw new Error(d?.error ?? "diff read failed");
 				const face = d.result;
 				setLane(typeof face.worktree === "string" ? face.worktree : "");
-				const files = Array.isArray(face.files) ? face.files : [];
-				setDocFiles(files.filter((f) => f.kind === "doc" && typeof f.path === "string").map((f) => f.path));
-				const file = files.find((f) => typeof f?.path === "string" && f.path === path);
+				const list = Array.isArray(face.files) ? face.files : [];
+				setFiles(list);
+				const file = list.find((f) => typeof f?.path === "string" && f.path === path);
 				if (file === void 0) throw new Error(`file not in the ticket's changed set: ${path}`);
-				setRawBlocks(file.blocks ?? []);
+				setEntry(file);
+				if (isDocPath(path)) setRawBlocks(file.blocks ?? []);
+				else setParse(parseUnifiedDiff(file.unified));
+				setLoaded(true);
 				const c = await fetch(withProject$1(commentsEndpoint)).then((r) => r.json());
 				if (dead) return;
 				if (c?.ok === true && c.result?.ok === true && c.result.doc !== null) {
-					const n = normalizeThreads(c.result.doc.threads);
-					setThreads(n.threads);
-					setDropped(n.dropped);
+					const own = scopeThreads(c.result.doc.threads, path, typeof c.result.doc.path === "string" ? c.result.doc.path : "");
+					if (isDocPath(path)) {
+						const n = normalizeThreads(own);
+						setThreads(n.threads);
+						setDropped(n.dropped);
+					} else {
+						const n = normalizeLineThreads(own);
+						setLineThreads(n.threads);
+						setLineDropped(n.dropped);
+					}
 				} else if (c?.ok === true && c.result?.ok === false) setLoadErr(`lane comments unreadable: ${String(c.result.reason ?? "")}`);
 			} catch (err) {
 				if (!dead) setLoadErr(String(err instanceof Error ? err.message : err));
@@ -10704,27 +11263,35 @@ function MarkdownReviewer({ target, onClose }) {
 		path,
 		commentsEndpoint
 	]);
-	/**
-	* PUT the full thread list; the host merges by id (last write wins per
-	* thread). Serialized through toStoreThread (arbitrate gen0 CF2): the wire
-	* shape is the STORE record shape (anchor:{index,hash,neighbour}), not the
-	* model's internal flat shape — a raw model thread is dropped by the store's
-	* sanitizer, which is the exact defect this seam now prevents.
-	*/
-	async function persist(next) {
+	/** PUT the given thread records; true when the lane file took them. */
+	async function putThreads(payload) {
 		setSaveState("saving…");
 		try {
 			const r = await (await fetch(withProject$1(commentsEndpoint), {
 				method: "PUT",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ threads: next.map(toStoreThread) })
+				body: JSON.stringify({ threads: payload })
 			})).json();
 			if (r?.ok !== true) throw new Error(r?.error ?? "save failed");
-			setThreads(next);
 			setSaveState("");
+			return true;
 		} catch (err) {
 			setSaveState(`save failed: ${String(err instanceof Error ? err.message : err)}`);
+			return false;
 		}
+	}
+	/**
+	* Persist the full block-thread list through toStoreThread (arbitrate gen0
+	* CF2): the wire shape is the STORE record shape (anchor:{index,hash,neighbour}),
+	* not the model's internal flat shape. The owning path is stamped on.
+	* Local state follows the store (a failed save keeps the old list, as before).
+	*/
+	async function persist(next) {
+		if (await putThreads(next.map((t) => toStoreThread(t, path)))) setThreads(next);
+	}
+	/** Same seam for line threads (anchor:{kind:'line',side,line,hunk,contextHash}). */
+	async function persistLines(next) {
+		if (await putThreads(next.map((t) => toStoreLineThread(t, path)))) setLineThreads(next);
 	}
 	function addComment(blockIndex) {
 		if (draft.trim() === "") return;
@@ -10746,20 +11313,57 @@ function MarkdownReviewer({ target, onClose }) {
 		setComposing(null);
 		persist([...threads, thread]);
 	}
+	function addLineComment(row) {
+		if (draft.trim() === "") return;
+		const anchor = rowAnchor(row);
+		if (anchor === null) return;
+		const thread = {
+			id: `ln-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+			parentId: null,
+			anchor,
+			author: "human",
+			at: Date.now(),
+			text: draft.trim(),
+			resolved: false,
+			replies: []
+		};
+		setDraft("");
+		setComposing(null);
+		persistLines([...lineThreads, thread]);
+	}
 	function addReply(threadId) {
 		if (replyDraft.trim() === "") return;
+		const text = replyDraft.trim();
+		setReplyDraft("");
+		setReplying(null);
+		if (lineMode) {
+			persistLines(lineThreads.map((t) => t.id === threadId ? {
+				...t,
+				replies: [...t.replies, {
+					author: "human",
+					at: Date.now(),
+					text
+				}]
+			} : t));
+			return;
+		}
 		persist(threads.map((t) => t.id === threadId ? {
 			...t,
 			replies: [...t.replies, {
 				author: "human",
 				at: Date.now(),
-				text: replyDraft.trim()
+				text
 			}]
 		} : t));
-		setReplyDraft("");
-		setReplying(null);
 	}
 	function setResolved(threadId, resolved) {
+		if (lineMode) {
+			persistLines(lineThreads.map((t) => t.id === threadId ? {
+				...t,
+				resolved
+			} : t));
+			return;
+		}
 		persist(threads.map((t) => t.id === threadId ? {
 			...t,
 			resolved
@@ -10782,29 +11386,65 @@ function MarkdownReviewer({ target, onClose }) {
 			behavior: "smooth"
 		});
 	}
+	function jumpToRow(index) {
+		const node = docRef.current?.querySelector(`[data-row-index="${index}"]`);
+		if (node !== null && node !== void 0) node.scrollIntoView({
+			block: "start",
+			behavior: "smooth"
+		});
+	}
 	const toc = (0, react.useMemo)(() => buildToc(blocks), [blocks]);
 	const minimap = (0, react.useMemo)(() => buildMinimap(blocks, threads), [blocks, threads]);
 	const visible = (0, react.useMemo)(() => blocks.filter((b) => !(hideRemoved && b.status === "removed")), [blocks, hideRemoved]);
 	const placed = (0, react.useMemo)(() => placeThreads(blocks, threads), [blocks, threads]);
 	const listed = (0, react.useMemo)(() => filterThreads(placed.map((p) => p.thread), filter), [placed, filter]);
-	if (loadErr !== "" && blocks.length === 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+	const lineRows = parse !== void 0 && parse.ok ? parse.rows : [];
+	const lineHunks = parse !== void 0 && parse.ok ? parse.hunks : [];
+	const lineAdded = parse !== void 0 && parse.ok ? parse.added : 0;
+	const lineRemoved = parse !== void 0 && parse.ok ? parse.removed : 0;
+	const placedLines = (0, react.useMemo)(() => placeLineThreads(lineRows, lineThreads), [parse, lineThreads]);
+	const lineRender = (0, react.useMemo)(() => buildLineRender(lineRows, lineHunks, lineThreads), [parse, lineThreads]);
+	const lineListed = (0, react.useMemo)(() => filterLineThreads(placedLines.map((p) => p.thread), filter), [placedLines, filter]);
+	const lineToc = (0, react.useMemo)(() => hunkToc(lineHunks), [parse]);
+	const railFiles = (0, react.useMemo)(() => lineMode ? files.filter((f) => typeof f.path === "string").map((f) => f.path) : files.filter((f) => f.kind === "doc" && typeof f.path === "string").map((f) => f.path), [files, lineMode]);
+	if (!loaded && loadErr !== "") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		className: "wb-rv-wrap",
 		"data-testid": "reviewer-panel",
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "wb-rv-head",
-			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-				className: "wb-rv-title",
-				children: ["Markdown review — ", path]
-			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-				className: "wb-rv-close",
-				onClick: onClose,
-				"aria-label": "Close reviewer",
-				children: "×"
-			})]
-		}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "wb-rv-err",
-			children: loadErr
-		})]
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-rv-head",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+					className: "wb-rv-title",
+					children: [
+						lineMode ? "Line review" : "Markdown review",
+						" — ",
+						path
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					className: "wb-rv-close",
+					onClick: onClose,
+					"aria-label": "Close reviewer",
+					children: "×"
+				})]
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-rv-err",
+				children: loadErr
+			}),
+			onFallback !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-rv-note",
+				children: [
+					"This file is not in the ticket's changed set.",
+					" ",
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						className: "wb-rv-railtoggle",
+						"data-testid": "open-read-only",
+						onClick: () => onFallback(ticketId, path),
+						children: "Open read-only view"
+					})
+				]
+			})
+		]
 	});
 	const lastReplyOf = (t) => t.replies.length > 0 ? t.replies[t.replies.length - 1] : void 0;
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -10829,9 +11469,32 @@ function MarkdownReviewer({ target, onClose }) {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 						className: "wb-rv-title",
-						children: ["Markdown review — ", path]
+						children: [
+							lineMode ? "Line review" : "Markdown review",
+							" — ",
+							path
+						]
 					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+					lineMode ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-rv-stat",
+						"data-testid": "diff-stat",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "add",
+								children: ["+", lineAdded]
+							}),
+							" ",
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "del",
+								children: ["−", lineRemoved]
+							})
+						]
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-rv-ticket",
+						"data-testid": "review-ticket-id",
+						title: "Ticket",
+						children: ticketId
+					})] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
 						className: "wb-rv-hideremoved",
 						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
 							type: "checkbox",
@@ -10852,7 +11515,7 @@ function MarkdownReviewer({ target, onClose }) {
 				className: "wb-rv-err",
 				children: loadErr
 			}),
-			dropped > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			!lineMode && dropped > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-rv-note",
 				"data-testid": "dropped-note",
 				children: [
@@ -10860,6 +11523,25 @@ function MarkdownReviewer({ target, onClose }) {
 					" unreadable comment entr",
 					dropped === 1 ? "y was" : "ies were",
 					" skipped (named here, never silent)."
+				]
+			}),
+			lineMode && lineDropped > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-rv-note",
+				"data-testid": "dropped-note",
+				children: [
+					lineDropped,
+					" unreadable comment entr",
+					lineDropped === 1 ? "y was" : "ies were",
+					" skipped (named here, never silent)."
+				]
+			}),
+			lineMode && entry !== void 0 && entry.unifiedTruncated === true && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-rv-note",
+				"data-testid": "diff-truncated",
+				children: [
+					"Diff truncated by the diff face",
+					typeof entry.note === "string" && entry.note !== "" ? `: ${entry.note}` : "",
+					"."
 				]
 			}),
 			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -10873,8 +11555,8 @@ function MarkdownReviewer({ target, onClose }) {
 								className: "wb-rv-sec",
 								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 									className: "wb-rv-secttl",
-									children: "Changed markdown files"
-								}), docFiles.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									children: lineMode ? "Changed files" : "Changed markdown files"
+								}), railFiles.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 									className: `wb-rv-toc l1${f === path ? " on" : ""}`,
 									"data-testid": "rail-file",
 									title: "Open in the reviewer",
@@ -10886,7 +11568,26 @@ function MarkdownReviewer({ target, onClose }) {
 									children: [f === path ? "▸ " : "", f]
 								}, f))]
 							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							lineMode ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "wb-rv-sec",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "wb-rv-secttl",
+										children: "Diff hunks"
+									}),
+									lineToc.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "wb-rv-empty",
+										children: "No hunks to show."
+									}),
+									lineToc.map((h) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										className: "wb-rv-toc l1",
+										"data-testid": "toc-entry",
+										title: h.label,
+										onClick: () => jumpToRow(h.row),
+										children: h.label
+									}, h.id))
+								]
+							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: "wb-rv-sec",
 								children: [
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -10907,59 +11608,88 @@ function MarkdownReviewer({ target, onClose }) {
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: "wb-rv-sec",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "wb-rv-secttl",
-										children: ["Comments", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-rv-filters",
-											"data-testid": "comment-filter",
-											children: [
-												"open",
-												"all",
-												"resolved"
-											].map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-												className: `wb-rv-filter${filter === f ? " on" : ""}`,
-												onClick: () => setFilter(f),
-												children: f
-											}, f))
-										})]
-									}),
-									listed.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "wb-rv-empty",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "wb-rv-secttl",
+									children: ["Comments", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "wb-rv-filters",
+										"data-testid": "comment-filter",
 										children: [
-											"No ",
-											filter === "all" ? "" : `${filter} `,
-											"comments."
+											"open",
+											"all",
+											"resolved"
+										].map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											className: `wb-rv-filter${filter === f ? " on" : ""}`,
+											onClick: () => setFilter(f),
+											children: f
+										}, f))
+									})]
+								}), lineMode ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [lineListed.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "wb-rv-empty",
+									children: [
+										"No ",
+										filter === "all" ? "" : `${filter} `,
+										"comments."
+									]
+								}), lineListed.map((t) => {
+									const at = placedLines.find((p) => p.thread.id === t.id);
+									const last = lastReplyOf(t);
+									return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: `wb-rv-thread${t.resolved ? " resolved" : ""}`,
+										"data-testid": "rail-thread",
+										onClick: () => {
+											setOpenThread(t.id);
+											if (at !== void 0 && at.resolution.row !== null) jumpToRow(at.resolution.row);
+										},
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-d-badge",
+												"data-s": t.resolved ? "unchanged" : "added",
+												children: at !== void 0 && at.resolution.row !== null ? `line ${t.anchor.line}` : "outdated"
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-rv-snippet",
+												children: t.text.slice(0, 80)
+											}),
+											last !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												className: "wb-rv-lastreply",
+												children: ["↩ ", last.text.slice(0, 60)]
+											})
 										]
-									}),
-									listed.map((t) => {
-										const b = blocks[t.blockIndex];
-										const last = lastReplyOf(t);
-										return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: `wb-rv-thread${t.resolved ? " resolved" : ""}`,
-											"data-testid": "rail-thread",
-											onClick: () => {
-												setOpenThread(t.id);
-												if (t.blockIndex < blocks.length) jumpTo(t.blockIndex);
-											},
-											children: [
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-													className: `wb-d-badge${t.resolved ? "" : ""}`,
-													"data-s": t.resolved ? "unchanged" : "added",
-													children: b !== void 0 ? KIND_LABEL$1[b.type] ?? b.type : "outdated"
-												}),
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-													className: "wb-rv-snippet",
-													children: t.text.slice(0, 80)
-												}),
-												last !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-													className: "wb-rv-lastreply",
-													children: ["↩ ", last.text.slice(0, 60)]
-												})
-											]
-										}, t.id);
-									})
-								]
+									}, t.id);
+								})] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [listed.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "wb-rv-empty",
+									children: [
+										"No ",
+										filter === "all" ? "" : `${filter} `,
+										"comments."
+									]
+								}), listed.map((t) => {
+									const b = blocks[t.blockIndex];
+									const last = lastReplyOf(t);
+									return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: `wb-rv-thread${t.resolved ? " resolved" : ""}`,
+										"data-testid": "rail-thread",
+										onClick: () => {
+											setOpenThread(t.id);
+											if (t.blockIndex < blocks.length) jumpTo(t.blockIndex);
+										},
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: `wb-d-badge${t.resolved ? "" : ""}`,
+												"data-s": t.resolved ? "unchanged" : "added",
+												children: b !== void 0 ? KIND_LABEL$1[b.type] ?? b.type : "outdated"
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-rv-snippet",
+												children: t.text.slice(0, 80)
+											}),
+											last !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												className: "wb-rv-lastreply",
+												children: ["↩ ", last.text.slice(0, 60)]
+											})
+										]
+									}, t.id);
+								})] })]
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: "wb-rv-sec wb-rv-laneinfo",
@@ -10981,7 +11711,7 @@ function MarkdownReviewer({ target, onClose }) {
 							})
 						]
 					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					!lineMode && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-rv-minimap",
 						"data-testid": "minimap",
 						onScroll: void 0,
@@ -11005,7 +11735,138 @@ function MarkdownReviewer({ target, onClose }) {
 							})]
 						}, m.index))
 					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					lineMode ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-rv-doc wb-rv-diffdoc",
+						ref: docRef,
+						"data-testid": "reviewer-doc",
+						children: [parse !== void 0 && !parse.ok && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "wb-rv-empty",
+							"data-testid": "diff-empty",
+							"data-state": parse.state,
+							children: ["No line diff to show: ", parse.reason]
+						}), lineRender.map((item) => {
+							if (item.kind === "hunk") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "wb-rv-hunk",
+								"data-testid": "diff-hunk",
+								children: item.hunk.label
+							}, `h-${item.hunk.id}`);
+							if (item.kind === "outdated") {
+								const t = item.thread;
+								return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ThreadBox, {
+									thread: t,
+									outdated: "outdated — the commented line has changed (line text or hunk no longer match)",
+									replying: replying === t.id,
+									replyDraft,
+									onReplyDraft: setReplyDraft,
+									onStartReply: () => {
+										setReplying(t.id);
+										setReplyDraft("");
+									},
+									onCancelReply: () => {
+										setReplying(null);
+										setReplyDraft("");
+									},
+									onSubmitReply: () => addReply(t.id),
+									onSetResolved: (v) => setResolved(t.id, v)
+								}, t.id);
+							}
+							const row = item.row;
+							const open = openCountForRow(placedLines, row.index);
+							const grey = hasOnlyResolvedForRow(placedLines, row.index);
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: `wb-rv-line s-${row.kind}`,
+								"data-testid": "diff-line",
+								"data-row-index": row.index,
+								"data-kind": row.kind,
+								"data-old-line": row.oldLine ?? void 0,
+								"data-new-line": row.newLine ?? void 0,
+								"data-hunk": row.hunk,
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-rv-linerow",
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-rv-ln wb-rv-ln-old",
+												children: row.oldLine ?? ""
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-rv-ln wb-rv-ln-new",
+												children: row.newLine ?? ""
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-rv-mark",
+												children: row.kind === "added" ? "+" : row.kind === "removed" ? "−" : " "
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "wb-rv-code",
+												children: row.text === "" ? "\xA0" : row.text
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												className: "wb-rv-lineactions",
+												children: [(open > 0 || grey) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+													className: `wb-rv-badge${grey ? " grey" : ""}`,
+													"data-testid": "line-badge",
+													onClick: () => {
+														const ts = item.threads;
+														if (ts.length > 0) setOpenThread(ts[0].id);
+													},
+													children: grey ? "✓ resolved" : `${open} open`
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+													className: "wb-rv-addc",
+													title: "Comment on this line",
+													"data-testid": "line-comment-btn",
+													onClick: () => {
+														setComposing(composing === row.index ? null : row.index);
+														setDraft("");
+													},
+													children: "+ comment"
+												})]
+											})
+										]
+									}),
+									composing === row.index && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "wb-rv-compose",
+										"data-testid": "composer",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+											value: draft,
+											autoFocus: true,
+											placeholder: "Comment on this line — saved to the lane file for the lane agents",
+											onChange: (e) => setDraft(e.target.value)
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "wb-rv-cbtns",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												className: "wb-rv-primary",
+												onClick: () => addLineComment(row),
+												children: "Comment"
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												onClick: () => {
+													setComposing(null);
+													setDraft("");
+												},
+												children: "Cancel"
+											})]
+										})]
+									}),
+									item.threads.map((t) => (openThread === t.id || t.resolved === false) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ThreadBox, {
+										thread: t,
+										replying: replying === t.id,
+										replyDraft,
+										onReplyDraft: setReplyDraft,
+										onStartReply: () => {
+											setReplying(t.id);
+											setReplyDraft("");
+										},
+										onCancelReply: () => {
+											setReplying(null);
+											setReplyDraft("");
+										},
+										onSubmitReply: () => addReply(t.id),
+										onSetResolved: (v) => setResolved(t.id, v)
+									}, t.id))
+								]
+							}, row.key);
+						})]
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "wb-rv-doc wb-md",
 						ref: docRef,
 						onScroll,
@@ -11087,115 +11948,40 @@ function MarkdownReviewer({ target, onClose }) {
 											})]
 										})]
 									}),
-									threadsForBlock(threads, b.index).map((t) => (openThread === t.id || t.resolved === false) && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: `wb-rv-threadbox${t.resolved ? " resolved" : ""}`,
-										"data-testid": "thread",
-										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-												className: "wb-rv-threadhead",
-												children: [
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: t.author }),
-													" ",
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-														className: "wb-rv-time",
-														children: new Date(t.at).toLocaleString()
-													}),
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "wb-rv-spacer" }),
-													t.resolved ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-														"data-testid": "reopen",
-														onClick: () => setResolved(t.id, false),
-														children: "Reopen"
-													}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-														"data-testid": "resolve",
-														onClick: () => setResolved(t.id, true),
-														children: "Resolve"
-													})
-												]
-											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-												className: "wb-rv-threadtext",
-												children: t.text
-											}),
-											t.replies.map((rep, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-												className: "wb-rv-reply",
-												children: [
-													"↩ ",
-													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: rep.author }),
-													" ",
-													rep.text
-												]
-											}, i)),
-											replying === t.id ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-												className: "wb-rv-compose",
-												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
-													value: replyDraft,
-													autoFocus: true,
-													onChange: (e) => setReplyDraft(e.target.value)
-												}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-													className: "wb-rv-cbtns",
-													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-														className: "wb-rv-primary",
-														onClick: () => addReply(t.id),
-														children: "Reply"
-													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-														onClick: () => {
-															setReplying(null);
-															setReplyDraft("");
-														},
-														children: "Cancel"
-													})]
-												})]
-											}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-												className: "wb-rv-addc",
-												"data-testid": "reply-btn",
-												onClick: () => {
-													setReplying(t.id);
-													setReplyDraft("");
-												},
-												children: "Reply"
-											})
-										]
+									threadsForBlock(threads, b.index).map((t) => (openThread === t.id || t.resolved === false) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ThreadBox, {
+										thread: t,
+										replying: replying === t.id,
+										replyDraft,
+										onReplyDraft: setReplyDraft,
+										onStartReply: () => {
+											setReplying(t.id);
+											setReplyDraft("");
+										},
+										onCancelReply: () => {
+											setReplying(null);
+											setReplyDraft("");
+										},
+										onSubmitReply: () => addReply(t.id),
+										onSetResolved: (v) => setResolved(t.id, v)
 									}, t.id))
 								]
 							}, b.index);
-						}), placed.filter((p) => p.resolution.kind === "outdated").map(({ thread }) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "wb-rv-threadbox outdated",
-							"data-testid": "outdated-thread",
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "wb-rv-threadhead",
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: thread.author }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "wb-rv-outdated-tag",
-											children: "outdated — the commented block has changed (hash and neighbour no longer match)"
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "wb-rv-spacer" }),
-										thread.resolved ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											"data-testid": "reopen",
-											onClick: () => setResolved(thread.id, false),
-											children: "Reopen"
-										}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											"data-testid": "resolve",
-											onClick: () => setResolved(thread.id, true),
-											children: "Resolve"
-										})
-									]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "wb-rv-threadtext",
-									children: thread.text
-								}),
-								thread.replies.map((rep, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: "wb-rv-reply",
-									children: [
-										"↩ ",
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("b", { children: rep.author }),
-										" ",
-										rep.text
-									]
-								}, i))
-							]
+						}), placed.filter((p) => p.resolution.kind === "outdated").map(({ thread }) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ThreadBox, {
+							thread,
+							outdated: "outdated — the commented block has changed (hash and neighbour no longer match)",
+							replying: replying === thread.id,
+							replyDraft,
+							onReplyDraft: setReplyDraft,
+							onStartReply: () => {
+								setReplying(thread.id);
+								setReplyDraft("");
+							},
+							onCancelReply: () => {
+								setReplying(null);
+								setReplyDraft("");
+							},
+							onSubmitReply: () => addReply(thread.id),
+							onSetResolved: (v) => setResolved(thread.id, v)
 						}, thread.id))]
 					})
 				]
@@ -16627,7 +17413,7 @@ function ChangesTab({ detail, operator, onMsg, onOpenFile }) {
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						className: "wb-d-fpath wb-d-flink",
-						title: "Open read-only as of this ticket",
+						title: "Open in the reviewer (line comments land in the lane file)",
 						onClick: () => onOpenFile(f.path, "settle"),
 						children: f.path
 					}),
@@ -17260,6 +18046,35 @@ function AgentLogsTab({ detail, wf, onMsg }) {
 		}, stageId);
 	})] });
 }
+/** t261028-23: the line-diff review face for code files — same reviewer, line
+* mode. Declared with the panel (not in the shared stylesheet) so the reviewer
+* carries its own skin; the class names are the reviewer's own wb-rv-* family. */
+const REVIEW_LINE_CSS = `/* t261028-23: line-diff review face for code files — same reviewer, line mode.
+   The row is a flex line; its threads and composer sit UNDER it (block flow),
+   which is why .wb-rv-line is a column container, not the flex row itself. */
+.wb-rv-diffdoc{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:6px 8px 40px}
+.wb-rv-hunk{margin:10px 0 4px;padding:2px 8px;border-radius:4px;background:var(--dsw-derive-surface-2,#eaeef2);
+  color:var(--dsw-derive-muted,#57606a);white-space:pre-wrap;overflow-wrap:anywhere}
+.wb-rv-line{border-radius:4px;padding:1px 0 2px}
+.wb-rv-line:hover{outline:1px solid var(--dsw-derive-border,#d0d7de);outline-offset:-1px}
+.wb-rv-line.s-added{background:var(--dsw-derive-success-bg,#dafbe1)}
+.wb-rv-line.s-removed{background:var(--dsw-derive-danger-bg,#ffebe9)}
+.wb-rv-linerow{display:flex;align-items:flex-start;gap:8px;padding:0 6px}
+.wb-rv-ln{flex:0 0 46px;text-align:right;color:var(--dsw-derive-muted,#8c959f);user-select:none}
+.wb-rv-mark{flex:0 0 12px;text-align:center;user-select:none;color:var(--dsw-derive-muted,#57606a)}
+.wb-rv-line.s-added .wb-rv-mark{color:var(--dsw-derive-success-deep,#116329);font-weight:700}
+.wb-rv-line.s-removed .wb-rv-mark{color:var(--dsw-derive-danger,#cf222e);font-weight:700}
+.wb-rv-line.s-removed .wb-rv-code{text-decoration:line-through;color:var(--dsw-derive-danger,#cf222e)}
+.wb-rv-code{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.wb-rv-lineactions{display:flex;align-items:center;gap:4px;flex:0 0 auto}
+.wb-rv-line:hover .wb-rv-addc{opacity:1}
+.wb-rv-line .wb-rv-threadbox,.wb-rv-line .wb-rv-compose{margin-left:60px}
+.wb-rv-stat{display:inline-flex;gap:6px;font-size:12px}
+.wb-rv-stat .add{color:var(--dsw-derive-success-deep,#116329);font-weight:600}
+.wb-rv-stat .del{color:var(--dsw-derive-danger,#cf222e);font-weight:600}
+.wb-rv-ticket{font-size:11px;color:var(--dsw-derive-muted,#57606a);
+  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;padding:0 6px}
+`;
 function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 	const [tickets, setTickets] = (0, react.useState)(void 0);
 	const [workflows, setWorkflows] = (0, react.useState)([]);
@@ -17291,9 +18106,12 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 	const [preview, setPreview] = (0, react.useState)(void 0);
 	const [fileViewer, setFileViewer] = (0, react.useState)(null);
 	const [reviewer, setReviewer] = (0, react.useState)(null);
-	/** Doc files go to the reviewer; everything else keeps the raw viewer. */
+	/** The changed-set faces ('settle') open the reviewer; a background reference
+	*  (mode 'base') is not part of this ticket's changed set and keeps the
+	*  read-only baseline viewer. The reviewer offers that viewer as a fallback
+	*  for a file it has no diff for (status-card files). */
 	const openChangedFile = (ticketId, p, m) => {
-		if (/\.(md|markdown)$/i.test(p)) setReviewer({
+		if (m === "settle" || /\.(md|markdown)$/i.test(p)) setReviewer({
 			ticketId,
 			path: p
 		});
@@ -18376,12 +19194,20 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 				role: "dialog",
 				"aria-modal": "true",
 				"aria-label": "Markdown review",
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "wb-rv-modalbox",
-					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MarkdownReviewer, {
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: REVIEW_LINE_CSS }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(MarkdownReviewer, {
 						target: reviewer,
-						onClose: () => setReviewer(null)
-					})
+						onClose: () => setReviewer(null),
+						onFallback: (tid, p) => {
+							setReviewer(null);
+							setFileViewer({
+								ticketId: tid,
+								path: p,
+								mode: "settle"
+							});
+						}
+					})]
 				})
 			})
 		]
