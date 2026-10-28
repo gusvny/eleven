@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 353,
+      "engine_tests": 354,
       "scenarios": 855
     },
     "vocab": [
@@ -1749,6 +1749,10 @@
     "server/engine/tests/test_t261028_05_quick_gate_receipt_unwrap.py": {
       "anchor": "behaviour",
       "note": "t261028-15 KI-388: the quickmanual battery/check gate reads admin.py's {ok, result} envelope through the one single point shared.gate_verdict - a wrapped green payload parses green where the pre-ticket read produced '1 ran / 0 passed / 1 failed', a wrapped red payload is red with its named check and detail text carried into the receipt (violations + evidence), and ok:false / a missing-or-empty result / an unparseable stdout are each a NAMED red with an error string plus a detail row (never counts-only, never a full-registry fallback); the activity hands its stdout to that one reader (fake subprocess, argv and process-group bookkeeping unchanged); and the verdict counts lock - failed>0 or ran with passed==0 is red, so the counts-only receipt four 261028 battery tickets booked as green is red while every pre-existing green and red path stays intact."
+    },
+    "server/engine/tests/test_t261028_24_request_sweep_archive_citation.py": {
+      "anchor": "behaviour",
+      "note": "t261028-25: the request sweep cites the ticket ARCHIVE for a residue head whose subject ticket left Temporal's retention window, and the `request` class gets a named rule. Pins the writer-derived witness (only a `terminal_status` recorded by the ticket-archive-terminal exit, whose describe guard refuses a non-terminal execution, is citable; `meta.status` is a mid-run snapshot and is never the witness, pinned in BOTH directions), the named refusals that keep the head open (missing manifest -> not_listed_unarchived, unreadable/non-schema-v1 -> archive_malformed, legacy:true -> archive_legacy_uncited because both legacy writers share one shape and one of them checks no status, close-path manifest without a witness -> archive_no_terminal_witness, a listed non-terminal ticket never consults the archive, an unavailable channel is named), the request-class rule (same cited-terminal evidence as a blocker: projection / ledger landing / archive; an uncited request head stays open, so no residue_class_unhandled:request exists), and the bounds that must not move (finding/question rows byte-identical, an answered head untouched, a second sweep appends nothing) plus the receipt's named-and-counted residue_buckets carried on the watch tick. Fixture project roots via SANDBAR_PROJECTS_DIR / SANDBAR_PANEL_DIR; zero production ledger, zero Temporal."
     }
   },
   "scenarios": {

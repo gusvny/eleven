@@ -19,7 +19,12 @@ close. The user-perceivable contract under host order 261026:
       LEDGER (the reader side; writer receipts are not evidence).
   C2. A legacy blocker head whose subject ticket reads `closed` is closed
       citing that ticket's row; a head whose subject ticket is NO LONGER
-      LISTED has no citable row and stays open, counted on the receipt.
+      LISTED has no citable projection row, so it stays open UNLESS the
+      ticket's ARCHIVE proves terminal closure (t261028-25 -- the archive is
+      consulted only then, and only a manifest the terminal-archive exit wrote
+      counts). This fixture has no archive store for the cited ticket, so the
+      head stays open and is counted on the receipt (bucket
+      `not_listed_unarchived`).
   D1. `finding` and `question` heads are NEVER closed by the machine under
       any evidence shape (subject closed, cert after, landing exists) --
       those classes are the human's word; their rows stay byte-identical.

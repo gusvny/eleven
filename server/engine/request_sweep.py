@@ -24,17 +24,39 @@ row it observed (the releasing cert id / the landing id / the freeze episode id
 plus the closing change named in the note / the ticket id plus the NAMED status
 source). Never a guess, never a summary a reader cannot check.
 
+t261028-25 (host ruling 261028, option a): the LEGACY-RESIDUE pass also cites
+the ticket ARCHIVE. A head whose subject ticket left Temporal's retention
+window has no citable projection row any more, but the closed ticket's archive
+manifest survives on disk. A manifest is citable ONLY when it proves the ticket
+reached a terminal state, and WHICH manifests prove that is read off the
+writers, never assumed (see ARCHIVE_TERMINAL_WITNESSES below): the
+named terminal-archive exit records `terminal_status` after its own
+describe-status guard refuses a non-terminal execution; a `legacy: true`
+manifest and the close path's mid-run manifest carry no such witness, so they
+are refused BY NAME. `meta.status` is a MID-RUN snapshot and is never read as
+a terminal fact.
+
+The residue buckets are named and counted on the receipt (`residue_buckets`),
+so a sweep that closes nothing is still visible: `closed` (cited projection row
+/ ledger landing), `archived_closed` (the archive subset of the closes),
+`not_listed_unarchived`, `archive_malformed`, `archive_legacy_uncited`,
+`archive_no_terminal_witness`, `human_word`, `uncited`, and `unchanged` (heads
+the pass left open).
+
 Fail-closed rules (spec 3):
   - unreadable delivery ledger, unreadable runs store, unavailable ticket
-    reader, unknown condition kind -> SKIP + a named note in the receipt.
-    Never a silent close, never a fabricated green;
+    reader, unreadable archive manifest, unknown condition kind -> SKIP + a
+    named note in the receipt. Never a silent close, never a fabricated green;
   - a dangling reference (the named red cert / freeze episode is not on the
     ledger) is also a SKIP -- a citation that cannot be checked resolves
     nothing;
-  - heads WITHOUT a declared condition are untouched (no retro-fitting); a
-    condition may be attached later through `request_thread.py op=condition`
-    (append-only, attributed), which the sweep reads as the head's effective
-    condition (the latest condition row wins over the head's own field).
+  - heads WITHOUT a declared condition are never retro-fitted with one; they go
+    through the legacy-residue pass (t261026-07), which closes them only on a
+    CITED subject row (never on a guess, never on an unproven terminal state); a
+    condition may still be attached later through `request_thread.py
+    op=condition` (append-only, attributed), which the sweep reads as the head's
+    effective condition (the latest condition row wins over the head's own
+    field).
 
 Identity (spec 5): the sweep writes under `by: "engine:request-sweep"`,
 `surface: SURFACE_ENGINE` -- never as a host answer. The answered/dismissed
@@ -68,6 +90,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import develop_certify
@@ -120,6 +143,63 @@ SWEEP_SURFACE = executor_requests.SURFACE_ENGINE
 # t261026-07: the residue writer — the executor-side close of a legacy head
 # whose condition can never exist, citing the row that ended its subject.
 RESIDUE_BY = "executor:request-sweep-residue"
+
+# ---- t261028-25: the archive as a citation ---------------------------------
+# The archive store is `<projects>/<key>/data/tickets/<id>/archive.json`,
+# written by three different writers. Exactly ONE of them records a terminal
+# fact, and the rule below is read off each writer's own precondition (never
+# off the manifest's `meta`, which is a MID-RUN snapshot — measured 261028 on
+# the production ledger: all 460 manifests read status=dispatched,
+# stage=merge, stage_state=running, because the close path archives BEFORE the
+# ticket is finished):
+#
+#   * cmd_ticket_archive_terminal (client.py:1300) — the named exit for a
+#     terminal-but-not-completed execution. Its terminal guard refuses any
+#     describe status outside _TICKET_TERMINAL_STATUSES (client.py:1380),
+#     refuses CONTINUED_AS_NEW explicitly (client.py:1384) and refuses
+#     COMPLETED because that class belongs to the normal path
+#     (client.py:1388); only then does it write `terminal_status` verbatim
+#     (client.py:1438-1443). So `terminal_status` is minted only AFTER that
+#     guard passed: the field IS the terminal witness, and its value set is
+#     exactly the `terminal_archive` face of client._STATUS_SURFACE_MAP
+#     (client.py:834-853) = ARCHIVE_TERMINAL_WITNESSES.
+#   * cmd_ticket_archive_legacy (client.py:4588) — collects COMPLETED entries
+#     via _closed_ticket_entries (client.py:4489) but records `legacy: true`
+#     with `meta`/`files` and no status field; the SAME `legacy: true` shape is
+#     written by agent_activities.archive_ticket's legacy branch
+#     (agent_activities.py:9480-9489), whose only precondition is "the lane is
+#     already gone". The artifact therefore cannot be attributed to the
+#     COMPLETED-only collector, so a legacy manifest proves no terminal fact:
+#     NOT citable.
+#   * agent_activities.archive_ticket, non-legacy (agent_activities.py:9589) —
+#     the ordinary close path runs it INSIDE the merge stage, BEFORE the stage
+#     finishes (dev_lane.py:7491-7500 -> teardown_lane -> _finish; a teardown
+#     refusal lands _blocked with the archive already on disk). An archive can
+#     therefore exist for a ticket that never closed: NOT a terminal witness
+#     (bucket `archive_no_terminal_witness`), and `meta.status` is never used.
+ARCHIVE_SCHEMA = "v1"
+#: the statuses the terminal-archive exit can record (its guard's eligibility
+#: set, client.py:849-853). COMPLETED and CONTINUED_AS_NEW are refused by that
+#: writer by name, so a manifest claiming them was not written by it.
+ARCHIVE_TERMINAL_WITNESSES = ("FAILED", "CANCELED", "TIMED_OUT", "TERMINATED")
+
+# ---- residue buckets (named on the receipt, always counted) ----------------
+BUCKET_CLOSED = "closed"
+BUCKET_ARCHIVED_CLOSED = "archived_closed"
+BUCKET_NOT_LISTED_UNARCHIVED = "not_listed_unarchived"
+BUCKET_ARCHIVE_MALFORMED = "archive_malformed"
+BUCKET_ARCHIVE_LEGACY_UNCITED = "archive_legacy_uncited"
+BUCKET_ARCHIVE_NO_TERMINAL_WITNESS = "archive_no_terminal_witness"
+BUCKET_HUMAN_WORD = "human_word"
+BUCKET_UNCITED = "uncited"
+RESIDUE_BUCKETS = (BUCKET_CLOSED, BUCKET_ARCHIVED_CLOSED,
+                   BUCKET_NOT_LISTED_UNARCHIVED, BUCKET_ARCHIVE_MALFORMED,
+                   BUCKET_ARCHIVE_LEGACY_UNCITED,
+                   BUCKET_ARCHIVE_NO_TERMINAL_WITNESS,
+                   BUCKET_HUMAN_WORD, BUCKET_UNCITED)
+#: the buckets that mean "a row was appended" (every other bucket leaves the
+#: head open, so `unchanged` counts them)
+RESIDUE_CLOSING_BUCKETS = (BUCKET_CLOSED, BUCKET_ARCHIVED_CLOSED)
 
 CERT_ID_RE = re.compile(r"^cert-[0-9A-Za-z]+$")
 FREEZE_ID_RE = re.compile(r"^frz-[0-9A-Za-z]+$")
@@ -521,9 +601,22 @@ def head_line(head_row: Dict[str, Any]) -> Optional[str]:
 
 
 def head_subject_ticket(head_row: Dict[str, Any]) -> Optional[str]:
-    """A blocker head's subject ticket: the FIRST strict ticket id in the
-    head's source_ticket, detail or question. Prose-only references stay
-    unparsed (None) — the residue pass never closes on a guess."""
+    """A head's subject ticket: the head's well-formed `source_ticket`, else the
+    structured `ticket` key of its JSON detail, else the FIRST strict ticket id
+    in its detail or question. Prose-only references stay unparsed (None) — the
+    residue pass never closes on a guess."""
+    src = head_row.get("source_ticket")
+    if isinstance(src, str) and request_thread.TICKET_ID_RE.match(src.strip()):
+        return src.strip()
+    detail = head_row.get("detail")
+    if isinstance(detail, str) and detail.strip():
+        try:
+            obj = json.loads(detail)
+        except ValueError:
+            obj = None
+        if isinstance(obj, dict) and isinstance(obj.get("ticket"), str) \
+                and request_thread.TICKET_ID_RE.match(obj["ticket"].strip()):
+            return obj["ticket"].strip()
     for field in ("source_ticket", "detail", "question"):
         val = head_row.get(field)
         if not isinstance(val, str):
@@ -534,20 +627,184 @@ def head_subject_ticket(head_row: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+# ---------- the archive as a citation (t261028-25) ---------------------------
+
+def archive_projects_root(env: Optional[Dict[str, str]] = None) -> Path:
+    """The projects root the archive store lives under, read from the INJECTED
+    env dict (never bare os.environ — the same isolation discipline the
+    delivery-ledger reader follows, so a test/process env really is isolated).
+    An unset/empty value falls back to the same default shared.py uses."""
+    env = dict(os.environ if env is None else env)
+    root = str(env.get("SANDBAR_PROJECTS_DIR") or "").strip()
+    if root:
+        return Path(root)
+    return Path.home() / ".sandbar" / "projects"
+
+
+def archive_manifest_path(project_key: str, ticket_id: str,
+                          env: Optional[Dict[str, str]] = None
+                          ) -> Tuple[Optional[Path], str]:
+    """The cited ticket's archive manifest path, or (None, reason) when a shape
+    check refuses to splice it (the same whitelist shared.ticket_data_dir
+    applies: both halves are spliced into a path)."""
+    key = str(project_key or "").strip()
+    tid = str(ticket_id or "").strip()
+    shared = shared_module()
+    if not shared.PROJECT_KEY_RE.match(key):
+        return None, "archive_project_key_invalid:%r" % key[:40]
+    if not shared.PROJECT_KEY_RE.match(tid):
+        return None, "archive_ticket_id_invalid:%r" % tid[:40]
+    return (archive_projects_root(env) / key / "data" / "tickets" / tid
+            / "archive.json"), ""
+
+
+def archive_terminal_citation(ticket: str, project_key: str,
+                              env: Optional[Dict[str, str]] = None
+                              ) -> Dict[str, Any]:
+    """Is this ticket's on-disk archive a lawful terminal citation?
+
+    Returns {"citable": bool, "evidence": str, "bucket": str, "reason": str,
+    "path": str}. Exactly one manifest shape is citable, and each refusal names
+    the condition that held (the writer guarantees are in the module comment
+    above ARCHIVE_TERMINAL_WITNESSES):
+
+      * missing manifest                  -> not_listed_unarchived
+      * unparseable / not schema=v1       -> archive_malformed
+      * legacy: true                      -> archive_legacy_uncited
+      * schema v1, no usable terminal_status
+        (the close path's mid-run manifest, or an unexpected value)
+                                          -> archive_no_terminal_witness
+      * terminal_status in the terminal-archive exit's own eligibility set
+                                          -> CITABLE, evidence names the path
+                                             and the field value relied on
+    """
+    path, why = archive_manifest_path(project_key, ticket, env)
+    if path is None:
+        return {"citable": False, "evidence": "", "bucket": BUCKET_UNCITED,
+                "reason": why, "path": ""}
+    loc = str(path)
+    if not path.is_file():
+        return {"citable": False, "evidence": "",
+                "bucket": BUCKET_NOT_LISTED_UNARCHIVED,
+                "reason": "no_archive_manifest:%s" % loc, "path": loc}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return {"citable": False, "evidence": "",
+                "bucket": BUCKET_ARCHIVE_MALFORMED,
+                "reason": "archive_manifest_unreadable:%s: %s: %s"
+                          % (loc, type(e).__name__, e), "path": loc}
+    if not isinstance(doc, dict) or str(doc.get("schema") or "") != ARCHIVE_SCHEMA:
+        return {"citable": False, "evidence": "",
+                "bucket": BUCKET_ARCHIVE_MALFORMED,
+                "reason": "archive_manifest_schema_invalid (no schema=%s): %s"
+                          % (ARCHIVE_SCHEMA, loc), "path": loc}
+    if bool(doc.get("legacy")):
+        return {"citable": False, "evidence": "",
+                "bucket": BUCKET_ARCHIVE_LEGACY_UNCITED,
+                "reason": "archive_manifest_legacy (records no terminal fact; "
+                          "two writers share this shape): %s" % loc, "path": loc}
+    status = doc.get("terminal_status")
+    token = status.strip().upper() if isinstance(status, str) else ""
+    if token not in ARCHIVE_TERMINAL_WITNESSES:
+        return {"citable": False, "evidence": "",
+                "bucket": BUCKET_ARCHIVE_NO_TERMINAL_WITNESS,
+                "reason": "archive_manifest_no_terminal_witness:%s (terminal_status=%r, "
+                          "the close path archives before the stage finishes; its meta "
+                          "is a mid-run snapshot and is never read as closure)"
+                          % (loc, status), "path": loc}
+    return {"citable": True,
+            "evidence": "%s proves closure: terminal_status=%s (recorded by the "
+                        "ticket-archive-terminal exit, whose describe guard refuses "
+                        "a non-terminal execution)" % (loc, token),
+            "bucket": BUCKET_ARCHIVED_CLOSED, "reason": "", "path": loc}
+
+
+def cited_terminal_evidence(ticket: str, ledger_rows: List[Dict[str, Any]],
+                            ticket_status_fn: Callable[[str], Optional[Tuple[str, str]]],
+                            project_key: str,
+                            env: Optional[Dict[str, str]] = None
+                            ) -> Tuple[Optional[bool], str, str, str, str]:
+    """The ONE cited-terminal rule shared by `blocker` and `request` heads.
+
+    Returns (verdict, evidence, note, bucket, via) where `via` names the face
+    the close rests on ("ticket_projection" / "ledger_landing" / "archive") or
+    "" for a head that stays open. Faces, in order:
+      1. a landing row on the delivery ledger naming the ticket (a cited row);
+      2. the ticket's list projection reading `closed` (a cited row);
+      3. the ticket no longer being listed -> the ARCHIVE is consulted, and only
+         a manifest carrying the terminal-archive exit's own witness closes it.
+    Anything else keeps the head open, named: `uncited` when the projection
+    reads a non-terminal status, and the archive buckets when the archive
+    cannot prove closure. No inference, no meta.status, no default close."""
+    verdict, evidence, note = eval_landing_on_line(ticket, ledger_rows)
+    if verdict is VERDICT_TRUE:
+        return VERDICT_TRUE, evidence, "ticket_landed:%s" % ticket, BUCKET_CLOSED, \
+            "ledger_landing"
+    read = ticket_status_fn(ticket)
+    if read is None:
+        return VERDICT_SKIP, "", "ticket_reader_unavailable:%s" % ticket, \
+            BUCKET_UNCITED, ""
+    status, source = read
+    if status == "closed":
+        return VERDICT_TRUE, "%s status=closed via %s" % (ticket, source), \
+            "ticket_closed:%s" % source, BUCKET_CLOSED, "ticket_projection"
+    if status != "not-listed":
+        # a listed, non-terminal ticket has no citable ending row at all: the
+        # archive is NOT consulted against a live projection (a contradiction
+        # there is never resolved in favour of a close)
+        return VERDICT_FALSE, "", "cited_ticket_not_terminal:%s:%s" % (ticket, status), \
+            BUCKET_UNCITED, ""
+    citation = archive_terminal_citation(ticket, project_key, env)
+    if citation["citable"]:
+        return VERDICT_TRUE, citation["evidence"], \
+            "archive_terminal:%s" % ticket, BUCKET_ARCHIVED_CLOSED, "archive"
+    return VERDICT_FALSE, "", citation["reason"], citation["bucket"], ""
+
+
+def residue_bucket_counts(entries: List[Dict[str, Any]]) -> Dict[str, int]:
+    """The receipt's bucket tally (t261028-25 spec 4): every named bucket is
+    present even at zero, so a sweep that closes nothing is visible instead of
+    absent. `archived_closed` is the archive subset of `closed`; `unchanged` is
+    every head the pass left open."""
+    counts: Dict[str, int] = {b: 0 for b in RESIDUE_BUCKETS}
+    for e in entries:
+        bucket = str(e.get("bucket") or "")
+        if bucket in counts:
+            counts[bucket] += 1
+    counts[BUCKET_ARCHIVED_CLOSED] = len(
+        [e for e in entries if str(e.get("via") or "") == "archive"])
+    counts[BUCKET_CLOSED] = len(
+        [e for e in entries if str(e.get("bucket") or "") == BUCKET_CLOSED])
+    counts["unchanged"] = len(
+        [e for e in entries
+         if str(e.get("bucket") or "") not in RESIDUE_CLOSING_BUCKETS])
+    return counts
+
+
 def close_legacy_residue(head_rows: Dict[str, Dict[str, Any]], states: Dict[str, str],
                          conditions: Dict[str, Dict[str, Any]],
                          ledger_rows: List[Dict[str, Any]],
                          ticket_status_fn: Callable[[str], Optional[Tuple[str, str]]],
-                         now_ms: int, seq: int, append_fn: Callable[[Dict[str, Any]], None]
+                         now_ms: int, seq: int, append_fn: Callable[[Dict[str, Any]], None],
+                         project_key: str = "",
+                         env: Optional[Dict[str, str]] = None
                          ) -> List[Dict[str, Any]]:
-    """t261026-07 build C+D: close OPEN heads with NO declared condition whose
-    subject row can be CITED. Bound D is absolute:
+    """t261026-07 build C+D, extended by t261028-25: close OPEN heads with NO
+    declared condition whose subject row can be CITED. Bound D is absolute:
       - `finding` / `question` are NEVER machine-closed (bucket `human_word`);
-      - a blocker whose ticket reads not-listed is NOT closable (a nonexistent
-        row cannot be cited — bucket `not_listed`);
-      - anything without a citable ending row stays open (bucket `uncited`).
+      - a `blocker` and a `request` head close on the SAME cited-terminal rule
+        (cited_terminal_evidence): a ledger landing naming the ticket, the
+        ticket's projection reading closed, or an archive manifest that proves
+        terminal closure;
+      - a cited ticket Temporal no longer lists is NOT closable on its absence:
+        the archive decides, and a missing / malformed / legacy / witness-less
+        manifest keeps the head open in its own named bucket;
+      - anything else without a citable ending row stays open (bucket
+        `uncited`, with the reason named).
     Each close appends ONE resolved state row whose evidence names the exact
-    observed row. Returns the receipt entries (one per evaluated head)."""
+    observed row (or the archive path and the field relied on). Returns the
+    receipt entries (one per evaluated head)."""
     out: List[Dict[str, Any]] = []
     for hid, state in states.items():
         if state != request_thread.STATE_OPEN:
@@ -558,41 +815,37 @@ def close_legacy_residue(head_rows: Dict[str, Dict[str, Any]], states: Dict[str,
         kind = str(head_row.get("kind") or "")
         entry: Dict[str, Any] = {"id": hid, "class": kind}
         if kind in NOT_AUTO_CLOSABLE:
-            entry["bucket"] = "human_word"
+            entry["bucket"] = BUCKET_HUMAN_WORD
             out.append(entry)
             continue
         head_at = head_row.get("at") if isinstance(head_row.get("at"), int) else None
         verdict: Optional[bool] = VERDICT_FALSE
-        evidence = note = ""
+        evidence = note = bucket = via = ""
         if kind in ("run-silent", "run-stalled"):
             line = head_line(head_row)
             if line is None:
                 verdict, evidence, note = VERDICT_SKIP, "", "residue_line_unparsable"
             else:
                 verdict, evidence, note = eval_round_after(line, ledger_rows, head_at)
-        elif kind == "blocker":
+        elif kind in ("blocker", "request"):
+            # t261028-25: the `request` class has its OWN named rule now — the
+            # same cited-terminal evidence as a blocker, never inference. A
+            # request head citing no parsable ticket stays open, named.
             ticket = head_subject_ticket(head_row)
             if ticket is None:
                 verdict, evidence, note = VERDICT_SKIP, "", "residue_subject_unparsable"
             else:
                 entry["ticket"] = ticket
-                # a landing naming the ticket ends the subject too
-                verdict, evidence, note = eval_landing_on_line(ticket, ledger_rows)
-                if verdict is VERDICT_FALSE:
-                    verdict, evidence, note = eval_ticket_closed(ticket, ticket_status_fn)
-                    if verdict is VERDICT_FALSE:
-                        read = ticket_status_fn(ticket)
-                        if read is not None and read[0] == "not-listed":
-                            entry["bucket"] = "not_listed"
-                            out.append(entry)
-                            continue
+                verdict, evidence, note, bucket, via = cited_terminal_evidence(
+                    ticket, ledger_rows, ticket_status_fn, project_key, env)
         else:
+            # every other class has no cited-terminal rule: it stays open, and
+            # the reason names the class (never a silent skip)
             verdict, evidence, note = VERDICT_SKIP, "", "residue_class_unhandled:%s" % kind
         if verdict is not VERDICT_TRUE:
-            if "bucket" not in entry:
-                entry["bucket"] = "uncited"
-                if note:
-                    entry["reason"] = note
+            entry["bucket"] = bucket or BUCKET_UNCITED
+            if note:
+                entry["reason"] = note
             out.append(entry)
             continue
         row = {"type": "state", "id": "st-%d-%04d" % (now_ms, seq),
@@ -601,8 +854,8 @@ def close_legacy_residue(head_rows: Dict[str, Dict[str, Any]], states: Dict[str,
                "note": "legacy_residue:%s" % note, "surface": SWEEP_SURFACE}
         append_fn(row)
         seq += 1
-        entry.update({"bucket": "closed", "evidence": evidence, "note": note,
-                      "row_id": row["id"]})
+        entry.update({"bucket": BUCKET_CLOSED, "via": via, "evidence": evidence,
+                      "note": note, "row_id": row["id"]})
         out.append(entry)
     return out
 
@@ -632,16 +885,20 @@ def evaluate(condition: Dict[str, Any], rows: List[Dict[str, Any]],
 
 def close_legacy_residue_locked(path: str, ledger_rows: List[Dict[str, Any]],
                                 ticket_status_fn: Callable[[str], Optional[Tuple[str, str]]],
-                                now_ms: int, seq: int
+                                now_ms: int, seq: int,
+                                project_key: str = "",
+                                env: Optional[Dict[str, str]] = None
                                 ) -> Tuple[List[Dict[str, Any]], int]:
     """The residue pass as its OWN flock pass over the requests ledger
     (t261026-07): re-reads the rows (the condition pass may have appended
     resolved rows in its pass — those heads are now terminal and skipped), so
     the condition pass's body stays byte-shape-compatible with the merge base
     and the residue insert never collides with another side's tail insert.
-    Idempotent by the same terminal-head skip. Returns (entries, next_seq) —
-    the seq is threaded back to the caller so the passes can never mint two
-    state rows carrying the same id in one sweep (acceptance gen7 finding)."""
+    Idempotent by the same terminal-head skip. `project_key`/`env` are what the
+    archive citation (t261028-25) resolves the ticket store from. Returns
+    (entries, next_seq) — the seq is threaded back to the caller so the passes
+    can never mint two state rows carrying the same id in one sweep
+    (acceptance gen7 finding)."""
     with request_thread._locked_append(path) as fd:
         req_rows, _mal = request_thread._read_rows_unlocked(fd)
         states = request_thread.head_states(req_rows)
@@ -658,7 +915,8 @@ def close_legacy_residue_locked(path: str, ledger_rows: List[Dict[str, Any]],
 
         entries = close_legacy_residue(
             head_rows, states, conditions, ledger_rows, ticket_status_fn,
-            now_ms, counter["seq"], append_row)
+            now_ms, counter["seq"], append_row,
+            project_key=project_key, env=env)
         return entries, counter["seq"]
 
 
@@ -674,13 +932,18 @@ def sweep_project(project_key: str, now_ms: int, seq: int,
     named in the receipt; terminal heads are untouched. Heads WITHOUT a
     declared condition go through the legacy-residue pass (t261026-07): they
     close only on a CITED subject row, and `finding`/`question` never close.
+    Since t261028-25 a cited ticket that Temporal no longer lists is carried by
+    its ARCHIVE when that manifest proves terminal closure, and a `request`
+    head closes on exactly the same cited-terminal evidence; the `residue`
+    entries are tallied by name in `residue_buckets`.
     The ledger/runs/ticket readers are injectable for tests."""
     env = dict(os.environ if env is None else env)
     key = str(project_key)
     path = str(executor_requests.ledger_file(key, env))
     receipt: Dict[str, Any] = {"ok": True, "project": key, "file": path,
                                "resolved": [], "skipped": [], "unchanged": 0,
-                               "residue": [], "malformed_lines": 0}
+                               "residue": [], "malformed_lines": 0,
+                               "residue_buckets": residue_bucket_counts([])}
     if ledger_rows_fn is None:
         def ledger_rows_fn(_key=key, _env=env):
             return load_delivery_ledger(_key, _env)
@@ -711,14 +974,16 @@ def sweep_project(project_key: str, now_ms: int, seq: int,
     receipt["malformed_lines"] = ledger_malformed
     # t261026-07: the legacy residue FIRST, as its own flock pass — open heads
     # with no declared condition, closed ONLY on a cited subject row (bound D:
-    # a `finding`/`question` never; a not-listed ticket never). Heads it
+    # a `finding`/`question` never; an unproven terminal state never). Heads it
     # closes read terminal in the condition pass below, and it never touches
     # conditioned heads, so the two passes are independent and idempotent.
     # The seq is threaded back (acceptance gen7 finding): the condition pass
     # starts AFTER the residue's rows, so one sweep can never mint two state
     # rows with the same id.
     receipt["residue"], seq = close_legacy_residue_locked(
-        path, ledger_rows, ticket_status_fn, now_ms, seq)
+        path, ledger_rows, ticket_status_fn, now_ms, seq,
+        project_key=key, env=env)
+    receipt["residue_buckets"] = residue_bucket_counts(receipt["residue"])
     with request_thread._locked_append(path) as fd:
         req_rows, req_malformed = request_thread._read_rows_unlocked(fd)
         receipt["malformed_lines"] += req_malformed

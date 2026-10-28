@@ -18,8 +18,12 @@ Coverage (mapped to the ticket's A/B/C/D and the plan-review conditions):
   subject row (run-silent / run-stalled: a certification row on the line
   after the head; blocker: its ticket closed or a landing naming it);
 - D (bound): finding / question are NEVER closed (bucket human_word); a
-  blocker whose ticket reads not-listed stays open (bucket not_listed); an
-  unparsable head stays open (bucket uncited);
+  blocker whose ticket reads not-listed and has no citable archive stays open
+  (bucket not_listed_unarchived, t261028-25's name); an unparsable head stays
+  open (bucket uncited). Since t261028-25 the `request` class has its own
+  named rule (the same cited-terminal evidence as a blocker), so a request
+  head citing no ticket is `uncited`/residue_subject_unparsable, never
+  residue_class_unhandled;
 - round_after as a new closed-set kind: validation, evaluation (strictly
   after the head's `at`, both sides must carry a readable `at`), and
   end-to-end close through sweep_project with idempotence.
@@ -399,7 +403,10 @@ def test_residue_bound_not_listed_ticket_stays_open(tmp_path, ledger_env):
     receipt = sweep(tmp, "proj-alpha", rows, [], env,
                     ticket_status=ticket_closed_fn("not-listed"))
     entry = residue_bucket(receipt, "h6")
-    assert entry and entry["bucket"] == "not_listed"
+    # t261028-25: the bucket name now says WHICH refusal held (no archive on
+    # disk for the cited ticket); the head still stays open.
+    assert entry and entry["bucket"] == "not_listed_unarchived"
+    assert "no_archive_manifest" in entry["reason"]
     assert not [r for r in read_ledger(path) if r.get("type") == "state"]
 
 
@@ -414,8 +421,13 @@ def test_residue_unparsable_and_unhandled_stay_open(tmp_path, ledger_env):
     assert residue_bucket(receipt, "h7")["reason"] == "residue_line_unparsable"
     assert residue_bucket(receipt, "h8")["bucket"] == "uncited"
     assert residue_bucket(receipt, "h8")["reason"] == "residue_subject_unparsable"
+    # t261028-25: the `request` class is no longer "unhandled" — it has a named
+    # rule (cited-terminal evidence, same as a blocker), and an uncited request
+    # head stays open in `uncited` with the unparsable-subject reason.
     assert residue_bucket(receipt, "h9")["bucket"] == "uncited"
-    assert "residue_class_unhandled" in residue_bucket(receipt, "h9")["reason"]
+    assert residue_bucket(receipt, "h9")["reason"] == "residue_subject_unparsable"
+    assert receipt["residue_buckets"]["uncited"] == 3
+    assert "residue_class_unhandled" not in json.dumps(receipt)
     assert not [r for r in read_ledger(path) if r.get("type") == "state"]
 
 
