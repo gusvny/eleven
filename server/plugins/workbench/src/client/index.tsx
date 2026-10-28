@@ -72,7 +72,7 @@
 import { Component, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 // t261001-11：问题区行模型单写者（gate_runs 双形态容忍）+ 槽错误边界文案纯面。
-import { gateProblemRows, slotFaultMessage } from './problems-model.ts'
+import { gateProblemRows, lastGateRun, slotFaultMessage } from './problems-model.ts'
 import type { ClientContext, ConversationViewDefinition } from '@deepseek-ai/dsh-client-runtime/client'
 // 空具名 type import：把 dsh-client-ui-conversation 的 SlotMap 扩展（conversation.view 槽声明）
 // 带进 tsc 检查环境；纯类型副作用，构建时被剥离，不进 bundle。
@@ -94,7 +94,7 @@ import { deriveStageDurations, fmtDur as fmtDurMs, humanWaitTotalMs, stageDurati
 import type { StageDuration } from './lane-durations.ts'
 // t260915-05：真泳道图（拓扑驱动）+ 检查明细区（mock ①③④；渲染器只认节点+边+kind，
 // 标签全部来自拓扑，组件零业务词——fixture-two-step 拓扑对拍锚）。
-import { buildLaneMap, buildChecksDetail, parseTopology } from './lane-map-model.ts'
+import { buildLaneMap, buildChecksDetail, gateApprovalSuffix, parseTopology } from './lane-map-model.ts'
 import { LaneMap, ChecksDetail } from './lane-map.tsx'
 // t260926-05：巡检报告面纯函数层（asText/套件证据段/泛化 face 行/报告摘要/发现项防御视图）。
 import { asText, suiteSectionView, faceRows, reportDigest, findingView } from './inspection-report-model.ts'
@@ -1699,8 +1699,8 @@ function d2StatusLine(detail: TicketDetail, wf?: Wf): { s: D2Visual | 'done'; te
     return { s: 'blocked', text: `Stuck at ${name}: ${lastBlocked?.reason || 'see problems section below'}` }
   }
   if (detail.stage_state === 'awaiting-human') {
-    const g = detail.gate_runs?.[detail.gate_runs.length - 1]
-    return { s: 'awaiting-human', text: `Awaiting your approval: ${name}${g?.green ? ' (merge_check green)' : ''}` }
+    const g = lastGateRun(detail)
+    return { s: 'awaiting-human', text: `Awaiting your approval: ${name}${gateApprovalSuffix(g)}` }
   }
   if (detail.stage_state === 'running') {
     // 并行分叉：活跃步数组 ≥2 步时统报并行（避免「文字报单步、图上双高亮」分裂）。

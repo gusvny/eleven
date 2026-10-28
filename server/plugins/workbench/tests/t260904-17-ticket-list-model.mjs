@@ -307,12 +307,12 @@ const SCAN_FILES = [
   'src/client/sidebar.tsx',
 ]
 // 豁免=存量字面量（本票之前的详情面文案，理由各注；扩清单须改本测试=有意识行为）。
+// t261028-56：详情状态行不再硬编码段名（改读 gate run 自带 stage），'(merge_check green)'
+// 这条豁免随之删除——豁免清单只缩不扩。
 const EXEMPT_LITERALS = [
   'merge_check 等脚本门不落 results 也能打勾',   // index.tsx 步骤条注释（存量）
   'merge_check 等程序化门的一次运行记录',         // index.tsx 类型注释（存量）
-  '(merge_check green)',                         // index.tsx 详情状态行文案（t260925-18 英文化）
   '最近一次 merge_check 红',                     // index.tsx 问题区注释（存量）
-  'merge_check red:',                            // index.tsx 问题区文案（存量）
 ]
 
 ok('零硬编码守卫：列表面四文件禁现 dev-lane 段名常量（豁免清单显式化）', () => {

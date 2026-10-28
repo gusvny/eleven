@@ -24,6 +24,10 @@
  * 纯函数无 IO；畸形输入（非对象/字段类型错/列表超长）全部软降级不抛。
  */
 import { translateReason } from '../client/red-light-lexicon.ts'
+// The gate-receipt readers are the client model's pure accessors (no closure, no
+// IO): the host reads the SAME run verdict and the SAME run name the console's
+// Check-details face shows, so the two faces cannot disagree (t261028-56).
+import { gateRunStage, readGateRunVerdict } from '../client/lane-map-model.ts'
 
 /** 文件名兜底抽取：blocked_reason 文本里的路径形 token（含 / 或 . 且非句读）。 */
 const PATH_TOKEN_RE = /[A-Za-z0-9_][A-Za-z0-9_./-]*[/.][A-Za-z0-9_.-]+/g
@@ -104,9 +108,8 @@ function buildSignWhat(detail: Record<string, unknown>): string[] {
     const g = gateRuns[i]
     if (g === null || typeof g !== 'object') continue
     const go = g as Record<string, unknown>
-    if (go.green !== true) continue
-    const stage = typeof go.stage === 'string' ? go.stage : ''
-    out.push(`All prior gates green: ${stage || 'programmatic check'} (ready to sign)`)
+    if (readGateRunVerdict(go).green !== true) continue
+    out.push(`All prior gates green: ${gateRunStage(go) || 'programmatic check'} (ready to sign)`)
     break
   }
   return out.slice(0, STATUS_CARD_SIGN_WHAT_CAP)

@@ -1317,6 +1317,26 @@ function readGateRunVerdict(run) {
 	};
 }
 /**
+* A run's OWN identity, for a face that names the run it quotes: the `stage`
+* the engine wrote, else its `label`, else '' (the caller supplies its own
+* neutral word). Never a literal: a face that names a stage it is not quoting
+* is a false attribution (t261028-56).
+*/
+function gateRunStage(run) {
+	return asString$1(run.stage) || asString$1(run.label);
+}
+/**
+* The approval line's green suffix: '' unless the run's own receipt says green
+* through the shared rule, else the run's OWN stage name from the data. One
+* rule for "is this run green" and one rule for "what is this run called", so a
+* status line cannot drift from the Check-details header (t261028-56).
+*/
+function gateApprovalSuffix(run) {
+	if (!run) return "";
+	if (readGateRunVerdict(run).green !== true) return "";
+	return ` (${gateRunStage(run) || "gate"} green)`;
+}
+/**
 * gate_runs → Check-details row model (newest run first). Reads both receipt
 * shapes through the one accessor (receiptRowView / readGateRunVerdict).
 * Malformed entries degrade row by row and never throw; a row that carries
@@ -14427,9 +14447,8 @@ function buildSignWhat(detail) {
 		const g = gateRuns[i];
 		if (g === null || typeof g !== "object") continue;
 		const go = g;
-		if (go.green !== true) continue;
-		const stage = typeof go.stage === "string" ? go.stage : "";
-		out.push(`All prior gates green: ${stage || "programmatic check"} (ready to sign)`);
+		if (readGateRunVerdict(go).green !== true) continue;
+		out.push(`All prior gates green: ${gateRunStage(go) || "programmatic check"} (ready to sign)`);
 		break;
 	}
 	return out.slice(0, 8);
@@ -16134,7 +16153,7 @@ function d2StatusLine(detail, wf) {
 	};
 	if (detail.stage_state === "awaiting-human") return {
 		s: "awaiting-human",
-		text: `Awaiting your approval: ${name}${(detail.gate_runs?.[detail.gate_runs.length - 1])?.green ? " (merge_check green)" : ""}`
+		text: `Awaiting your approval: ${name}${gateApprovalSuffix(lastGateRun(detail))}`
 	};
 	if (detail.stage_state === "running") {
 		const order = wf?.stages.map((s) => s.id) ?? [];

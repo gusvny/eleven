@@ -1142,6 +1142,28 @@ export function readGateRunVerdict(run: Record<string, unknown>): GateRunVerdict
 }
 
 /**
+ * A run's OWN identity, for a face that names the run it quotes: the `stage`
+ * the engine wrote, else its `label`, else '' (the caller supplies its own
+ * neutral word). Never a literal: a face that names a stage it is not quoting
+ * is a false attribution (t261028-56).
+ */
+export function gateRunStage(run: Record<string, unknown>): string {
+  return asString(run.stage) || asString(run.label)
+}
+
+/**
+ * The approval line's green suffix: '' unless the run's own receipt says green
+ * through the shared rule, else the run's OWN stage name from the data. One
+ * rule for "is this run green" and one rule for "what is this run called", so a
+ * status line cannot drift from the Check-details header (t261028-56).
+ */
+export function gateApprovalSuffix(run: Record<string, unknown> | undefined): string {
+  if (!run) return ''
+  if (readGateRunVerdict(run).green !== true) return ''
+  return ` (${gateRunStage(run) || 'gate'} green)`
+}
+
+/**
  * gate_runs → Check-details row model (newest run first). Reads both receipt
  * shapes through the one accessor (receiptRowView / readGateRunVerdict).
  * Malformed entries degrade row by row and never throw; a row that carries

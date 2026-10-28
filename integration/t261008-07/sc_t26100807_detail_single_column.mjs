@@ -603,6 +603,19 @@ async function runBrowser(pw, browser) {
       // old tab strip retired
       const tabsGone = await page.evaluate(() => !document.querySelector('.wb-dtabs, .wb-dtab')).catch(() => true)
       record('A1b tab-strip-retired', tabsGone ? 'pass' : 'fail', tabsGone ? 'no tab strip nodes in the document' : 'wb-dtabs/wb-dtab nodes still present')
+      // A8 status line quotes the gate run it actually read (t261028-56): this
+      // fixture's LAST gate run carries stage=review_plan while its label says
+      // merge_check — a status line that prints a literal stage name is a false
+      // attribution, and a truthiness read would also drop a green script gate.
+      const status = await page.evaluate(() => {
+        const r = document.querySelector('.wb-drawer, .wb-overlay, .wb-d2-status')
+        const el = (r && r.querySelector && r.querySelector('.wb-d2-status')) || document.querySelector('.wb-d2-status')
+        return el ? { text: el.textContent || '', s: el.getAttribute('data-s') || '' } : null
+      }).catch(() => null)
+      const statusOk = !!status && status.s === 'awaiting-human' &&
+        status.text.includes('(review_plan green)') && !status.text.includes('merge_check')
+      record('A8 status-line-names-the-run', statusOk ? 'pass' : 'fail',
+        `status=${JSON.stringify(status)} (expected the last gate run to be named review_plan, never a literal)`)
     } else record('A1 column-order', 'fail', 'detail column did not open')
   }
 

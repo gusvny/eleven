@@ -818,6 +818,80 @@ def settle_shape_needs_rerun(error: str) -> bool:
     ))
 
 
+_GATE_ROW_GREEN_WORDS = {"green": True, "red": False}
+
+
+def gate_row_field_verdict(value: Any) -> Optional[bool]:
+    """One receipt verdict field as a boolean (mirror of the console's
+    `receiptBool`, t261028-56). The engine writes booleans on agent/human gate
+    rows and the words green/red on script-gate rows; an unknown value stays
+    None, because a reader degrades and never invents a verdict."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in _GATE_ROW_GREEN_WORDS:
+            return _GATE_ROW_GREEN_WORDS[word]
+    return None
+
+
+def gate_row_verdict(row: Any) -> Optional[bool]:
+    """One `gate_runs[*].checks[*]` row's verdict across BOTH engine shapes
+    (mirror of the console's `receiptRowView`, t261028-56): green -> level ->
+    verdict -> done, conflicting signals resolve red, no signal -> None (the row
+    is shown red, never upgraded). Only a dict is a shaped row."""
+    if not isinstance(row, dict):
+        return None
+    signals = [s for s in (
+        gate_row_field_verdict(row.get("green")),
+        gate_row_field_verdict(row.get("level")),
+        gate_row_field_verdict(row.get("verdict")),
+        gate_row_field_verdict(row.get("done")),
+    ) if s is not None]
+    if not signals:
+        return None
+    return all(signals)
+
+
+def gate_row_name(row: Any) -> str:
+    """One row's readable name from the data: item (agent/human gates) -> check
+    (script gates) -> id. '' when the row carries no name (t261028-56)."""
+    if isinstance(row, dict):
+        for key in ("item", "check", "id"):
+            value = row.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return ""
+    if isinstance(row, (str, int, float)) and not isinstance(row, bool):
+        return str(row).strip()
+    return ""
+
+
+def gate_row_reds(checks: Any) -> List[Any]:
+    """The rows the console shows red for one gate run = the run's red_count
+    (t261028-56). A scalar row names something and stays red; a dict row green
+    by `gate_row_verdict` is not red; any other value is not a row. The engine's
+    count and the console's faces now come from ONE rule."""
+    if not isinstance(checks, list):
+        return []
+    reds: List[Any] = []
+    for c in checks:
+        if isinstance(c, (str, int, float)) and not isinstance(c, bool):
+            if str(c).strip():
+                reds.append(c)
+            continue
+        if not isinstance(c, dict):
+            # A JSON array is not a shaped row either, but the console still shows
+            # it (as an unnamed red row): the count must not disagree.
+            if isinstance(c, list):
+                reds.append(c)
+            continue
+        if gate_row_verdict(c) is True:
+            continue
+        reds.append(c)
+    return reds
+
+
 def quiet_baseline_covered(checks: Any) -> bool:
     """t261009-15: the quiet-verdicts-all-green coverage predicate (single writer
     = pure function, shared by the workflow routing and the unit tests).
@@ -826,8 +900,9 @@ def quiet_baseline_covered(checks: Any) -> bool:
     every verdict is green with no cap/error degradation — any uncovered red,
     quiet red, or degraded verdict -> False (fail-closed to today's blocked path,
     byte-identical). Green receipts never reach this predicate (the caller sits
-    after the mc.green branch)."""
-    reds = [c for c in (checks or []) if isinstance(c, dict) and not c.get("green")]
+    after the mc.green branch). The red set is the shared one (t261028-56): a
+    script-shape row that is green is not an uncovered red."""
+    reds = [c for c in gate_row_reds(checks) if isinstance(c, dict)]
     if not reds:
         return False
     return all(
@@ -3635,7 +3710,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             return
         red: Optional[Dict[str, Any]] = None
         for c in (checks if isinstance(checks, list) else []):
-            if isinstance(c, dict) and c.get("green") is False:
+            if isinstance(c, dict) and gate_row_verdict(c) is False:
                 red = c
                 break
         if red is None:
@@ -3651,7 +3726,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             files = red.get("files")
             detail = {
                 "check_id": str(red.get("id") or "merge_check"),
-                "item": str(red.get("item") or ""),
+                "item": gate_row_name(red),
                 "red": True,
                 "reason_code": str(red.get("reason_code") or "merge_check_red"),
                 "files": [str(f) for f in files[:20]]
@@ -3666,14 +3741,14 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         # 260927 ⑥：逐条列出**全部**红项 + 红类 + 各自处置（纯加法，既有键不变）
         reds: List[Dict[str, Any]] = []
         for c in (checks if isinstance(checks, list) else []):
-            if not (isinstance(c, dict) and c.get("green") is False):
+            if gate_row_verdict(c) is not False:
                 continue
             _cid = str(c.get("id") or "merge_check")
             _rc = str(c.get("reason_code") or "merge_check_red")
             _files = c.get("files")
             reds.append({
                 "check_id": _cid,
-                "item": str(c.get("item") or ""),
+                "item": gate_row_name(c),
                 "reason_code": _rc,
                 # 红类=引擎本轮将怎么处置：预演冲突类红会（至多 N 轮）自动打回 implement
                 # 消解；其余红一律 blocked 等人。判据与 dev_lane 的路由条件同源
@@ -6998,7 +7073,9 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 self.gate_runs.append({
                     "stage": "merge_check", "label": "merge_check（程序化检查）",
                     "green": mc.green,
-                    "red_count": len([c for c in mc.checks if not c.get("green")]),
+                    # The face's red count, from the SAME row rule it reads (t261028-56):
+                    # a green script-shape row is not a red.
+                    "red_count": len(gate_row_reds(mc.checks)),
                     "exit_code": 0, "checks": mc.checks,
                     "conflict": mc.conflict, "conflict_files": mc.conflict_files})
                 if mc.green:
@@ -7016,7 +7093,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 # counted, never silent) -> finish merge_check with name-named evidence
                 # -> merge. Any uncovered red, unavailable roster, or quiet red falls
                 # through to today's path below, byte-identical (fail-closed).
-                _q_reds = [c for c in mc.checks if not c.get("green")]
+                _q_reds = gate_row_reds(mc.checks)
                 _q_covered = quiet_baseline_covered(mc.checks)
                 if _q_covered:
                     _q_rows = [
@@ -7042,10 +7119,12 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     continue
                 # 260927 ⑥：逐条带出该红的**处置**（宿主实报：旧文案只有首红的处置，
                 # 于是「脏工作区红」被读成「预演冲突不会自动消解」）。
+                # t261028-56: the red set and the row name come from the shared gate-row
+                # rule, so the count above and this text name the same rows.
                 red = "；".join(
-                    "%s: %s%s" % (c.get("item"), c.get("detail"),
+                    "%s: %s%s" % (gate_row_name(c), c.get("detail"),
                                   ("｜处置：%s" % c.get("next_action")) if c.get("next_action") else "")
-                    for c in mc.checks if not c.get("green"))
+                    for c in gate_row_reds(mc.checks))
                 # t260826-01 conflict auto-resolution loop: only a merge dry-run conflict
                 # red (mc.conflict) skips blocked and automatically sends work back to
                 # implement for resolution (reusing the rework loop, no signal needed);
@@ -7089,7 +7168,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                    self._auto_rework_rounds),
                                 report="; ".join(
                                     str(c.get("detail") or "")
-                                    for c in mc.checks if not c.get("green")))
+                                    for c in gate_row_reds(mc.checks)))
                             impl_done = False
                             phase = self._auto_rework(
                                 str(_plan["stage"]), _note, who="workflow",
@@ -8736,7 +8815,8 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
         self.gate_runs.append({
             "stage": "merge_check", "label": "merge_check (programmatic checks)",
             "green": mc.green,
-            "red_count": len([c for c in mc.checks if not c.get("green")]),
+            # Same shared row rule as the dev-lane face (t261028-56).
+            "red_count": len(gate_row_reds(mc.checks)),
             "exit_code": 0, "checks": mc.checks,
             "conflict": mc.conflict, "conflict_files": mc.conflict_files})
         return mc
@@ -9230,7 +9310,7 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                     self._handoff("merge_check", "Merge check: all items green")
                     phase = "merge"
                     continue
-                reds = [c for c in mc.checks if not c.get("green")]
+                reds = gate_row_reds(mc.checks)
 
                 def _handling(c):
                     na = str(c.get("next_action") or "")
@@ -9239,7 +9319,7 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                     return na
 
                 red = "; ".join(
-                    "%s: %s%s" % (c.get("item"), c.get("detail"),
+                    "%s: %s%s" % (gate_row_name(c), c.get("detail"),
                                   (" | handling: %s" % _handling(c)) if _handling(c)
                                   else "")
                     for c in reds)
