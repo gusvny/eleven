@@ -95,8 +95,9 @@ from concurrency import CONCURRENCY_ACTIVITIES, configure_probe
 from dsh_pin import dsh_face_payload, enforce_expected
 from agent_activities import (inflight_stage_snapshot, owned_spawn_snapshot,
                               recent_stage_outcomes, reap_owned_spawns)
-from shared import (NAMESPACE, POC_DIR, REPO_ROOT, TARGET_HOST, TASK_QUEUE,
-                    configured_task_queues, pid_alive, read_pidfile_state)
+from shared import (CLOSED_WITNESS_STATUSES, NAMESPACE, POC_DIR, REPO_ROOT,
+                    TARGET_HOST, TASK_QUEUE, configured_task_queues, pid_alive,
+                    read_pidfile_state, write_closed_witness)
 from shared import write_worker_meta
 from workflows import ALL_WORKFLOWS
 from workflows_v2 import (ALL_WORKFLOWS_V2, PROJECT_TEMPLATE_PASSTHROUGH_MODULES,
@@ -606,6 +607,89 @@ def watch_interval_sec(raw: "str | None" = None) -> float:
     return max(val, WATCH_INTERVAL_MIN_SEC)
 
 
+#: t261028-35: the writer id this worker entry registers for the ORDINARY close.
+#: The id lives in shared.CLOSED_WITNESS_WRITERS (a closed set) — the witness writer
+#: refuses an identity it does not know, which is what tells a real post-close marker
+#: from a hand-made file.
+WITNESS_TICKET_WATCH = "engine:worker.ticket-watch"
+
+
+def _witness_close_time(desc) -> str:
+    """The workflow's own close time as ISO-8601, or "" when unreadable (the witness
+    then records the write time; a missing field is never a failure)."""
+    try:
+        ct = getattr(desc, "close_time", None)
+        if ct is not None and hasattr(ct, "isoformat"):
+            return ct.isoformat(timespec="seconds")
+    except Exception:  # noqa: BLE001 — a missing field is not a failure
+        pass
+    return ""
+
+
+async def observe_ordinary_close(handle, ticket: str) -> dict:
+    """Observe a settled ticket once and record the post-close witness (t261028-35).
+
+    WHY THIS ACTOR: the merge stage archives the ticket WHILE IT IS STILL OPEN, so the
+    ordinary (merge-lane) close cannot carry a terminal fact from that face. The
+    per-ticket worker's watch loop is the engine actor that SEES the execution leave
+    RUNNING; it therefore records the SAME witness the client close entries write,
+    through the SAME shared writer — one implementation, one schema, no second marker.
+
+    NEVER A GUESS: this makes its own describe (a fresh observation, never a status
+    remembered from an earlier tick). A failed or torn read writes nothing and names
+    it; a status outside shared.CLOSED_WITNESS_STATUSES (the terminal set minus
+    CONTINUED_AS_NEW, which is an unclosed watcher handover) writes nothing and names
+    it; an unreadable project key writes nothing and names it (the target ticket's key
+    is never inferred). The marker's path comes from the one shared resolver, so it
+    always lands inside the target ticket's data dir.
+
+    Never raises: the worker's exit is not the close's business, and a witness problem
+    must not cost the ticket its worker. Returns the receipt face."""
+    face = {"observed": "", "written": False, "skipped": False, "path": "",
+            "project": "", "terminal_status": "", "reason": ""}
+    try:
+        desc = await handle.describe()
+    except Exception as e:  # noqa: BLE001 — an unreadable terminal fact is a named skip
+        face["reason"] = ("ordinary_close_describe_failed:%s: %s (no witness written - "
+                          "a terminal status is never inferred)" % (type(e).__name__, e))
+        return face
+    status = desc.status.name if getattr(desc, "status", None) is not None else ""
+    face["observed"] = status
+    if status not in CLOSED_WITNESS_STATUSES:
+        face["reason"] = ("ordinary_close_status_not_eligible:%s (no witness written - "
+                          "only %s are closure; CONTINUED_AS_NEW is a watcher handover)"
+                          % (status or "unknown", ", ".join(CLOSED_WITNESS_STATUSES)))
+        return face
+    from client import _project_from_describe  # local: the close entries' own resolution
+    project = _project_from_describe(desc)
+    if not project:
+        face["reason"] = ("ordinary_close_project_unknown:%s (no witness written - the "
+                          "target ticket's project key is never guessed)" % ticket)
+        return face
+    face["project"] = project
+    res = write_closed_witness(
+        project, ticket, status, WITNESS_TICKET_WATCH, workflow_id=ticket,
+        observed_by="worker.ticket-watch describe after the workflow left RUNNING",
+        closed_at=_witness_close_time(desc))
+    for field in ("written", "skipped", "path", "terminal_status", "reason"):
+        face[field] = res.get(field, face[field])
+    return face
+
+
+def log_watch_witness(watch_wf: str, face: dict) -> None:
+    """Report what the close observation produced (t261028-35).
+
+    A witness that was NOT written must never look like one that was: the refusal
+    reason rides on the same line as the `written=False`."""
+    logging.info("watch: post-close witness ticket=%s written=%s skipped=%s observed=%s "
+                 "project=%s path=%s%s",
+                 watch_wf, face.get("written"), face.get("skipped"),
+                 face.get("observed") or "unknown",
+                 face.get("project") or "(unknown)",
+                 face.get("path") or "(none)",
+                 "" if not face.get("reason") else " - " + str(face["reason"]))
+
+
 def worker_meta_path(args: argparse.Namespace) -> str:
     """Where the ownership-fingerprint meta lands (KI-033).
 
@@ -1019,11 +1103,16 @@ async def run_worker(args: argparse.Namespace) -> None:
                 logging.info("watch：宿主 console 已退出（ppid=1 被收养），专属 worker 自退")
                 stop.set()
                 return
+            # t261028-35: the settled branch below also mints the ordinary-close
+            # witness (an ordinary merge-close is observed here and nowhere else).
             try:
                 desc = await client.get_workflow_handle(watch_wf).describe()
                 status = desc.status.name if desc.status is not None else ""
                 if status and status != "RUNNING":
                     logging.info("watch：workflow %s 已收口（%s），专属 worker 自退", watch_wf, status)
+                    _face = await observe_ordinary_close(
+                        client.get_workflow_handle(watch_wf), watch_wf)
+                    log_watch_witness(watch_wf, _face)
                     stop.set()
                     return
             except Exception as e:

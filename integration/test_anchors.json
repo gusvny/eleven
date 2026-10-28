@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 355,
+      "engine_tests": 356,
       "scenarios": 855
     },
     "vocab": [
@@ -1757,6 +1757,10 @@
     "server/engine/tests/test_t261028_28_post_close_witness.py": {
       "anchor": "behaviour",
       "note": "t261028-30 L1: the post-close terminal witness - a terminal close through the real client.cmd_ticket_close_out entry writes exactly one closed.json in the ticket data dir with schema/ticket_id/terminal_status/closed_at/workflow_id/engine_version/written_by, a torn post-terminate read or a failed one writes none and names why, the merge-stage archive activity (agent_activities.archive_ticket) never writes one, idempotence (second write a no-op, bytes unchanged, a foreign file never overwritten), the refusal faces (absent / malformed / unknown schema / unattributed writer or engine_version / non-terminal status / ticket mismatch) are no witness and named, all five terminal statuses citable, the other close entries (archive-terminal, cancel, archive-legacy, prune before delete + fail-closed keep) record the same marker, and the request sweep closes a blocker/request head on the marker (evidence cites the marker path and terminal_status) while a missing or hand-made marker keeps the head open in archive_no_terminal_witness with both refusals named."
+    },
+    "server/engine/tests/test_t261028_29_ordinary_close_witness.py": {
+      "anchor": "behaviour",
+      "note": "t261028-35 L1: the ORDINARY (merge-lane) close mints the post-close witness - the per-ticket worker's watch round is the only engine actor that OBSERVES a ticket settle on that path (the merge stage archives the ticket while it is still open, so that face can never carry a terminal fact). Pins: a settled ticket leaves exactly one closed.json in its own data dir carrying the OBSERVED terminal status, the target ticket's project key, the registered watch writer id (engine:worker.ticket-watch, in shared.CLOSED_WITNESS_WRITERS) and the engine version, minted through the SAME shared writer as the client close entries (one schema, no second marker); a RUNNING ticket writes nothing and a failed query neither stops the watcher nor writes; a torn post-settle describe writes nothing and names the failing check; CONTINUED_AS_NEW is never a closure (unclosed watcher handover) and an unreadable project key is never guessed - both named; the witness's closed_at is the workflow's own close time; all five eligible terminal statuses recorded verbatim; idempotence and attribution are the shared writer's unchanged (second observation a no-op with byte-identical bytes, a hand-made/foreign marker refused by name and never overwritten); the settle log keeps its consumed 「收口…自退」 line and adds a witness line that never dresses up a refusal; nothing written outside the ticket data dir and an existing archive manifest keeps its bytes; and the sweep-facing leg - a blocker head citing such a ticket closes on the marker citation (bucket archived_closed, via=archive, evidence naming marker path + terminal_status + writer) while the same head without the marker stays open with both refusals named. Fixture roots only (SANDBAR_PROJECTS_DIR / SANDBAR_PANEL_DIR, stub Temporal handles); zero production store, zero live ledger, zero real Temporal."
     }
   },
   "scenarios": {

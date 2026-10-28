@@ -7350,6 +7350,10 @@ CLOSED_WITNESS_WRITERS = frozenset((
     "engine:client.ticket-archive-terminal",
     "engine:client.ticket-archive-legacy",
     "engine:client.ticket-prune",
+    # t261028-35: the per-ticket worker's watch face - the only engine actor that
+    # OBSERVES a ticket settle on the ORDINARY (merge-lane) close. The client entries
+    # above are caller-driven close-outs; this one is the close nobody commands.
+    "engine:worker.ticket-watch",
 ))
 #: The terminal execution statuses a witness may record. This is the engine's own
 #: terminal set (client._TICKET_TERMINAL_STATUSES) minus CONTINUED_AS_NEW, which is an
