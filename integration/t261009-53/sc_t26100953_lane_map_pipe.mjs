@@ -7,8 +7,19 @@
 // 标签塞在盒子里的 flex 列。本条独占 t261009-53 的段几何面（mock laneMap()
 // notes/discussions/261004-concurrency-limit-mock.html，设计稿 §7.6 判据 1/4/5）：
 // P1 主道=一条基线上的细条（12px 级、同高、同一 y）而非满轨道高的盒子；
-// P2 标签浮在条上方两级交错、middle 锚、夹在画布内、不压条；
-// P3 同级相邻标签互不压字（两级交错是唯一的防重叠面——审查意见①）；
+// P2 标签浮在条上方、middle 锚、夹在画布内、不压条；
+// P3 caption readability contract (re-anchored by t261028-27): visible caption
+//    boxes never intersect, every box stays inside the canvas, the canvas height
+//    covers the rows used, and captions sharing a row keep the documented
+//    minimum gap. P3a used to assert "exactly two alternating levels" - the
+//    mechanism t261028-22 retired, because two rows cannot separate captions
+//    that sit close together. On this very fixture the ten-stage run needs
+//    three rows and no two-row split is overlap-free, so the two-level premise
+//    is gone and the contract it was protecting (readable captions) is checked
+//    directly on the real glyph boxes. P3b/P3c/P3d are unchanged; P3e runs the
+//    same checker on a rework map (longer, badge-carrying captions - the host's
+//    report case) and requires the ×N badge to survive; the checker calibrates
+//    itself in-run (synthetic overlap / canvas-escape samples must go red);
 // P4 人门菱形在段的左端（条头）不在盒子中心；
 // P5 并行伙伴=主道下方第二道、虚线窗包住两道、∥ 标记、伙伴名在那道之下；
 // P6 now 游标竖线纵贯两道；
@@ -165,15 +176,91 @@ rec('P2 segments are slim bars, not full-track blocks',
   lm.vbh > 0 && main[0] && main[0].h / lm.vbh <= 0.3,
   `barH/vbH=${main[0] ? (main[0].h / lm.vbh).toFixed(2) : 'n/a'}`)
 
-// P3 标签浮在条上方、两级交错、middle 锚、不压条。
+// P3 captions: the row set is still read from the label attributes (P3b/P3c/
+// P3d below are unchanged); the readability contract itself is checked on real
+// glyph boxes.
 const labels = lm.texts.filter((t) => t.y != null && t.y < mainY).sort((a, b) => a.x - b.x)
 const levels = [...new Set(labels.map((t) => t.y))]
-// 交错面：相邻（按 x 排序）标签不得长期同一级（mock 的两级交错）。
-let adjacentSameLevel = 0
-for (let i = 1; i < labels.length; i++) if (labels[i].y === labels[i - 1].y) adjacentSameLevel++
-rec('P3a labels float above the bars in two alternating levels',
-  labels.length >= 6 && levels.length === 2 && adjacentSameLevel <= Math.floor(labels.length / 3),
-  `labels=${labels.length} levels=${levels.join(',')} adjacentSame=${adjacentSameLevel}`)
+// P3 caption readability (t261028-27 re-anchor). See the file header: P3a no
+// longer asserts "two alternating levels" (the retired mechanism); it asserts
+// what that premise was protecting - captions a person can read. Geometry is
+// the REAL rendered glyph box (client rect folded back into viewBox units), so
+// the assertion binds the user-visible face, never the model's estimate.
+const CAPTION_ROW_MIN_GAP = 6 // = LM_LABEL.MIN_GAP (lane-map-model.ts), the documented same-row gap
+const CAPTION_TOL = 1 // scene units: sub-pixel / glyph-box rounding noise
+const BASE_CANVAS_H = 96 // LM_SCENE.H: the two-row canvas the scene grows from
+
+/** Caption boxes + the badges they carry, read from the rendered SVG. */
+const LABEL_BOXES = `(() => {
+  const lm = document.querySelector('[data-testid="detail-lane-map"]')
+  if (!lm) return { found: false }
+  const svg = lm.querySelector('svg')
+  if (!svg) return { found: true, svg: false }
+  const vb = (svg.getAttribute('viewBox') || '').split(/\\s+/).map(Number)
+  const sr = svg.getBoundingClientRect()
+  const scale = vb[2] > 0 && sr.width > 0 ? sr.width / vb[2] : 0
+  if (!scale) return { found: true, svg: true, scaled: false }
+  const boxes = [...svg.querySelectorAll('text.wb-lm-label')].map((el) => {
+    const r = el.getBoundingClientRect()
+    return {
+      s: (el.textContent || '').trim(),
+      x0: (r.left - sr.left) / scale, x1: (r.right - sr.left) / scale,
+      y0: (r.top - sr.top) / scale, y1: (r.bottom - sr.top) / scale,
+      row: Number(el.getAttribute('y')),
+      ellipsized: el.getAttribute('data-ellipsized') === 'true',
+      title: el.getAttribute('title') || '',
+    }
+  }).filter((b) => b.s !== '' && b.x1 > b.x0 && b.y1 > b.y0)
+  return { found: true, svg: true, scaled: true, vbw: vb[2], vbh: vb[3],
+    boxes, roundTspans: svg.querySelectorAll('tspan.wb-lm-round').length }
+})()`
+
+/** Violations of the caption contract (empty = readable). */
+function captionViolations({ boxes, vbw, vbh }) {
+  const out = []
+  for (const b of boxes) {
+    if (b.x0 < -CAPTION_TOL || b.x1 > vbw + CAPTION_TOL) out.push(`"${b.s}" leaves the canvas sideways ${b.x0.toFixed(1)}..${b.x1.toFixed(1)} of 0..${vbw}`)
+    if (b.y0 < -CAPTION_TOL || b.y1 > vbh + CAPTION_TOL) out.push(`"${b.s}" leaves the canvas vertically ${b.y0.toFixed(1)}..${b.y1.toFixed(1)} of 0..${vbh}`)
+  }
+  for (let i = 0; i < boxes.length; i += 1) {
+    for (let j = i + 1; j < boxes.length; j += 1) {
+      const a = boxes[i], b = boxes[j]
+      if (a.x0 < b.x1 - CAPTION_TOL / 2 && b.x0 < a.x1 - CAPTION_TOL / 2
+        && a.y0 < b.y1 - CAPTION_TOL / 2 && b.y0 < a.y1 - CAPTION_TOL / 2) {
+        out.push(`caption boxes intersect: "${a.s}" × "${b.s}"`)
+      }
+      if (a.row === b.row) {
+        const gap = b.x0 >= a.x0 ? b.x0 - a.x1 : a.x0 - b.x1
+        if (gap < CAPTION_ROW_MIN_GAP - CAPTION_TOL) out.push(`row ${a.row}: "${a.s}" / "${b.s}" keep only ${gap.toFixed(1)} (min ${CAPTION_ROW_MIN_GAP})`)
+      }
+    }
+  }
+  const rows = [...new Set(boxes.map((b) => b.row))]
+  if (rows.length > 2 && !(vbh > BASE_CANVAS_H)) out.push(`${rows.length} caption rows used but the canvas height ${vbh} did not grow (rows cost height, never overlap)`)
+  return out
+}
+
+const sampleBox = (s, x0, x1, row) => ({ s, x0, x1, y0: row, y1: row + 8, row })
+const teethOverlap = captionViolations({ boxes: [sampleBox('A', 10, 60, 26), sampleBox('B', 50, 100, 26)], vbw: 730, vbh: 96 })
+const teethEscape = captionViolations({ boxes: [sampleBox('A', 700, 760, 26)], vbw: 730, vbh: 96 })
+const teethClean = captionViolations({ boxes: [sampleBox('A', 10, 60, 26), sampleBox('B', 120, 170, 26)], vbw: 730, vbh: 96 })
+rec('P3a-teeth the caption checker bites an overlap and a canvas escape (and passes clean boxes)',
+  teethOverlap.some((v) => v.includes('intersect')) && teethEscape.some((v) => v.includes('leaves the canvas'))
+  && teethClean.length === 0,
+  `overlap=${teethOverlap.length} escape=${teethEscape.length} clean=${teethClean.length}`)
+
+const captionProbe = await page.evaluate(LABEL_BOXES)
+if (!captionProbe || !captionProbe.found || !captionProbe.scaled) {
+  record('P3a captions are collision-free, inside the canvas, rows covered, same-row gap kept', 'env_fail',
+    `lane-map caption probe unusable: ${JSON.stringify(captionProbe).slice(0, 160)}`)
+} else {
+  const captionBad = captionViolations(captionProbe)
+  const captionRows = [...new Set(captionProbe.boxes.map((b) => b.row))].sort((a, b) => a - b)
+  rec('P3a captions are collision-free, inside the canvas, rows covered, same-row gap kept',
+    captionProbe.boxes.length >= 6 && captionBad.length === 0,
+    `captions=${captionProbe.boxes.length} rows=[${captionRows.join(',')}] vbh=${captionProbe.vbh}`
+    + (captionBad.length ? ` -- ${captionBad.length} violation(s): ${captionBad.slice(0, 2).join(' | ')}` : ''))
+}
 rec('P3b labels are middle-anchored and never painted onto a bar',
   labels.every((t) => t.anchor === 'middle') && labels.every((t) => t.y < mainY - 1),
   `anchors=${[...new Set(labels.map((t) => t.anchor))].join('/')} maxY=${Math.max(...labels.map((t) => t.y))} baseline=${mainY}`)
@@ -276,6 +363,71 @@ rec('P9 chrome tripwire: header summary and axis clocks still render',
 rec('P10 zero pageerror and no undefined literal after the rewrite',
   pageErrors.length === 0 && !/undefined/i.test(lm.text),
   pageErrors.join(' | ').slice(0, 200))
+
+// P3e (t261028-27, the host's own report case): the SAME caption contract on a
+// rework map. Reworked steps carry a ×N badge and longer copy, which is exactly
+// "several steps that ran quickly" - the crowded map the two-level placement
+// used to smear. The same checker must stay clean here, the ×N badge must stay
+// visible (presence only: KI-400 records that a rework caption repeats its badge,
+// labelBit plus tspan.wb-lm-round, and this ticket does not fix caption copy),
+// and a shortened caption must keep its full text in the hover title.
+const REWORK_T0 = 1789353600000 // the fixture epoch family (lib_fix23 T0)
+function reworkTimeline() {
+  const iso = (mins) => new Date(REWORK_T0 + mins * 60e3).toISOString()
+  const row = (mins, stage, state, extra = {}) => ({ at: iso(mins), stage, state, ...extra })
+  const done = (mins, stage, extra = {}) => row(mins, stage, 'done', { reason: 'stage finished', ...extra })
+  return [
+    row(0, 'create_plan', 'running', { reason: 'plan written' }), done(1, 'create_plan'),
+    row(1, 'review_plan', 'running', { gen: 1, reason: 'review passed with conditions' }),
+    row(1.5, 'review_plan', 'rework', { gen: 1, reason: 'write set missed the test path' }),
+    row(1.5, 'review_plan', 'running', { gen: 2 }), done(2, 'review_plan', { gen: 2 }),
+    row(2, 'implement', 'running', { gen: 1, reason: 'implemented' }),
+    row(2.5, 'implement', 'rework', { gen: 1, reason: 'gate red: write set refused' }),
+    row(2.5, 'implement', 'running', { gen: 2 }), done(3, 'implement', { gen: 2 }),
+    row(3, 'design_integration_tests', 'running', { reason: 'tests designed' }), done(4, 'design_integration_tests'),
+    row(4, 'ui_evidence', 'running', { reason: 'captures attached' }), done(4.5, 'ui_evidence'),
+    row(4.5, 'run_integration_tests', 'running', { reason: 'suite green' }), done(6, 'run_integration_tests'),
+    row(6, 'arbitrate', 'running', { reason: 'arbitrated' }), done(7, 'arbitrate'),
+    row(6, 'acceptance_walkthrough', 'running', { reason: 'walked through' }), done(7.5, 'acceptance_walkthrough'),
+    row(7.5, 'merge_check', 'running', { reason: 'checks green' }), done(8, 'merge_check'),
+    row(8, 'merge', 'running', { reason: 'merged' }),
+  ]
+}
+const pageErrorsBeforeRework = pageErrors.length
+await routeDetail(page, fixtureTicketDetail(reworkTimeline()))
+await page.reload({ waitUntil: 'networkidle' })
+await dismissIntroModal(page)
+await page.waitForTimeout(800)
+const reworkOpen = await waitFor(async () => {
+  const row = await page.$(`[data-ticket-id="${TID}"]`)
+  if (!row) return false
+  await row.click()
+  await page.waitForTimeout(900)
+  return !!(await page.$('[data-testid="detail-lane-map"] svg'))
+}, 10000)
+const reworkProbe = reworkOpen ? await page.evaluate(LABEL_BOXES) : null
+if (!reworkOpen || !reworkProbe || !reworkProbe.scaled) {
+  record('P3e the rework map keeps readable captions and its ×N badge', 'env_fail',
+    `rework fixture never rendered: open=${reworkOpen} probe=${JSON.stringify(reworkProbe).slice(0, 120)}`)
+} else {
+  const reworkBad = captionViolations(reworkProbe)
+  const reworkRows = [...new Set(reworkProbe.boxes.map((b) => b.row))].sort((a, b) => a - b)
+  const badgeTexts = reworkProbe.boxes.filter((b) => /×\s*\d/.test(b.s)).map((b) => b.s)
+  rec('P3e a reworked step keeps its ×N badge on the crowded map',
+    badgeTexts.length > 0 && reworkProbe.roundTspans > 0,
+    `captions carrying ×N=${badgeTexts.length} round tspans=${reworkProbe.roundTspans} e.g. "${(badgeTexts[0] || '').slice(0, 60)}"`)
+  rec('P3e the crowded rework map keeps the same caption contract',
+    reworkProbe.boxes.length >= 6 && reworkBad.length === 0,
+    `captions=${reworkProbe.boxes.length} rows=[${reworkRows.join(',')}] vbh=${reworkProbe.vbh}`
+    + (reworkBad.length ? ` -- ${reworkBad.length} violation(s): ${reworkBad.slice(0, 2).join(' | ')}` : ''))
+  const shortened = reworkProbe.boxes.filter((b) => b.ellipsized)
+  rec('P3e a shortened caption keeps its full text in the hover title',
+    shortened.every((b) => b.title.length > b.s.length && b.title.startsWith(b.s.replace(/…$/u, ''))),
+    `shortened=${shortened.length}` + (shortened.length ? ` e.g. "${shortened[0].s}" -> "${shortened[0].title.slice(0, 60)}"` : ' (none needed on this map)'))
+  rec('P3e the rework journey adds no page error',
+    pageErrors.length === pageErrorsBeforeRework,
+    pageErrors.slice(pageErrorsBeforeRework).join(' | ').slice(0, 200))
+}
 
 // 明暗双主题捕获（KI-055 证据面；尽力而为，不判红）。
 const outDir = join(REPO, 'integration', 't261009-53', 'out')

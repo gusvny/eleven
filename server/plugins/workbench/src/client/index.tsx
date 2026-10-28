@@ -429,7 +429,7 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
  * elapsed/now summary), the pipe, the footer time axis.
  * t261009-53 (mock laneMap(t), criteria 1-8): the pipe itself is ONE SVG
  * scene (laneMapScene/LaneSceneSvg) - slim 12px bars on one baseline, labels
- * floating above in two clamped levels with dotted leaders, the human diamond
+ * floating above on clamped rows with dotted leaders, the human diamond
  * at the bar head, the partner bar on a second track inside a dashed window
  * that surrounds both tracks, the now cursor spanning both tracks. The old
  * block row (.wb-lm-track min-height + .wb-lm-item/.wb-lm-band full-background
@@ -461,9 +461,9 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 /* Now cursor (the mock's nowMark): one dashed vertical line spanning both
  * tracks, drawn by LaneSceneSvg as line.wb-lm-cursor. */
 .wb-lm-cursor{pointer-events:none}
-/* Labels float ABOVE the pipe in two alternating levels (baseline-4 /
- * baseline-13), middle-anchored on their bar, clamped by laneMapScene - the
- * mock's own sizes (8px names, 7.5px duration/partner line). */
+/* Labels float ABOVE the pipe on rows the MODEL places (t261028-22): these
+ * rules carry no positioning, only size - font-size must match LM_LABEL.
+ * FONT_MAIN / FONT_PARTNER in lane-map-model.ts (the collision estimate). */
 .wb-lm-label{font-size:8px;fill:var(--dsw-derive-muted,#57606a)}
 .wb-lm-label.wb-lm-label-now{fill:var(--dsw-derive-fg,#1f2328);font-weight:600}
 .wb-lm-plabel{font-size:7.5px}

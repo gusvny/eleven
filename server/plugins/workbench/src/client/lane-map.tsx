@@ -11,11 +11,13 @@
  *   - every main-track segment = a slim bar (rect h 12, rx 3) on ONE shared
  *     baseline; width = its time share (the v5 weight formula is untouched,
  *     t261008-23 does not regress); a segment is no longer a filled block;
- *   - labels float above the pipe in two alternating levels (baseline-4 /
- *     baseline-13), middle-anchored on their bar, clamped into the canvas,
- *     with a dotted leader down to the bar top; duration and rounds ride in
- *     the same caption (`38m · ×2`; criterion 7: rework is carried by ×n -
- *     the round chips are retired, their evidence folded into the hover title);
+ *   - labels float above the pipe on rows the MODEL picks (level 0 =
+ *     baseline-4, level 1 = baseline-13, further rows only when captions would
+ *     collide - t261028-22), middle-anchored on their bar, box-clamped into the
+ *     canvas, with a dotted leader down to the bar top; duration and rounds
+ *     ride in the same caption (`38m · ×2`; criterion 7: rework is carried by
+ *     ×n - the round chips are retired, their evidence folded into the hover
+ *     title);
  *   - the human gate diamond sits at the LEFT head of the bar (the mock's
  *     7px path), not inside a box;
  *   - the parallel partner bar sits on a second track below, at its own width,
@@ -33,8 +35,9 @@ import type { LaneMapModel, GateRunView, LaneScene } from './lane-map-model.ts'
 /** Scene -> SVG (the truth is laneMapScene; this only draws). Public anchor
  *  contract (DOM scenarios assert on these data-* keys, not on internals):
  *  g.wb-lm-node[data-id/kind/vis/skipped/now], g.wb-lm-band[data-band=partner],
- *  rect.wb-lm-parallel[data-group], text.wb-lm-label, tspan.wb-lm-opt /
- *  wb-lm-round / wb-lm-ever, path.wb-lm-diamond, line.wb-lm-cursor. */
+ *  rect.wb-lm-parallel[data-group], text.wb-lm-label[data-level/ellipsized],
+ *  tspan.wb-lm-opt / wb-lm-round / wb-lm-ever, path.wb-lm-diamond,
+ *  line.wb-lm-cursor. */
 export function LaneSceneSvg({ scene }: { scene: LaneScene }) {
   return (
     <svg
@@ -125,6 +128,14 @@ export function LaneSceneSvg({ scene }: { scene: LaneScene }) {
           x={l.x}
           y={l.y}
           textAnchor={l.anchor}
+          /* The row and the shortening are the MODEL's decisions (t261028-22:
+           * placeLmCaption). The component draws them as handed over - no CSS
+           * offset, no component-side collision opinion. */
+          data-level={l.level}
+          data-ellipsized={l.ellipsized ? 'true' : undefined}
+          /* A shortened caption keeps its FULL text here, so the hover still
+           * tells the whole story (data is never silently dropped). */
+          title={l.title}
         >
           {l.text}
           {l.opt ? <tspan className="wb-lm-opt">{` ${l.opt}`}</tspan> : null}

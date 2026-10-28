@@ -881,6 +881,40 @@ const LM_SCENE = {
 	CLAMP_MIN: 20,
 	CLAMP_MAX: 710
 };
+/** Partner caption baseline: below the partner track (its own row, never clamped
+*  into the main label band; extra partner rows step down from here). Exported
+*  so the placement battery can re-derive every caption row it asserts on. */
+const LM_PARTNER_LABEL_Y = LM_SCENE.BY + LM_SCENE.BH + 9;
+const LM_LABEL = {
+	/** Main caption font size in px. MUST equal `.wb-lm-label{font-size}` in
+	*  src/client/index.tsx - the CSS is the truth and this constant mirrors it. */
+	FONT_MAIN: 8,
+	/** Partner caption font size in px; mirrors `.wb-lm-plabel{font-size}`. */
+	FONT_PARTNER: 7.5,
+	/** Advance of one wide glyph (CJK / fullwidth / the ellipsis) in em: 1.00 em
+	*  = the font size, because those glyphs are one square. */
+	WIDE_EM: 1,
+	/** Advance of every other glyph in em: 0.58. A sans-serif mean at 8px sits
+	*  near 0.50 em; 0.58 is the conservative bound, and over-estimating only
+	*  buys an extra level - never an overlap. */
+	NARROW_EM: .58,
+	/** Caption box height above the baseline (cap height + ascender), in em. */
+	ASCENT_EM: .78,
+	/** Caption box depth below the baseline (descender), in em. */
+	DESCENT_EM: .26,
+	/** Vertical distance between two caption rows in px: 9 keeps adjacent rows'
+	*  boxes disjoint (a row is 8.32px tall at the 8px caption size). */
+	STEP: 9,
+	/** Highest level a caption may climb: levels 0..5 = six stacked rows. Six
+	*  rows absorb a fully packed map of ~4.5-caption-wide steps, so a crowded
+	*  map costs vertical space (the scene grows) instead of an unreadable
+	*  overlap; beyond that a caption is shortened, never dropped. */
+	MAX_LEVEL: 5,
+	/** Smallest horizontal gap kept between two captions on the same row, in px. */
+	MIN_GAP: 6,
+	/** Padding a caption row keeps from the canvas edge, in px. */
+	EDGE_PAD: 2
+};
 /** Segment fills by kind (criterion 2: agent green / gate blue / human amber). */
 const LM_KIND_FILL = {
 	agent: "var(--dsw-derive-success,#4ac26b)",
@@ -980,23 +1014,176 @@ function labelBit(nv) {
 	const durBit = nv.durSource === "nominal" ? "" : nv.durationText;
 	return durBit ? ` ${durBit}${nv.badge ? ` · ${nv.badge}` : ""}` : "";
 }
-/** Main label: name + `duration · ×N` in the same caption (criterion 4/7);
+/** Main caption: name + `duration · ×N` in the same caption (criterion 4/7);
 *  done/running stages print their duration, unstarted prints the name only,
-*  the current stage appends `now` (the mock's wording). */
-function mainLabelOf(nv, i, now) {
+*  the current stage appends `now` (the mock's wording). The caption copy is
+*  unchanged by t261028-22 - only its level and, when squeezed, its truncation
+*  are new. */
+function mainCaptionOf(nv, now) {
 	const ever = everOf(nv);
 	return {
 		text: `${stageDisplayLabel(nv.node.id, nv.node.label)}${now ? " now" : labelBit(nv)}`,
-		x: 0,
-		y: i % 2 === 0 ? LM_SCENE.LABEL_LO : LM_SCENE.LABEL_HI,
-		track: "main",
-		level: i % 2 === 0 ? 0 : 1,
-		anchor: "middle",
-		now,
 		opt: nv.node.optional || void 0,
 		roundBadge: nv.badge || void 0,
 		everTitle: ever ? everBlockedTitle(ever) : void 0
 	};
+}
+/** Partner caption: same parts vocabulary, its own `now` wording. */
+function partnerCaptionOf(nv) {
+	const ever = everOf(nv);
+	return {
+		text: `${stageDisplayLabel(nv.node.id, nv.node.label)}${nv.vis === "running" ? " now" : labelBit(nv)}`,
+		opt: nv.node.optional || void 0,
+		roundBadge: nv.badge || void 0,
+		everTitle: ever ? everBlockedTitle(ever) : void 0
+	};
+}
+/** Glyphs whose advance is a full em: CJK ideographs, Hangul, kana, fullwidth
+*  forms, and the typographic marks the captions actually use (`…`, `·`, `—`). */
+const LM_WIDE_GLYPH = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6\u2014\u2022\u2026\u00b7]/u;
+/** Caption width estimate in px at `fontPx`: one em per wide glyph, NARROW_EM
+*  per other glyph. Deterministic and conservative - the model has no DOM to
+*  measure with (the unit battery re-derives every box from this estimate). */
+function lmTextWidth(text, fontPx) {
+	let em = 0;
+	for (const ch of text) em += LM_WIDE_GLYPH.test(ch) ? LM_LABEL.WIDE_EM : LM_LABEL.NARROW_EM;
+	return em * fontPx;
+}
+/** The string a label really paints: its text plus the tspan suffixes the
+*  renderer appends (optional note, ×N badge, ever-blocked badge). */
+function lmCaptionText(l) {
+	let s = l.text;
+	if (l.opt) s += ` ${l.opt}`;
+	if (l.roundBadge) s += ` · ${l.roundBadge}`;
+	if (l.everTitle) s += " was blocked";
+	return s;
+}
+/** Caption font size per track (the CSS font sizes, mirrored). */
+function lmCaptionFont(track) {
+	return track === "main" ? LM_LABEL.FONT_MAIN : LM_LABEL.FONT_PARTNER;
+}
+/** Caption row baseline for a level: main rows climb above the bar, partner
+*  rows step down below the partner track. */
+function lmLevelY(track, level) {
+	return track === "main" ? LM_SCENE.LABEL_LO - level * LM_LABEL.STEP : LM_PARTNER_LABEL_Y + level * LM_LABEL.STEP;
+}
+/** Shorten `text` to at most `room` px, marking the cut with an ellipsis.
+*  Returns '' when not even the ellipsis fits (the caller then keeps the full
+*  caption in the hover title, so nothing is dropped). */
+function lmEllipsizeTo(text, room, fontPx) {
+	if (room <= 0) return "";
+	if (lmTextWidth(text, fontPx) <= room) return text;
+	const chars = Array.from(text);
+	for (let n = chars.length - 1; n > 0; n--) {
+		const candidate = `${chars.slice(0, n).join("").replace(/[\s·]+$/u, "")}…`;
+		if (lmTextWidth(candidate, fontPx) <= room) return candidate;
+	}
+	return lmTextWidth("…", fontPx) <= room ? "…" : "";
+}
+/** Fit a caption into `room` px: keep the badges (optional note / ×N / ever
+*  blocked) when at least one name glyph still fits beside them, else shorten
+*  the whole caption and let the badges ride in the hover title. */
+function lmShrinkCaption(parts, room, fontPx) {
+	const full = lmCaptionText(parts);
+	if (lmTextWidth(full, fontPx) <= room) return {
+		parts,
+		cut: false
+	};
+	const suffixW = lmTextWidth(full.slice(parts.text.length), fontPx);
+	if (suffixW > 0 && lmTextWidth("a…", fontPx) + suffixW <= room) {
+		const text = lmEllipsizeTo(parts.text, room - suffixW, fontPx);
+		if (text) return {
+			parts: {
+				...parts,
+				text
+			},
+			cut: text !== parts.text
+		};
+	}
+	return {
+		parts: { text: lmEllipsizeTo(full, room, fontPx) },
+		cut: true
+	};
+}
+/** Place one caption (t261028-22): the LOWEST level whose row has room for the
+*  whole estimated box, keeping the middle anchor on the bar and clamping the
+*  box into the canvas band; when no row has room, the roomiest row takes the
+*  shortened caption (full caption -> hover title). Every placed box is pushed
+*  into `boxes`, so the next caption sees it. */
+function placeLmCaption(req, boxes) {
+	const font = lmCaptionFont(req.track);
+	const full = lmCaptionText(req.parts);
+	const fullW = lmTextWidth(full, font);
+	const bandW = LM_SCENE.CLAMP_MAX - LM_SCENE.CLAMP_MIN;
+	/** Room this caption may use on `level`: the canvas band minus every placed
+	*  box on an overlapping row, minus MIN_GAP. */
+	const roomOf = (level) => {
+		const y = lmLevelY(req.track, level);
+		const row = {
+			x0: LM_SCENE.CLAMP_MIN,
+			x1: LM_SCENE.CLAMP_MAX,
+			y0: y - font * LM_LABEL.ASCENT_EM,
+			y1: y + font * LM_LABEL.DESCENT_EM
+		};
+		for (const b of boxes) {
+			if (!(b.y0 < row.y1 && row.y0 < b.y1)) continue;
+			if (b.x1 + LM_LABEL.MIN_GAP <= req.at) row.x0 = Math.max(row.x0, b.x1 + LM_LABEL.MIN_GAP);
+			else if (b.x0 - LM_LABEL.MIN_GAP >= req.at) row.x1 = Math.min(row.x1, b.x0 - LM_LABEL.MIN_GAP);
+			else return {
+				x0: req.at,
+				x1: req.at,
+				y0: row.y0,
+				y1: row.y1
+			};
+		}
+		return row;
+	};
+	const xOf = (row, w) => req.anchor === "middle" ? Math.max(row.x0 + w / 2, Math.min(req.at, row.x1 - w / 2)) : Math.max(row.x0, Math.min(req.at, row.x1 - w));
+	const commit = (level, parts, cut) => {
+		const y = lmLevelY(req.track, level);
+		const w = lmTextWidth(lmCaptionText(parts), font);
+		const row = roomOf(level);
+		const x = xOf(row, w);
+		if (w > 0) boxes.push({
+			x0: req.anchor === "middle" ? x - w / 2 : x,
+			x1: req.anchor === "middle" ? x + w / 2 : x + w,
+			y0: y - font * LM_LABEL.ASCENT_EM,
+			y1: y + font * LM_LABEL.DESCENT_EM
+		});
+		const out = {
+			text: parts.text,
+			x: r2(x),
+			y,
+			track: req.track,
+			level,
+			anchor: req.anchor,
+			now: req.now
+		};
+		if (parts.opt) out.opt = parts.opt;
+		if (parts.roundBadge) out.roundBadge = parts.roundBadge;
+		if (parts.everTitle) out.everTitle = parts.everTitle;
+		if (cut) {
+			out.ellipsized = true;
+			out.title = full;
+		}
+		return out;
+	};
+	if (fullW <= bandW) for (let level = 0; level <= LM_LABEL.MAX_LEVEL; level++) {
+		const row = roomOf(level);
+		if (row.x1 - row.x0 < fullW) continue;
+		return commit(level, req.parts, false);
+	}
+	let best = 0;
+	let bestRoom = roomOf(0);
+	for (let level = 1; level <= LM_LABEL.MAX_LEVEL; level++) {
+		const row = roomOf(level);
+		if (row.x1 - row.x0 > bestRoom.x1 - bestRoom.x0) {
+			best = level;
+			bestRoom = row;
+		}
+	}
+	const room = Math.min(bestRoom.x1 - bestRoom.x0, bandW);
+	return commit(best, lmShrinkCaption(req.parts, room, font).parts, true);
 }
 /** Partner band width (%): min(1, partner/window) x 100 (the mock line ~677 clamp). */
 function lmBandPct(partnerMs, windowMs) {
@@ -1021,13 +1208,18 @@ function lmWidths(model) {
 /**
 * Model -> SVG scene (a pure function; LaneMap only draws it). The geometry
 * copies the mock's laneMap(t) value for value: 12-tall slim bars on one
-* baseline, two floating label levels (middle anchor, clamped into
-* [20, W+RPAD-20]), dotted leaders, the diamond at the bar head, the partner
-* on a second track (one dashed window around both tracks + the parallel
-* mark), the now cursor spanning both tracks.
+* baseline, floating captions (middle anchor, clamped into
+* [20, W+RPAD-20] by their BOX), dotted leaders, the diamond at the bar head,
+* the partner on a second track (one dashed window around both tracks + the
+* parallel mark), the now cursor spanning both tracks.
+*
+* Caption rows (t261028-22): level 0 and level 1 are the mock's own two rows;
+* further rows exist only when two captions would otherwise collide, and the
+* scene height grows with the rows used. Placement is the pure estimate in
+* placeLmCaption - no DOM measurement anywhere.
 */
 function laneMapScene(model) {
-	const { W, PAD, RPAD, AY, AH, BY, BH, GAP, MINW, CLAMP_MIN, CLAMP_MAX } = LM_SCENE;
+	const { W, PAD, RPAD, AY, AH, BY, BH, GAP, MINW } = LM_SCENE;
 	const usable = W - PAD - RPAD;
 	const pctOf = new Map(lmWidths(model).map((w) => [w.id, w.pct]));
 	const bars = [];
@@ -1036,11 +1228,14 @@ function laneMapScene(model) {
 	const windows = [];
 	const parMarks = [];
 	const diamonds = [];
+	/** Caption boxes already claimed in this scene (t261028-22 collision truth). */
+	const boxes = [];
 	let cursor = null;
 	let x = PAD;
-	model.items.forEach((item, i) => {
+	model.items.forEach((item) => {
 		const w = Math.max(0, usable * (pctOf.get(item.id) ?? 0) / 100);
 		const now = model.nowItem === item.id;
+		const cx = r2(x + w / 2);
 		if (item.kind === "group") {
 			const g = model.groups[item.id];
 			windows.push({
@@ -1060,39 +1255,50 @@ function laneMapScene(model) {
 			const head = g.members[0];
 			const partner = g.members[1];
 			bars.push(barOf(head, x, AY, w, AH, "main", now));
-			labels.push(mainLabelOf(head, i, now));
-			const pw = Math.max(MINW, w * lmBandPct(partner.weightMs, g.windowMs) / 100);
-			bars.push(barOf(partner, x, BY, pw, BH, "partner", partner.vis === "running"));
-			const pever = everOf(partner);
-			labels.push({
-				text: `${stageDisplayLabel(partner.node.id, partner.node.label)}${partner.vis === "running" ? " now" : labelBit(partner)}`,
-				x: r2(x + 6),
-				y: BY + BH + 9,
-				track: "partner",
-				level: 0,
-				anchor: "start",
-				now: partner.vis === "running",
-				opt: partner.node.optional || void 0,
-				roundBadge: partner.badge || void 0,
-				everTitle: pever ? everBlockedTitle(pever) : void 0
+			const headLabel = placeLmCaption({
+				parts: mainCaptionOf(head, now),
+				track: "main",
+				anchor: "middle",
+				at: cx,
+				now
+			}, boxes);
+			labels.push(headLabel);
+			leaders.push({
+				x: cx,
+				y1: r2(headLabel.y + 2.5),
+				y2: AY - 1
 			});
+			const pw = Math.max(MINW, w * lmBandPct(partner.weightMs, g.windowMs) / 100);
+			const partnerNow = partner.vis === "running";
+			bars.push(barOf(partner, x, BY, pw, BH, "partner", partnerNow));
+			labels.push(placeLmCaption({
+				parts: partnerCaptionOf(partner),
+				track: "partner",
+				anchor: "start",
+				at: r2(x + 6),
+				now: partnerNow
+			}, boxes));
 		} else {
 			const nv = model.nodes[item.id];
 			bars.push(barOf(nv, x, AY, w, AH, "main", now));
-			labels.push(mainLabelOf(nv, i, now));
+			const label = placeLmCaption({
+				parts: mainCaptionOf(nv, now),
+				track: "main",
+				anchor: "middle",
+				at: cx,
+				now
+			}, boxes);
+			labels.push(label);
+			leaders.push({
+				x: cx,
+				y1: r2(label.y + 2.5),
+				y2: AY - 1
+			});
 			if (nv.node.kind === "human") diamonds.push({
 				x: r2(x + 5),
 				y: AY + AH / 2
 			});
 		}
-		const cx = r2(x + w / 2);
-		const headLabel = item.kind === "group" ? labels[labels.length - 2] : labels[labels.length - 1];
-		headLabel.x = Math.max(CLAMP_MIN, Math.min(cx, CLAMP_MAX));
-		leaders.push({
-			x: cx,
-			y1: headLabel.y + 2.5,
-			y2: AY - 1
-		});
 		if (now) cursor = {
 			x: r2(x + w),
 			y1: AY - 8,
@@ -1100,9 +1306,29 @@ function laneMapScene(model) {
 		};
 		x += w + GAP;
 	});
+	const mainLevel = labels.reduce((m, l) => l.track === "main" ? Math.max(m, l.level) : m, 0);
+	const partnerLevel = labels.reduce((m, l) => l.track === "partner" ? Math.max(m, l.level) : m, 0);
+	const dy = Math.max(0, mainLevel - 1) * LM_LABEL.STEP;
+	const bottomNeed = LM_PARTNER_LABEL_Y + partnerLevel * LM_LABEL.STEP + LM_LABEL.FONT_PARTNER * LM_LABEL.DESCENT_EM;
+	const height = Math.max(LM_SCENE.H + dy, Math.ceil(bottomNeed + dy + LM_LABEL.EDGE_PAD));
+	if (dy !== 0) {
+		for (const l of labels) l.y = r2(l.y + dy);
+		for (const b of bars) b.y = r2(b.y + dy);
+		for (const l of leaders) {
+			l.y1 = r2(l.y1 + dy);
+			l.y2 = r2(l.y2 + dy);
+		}
+		for (const wn of windows) wn.y = r2(wn.y + dy);
+		for (const p of parMarks) p.y = r2(p.y + dy);
+		for (const d of diamonds) d.y = r2(d.y + dy);
+		if (cursor) {
+			cursor.y1 = r2(cursor.y1 + dy);
+			cursor.y2 = r2(cursor.y2 + dy);
+		}
+	}
 	return {
 		width: W + RPAD,
-		height: LM_SCENE.H,
+		height,
 		bars,
 		labels,
 		leaders,
@@ -1483,11 +1709,13 @@ function buildLaneMap(topologyRaw, detailRaw, opts) {
 *   - every main-track segment = a slim bar (rect h 12, rx 3) on ONE shared
 *     baseline; width = its time share (the v5 weight formula is untouched,
 *     t261008-23 does not regress); a segment is no longer a filled block;
-*   - labels float above the pipe in two alternating levels (baseline-4 /
-*     baseline-13), middle-anchored on their bar, clamped into the canvas,
-*     with a dotted leader down to the bar top; duration and rounds ride in
-*     the same caption (`38m · ×2`; criterion 7: rework is carried by ×n -
-*     the round chips are retired, their evidence folded into the hover title);
+*   - labels float above the pipe on rows the MODEL picks (level 0 =
+*     baseline-4, level 1 = baseline-13, further rows only when captions would
+*     collide - t261028-22), middle-anchored on their bar, box-clamped into the
+*     canvas, with a dotted leader down to the bar top; duration and rounds
+*     ride in the same caption (`38m · ×2`; criterion 7: rework is carried by
+*     ×n - the round chips are retired, their evidence folded into the hover
+*     title);
 *   - the human gate diamond sits at the LEFT head of the bar (the mock's
 *     7px path), not inside a box;
 *   - the parallel partner bar sits on a second track below, at its own width,
@@ -1502,8 +1730,9 @@ function buildLaneMap(topologyRaw, detailRaw, opts) {
 /** Scene -> SVG (the truth is laneMapScene; this only draws). Public anchor
 *  contract (DOM scenarios assert on these data-* keys, not on internals):
 *  g.wb-lm-node[data-id/kind/vis/skipped/now], g.wb-lm-band[data-band=partner],
-*  rect.wb-lm-parallel[data-group], text.wb-lm-label, tspan.wb-lm-opt /
-*  wb-lm-round / wb-lm-ever, path.wb-lm-diamond, line.wb-lm-cursor. */
+*  rect.wb-lm-parallel[data-group], text.wb-lm-label[data-level/ellipsized],
+*  tspan.wb-lm-opt / wb-lm-round / wb-lm-ever, path.wb-lm-diamond,
+*  line.wb-lm-cursor. */
 function LaneSceneSvg({ scene }) {
 	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
 		className: "wb-lm-svg",
@@ -1582,6 +1811,9 @@ function LaneSceneSvg({ scene }) {
 				x: l.x,
 				y: l.y,
 				textAnchor: l.anchor,
+				"data-level": l.level,
+				"data-ellipsized": l.ellipsized ? "true" : void 0,
+				title: l.title,
 				children: [
 					l.text,
 					l.opt ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tspan", {
@@ -14702,7 +14934,7 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
  * elapsed/now summary), the pipe, the footer time axis.
  * t261009-53 (mock laneMap(t), criteria 1-8): the pipe itself is ONE SVG
  * scene (laneMapScene/LaneSceneSvg) - slim 12px bars on one baseline, labels
- * floating above in two clamped levels with dotted leaders, the human diamond
+ * floating above on clamped rows with dotted leaders, the human diamond
  * at the bar head, the partner bar on a second track inside a dashed window
  * that surrounds both tracks, the now cursor spanning both tracks. The old
  * block row (.wb-lm-track min-height + .wb-lm-item/.wb-lm-band full-background
@@ -14734,9 +14966,9 @@ close-health chip left the board card; dead at HEAD too (pre-existing). */
 /* Now cursor (the mock's nowMark): one dashed vertical line spanning both
  * tracks, drawn by LaneSceneSvg as line.wb-lm-cursor. */
 .wb-lm-cursor{pointer-events:none}
-/* Labels float ABOVE the pipe in two alternating levels (baseline-4 /
- * baseline-13), middle-anchored on their bar, clamped by laneMapScene - the
- * mock's own sizes (8px names, 7.5px duration/partner line). */
+/* Labels float ABOVE the pipe on rows the MODEL places (t261028-22): these
+ * rules carry no positioning, only size - font-size must match LM_LABEL.
+ * FONT_MAIN / FONT_PARTNER in lane-map-model.ts (the collision estimate). */
 .wb-lm-label{font-size:8px;fill:var(--dsw-derive-muted,#57606a)}
 .wb-lm-label.wb-lm-label-now{fill:var(--dsw-derive-fg,#1f2328);font-weight:600}
 .wb-lm-plabel{font-size:7.5px}

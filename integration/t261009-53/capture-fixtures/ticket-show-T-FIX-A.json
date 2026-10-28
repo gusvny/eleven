@@ -1,0 +1,680 @@
+{
+ "id": "T-FIX-A",
+ "title": "【fixture 注入票】合并人审门（awaiting-human，供审批抽屉截图）",
+ "workflow_id": "dev-lane",
+ "epic": "",
+ "stage": "merge",
+ "stage_state": "awaiting-human",
+ "status": "running",
+ "role": "integration",
+ "lane": "dev",
+ "worktree": ".worktrees/t-fixture-a",
+ "workspace": {
+  "type": "worktree",
+  "path": "/tmp/suyou-fixture/lane-t-fixture-a"
+ },
+ "branch": "lane/t-fixture-a",
+ "base_ref": "main",
+ "proposal_id": "",
+ "revision_count": 1,
+ "acceptance": [
+  "审批抽屉可见（fixture 验收口径）"
+ ],
+ "checks": {
+  "merge_check": [
+   {
+    "item": "verify_lane 四件套（写集/SHOTDEBUG/tsc/smoke）",
+    "done": true,
+    "by": "merge_check"
+   }
+  ]
+ },
+ "handoffs": [
+  {
+   "stage": "acceptance_walkthrough",
+   "agent_id": "fixture",
+   "summary": "验收走查完成（fixture 注入台造的交接摘要）",
+   "ts": 1700000000
+  }
+ ],
+ "pending": [
+  {
+   "ts": 1700000000,
+   "note": "merge_check 全绿，请人审签字（fixture 注入台造的审批理由）"
+  }
+ ],
+ "log": [
+  {
+   "ts": 1700000000,
+   "status": "ok",
+   "note": "fixture 注入台造的日志行"
+  }
+ ],
+ "body": "# 工单（fixture 注入票 T-FIX-A）\n\n本票由 ui-check 状态注入台预置，仅用于截图证据，不存在于任何真实 Temporal。",
+ "write_set": [
+  "server/plugins/workbench/src/client/lane-map-model.ts"
+ ],
+ "deliverables": "- fixture 审批态截图证据",
+ "created": 1700000000,
+ "updated": 1700000000,
+ "gate_runs": [
+  {
+   "stage": "merge_check",
+   "label": "合并检查",
+   "green": true,
+   "checks": [
+    {
+     "item": "四件套",
+     "green": true,
+     "detail": "fixture 造绿"
+    }
+   ]
+  }
+ ],
+ "timeline": [
+  {
+   "at": "2026-09-14T02:40:00Z",
+   "stage": "create_plan",
+   "state": "running",
+   "reason": "entered",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:40:20Z",
+   "stage": "create_plan",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:40:20Z",
+   "stage": "create_plan",
+   "state": "running",
+   "reason": "entered",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:40:40Z",
+   "stage": "create_plan",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:40:40Z",
+   "stage": "create_plan",
+   "state": "running",
+   "reason": "entered",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:41:00Z",
+   "stage": "create_plan",
+   "state": "done",
+   "reason": "stage finished",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:41:00Z",
+   "stage": "review_plan",
+   "state": "running",
+   "reason": "entered",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:41:20Z",
+   "stage": "review_plan",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:41:20Z",
+   "stage": "review_plan",
+   "state": "running",
+   "reason": "entered",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:41:40Z",
+   "stage": "review_plan",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:41:40Z",
+   "stage": "review_plan",
+   "state": "running",
+   "reason": "entered",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:42:00Z",
+   "stage": "review_plan",
+   "state": "done",
+   "reason": "stage finished",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:42:00Z",
+   "stage": "implement",
+   "state": "running",
+   "reason": "entered",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:42:20Z",
+   "stage": "implement",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:42:20Z",
+   "stage": "implement",
+   "state": "running",
+   "reason": "entered",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:42:40Z",
+   "stage": "implement",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:42:40Z",
+   "stage": "implement",
+   "state": "running",
+   "reason": "entered",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:43:00Z",
+   "stage": "implement",
+   "state": "done",
+   "reason": "stage finished",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:43:00Z",
+   "stage": "design_integration_tests",
+   "state": "running",
+   "reason": "entered",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:43:20Z",
+   "stage": "design_integration_tests",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:43:20Z",
+   "stage": "design_integration_tests",
+   "state": "running",
+   "reason": "entered",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:43:40Z",
+   "stage": "design_integration_tests",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:43:40Z",
+   "stage": "design_integration_tests",
+   "state": "running",
+   "reason": "entered",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:44:00Z",
+   "stage": "design_integration_tests",
+   "state": "done",
+   "reason": "stage finished",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:44:00Z",
+   "stage": "ui_evidence",
+   "state": "running",
+   "reason": "entered",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:44:20Z",
+   "stage": "ui_evidence",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:44:20Z",
+   "stage": "ui_evidence",
+   "state": "running",
+   "reason": "entered",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:44:40Z",
+   "stage": "ui_evidence",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:44:40Z",
+   "stage": "ui_evidence",
+   "state": "running",
+   "reason": "entered",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:45:00Z",
+   "stage": "ui_evidence",
+   "state": "done",
+   "reason": "stage finished",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:45:00Z",
+   "stage": "run_integration_tests",
+   "state": "running",
+   "reason": "entered",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:45:20Z",
+   "stage": "run_integration_tests",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:45:20Z",
+   "stage": "run_integration_tests",
+   "state": "running",
+   "reason": "entered",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:45:40Z",
+   "stage": "run_integration_tests",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:45:40Z",
+   "stage": "run_integration_tests",
+   "state": "running",
+   "reason": "entered",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:46:00Z",
+   "stage": "run_integration_tests",
+   "state": "done",
+   "reason": "stage finished",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:46:00Z",
+   "stage": "arbitrate",
+   "state": "running",
+   "reason": "entered",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:46:20Z",
+   "stage": "arbitrate",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:46:20Z",
+   "stage": "arbitrate",
+   "state": "running",
+   "reason": "entered",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:46:40Z",
+   "stage": "arbitrate",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:46:40Z",
+   "stage": "arbitrate",
+   "state": "running",
+   "reason": "entered",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:47:00Z",
+   "stage": "arbitrate",
+   "state": "done",
+   "reason": "stage finished",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:47:00Z",
+   "stage": "acceptance_walkthrough",
+   "state": "running",
+   "reason": "entered",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:47:20Z",
+   "stage": "acceptance_walkthrough",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:47:20Z",
+   "stage": "acceptance_walkthrough",
+   "state": "running",
+   "reason": "entered",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:47:40Z",
+   "stage": "acceptance_walkthrough",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:47:40Z",
+   "stage": "acceptance_walkthrough",
+   "state": "running",
+   "reason": "entered",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:48:00Z",
+   "stage": "acceptance_walkthrough",
+   "state": "done",
+   "reason": "stage finished",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:48:00Z",
+   "stage": "merge_check",
+   "state": "running",
+   "reason": "entered",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:48:20Z",
+   "stage": "merge_check",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 1
+  },
+  {
+   "at": "2026-09-14T02:48:20Z",
+   "stage": "merge_check",
+   "state": "running",
+   "reason": "entered",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:48:40Z",
+   "stage": "merge_check",
+   "state": "rework",
+   "reason": "sent back",
+   "gen": 2
+  },
+  {
+   "at": "2026-09-14T02:48:40Z",
+   "stage": "merge_check",
+   "state": "running",
+   "reason": "entered",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:49:00Z",
+   "stage": "merge_check",
+   "state": "done",
+   "reason": "stage finished",
+   "gen": 3
+  },
+  {
+   "at": "2026-09-14T02:49:00Z",
+   "stage": "merge",
+   "state": "running",
+   "reason": "merged"
+  }
+ ],
+ "results": {},
+ "signatures": {},
+ "pulse": null,
+ "_fixture": true,
+ "workflow": "dev-lane",
+ "meta": {
+  "parallel_stages": []
+ },
+ "topology": {
+  "version": "topology-v1",
+  "template": "dev-lane",
+  "name": "crowded fixture (16 quick stages, 3 rounds each)",
+  "nodes": [
+   {
+    "id": "create_plan",
+    "label": "create_plan",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "review_plan",
+    "label": "review_plan",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "implement",
+    "label": "implement",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "design_integration_tests",
+    "label": "design_integration_tests",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "ui_evidence",
+    "label": "ui_evidence",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "run_integration_tests",
+    "label": "run_integration_tests",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "arbitrate",
+    "label": "arbitrate",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "acceptance_walkthrough",
+    "label": "acceptance_walkthrough",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "merge_check",
+    "label": "merge_check",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "merge",
+    "label": "merge",
+    "role": "developer",
+    "kind": "human",
+    "parts": []
+   },
+   {
+    "id": "setup",
+    "label": "setup",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "suite",
+    "label": "suite",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "inspect",
+    "label": "inspect",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "produce",
+    "label": "produce",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "selfcheck",
+    "label": "selfcheck",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   },
+   {
+    "id": "report",
+    "label": "report",
+    "role": "developer",
+    "kind": "agent",
+    "parts": [
+     "agent"
+    ]
+   }
+  ],
+  "edges": [
+   [
+    "create_plan",
+    "review_plan"
+   ],
+   [
+    "review_plan",
+    "implement"
+   ],
+   [
+    "implement",
+    "design_integration_tests"
+   ],
+   [
+    "design_integration_tests",
+    "ui_evidence"
+   ],
+   [
+    "ui_evidence",
+    "run_integration_tests"
+   ],
+   [
+    "run_integration_tests",
+    "arbitrate"
+   ],
+   [
+    "arbitrate",
+    "acceptance_walkthrough"
+   ],
+   [
+    "acceptance_walkthrough",
+    "merge_check"
+   ],
+   [
+    "merge_check",
+    "merge"
+   ],
+   [
+    "merge",
+    "setup"
+   ],
+   [
+    "setup",
+    "suite"
+   ],
+   [
+    "suite",
+    "inspect"
+   ],
+   [
+    "inspect",
+    "produce"
+   ],
+   [
+    "produce",
+    "selfcheck"
+   ],
+   [
+    "selfcheck",
+    "report"
+   ]
+  ],
+  "groups": []
+ }
+}

@@ -1,0 +1,738 @@
+{
+ "_fixture": true,
+ "ok": true,
+ "result": [
+  {
+   "id": "dev-lane",
+   "name": "开发泳道（fixture）",
+   "lane": "dev",
+   "stages": [
+    {
+     "id": "create_plan",
+     "role": "developer",
+     "name": "create_plan",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "review_plan",
+     "role": "developer",
+     "name": "review_plan",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "implement",
+     "role": "developer",
+     "name": "implement",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "design_integration_tests",
+     "role": "developer",
+     "name": "design_integration_tests",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "ui_evidence",
+     "role": "developer",
+     "name": "ui_evidence",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "run_integration_tests",
+     "role": "developer",
+     "name": "run_integration_tests",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "arbitrate",
+     "role": "developer",
+     "name": "arbitrate",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "acceptance_walkthrough",
+     "role": "developer",
+     "name": "acceptance_walkthrough",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "merge_check",
+     "role": "developer",
+     "name": "merge_check",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "merge",
+     "role": "developer",
+     "name": "merge",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "setup",
+     "role": "developer",
+     "name": "setup",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "suite",
+     "role": "developer",
+     "name": "suite",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "inspect",
+     "role": "developer",
+     "name": "inspect",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "produce",
+     "role": "developer",
+     "name": "produce",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "selfcheck",
+     "role": "developer",
+     "name": "selfcheck",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "report",
+     "role": "developer",
+     "name": "report",
+     "parts": [
+      "agent"
+     ]
+    }
+   ],
+   "order": [
+    "create_plan",
+    "review_plan",
+    "implement",
+    "ui_evidence",
+    "design_integration_tests",
+    "run_integration_tests",
+    "arbitrate",
+    "acceptance_walkthrough",
+    "merge_check",
+    "merge"
+   ],
+   "topology": {
+    "version": "topology-v1",
+    "template": "dev-lane",
+    "name": "crowded fixture (16 quick stages, 3 rounds each)",
+    "nodes": [
+     {
+      "id": "create_plan",
+      "label": "create_plan",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "review_plan",
+      "label": "review_plan",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "implement",
+      "label": "implement",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "design_integration_tests",
+      "label": "design_integration_tests",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "ui_evidence",
+      "label": "ui_evidence",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "run_integration_tests",
+      "label": "run_integration_tests",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "arbitrate",
+      "label": "arbitrate",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "acceptance_walkthrough",
+      "label": "acceptance_walkthrough",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "merge_check",
+      "label": "merge_check",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "merge",
+      "label": "merge",
+      "role": "developer",
+      "kind": "human",
+      "parts": []
+     },
+     {
+      "id": "setup",
+      "label": "setup",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "suite",
+      "label": "suite",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "inspect",
+      "label": "inspect",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "produce",
+      "label": "produce",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "selfcheck",
+      "label": "selfcheck",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "report",
+      "label": "report",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     }
+    ],
+    "edges": [
+     [
+      "create_plan",
+      "review_plan"
+     ],
+     [
+      "review_plan",
+      "implement"
+     ],
+     [
+      "implement",
+      "design_integration_tests"
+     ],
+     [
+      "design_integration_tests",
+      "ui_evidence"
+     ],
+     [
+      "ui_evidence",
+      "run_integration_tests"
+     ],
+     [
+      "run_integration_tests",
+      "arbitrate"
+     ],
+     [
+      "arbitrate",
+      "acceptance_walkthrough"
+     ],
+     [
+      "acceptance_walkthrough",
+      "merge_check"
+     ],
+     [
+      "merge_check",
+      "merge"
+     ],
+     [
+      "merge",
+      "setup"
+     ],
+     [
+      "setup",
+      "suite"
+     ],
+     [
+      "suite",
+      "inspect"
+     ],
+     [
+      "inspect",
+      "produce"
+     ],
+     [
+      "produce",
+      "selfcheck"
+     ],
+     [
+      "selfcheck",
+      "report"
+     ]
+    ],
+    "groups": []
+   }
+  }
+ ],
+ "order": [
+  "create_plan",
+  "review_plan",
+  "implement",
+  "ui_evidence",
+  "design_integration_tests",
+  "run_integration_tests",
+  "arbitrate",
+  "acceptance_walkthrough",
+  "merge_check",
+  "merge"
+ ],
+ "workflows": [
+  {
+   "id": "dev-lane",
+   "name": "开发泳道（fixture）",
+   "lane": "dev",
+   "stages": [
+    {
+     "id": "create_plan",
+     "role": "developer",
+     "name": "create_plan",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "review_plan",
+     "role": "developer",
+     "name": "review_plan",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "implement",
+     "role": "developer",
+     "name": "implement",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "design_integration_tests",
+     "role": "developer",
+     "name": "design_integration_tests",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "ui_evidence",
+     "role": "developer",
+     "name": "ui_evidence",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "run_integration_tests",
+     "role": "developer",
+     "name": "run_integration_tests",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "arbitrate",
+     "role": "developer",
+     "name": "arbitrate",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "acceptance_walkthrough",
+     "role": "developer",
+     "name": "acceptance_walkthrough",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "merge_check",
+     "role": "developer",
+     "name": "merge_check",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "merge",
+     "role": "developer",
+     "name": "merge",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "setup",
+     "role": "developer",
+     "name": "setup",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "suite",
+     "role": "developer",
+     "name": "suite",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "inspect",
+     "role": "developer",
+     "name": "inspect",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "produce",
+     "role": "developer",
+     "name": "produce",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "selfcheck",
+     "role": "developer",
+     "name": "selfcheck",
+     "parts": [
+      "agent"
+     ]
+    },
+    {
+     "id": "report",
+     "role": "developer",
+     "name": "report",
+     "parts": [
+      "agent"
+     ]
+    }
+   ],
+   "order": [
+    "create_plan",
+    "review_plan",
+    "implement",
+    "ui_evidence",
+    "design_integration_tests",
+    "run_integration_tests",
+    "arbitrate",
+    "acceptance_walkthrough",
+    "merge_check",
+    "merge"
+   ],
+   "topology": {
+    "version": "topology-v1",
+    "template": "dev-lane",
+    "name": "crowded fixture (16 quick stages, 3 rounds each)",
+    "nodes": [
+     {
+      "id": "create_plan",
+      "label": "create_plan",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "review_plan",
+      "label": "review_plan",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "implement",
+      "label": "implement",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "design_integration_tests",
+      "label": "design_integration_tests",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "ui_evidence",
+      "label": "ui_evidence",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "run_integration_tests",
+      "label": "run_integration_tests",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "arbitrate",
+      "label": "arbitrate",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "acceptance_walkthrough",
+      "label": "acceptance_walkthrough",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "merge_check",
+      "label": "merge_check",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "merge",
+      "label": "merge",
+      "role": "developer",
+      "kind": "human",
+      "parts": []
+     },
+     {
+      "id": "setup",
+      "label": "setup",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "suite",
+      "label": "suite",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "inspect",
+      "label": "inspect",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "produce",
+      "label": "produce",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "selfcheck",
+      "label": "selfcheck",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     },
+     {
+      "id": "report",
+      "label": "report",
+      "role": "developer",
+      "kind": "agent",
+      "parts": [
+       "agent"
+      ]
+     }
+    ],
+    "edges": [
+     [
+      "create_plan",
+      "review_plan"
+     ],
+     [
+      "review_plan",
+      "implement"
+     ],
+     [
+      "implement",
+      "design_integration_tests"
+     ],
+     [
+      "design_integration_tests",
+      "ui_evidence"
+     ],
+     [
+      "ui_evidence",
+      "run_integration_tests"
+     ],
+     [
+      "run_integration_tests",
+      "arbitrate"
+     ],
+     [
+      "arbitrate",
+      "acceptance_walkthrough"
+     ],
+     [
+      "acceptance_walkthrough",
+      "merge_check"
+     ],
+     [
+      "merge_check",
+      "merge"
+     ],
+     [
+      "merge",
+      "setup"
+     ],
+     [
+      "setup",
+      "suite"
+     ],
+     [
+      "suite",
+      "inspect"
+     ],
+     [
+      "inspect",
+      "produce"
+     ],
+     [
+      "produce",
+      "selfcheck"
+     ],
+     [
+      "selfcheck",
+      "report"
+     ]
+    ],
+    "groups": []
+   }
+  }
+ ]
+}
