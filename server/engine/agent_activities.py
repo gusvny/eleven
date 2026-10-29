@@ -5156,6 +5156,32 @@ def _merge_base_ref(branch: str, repo: Path, other: str = "main") -> Tuple[str, 
     return ref, ""
 
 
+def _tip_ref(ref: str, repo: Path) -> Tuple[str, str]:
+    """The TIP commit of the other side of the write-set diff. Returns (sha, err).
+
+    Ticket t261029-64. The write-set whitelist must answer "did this ticket write
+    this file?". The merge-base pair cannot always answer it: a line whose tip is a
+    merge of main, coupled with a lane that absorbed an older line tip, makes
+    `git merge-base --all <line> <lane>` report TWO candidates; the one the plain
+    command prints can be the same commit as merge-base(main, lane), so the two
+    baselines coincide and the intersection has no basis. The content question
+    ("is this file identical to what the lane will land onto?") needs the other
+    side's tip itself, so merge_check resolves it here and passes the sha down.
+
+    Non-empty sha = success. Empty = resolution failed and err is the detail text
+    for a fail-closed red item: the caller judges nothing under a basis it cannot
+    establish, and never falls back to a guessed ref."""
+    ref = str(ref or "").strip()
+    if not ref:
+        return "", "empty ref (no other side named)"
+    p = _git(["rev-parse", "--verify", ref + "^{commit}"], repo)
+    if p.returncode != 0 or not (p.stdout or "").strip():
+        return "", "rev-parse --verify %s^{commit} failed rc=%s: %s" % (
+            ref, p.returncode, ((p.stderr or p.stdout or "").strip())[-200:])
+    lines = [ln.strip() for ln in p.stdout.strip().splitlines() if ln.strip()]
+    return lines[0], ""
+
+
 def _ui_diff_paths(lane_repo: Path, wl_base: str, branch: str,
                    prefixes: Any = None) -> Tuple[List[str], str]:
     """The diff-side shared predicate for UI-ticket detection (KI-044 root fix,
@@ -5687,6 +5713,25 @@ def _red_item_names_from_receipt(res: Any) -> List[str]:
                 if n not in names:
                     names.append(n)
     return names
+
+
+def _write_set_note_from_receipt(res: Any) -> str:
+    """verify_lane receipt -> the write-set whitelist's own note (ticket t261029-64).
+
+    The whitelist names every file a skip rule attributed to the other side (the
+    intersection, the content rule against the other side's tip) and names a
+    degenerate basis. That receipt is the record the whitelist keeps; this helper
+    lifts it onto the merge_check row so the merge receipt shows which rule decided
+    a skip instead of only the red names. The machine key is verify_lane's
+    WS_CHECK_ID ('write_set_whitelist', both sides are separate processes and there
+    is no import edge between them). Malformed receipts yield '' — no invented
+    note, and the row keeps its old shape."""
+    if not isinstance(res, dict):
+        return ""
+    for chk in (res.get("checks") or []):
+        if isinstance(chk, dict) and chk.get("id") == "write_set_whitelist":
+            return str(chk.get("note") or "")
+    return ""
 
 
 def _load_sensitive_roster(tree: Path):
@@ -6965,6 +7010,19 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
         wl_base2, wl_err2 = ((wl_base, wl_err) if _other == "main" else
                              _merge_base_ref(sc["branch"], sc["repo"], other="main"))
         _bad_side = _other if not wl_base else ("main" if not wl_base2 else "")
+        # t261029-64 (line inheritance): resolve the other side's TIP as well and
+        # pass it down. "This ticket's own write" must be answered by "did this
+        # ticket write this file?", and the merge-base pair cannot always answer
+        # it: when the line tip is a merge of main and the lane absorbed an older
+        # line tip, `git merge-base --all <line> <lane>` has TWO candidates, the
+        # plain command may print the same commit merge-base(main, lane) gives,
+        # the two baselines coincide, and the intersection has no basis — measured
+        # on t261029-38, where three files byte-identical to the line tip were
+        # reported as out-of-write-set writes. verify_lane compares content
+        # against this tip and never judges a file that is identical to it. A tip
+        # that cannot be resolved is fail-closed like a failed merge-base: the
+        # gate judges nothing and says which check failed.
+        _tip_sha, _tip_err = ("", "") if _bad_side else _tip_ref(_other, sc["repo"])
         if _bad_side:
             # Fail-closed: a red item is merge_check's normal channel, the activity
             # doesn't raise. verify_lane doesn't run this round (tsc/smoke are
@@ -6978,6 +7036,18 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                            "detail": (wl_err if _bad_side == _other else wl_err2),
                            "id": "verify_lane_code", "reason_code": "merge_base_failed",
                            "next_action": "泳道内 merge-base 失败（git 环境类）——排查泳道仓后发 retry_qc"})
+        elif not _tip_sha:
+            # t261029-64: the same fail-closed stance one step later. The content
+            # rule needs the other side's tip; without it the whitelist could only
+            # degrade to a caliber this ticket exists to retire, so it refuses and
+            # names the check that failed (a merge-base that resolves while the tip
+            # does not is unusual — never silently ignored).
+            checks.append({"item": "write-set whitelist baseline (tip %s x %s)" % (_other, sc["branch"]),
+                           "green": False,
+                           "detail": _tip_err or ("no tip resolved for %s" % _other),
+                           "id": "verify_lane_code", "reason_code": "other_tip_unresolved",
+                           "next_action": "the other side's tip did not resolve (branch deleted "
+                                          "or repo unreadable) — restore that ref, then retry_qc"})
         else:
             if wl_err or wl_err2:  # multi-line malformed output: keep the first line, leave a searchable trace
                 activity.logger.info("[%s] %s", args.ticket_id,
@@ -7018,6 +7088,11 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                             # (legacy / main fallback) = the old caliber, byte for
                             # byte unchanged.
                             "base_other": wl_base2,
+                            # t261029-64: the other side's TIP (a sha, resolved in the
+                            # lane repo above). verify_lane never judges a file whose
+                            # content is identical to it — the rule that holds when
+                            # the two merge-bases coincide.
+                            "base_other_tip": _tip_sha,
                             "write_set": list(eff_ws),
                             # t261004-25: pass the ticket id down — verify_lane's
                             # write-set whitelist then admits ticket-test-face files
@@ -7042,6 +7117,7 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             register_owned_spawn(vp, tag="verify-lane-code")
             _v_wait_t0 = time.monotonic()
             _red_names: List[str] = []  # t261009-15 (1): exception paths default to no names (no exemption)
+            _ws_note = ""               # t261029-64: same stance — an unread receipt names no rule
             _gate_expiry: Optional[Dict[str, Any]] = None
             try:
                 vo_b, ve_b = await asyncio.wait_for(vp.communicate(), timeout=_gate_wait_sec)
@@ -7066,6 +7142,11 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 # field (machine-readable identity) — existing text keys stay
                 # byte-identical, pure addition; unparseable = no field (never invented).
                 _red_names = _red_item_names_from_receipt(res)
+                # t261029-64: the whitelist's own note (which rule skipped which
+                # files, and a degenerate basis when the two sides coincide) travels
+                # onto the green row, so a clean-looking merge receipt still says how
+                # the skip was decided. No note = no key (old row shape).
+                _ws_note = _write_set_note_from_receipt(res)
             except asyncio.CancelledError:
                 # t261006-08: reap then re-raise — cancellation semantics are never
                 # swallowed (the outer `except Exception` cannot catch the
@@ -7101,7 +7182,10 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                            # t261009-38: a whitelist green that admitted a declared
                            # rebuilt output carries the named rule note on the
                            # receipt (never silent); nothing widened = no key.
-                           **({"note": bundle_note} if bundle_note and green else {}),
+                           # t261029-64 composes the whitelist's own note in (the
+                           # skip rule and any degenerate basis); empty = no key.
+                           **({"note": "; ".join(n for n in (bundle_note, _ws_note) if n)}
+                              if green and (bundle_note or _ws_note) else {}),
                            **({} if green else {
                                "reason_code": "verify_red",
                                # 文件级归因在 verify_lane 回执 detail 文本里（保持文本，
@@ -12089,6 +12173,20 @@ async def changed_files(args: shared.ChangedFilesArgs) -> shared.ChangedFilesRes
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
     _t0 = time.monotonic()   # t260925-12：活动自报墙钟
+    # t261029-64 (KI-414 / t261029-42 contract): ask the lane-root resolver to place
+    # the tree BEFORE any git query runs on it. Its two honest answers are unchanged
+    # (the convention's owning repo, or the named tree when it is itself a repo
+    # root); the named refusal replaces what used to happen to a path it cannot
+    # place — a FileNotFoundError escaping an activity whose contract is "return a
+    # receipt" (measured: worktree="/w" raised before this fix). Fail-closed and
+    # named: files=[], and the error carries the resolver's own wording (the path
+    # and both checks), so the caller's "always run everything" arm fires on a
+    # reason it can read.
+    try:
+        _lane_repo_root(wt)
+    except LaneRootRefusal as e:
+        return shared.ChangedFilesResult(files=[], error=str(e),
+                                         wall_s=time.monotonic() - _t0)
     if not args.branch:
         return shared.ChangedFilesResult(
             files=[], error="branch 缺失，改动清单不可得，fail-closed 恒全跑",

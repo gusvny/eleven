@@ -46,6 +46,23 @@ lane=code（代码道，泳道）——**全配置驱动（t260901-08，契约�
       (the second diff is empty while the judged diff is not, so no file can be
       attributed to this ticket). A per-file skip under a usable basis is a named
       green note, never silence.
+      t261029-64 (line inheritance): the intersection answers "differs from both
+      merge-bases", which is NOT the question the whitelist asks. When the two
+      baselines resolve to the SAME merge-base (a line whose tip is a merge of
+      main, and a lane that absorbed an older line tip: `git merge-base --all`
+      reports two candidates, plain `git merge-base` picks one), the intersection
+      has no basis and the old caliber charged the line's own work to the ticket
+      (measured on t261029-38: three files byte-identical to the line tip red as
+      out-of-write-set). So the caller may pass `base_other_tip`, the other side's
+      TIP ref, and the whitelist then decides the skip by CONTENT: a file whose
+      content at HEAD is byte-identical to that tip is not this ticket's write and
+      is never judged (named on the record with the tip it was compared against).
+      `git diff --no-renames <tip> HEAD` is the single query behind that answer.
+      A degenerate basis (both baselines equal) is NAMED on the record; it is
+      never a silent degradation. Fail-closed stays: a tip that does not resolve,
+      or a failed tip diff, judges nothing and reds by name
+      (`other_tip_unresolved` / `other_tip_diff_failed`). Absent `base_other_tip`
+      = the pre-t261029-64 caliber, byte for byte.
       判据优先级=调用方 write_set
      （工单精判，空列表=零写集，任何改动即红）> verify.yaml write_allow（粗判据）；
      协调目录（.sandbar/ 老 .suyou/）与 .dsh/ 引擎运行时目录一律不判（与 merge_check SETTLE_PATHSPEC 同口径）。  # naming-compat
@@ -116,6 +133,15 @@ TOOL = {
                                           '(reason_code=baseline_diff_failed); a second diff yielding no file while the judged '
                                           'diff is not empty is fail-closed red too (reason_code=baseline_diff_empty, t261022-08). '
                                           'Neither judges anything.'},
+            'base_other_tip': {'type': 'string',
+                               'description': 'code lane (t261029-64): the other side\'s TIP ref (branch name or sha) — the '
+                                              'content the lane will land onto. A file whose content at HEAD is byte-identical to '
+                                              'it was not written by this ticket and is never judged (the skip is named with the '
+                                              'tip). This is the rule that holds when the two baselines coincide (a line tip that '
+                                              'is a merge of main plus a lane that absorbed an older line tip). A degenerate basis '
+                                              '(base == base_other) is always named on the record. Fail-closed: an unresolvable tip '
+                                              'or a failed tip diff is a NAMED red and judges nothing (other_tip_unresolved / '
+                                              'other_tip_diff_failed). Absent/empty = the pre-t261029-64 caliber, byte for byte.'},
             'write_set': {'type': 'array', 'items': {'type': 'string'},
                           'description': 'code 道：当前工单声明写集（文件或目录前缀）；提供时优先于 verify.yaml write_allow，空列表=零写集。integ 道：票面写集——宿主 260914 口径下**不再**参与排除例外分支判定，仅用于旧口径命中面留痕（回执 pool_exclude.former_force_assets）'},
             'apply_skip_pools': {'type': 'boolean',
@@ -538,6 +564,13 @@ def _code(a):
         # base_other absent or equal to base = the old caliber, byte for byte
         # (legacy tickets, and the main fallback when the line is unresolvable).
         base_other = str(a.get('base_other') or '').strip()
+        # t261029-64: the other side's TIP. The rule: a file whose content at HEAD
+        # is byte-identical to this ref was not written by this ticket, so it is
+        # never judged as an out-of-write-set write. This is the only sound answer
+        # when the two merge-bases coincide (it is arithmetic about where the sides
+        # diverged, not about who wrote the file). One query answers it:
+        # `git diff --no-renames <tip> HEAD` lists every path whose content moved.
+        other_tip = str(a.get('base_other_tip') or '').strip()
         keep = None            # None = the old one-sided caliber (no second baseline)
         basis_err = ''         # named reason why the intersection basis is unusable
         if base_other and base_other != base:
@@ -562,6 +595,9 @@ def _code(a):
                        '--name-status', base + '...HEAD'], root, crop=None)
         entries = []           # [(status, path)] of the judged diff
         side_skipped = []      # files the intersection attributed to the other side
+        tip_skipped = []       # files byte-identical to the other side's tip
+        tip_sha = ''           # the tip the content rule compared against (receipts)
+        differs_from_tip = None  # set of paths whose content moved between tip and HEAD
         if rc != 0:
             items.append({'detail': 'git diff 失败: %s' % out[-200:]})
         else:
@@ -573,6 +609,31 @@ def _code(a):
                 f = ln.split('	')[-1].strip()
                 if f:
                     entries.append((st, f))
+        # t261029-64: resolve the other side's tip before any file is judged, and
+        # fail closed if it cannot be resolved or diffed — a skip rule that cannot
+        # run is not a licence to judge (or skip) anyway.
+        if other_tip and not basis_err:
+            rc_t, out_t = _sh(['git', 'rev-parse', '--verify', other_tip + '^{commit}'],
+                              root, crop=None)
+            tip_sha = (out_t.splitlines() or [''])[0].strip() if rc_t == 0 else ''
+            if rc_t != 0 or not tip_sha:
+                basis_err = 'other_tip_unresolved'
+                items.append({'detail': '写集白名单无法判定（对侧 tip %s 无法解析，'
+                                        '内容判据跑不了）: %s — fail-closed，本次不判任何文件'
+                                        % (other_tip, (out_t or '').strip()[-200:]),
+                              'reason_code': 'other_tip_unresolved'})
+            else:
+                rc_td, out_td = _sh(['git', '-c', 'core.quotepath=false', 'diff',
+                                     '--name-only', '--no-renames', tip_sha, 'HEAD'],
+                                    root, crop=None)
+                if rc_td != 0:
+                    basis_err = 'other_tip_diff_failed'
+                    items.append({'detail': '写集白名单无法判定（内容判据 diff %s HEAD 失败）: %s — '
+                                            'fail-closed，本次不判任何文件'
+                                            % (tip_sha[:12], out_td[-200:]),
+                                  'reason_code': 'other_tip_diff_failed'})
+                else:
+                    differs_from_tip = {ln.strip() for ln in out_td.splitlines() if ln.strip()}
         # t261022-08 (fail-open fix, measured on the t260915-05 repair): an EMPTY
         # intersection is not a filter, it is the absence of a basis. `keep` empty
         # while the judged diff carries files means every file is "the other side's
@@ -606,6 +667,16 @@ def _code(a):
                     # answer, so the filter sits before it.
                     side_skipped.append(f)
                     continue
+                if differs_from_tip is not None and f not in differs_from_tip:
+                    # t261029-64: content at HEAD is byte-identical to the other
+                    # side's tip, so landing this lane changes nothing here — the
+                    # ticket did not write it. This is the rule that decides the
+                    # skip, and it is NAMED below (a silent skip is as bad as the
+                    # false red it replaces). Sits with the intersection skip and
+                    # before the notes/ and runtime gates: a line-only file under
+                    # notes/ is not this ticket's notes/ write either.
+                    tip_skipped.append(f)
+                    continue
                 # 宿主令 260904 机械闸：dev-lane 工单禁写 notes/（票据/知识库账本归
                 # main 侧直管）。独立于写集判定——声明了 notes/ 也拦（防自授权）；
                 # D 同拦（删账=丢账：notes 是账本，不是运行时残留，不适用清退放行）。
@@ -637,6 +708,24 @@ def _code(a):
         if side_skipped:
             notes.append('t261022-08: %d file(s) read as the other baseline\'s own work and not judged: %s'
                          % (len(side_skipped), ', '.join(side_skipped[:6])))
+        if tip_skipped:
+            notes.append('t261029-64: %d file(s) byte-identical to the other side\'s tip %s '
+                         '(no resulting change, not this ticket\'s write) and not judged: %s%s'
+                         % (len(tip_skipped), tip_sha[:12], ', '.join(tip_skipped[:6]),
+                            '' if len(tip_skipped) <= 6
+                            else ' (+%d more, all named by count)' % (len(tip_skipped) - 6)))
+        if base_other and base_other == base:
+            # t261029-64: a degenerate basis is a FACT on the record, never a
+            # silent degradation. What decided the skips is named too, so a
+            # reader knows which rule produced this green.
+            _decided = ('skips were decided by content comparison against the '
+                        "other side's tip %s" % tip_sha[:12]
+                        if differs_from_tip is not None else
+                        'no other-side tip was passed, so the one-sided caliber judged '
+                        'every file in %s...HEAD' % base[:12])
+            notes.append('t261029-64: degenerate basis — both baselines resolved to the same '
+                         'merge-base %s, so the intersection filter had no basis and was not '
+                         'applied; %s' % (base[:12], _decided))
         if not items and rc == 0 and not entries:
             # Nothing to judge at all (an out-of-set write on this branch would also
             # land outside the diff): visible, never a silent empty green.
