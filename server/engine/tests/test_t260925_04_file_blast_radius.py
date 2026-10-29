@@ -80,6 +80,24 @@ def test_file_radius_localized_and_fail_closed():
     assert changed_files_blast_radius(["app/a.ts", "tickets/t1/"]) == "shared"
 
 
+def test_file_radius_member_prefix_tail_rail():
+    """t261029-18 (review C5): a multi-repo lane prefixes a member-tree path with the
+    repo directory. A member tree can carry a shared face itself (the gate resolves
+    verify.yaml over candidate trees, t261019-45), so the tail after ONE segment is
+    tested too. Over-matching = a full run (safe); under-matching = a narrowed round."""
+    for fs in (["fpv-parts/verify.yaml"],
+               ["fpv-midnight/integration/run_scenarios.py"],
+               ["fpv-parts/integration/lib_env.py"],
+               ["fpv-parts/server/engine/dev_lane.py"],
+               ["fpv-parts/app/a.ts", "fpv-parts/verify.yaml"]):
+        assert changed_files_blast_radius(fs) == "shared", fs
+    # control: a member path that hits no shared face stays narrowable
+    for fs in (["fpv-parts/parts/cad/x.json"],
+               ["fpv-parts/sc_app_build_info_consistency.py"],
+               ["fpv-parts", "fpv-midnight/tools/cad/check.py"]):
+        assert changed_files_blast_radius(fs) == "localized", fs
+
+
 # ---------------- 2. targeted_rerun_plan 新旧签名兼容 ----------------
 
 def test_plan_old_signature_verbatim():
@@ -137,6 +155,11 @@ def test_changed_files_union_dedup(tmp_path):
     wt = _placeable_worktree(tmp_path)
 
     def fake_git(args, cwd, timeout=60):
+        if args[0] == "rev-parse":
+            # t261029-18: the name resolver asks whether the branch exists first
+            assert args[1] == "--verify" and args[2] == "--quiet", args
+            assert args[3] == "lane-1^{commit}", args
+            return _rc("deadbeef\n")
         if args[0] == "merge-base":
             return _rc("abc123\n")
         if args[0] == "diff":
@@ -155,6 +178,8 @@ def test_changed_files_union_dedup(tmp_path):
         aa._git = orig
     assert isinstance(r, ChangedFilesResult) and r.error == ""
     assert r.files == ["app/a.ts", "notes/x.md", "integration/t260925-04/"]
+    # t261029-18: the resolved branch rides the receipt (one entry per scope)
+    assert r.resolved == ["root:lane-1"]
 
 
 def test_changed_files_refuses_an_unplaceable_worktree(tmp_path):
@@ -183,7 +208,15 @@ def test_changed_files_fail_closed_paths(tmp_path):
     orig_git = aa._git
     orig_mb = aa._merge_base_ref
     try:
+        # t261029-18: the name resolver runs before the baseline. Nothing resolves →
+        # fail-closed, and the error still names the merge-base it blocks plus the
+        # candidates it tried.
+        aa._git = lambda args, cwd, timeout=60: _rc(
+            returncode=1, stderr="fatal: Needed a single revision")
+        r = asyncio.run(aa.changed_files(ChangedFilesArgs(ticket_id="t", worktree=wt, branch="b")))
+        assert r.files == [] and "merge-base" in r.error and "tried" in r.error, r.error
         # merge-base 失败（空 ref，禁回退字面 main）
+        aa._git = lambda args, cwd, timeout=60: _rc("deadbeef\n")   # the name resolves
         aa._merge_base_ref = lambda branch, repo: ("", "解析失败 rc=128")
         r = asyncio.run(aa.changed_files(ChangedFilesArgs(ticket_id="t", worktree=wt, branch="b")))
         assert r.files == [] and "merge-base" in r.error
@@ -191,13 +224,17 @@ def test_changed_files_fail_closed_paths(tmp_path):
         # 畸形留痕由该函数 UT 守（t260901-18 家族），此处只钉非空 ref 可继续
         # diff 失败
         aa._merge_base_ref = lambda branch, repo: ("abc", "")
-        aa._git = lambda args, cwd, timeout=60: (
-            _rc(returncode=128, stderr="fatal: bad revision") if args[0] == "diff"
-            else _rc())
+        def diff_fail(args, cwd, timeout=60):
+            if args[0] == "rev-parse":
+                return _rc("deadbeef\n")
+            return _rc(returncode=128, stderr="fatal: bad revision")
+        aa._git = diff_fail
         r = asyncio.run(aa.changed_files(ChangedFilesArgs(ticket_id="t", worktree=wt, branch="b")))
         assert r.files == [] and "git diff" in r.error
         # status 失败
         def st_fail(args, cwd, timeout=60):
+            if args[0] == "rev-parse":
+                return _rc("deadbeef\n")
             if args[0] == "diff":
                 return _rc("app/a.ts\n")
             return _rc(returncode=1, stderr="fatal")
@@ -218,9 +255,11 @@ def test_changed_files_fail_closed_paths(tmp_path):
 
 
 def test_changed_files_malformed_porcelain(tmp_path):
-    wt = _placeable_worktree(tmp_path)
     # 畸形 porcelain 条目丢弃不猜（-z 家族解析器语义）；dir/ 折叠形态安全透传
+    wt = _placeable_worktree(tmp_path)
     def fake_git(args, cwd, timeout=60):
+        if args[0] == "rev-parse":
+            return _rc("deadbeef\n")
         if args[0] == "merge-base":
             return _rc("abc\n")
         if args[0] == "diff":

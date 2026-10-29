@@ -134,7 +134,7 @@ from shared import (
     build_repo_worktrees,
     is_multi_repo_layout,
     resolve_repos_for_paths,
-    roles_dir_for_spawn,
+    role_preset_for_spawn,
     routes_file_for_spawn,
 )
 
@@ -3817,6 +3817,151 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     return note
 
 
+#: Role preset spawn artifacts (ticket t261028-54), named with the spawn tag like
+#: model_patch_<tag>.yml / dsh_pin_<tag>.json. The copy carries the engine library
+#: preset into the lane; the record is the trace of the decision.
+ROLE_PATCH_NAME = "role_patch_%s.yml"
+ROLE_PRESET_TRACE_NAME = "role_preset_%s.json"
+
+
+def _role_text_for_log(role: str) -> str:
+    """Role text for a log line: JSON-escaped and truncated.
+
+    The role name arrives from a project-external workflow template, so it is
+    untrusted input and a log line is a sink: a raw newline or control character could
+    forge a second line (review C5). Escaping keeps one line per event."""
+    try:
+        text = json.dumps(role, ensure_ascii=False)
+    except (TypeError, ValueError):
+        text = repr(role)
+    if len(text) > 82:
+        text = text[:79] + "..."
+    return text
+
+
+def _role_candidate_text(decision: Dict[str, Any]) -> str:
+    """One readable line naming every preset candidate (leg, path, kind)."""
+    parts = []
+    for cand in decision.get("candidates") or []:
+        parts.append("%s=%s (%s)" % (cand.get("leg"), cand.get("file"), cand.get("kind")))
+    return "; ".join(parts) or "-"
+
+
+def _role_preset_patch_arg(decision: Dict[str, Any], artifacts_dir: Path,
+                           tag: str) -> Optional[str]:
+    """Turn a role decision into the --patch argument, or None.
+
+    The project leg passes the resolved file through unchanged (pre-ticket byte
+    identity). The engine leg is copied into the lane first: a --patch path into the
+    engine tree is a host path and the docker runtime cannot see it (the failure
+    recorded for the headless-resume runner above). The copy is written to <name>.part
+    and os.replace-d, so a half-written file never becomes an argument. Any failure
+    means no patch argument and a named trace line - never a host path."""
+    source = decision.get("source_file")
+    state = decision.get("state")
+    if state == "project" and source:
+        return str(source)
+    if state != "engine" or not source:
+        return None
+    dst = Path(artifacts_dir) / (ROLE_PATCH_NAME % tag)
+    part = dst.with_name(dst.name + ".part")
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        part.write_bytes(Path(source).read_bytes())
+        os.replace(str(part), str(dst))
+        decision["materialized"] = True
+        return str(dst)
+    except OSError as e:
+        decision["error"] = "materialize failed: %s" % str(e)[:200]
+        try:
+            part.unlink()
+        except OSError:
+            pass
+        return None
+
+
+def _record_role_preset(decision: Dict[str, Any], patch_arg: Optional[str],
+                        artifacts_dir: Path, tag: str, ticket_id: str) -> None:
+    """Leave the role-preset trace: one [role_preset] line plus one JSON record
+    (ticket t261028-54).
+
+    Best effort, in the dsh_pin_<tag>.json stance (carried: written into the lane's
+    .sandbar, tagged by the spawn tag, never blocking the spawn; upgraded: a failure is
+    a named warning; hardened: every field is pre-serialized so a non-JSON value cannot
+    raise during the write). `patch_arg_added` says only that the argument was added -
+    whether dsh applies the file is dsh's business (KI-102).
+
+    Level by state: info for project / builtin / no_role / undeclared_missing (the
+    pre-ticket silence for undeclared projects is preserved); warning for engine /
+    declared_missing / invalid_role / a failed engine copy."""
+    payload: Dict[str, Any] = {}
+    for k, v in decision.items():
+        payload[str(k)] = v if (v is None or isinstance(v, (str, int, float, bool,
+                                                           list, dict))) else str(v)
+    payload["patch"] = patch_arg
+    payload["patch_arg_added"] = bool(patch_arg)
+    payload["materialized"] = bool(decision.get("materialized"))
+    payload["ticket_id"] = str(ticket_id)
+    payload["tag"] = str(tag)
+    payload["ts"] = _dt_code.datetime.now(_dt_code.timezone.utc).isoformat(
+        timespec="seconds")
+    trace_file = Path(artifacts_dir) / (ROLE_PRESET_TRACE_NAME % tag)
+    try:
+        trace_file.parent.mkdir(parents=True, exist_ok=True)
+        trace_file.write_text(json.dumps(payload, ensure_ascii=False, indent=1) + "\n",
+                              "utf-8")
+    except (OSError, TypeError, ValueError) as e:
+        activity.logger.warning(
+            "[role_preset] trace write failed (%s): %s - spawn continues without the "
+            "record", trace_file, str(e)[:200])
+
+    state = str(decision.get("state") or "")
+    role_log = _role_text_for_log(str(decision.get("role") or ""))
+    cands = _role_candidate_text(decision)
+    if state == "project":
+        activity.logger.info("[role_preset] role=%s state=project preset=%s",
+                             role_log, patch_arg or "-")
+    elif state == "builtin":
+        activity.logger.info(
+            "[role_preset] role=%s state=builtin: the engine builds this persona at "
+            "spawn time (no preset file needed)", role_log)
+    elif state == "no_role":
+        activity.logger.info("[role_preset] no role requested: nothing resolved")
+    elif state == "undeclared_missing":
+        activity.logger.info(
+            "[role_preset] role=%s state=undeclared_missing: the project declares no "
+            "roles_dir, so the engine library is not consulted (project leg only, "
+            "unchanged) and the agent runs on the profile default persona (%s)",
+            role_log, cands)
+    elif state == "engine" and patch_arg:
+        activity.logger.warning(
+            "[role_preset] role=%s state=engine: no project preset, using the engine "
+            "library file %s (copied to %s); the engine library may carry another "
+            "project's wording (%s)", role_log, decision.get("source_file"),
+            patch_arg, cands)
+    elif state == "engine":
+        activity.logger.warning(
+            "[role_preset] role=%s state=engine: could not copy the engine library "
+            "file into the lane (%s), so no role patch was added and the agent runs "
+            "on the profile default persona (%s)",
+            role_log, str(decision.get("error") or "unknown"), cands)
+    elif state == "declared_missing":
+        activity.logger.warning(
+            "[role_preset] role=%s state=declared_missing: the project declares "
+            "roles_dir, but no preset was found (%s%s); the agent runs on the profile "
+            "default persona", role_log, cands,
+            (", %s" % decision.get("error")) if decision.get("error") else "")
+    elif state == "invalid_role":
+        activity.logger.warning(
+            "[role_preset] role=%s state=invalid_role: not a legal preset file stem, "
+            "so no file was read (%s); the agent runs on the profile default persona",
+            role_log, str(decision.get("error") or ""))
+    else:
+        activity.logger.warning(
+            "[role_preset] role=%s state=%s: unexpected decision, no role patch added",
+            role_log, state or "-")
+
+
 def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
                          artifacts_dir: Path, tag: str, project: str = "",
                          session_key: str = "",
@@ -3888,18 +4033,21 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     # 的二进制，enforce_expected 也比对被钉二进制的实证版）。
     resolved_dsh = _dsh_resolved(project)
     cmd = list(resolved_dsh["cmd"])
-    # Role preset patch (contract ①d, ticket t260903-03: the directory base comes
-    # from the registered entry's declared paths.roles_dir, falling back to
-    # <cwd>/server/roles when undeclared — the in-worktree copy keeps the ticket
-    # snapshot semantics): persona = the full role brief, and the cordis patch
-    # overrides by the same id. When undeclared and the concrete role file is absent
-    # (old base_ref) it is skipped, degrading to the profile's default persona — no
-    # hard failure; declared but the anchor directory is missing / the wrong kind =
-    # ProjectPathsError propagates (fail-closed red, the error names the entry file
-    # and the resolved path).
-    role_patch = roles_dir_for_spawn(project, cwd) / (role + ".yml")
-    if role and role_patch.is_file():
-        cmd += ["--patch", str(role_patch)]
+    # Role preset patch (ticket t261028-54; contract ①d base from t260903-03): one
+    # decision from shared.role_preset_for_spawn decides the persona file per ROLE
+    # FILE. Chain = project leg (declared paths.roles_dir, else <cwd>/server/roles; the
+    # in-worktree copy keeps the ticket snapshot semantics) -> engine-built persona ->
+    # engine library (ONLY when the project declares roles_dir; the declaration is the
+    # opt-in, so an undeclared project keeps the pre-ticket behavior byte for byte) ->
+    # profile default persona. A declared anchor that is missing or of the wrong kind
+    # still raises ProjectPathsError here (fail-closed red, the error names the entry
+    # file and the resolved path). The trace record and the line level per state are
+    # _record_role_preset's.
+    role_decision = role_preset_for_spawn(project, cwd, role)
+    role_patch = _role_preset_patch_arg(role_decision, artifacts_dir, tag)
+    if role_patch:
+        cmd += ["--patch", role_patch]
+    _record_role_preset(role_decision, role_patch, artifacts_dir, tag, ticket_id)
     # Runtime model routing (the only consumer left after gen.py retired): read the
     # route table for (role, kind) → provider/model and generate a one-shot patch
     # pinning agent-default-model. The division-of-labor kind comes from
@@ -5156,6 +5304,45 @@ def _merge_base_ref(branch: str, repo: Path, other: str = "main") -> Tuple[str, 
     return ref, ""
 
 
+def _lane_branch_resolve(branch: str, repo: Path,
+                         allow_root_twin: bool = True) -> Tuple[str, str]:
+    """Resolve a lane branch name in ``repo``, returning ``(resolved, trace)``.
+
+    Why this exists (ticket t261029-18): a multi-repo lane's ``meta.branch`` is the
+    placeholder ``lane/<id>`` (`shared.derive_lane_workspace`), while the root tree's
+    real branch is ``lane/<id>-root`` (`shared.build_repo_worktrees`). Git cannot see
+    the placeholder, so every consumer that hands ``meta.branch`` to git fails closed
+    and the file-level blast radius degrades to "run the whole suite".
+
+    The candidate list comes from `shared.lane_branch_candidates` — the SAME naming
+    source the mint reads, so the suffix cannot drift between the two sides.
+    ``allow_root_twin`` is False for a member-repo scope: its twin cannot exist there.
+
+    The probe is ``rev-parse --verify --quiet <candidate>^{commit}`` (existence of a
+    name only). The baseline stays `_merge_base_ref`'s job, so its failure stance comes
+    along unchanged.
+
+    Empty resolved = resolution failed, and the trace is the detail text for a
+    fail-closed red: it names the refs it tried and the last git error. The caller adds
+    the check it blocks (changed-file list / lane head / ...). No fallback to any other
+    ref, never to the literal main. Never raises.
+    """
+    candidates = shared.lane_branch_candidates(branch, allow_root_twin=allow_root_twin)
+    if not candidates:
+        return "", ("lane branch name is missing or malformed (%r) — nothing to resolve "
+                    "in repo %s" % (branch, repo))
+    last = ""
+    for cand in candidates:
+        p = _git(["rev-parse", "--verify", "--quiet", "%s^{commit}" % cand], repo)
+        if p.returncode == 0 and (p.stdout or "").strip():
+            if cand == candidates[0]:
+                return cand, ""
+            return cand, ("lane branch %r resolved as %r (root-tree name)"
+                          % (branch, cand))
+        last = ((p.stderr or p.stdout or "").strip())[-200:]
+    return "", ("lane branch %r is not resolvable in repo %s (tried %s); git: %s"
+                % (branch, repo, ", ".join(repr(c) for c in candidates),
+                   last or "rev-parse returned nothing"))
 def _tip_ref(ref: str, repo: Path) -> Tuple[str, str]:
     """The TIP commit of the other side of the write-set diff. Returns (sha, err).
 
@@ -6746,6 +6933,70 @@ def _verify_lane_code_expiry_row(detail: str, expiry: Dict[str, Any],
     return row
 
 
+#: t261028-54 (merge resolution): the fixed ceiling and the duplicated activity budget
+#: are gone - the wait is derived from the declared check budgets by
+#: verify_lane_code_gate_budget (main's t261028-57 / t261029-14 design). What the lane
+#: side keeps is the diagnosis below: why this process may not be running the lane's code.
+
+
+def _verify_tree_note(lane_root) -> str:
+    """Name a process/lane tree mismatch behind this class of incident (t261028-54).
+
+    The activity code lives in the SERVING PROCESS's tree; verify_lane's checks run in the
+    lane. A fix that exists only in the lane (measured: the verify wait budget) is
+    invisible to the process, and replacing the process re-loads the same tree - so
+    "restart the worker" alone does not deliver it. Comparing the loaded module's bytes
+    with the lane's copy is the exact test for that state; identical copies mean no note.
+
+    Read-only and best effort: unreadable or absent lane copy yields an empty string."""
+    try:
+        proc = Path(__file__).resolve()
+        lane = Path(lane_root).resolve() / "server" / "engine" / proc.name
+        if not lane.is_file():
+            return ""
+        if proc.read_bytes() == lane.read_bytes():
+            return ""
+        return ("this process runs the engine code at %s while the lane carries a "
+                "different copy (%s): an activity-side engine fix that exists only in the "
+                "lane (for example the verify wait budget) cannot take effect here - serve "
+                "the ticket with a lane worker or land the fix on this process's tree"
+                % (proc, lane))
+    except (OSError, TypeError, ValueError):
+        return ""
+
+
+def _verify_stale_code_note(lane_root=None) -> str:
+    """Name why this process may not be running the code the lane carries.
+
+    Two independent states (both read-only, both best effort, joined with " | "):
+      1. the process runs a different copy of this module than the lane
+         (`_verify_tree_note`): a lane-only fix cannot take effect, and replacing the
+         worker reloads the same tree;
+      2. the process loaded engine modules before they were last edited
+         (`shared.worker_code_stamp`): replacing the worker does load the fix.
+    Any failure yields an empty string (no invented diagnosis, no new raise on a failure
+    path). The shape this exists for (t261028-54): the merge gate reported an unnamed
+    timeout (a bare 900 s budget) after the wait fix had already landed on the lane, and
+    the reader had to know the ops rule to explain it. Wording note: the module must not
+    carry the old timeout sentence, so the incident is described, not quoted (the
+    t261028-57 source lock keeps that phrase out of the whole file)."""
+    parts = []
+    if lane_root is not None:
+        tree = _verify_tree_note(lane_root)
+        if tree:
+            parts.append(tree)
+    try:
+        stamp = shared.worker_code_stamp()
+    except Exception:                                  # noqa: BLE001 - diagnosis only
+        stamp = {}
+    stale = [str(x) for x in ((stamp or {}).get("stale") or [])]
+    if stale:
+        parts.append("this process holds pre-edit engine code (%s) - replace the worker "
+                     "(engine_ops.py restart) so the fix takes effect"
+                     % ", ".join(stale))
+    return " | ".join(parts)
+
+
 async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                  lane_root: Path, multi: bool) -> Dict[str, Any]:
     """Single-scope merge_check core (extracted from merge_check in ticket B
@@ -7068,6 +7319,8 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             # smaller than the slowest declared budget (1000), so the check could
             # never use the budget it declares. Derived once per scope, logged so a
             # green round also shows which budget the gate waited on.
+            # (Merge resolution t261028-54: main's derived budget supersedes the lane's
+            # fixed ceiling - one wait mechanism, not two.)
             _gate_checks, _gate_decl_diag = _read_verify_lane_check_budgets(sc["tree"])
             _gate_wait_sec, _gate_facts = verify_lane_code_gate_budget(_gate_checks)
             activity.logger.info(
@@ -7119,6 +7372,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             _red_names: List[str] = []  # t261009-15 (1): exception paths default to no names (no exemption)
             _ws_note = ""               # t261029-64: same stance — an unread receipt names no rule
             _gate_expiry: Optional[Dict[str, Any]] = None
+            # t261028-54 (kept from the lane side): why this process may not be running
+            # the lane's engine code; filled on an expiry only, attached to the row.
+            _stale_note = ""
             try:
                 vo_b, ve_b = await asyncio.wait_for(vp.communicate(), timeout=_gate_wait_sec)
                 v_stdout, v_stderr = vo_b.decode("utf-8", "replace"), ve_b.decode("utf-8", "replace")
@@ -7163,12 +7419,14 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     _gate_wait_sec, _gate_facts, time.monotonic() - _v_wait_t0,
                     read_diag=_gate_decl_diag, loadavg=_machine_loadavg())
                 green = False
+                _stale_note = _verify_stale_code_note(lane_root)
             except asyncio.TimeoutError:
                 await reap_spawn_group(vp, tag="verify-lane-code")
                 detail, _gate_expiry = code_gate_expiry_receipt(
                     _gate_wait_sec, _gate_facts, time.monotonic() - _v_wait_t0,
                     read_diag=_gate_decl_diag, loadavg=_machine_loadavg())
                 green = False
+                _stale_note = _verify_stale_code_note(lane_root)
             except json.JSONDecodeError:
                 green, detail = False, (v_stderr or v_stdout or "无输出").strip()[-300:]
             finally:
@@ -7203,6 +7461,11 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             if _gate_expiry:
                 checks[-1] = _verify_lane_code_expiry_row(detail, _gate_expiry,
                                                           red_names=_red_names)
+                # t261028-54: an expiry caused by a process that cannot run the lane's
+                # code names that state too (the diagnosis rides the row; a clean
+                # process adds no key).
+                if _stale_note:
+                    checks[-1]["note"] = _stale_note
     except Exception as e:
         checks.append({"item": "In-lane verify_lane code is green", "green": False,
                        "detail": "verify_lane error: %s" % e,
@@ -7539,11 +7802,24 @@ async def lane_head_sha(args: LaneHeadShaArgs) -> LaneHeadShaResult:
     """Resolve the lane branch HEAD sha (read-only, KI-220). Failures do not raise:
     `ok=False` + named error — the caller simply skips recording the green-run face
     for that round (the merge gate then stays red zero-run, fail-closed; a missing
-    face never mints a green)."""
+    face never mints a green).
+
+    t261029-18: the branch name goes through `_lane_branch_resolve` first. The gate
+    hands `meta.branch`, which on a multi-repo lane is the placeholder `lane/<id>` while
+    the worktree here is the root tree on `lane/<id>-root`. Without the resolve this
+    activity failed every round on such a lane, so no green-run face was ever recorded
+    and the merge gate stayed red zero-run. An unresolvable name still returns
+    `ok=False` with a named error (fail-closed face kept).
+    """
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    ref = args.branch or "HEAD"
+    ref, res_trace = _lane_branch_resolve(args.branch or "HEAD", wt,
+                                          allow_root_twin=True)
+    if not ref:
+        return LaneHeadShaResult(ok=False, error=res_trace)
+    if res_trace:
+        activity.logger.info("[%s] lane_head_sha: %s", args.ticket_id, res_trace)
     p = _git(["rev-parse", "--verify", ref], wt)
     if p.returncode != 0:
         return LaneHeadShaResult(
@@ -12150,25 +12426,57 @@ async def bundle_out_ws_prefixes(args: shared.BundleOutWsArgs) -> shared.BundleO
 
 @activity.defn
 async def changed_files(args: shared.ChangedFilesArgs) -> shared.ChangedFilesResult:
-    """t260925-04 实际改动文件清单收集（文件级爆炸半径的输入面）：
-    `git diff --name-only <merge-base>...<branch>` ∪ `git status --porcelain -z`
-    脏文件，去重返回（仓库根相对路径）。
+    """Collect the actual changed files of a lane (the input face of the file-level
+    blast radius, t260925-04; per-scope since t261029-18).
 
-    **整函数复用既有家族件，故障模式全带**（review 意见 2 落账）：
-    - 基线= `_merge_base_ref`（merge-base(main, branch) 锚泳道仓）：多行畸形取首行
-      留痕、**绝不回退字面 main**（回退钉死基线复活 KI-010；泳道落后 main 时两点差
-      会误判）、解析失败=空 ref=fail-closed 红项文案；
-    - diff 姿态= `_ui_diff_paths` 同款三点差（base...branch）、git 失败 fail-closed
-      返回 error、subprocess 走 `_git` 族（同步有界超时，超时异常由调用方转红；
-      取消即时性是 `_git` 家族既有欠账，本活动沿用同姿态不另立口径）；
-    - 脏文件解析=`_dirty_files_from_status_z`（-z 免 quotePath 歧义、畸形条目丢弃
-      不猜、rename/copy 只取 new；status 带 `-uall` 展开——t260925-04 rework 缺陷②
-      根修：未跟踪目录不折叠成 `dir/`，共享面新文件按真实路径命中前缀表）。
+    Per lane scope (`_lane_scopes`, the single scope source):
+    `git diff --name-only <merge-base>...<branch>` union `git status --porcelain -z`
+    dirty files, deduped, as project-root-relative paths (a member-tree path keeps its
+    repo prefix).
 
-    **fail-closed 方向恒全跑**：branch 空 / merge-base 失败 / diff 失败 / 超时 /
-    status 失败 → error 非空、files=[]；调用方（dev_lane 定点决策）拿到非空 error
-    必须判 shared 恒全跑，**绝不因 files 空收窄**。本活动只收集不决策——爆炸半径
-    判定单写者=shared.changed_files_blast_radius（经 targeted_rerun_plan）。"""
+    The branch name per scope: ``sc["branch"]`` first — on a multi-repo lane that is
+    already the real name from ``meta.repo_worktrees`` / the on-disk manifest. When that
+    name does not resolve, `_lane_branch_resolve` tries the root-tree twin, but only for
+    the root scope (``len(scopes) == 1`` or an empty ``repo_rel``): a member scope has
+    no twin. This closes the t261029-18 defect: the gate hands ``meta.branch`` (the
+    placeholder ``lane/<id>``) and the root tree is on ``lane/<id>-root``.
+
+    One refusal sits on top of the twin: when the twin was needed AND no lane manifest
+    exists, the call fails closed by name. Only a multi-repo root gets the
+    ``lane/<id>-root`` name, and a multi-repo lane's member trees are enumerable only
+    through the manifest, so the root tree's files alone are NOT the lane's change set.
+    Returning them would read ``localized`` and narrow the round while member work stays
+    unseen (the unsafe direction; the pre-fix code failed closed on this shape too). A
+    manifest-free SINGLE-repo lane resolves its own ``lane/<id>`` first and is untouched
+    by the guard.
+
+    Fault modes of the reused family, all carried (review C1):
+    - baseline = `_merge_base_ref` (multi-line malformed keeps the first line and leaves
+      a trace; never falls back to the literal ``main``; an empty ref is a fail-closed
+      named error);
+    - the diff keeps the three-dot stance and is anchored on ``sc["repo"]``;
+    - the dirty-file face keeps ``--porcelain -z`` (no quotePath / rename-arrow
+      ambiguity), `_dirty_files_from_status_z` (rename/copy takes the new side only,
+      malformed entries are dropped, never guessed) and ``--untracked-files=all`` (an
+      untracked directory is not collapsed, t260925-04 rework defect 2);
+    - every rc failure returns ``files=[]`` plus a named error; a git timeout raises out
+      of `_git` as before (the caller turns it into a full run, and the existing unit
+      test pins the propagation).
+
+    New since t261029-18: candidate order and dedupe (`shared.lane_branch_candidates`,
+    no ``-root-root``), and the per-scope union (manifest order, dedupe, repo-prefixed
+    member paths). One failing scope fails the WHOLE call — a partial list must never
+    reach the radius decision.
+
+    Fail-closed direction is always "run the full suite": an empty branch / an
+    unresolvable name / a corrupt manifest / a failed merge-base, diff or status gives a
+    non-empty error and ``files=[]``. The caller (the dev_lane targeted decision) must
+    read a non-empty error as shared. This activity only collects; the radius verdict
+    has one writer, `shared.changed_files_blast_radius` (through `targeted_rerun_plan`).
+
+    ``resolved`` carries ``"<scope name>:<branch>"`` per scope so the gate can project
+    it onto the ticket face (the degrade survives log rotation).
+    """
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
@@ -12191,36 +12499,115 @@ async def changed_files(args: shared.ChangedFilesArgs) -> shared.ChangedFilesRes
         return shared.ChangedFilesResult(
             files=[], error="branch 缺失，改动清单不可得，fail-closed 恒全跑",
             wall_s=time.monotonic() - _t0)
-    base, base_err = _merge_base_ref(args.branch, wt)
-    if not base:
+    # A manifest on disk is what makes a multi-repo lane's member trees enumerable. Read
+    # this BEFORE the scope list: the guard below needs the fact, not a re-derivation.
+    manifest_present = shared.multi_manifest_path(wt, legacy_fallback=True).is_file()
+    try:
+        scopes = _lane_scopes(wt, args.branch, base_ref="", write_set=None)
+    except Exception as e:  # noqa: BLE001 — a corrupt manifest is a named fail-closed red
         return shared.ChangedFilesResult(
-            files=[], error="merge-base 解析失败：%s" % (base_err or "空 ref")[-300:],
-                                      wall_s=time.monotonic() - _t0)
-    p = _git(["diff", "--name-only", "%s...%s" % (base, args.branch)], wt)
-    if p.returncode != 0:
-        return shared.ChangedFilesResult(
-            files=[], error="git diff %s...%s 失败 rc=%s：%s" % (
-                base, args.branch, p.returncode,
-                ((p.stderr or p.stdout or "").strip())[-300:]),
+            files=[],
+            error=("lane manifest unreadable (fail-closed), changed-file list not "
+                   "available: %s: %s" % (type(e).__name__, str(e)[:300])),
             wall_s=time.monotonic() - _t0)
-    diff_files = [ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()]
-    # -uall（t260925-04 rework 缺陷②根修）：porcelain 缺省把未跟踪目录折叠成
-    # `dir/` 一条，折叠条目命中不了 integration/tests/ 等文件级前缀表项 → 共享面
-    # 新文件可漏判。展开到逐文件后前缀表按真实路径判定；changed_files_blast_radius
-    # 侧另留「尾 / 条目=shared」纵深，兜非 -uall 形态的来历不明清单。
-    st = _git(["status", "--porcelain", "-z", "--untracked-files=all"], wt)
-    if st.returncode != 0:
-        return shared.ChangedFilesResult(
-            files=[], error="git status 失败 rc=%s：%s" % (
-                st.returncode, ((st.stderr or st.stdout or "").strip())[-300:]),
-            wall_s=time.monotonic() - _t0)
-    dirty = _dirty_files_from_status_z(st.stdout or "")
+    multi = len(scopes) > 1
     out: List[str] = []
-    for f in list(diff_files) + list(dirty):
-        n = (f or "").strip()
-        if n and n not in out:
-            out.append(n)
-    return shared.ChangedFilesResult(files=out, error="",
+    resolved: List[str] = []
+    for sc in scopes:
+        tag = _scope_tag(sc)
+        name = tag or "root"
+        allow_twin = (not multi) or not str(sc.get("repo_rel") or "")
+        # A tree that is not on disk (or not readable) is a named fail-closed red, not an
+        # exception: `_git` raises OSError from a missing cwd, and a raise is a retry
+        # storm, not a verdict (t261029-18 A4). A git TIMEOUT is not an OSError, so it
+        # still propagates to the caller unchanged.
+        try:
+            branch, br_trace = _lane_branch_resolve(
+                sc["branch"], sc["repo"], allow_root_twin=allow_twin)
+            if not branch:
+                # The check this blocks is named here, not in the shared resolver: that
+                # resolver also serves lane_head_sha, whose red is about the head.
+                return shared.ChangedFilesResult(
+                    files=[],
+                    error=_tagged(tag, "changed-file list unavailable (the merge-base "
+                                       "baseline needs a resolvable branch): %s"
+                                  % br_trace),
+                    wall_s=time.monotonic() - _t0)
+            if br_trace and not manifest_present:
+                # The root-tree twin was needed, and no lane manifest exists. Only a
+                # MULTI-REPO root gets the `lane/<id>-root` name, and a multi-repo lane's
+                # member trees are enumerable ONLY through the manifest. Returning the
+                # root tree's files here would report "localized" and narrow the round
+                # while member work stays unseen (the unsafe direction, measured on a
+                # manifest-absent multi-repo fixture). Fail closed instead: the pre-fix
+                # code also failed closed on this shape, through the merge-base.
+                # A manifest-free SINGLE-repo lane resolves its own `lane/<id>` first, so
+                # this guard never touches it (that control stays green).
+                return shared.ChangedFilesResult(
+                    files=[],
+                    error=_tagged(tag, "changed-file list unavailable: the lane root "
+                                       "branch resolves through the root-tree name %r and "
+                                       "no lane manifest exists — a multi-repo lane's "
+                                       "member trees cannot be enumerated, so the round "
+                                       "must not narrow (fail-closed full run)" % branch),
+                    wall_s=time.monotonic() - _t0)
+            base, base_err = _merge_base_ref(branch, sc["repo"])
+            if not base:
+                return shared.ChangedFilesResult(
+                    files=[],
+                    error=_tagged(tag, "merge-base failed for branch %r in repo %s: %s" % (
+                        branch, sc["repo"], (base_err or "empty ref")[-300:])),
+                    wall_s=time.monotonic() - _t0)
+            p = _git(["diff", "--name-only", "%s...%s" % (base, branch)], sc["repo"])
+            if p.returncode != 0:
+                return shared.ChangedFilesResult(
+                    files=[],
+                    error=_tagged(tag, "git diff %s...%s failed in repo %s (rc=%s): %s" % (
+                        base, branch, sc["repo"], p.returncode,
+                        ((p.stderr or p.stdout or "").strip())[-300:])),
+                    wall_s=time.monotonic() - _t0)
+            # -uall (t260925-04 rework defect 2 root fix): plain porcelain folds an
+            # untracked directory into one `dir/` entry, and that entry cannot hit a
+            # file-level prefix such as integration/tests/, so a new file on a shared
+            # face could be missed. Expand to one path per file, then let the prefix
+            # table judge the real path. changed_files_blast_radius keeps the second
+            # line of defense (a trailing-slash entry is shared) for a list that did not
+            # come from this -uall shape.
+            st = _git(["status", "--porcelain", "-z", "--untracked-files=all"], sc["tree"])
+            if st.returncode != 0:
+                return shared.ChangedFilesResult(
+                    files=[],
+                    error=_tagged(tag, "git status failed in tree %s (rc=%s): %s" % (
+                        sc["tree"], st.returncode,
+                        ((st.stderr or st.stdout or "").strip())[-300:])),
+                    wall_s=time.monotonic() - _t0)
+        except OSError as e:
+            return shared.ChangedFilesResult(
+                files=[],
+                error=_tagged(tag, "lane tree unreadable for scope %r (changed-file list "
+                                   "not available, fail-closed): %s: %s"
+                              % (name, type(e).__name__, str(e)[:200])),
+                wall_s=time.monotonic() - _t0)
+        prefix = ("%s/" % sc["repo_rel"]) if sc.get("repo_rel") else ""
+        scope_files = ([ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()]
+                       + _dirty_files_from_status_z(st.stdout or ""))
+        added = 0
+        for f in scope_files:
+            n = (f or "").strip()
+            if not n:
+                continue
+            path = prefix + n
+            if path not in out:
+                out.append(path)
+                added += 1
+        resolved.append("%s:%s" % (name, branch))
+        # t261029-18 (review C6): the resolve/degrade must be readable on the gate log
+        # face (server/engine/data/worker-<tid>.log), not only in the receipt.
+        activity.logger.info(
+            "[%s] changed_files: scope=%s branch=%s base=%s files=%d%s",
+            args.ticket_id, name, branch, (base or "?")[:7], added,
+            ("; " + br_trace) if br_trace else "")
+    return shared.ChangedFilesResult(files=out, error="", resolved=resolved,
                                      wall_s=time.monotonic() - _t0)
 
 

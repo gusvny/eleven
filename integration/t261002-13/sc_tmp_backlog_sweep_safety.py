@@ -100,9 +100,11 @@ def main():
     foreign.mkdir()
     outsider = Path(box, "not-ours-aged")                 # B4 白名单外
     outsider.mkdir()
+    cross = Path(box, "t26101406-gate-abc123")            # t261029-38 跨仓族（project-vision 产）
+    cross.mkdir()
     link = Path(box, "t260904-02-link")                   # B6 符号链接
     os.symlink(str(aged_wl_dir), str(link))
-    for p in (aged_wl_dir, aged_wl_file, foreign, outsider):
+    for p in (aged_wl_dir, aged_wl_file, foreign, outsider, cross):
         backdate(p)  # recent_wl 有意不回溯：<6h 新鲜 = 在跑套件持有的形态
 
     held = Path(box, "t260904-02-held.lock")              # B7 活 flock（越龄才会进锁判据）
@@ -121,6 +123,15 @@ def main():
         backdate(carrier_dir)
         carrier = subprocess.Popen([PY, "-c", "import time;time.sleep(120)"],
                                    cwd=str(carrier_dir))
+        # 夹具前提显式化（t261029-38 验收实测：cwd 落在越龄目录里的子进程 spawn 会把该目录
+        # mtime 拨到现在——那之后条目读作「新鲜」，本用例就没有越龄候选可点名；实测 3/3）。
+        # 子进程落定后重打一次 aging，并断言前提成立：前提不成立 = 具名红，不是「载体判据失效」。
+        time.sleep(0.4)
+        backdate(carrier_dir)
+        _age_h = (time.time() - carrier_dir.stat().st_mtime) / 3600.0
+        ok(_age_h >= 6.0,
+           "B8-pre fixture precondition: carrier dir is aged (%.1fh >= 6h) before the tool runs"
+           % _age_h)
         try:
             # ---- A dry-run ----
             r = run_tool(["--root", box, "--json"])
@@ -137,6 +148,33 @@ def main():
             ok(r1.returncode != 0,
                "C2 --apply below 1h hard floor refused")
 
+            # ---- F 跨仓族永不可删（t261029-38 交付物 3：只记不碰） ----
+            rf = run_tool(["--root", box, "--apply", "--prefix", "t26101406-gate-"])
+            fout = rf.stdout + rf.stderr
+            ok(rf.returncode != 0 and "REFUSED" in fout,
+               "F1 --apply over a foreign prefix refused by name")
+            ok("project-vision" in fout,
+               "F2 refusal names the repo that mints the family")
+            ok(cross.exists(), "F3 zero deletes on the foreign family")
+            ok(aged_wl_dir.exists(),
+               "F4 the refusal happens before any delete (whitelisted aged dir intact)")
+            rfa = run_tool(["--root", box, "--count-only", "--apply"])
+            ok(rfa.returncode != 0, "F5 --count-only --apply refused")
+
+            # ---- G count-only 只数不探不删（t261029-38 回执归因面） ----
+            rg = run_tool(["--root", box, "--count-only", "--json",
+                           "--prefix", "t26101406-gate-"])
+            ok(rg.returncode == 0, "G1 count-only exits 0")
+            jg = json.loads(rg.stdout)
+            ok(jg.get("probe_skipped") is True,
+               "G2 count-only skips the holder probe (no delete decision, no probe cost)")
+            grow = [x for x in (jg.get("per_prefix") or [])
+                    if str(x.get("prefix", "")).startswith("t26101406-gate-")]
+            ok(bool(grow) and grow[0].get("count") == 1,
+               "G3 count-only reports the foreign family count")
+            ok(cross.exists() and aged_wl_dir.exists(),
+               "G4 count-only has no delete path")
+
             # ---- B apply ----
             ra = run_tool(["--root", box, "--apply", "--json"])
             ok(ra.returncode == 0, "B0 --apply exits 0")
@@ -146,6 +184,8 @@ def main():
             ok(recent_wl.exists(), "B3 fresh whitelisted dir (<6h, live run holds) untouched")
             ok(outsider.exists(), "B4 non-whitelisted aged entry untouched (never deletes foreign)")
             ok(foreign.exists(), "B5 EXCLUDED_PREFIXES family untouched (Chrome etc.)")
+            ok(cross.exists(),
+               "B5b foreign (project-vision) family outside the whitelist is never swept")
             ok(link.is_symlink(),
                "B6 symlink entry itself skipped (never rmtree'd through the link)")
             ok(isinstance(ja.get("summary"), str) and "kept" in ja["summary"],
@@ -158,6 +198,39 @@ def main():
             ok(carrier_dir.exists() and any("t260904-02-carrier" in str(n)
                                             for n in (ja.get("carriers_named") or [])),
                "B8b kept live carrier is named in the machine receipt (never kills/silently drops)")
+
+            # ---- E 活 fd 持有者（t261029-38 交付物 1 守卫 2；符号链接根 = realpath 面） ----
+            real_root = Path(box, "openfd-real")
+            real_root.mkdir()
+            link_root = Path(box, "openfd-link")
+            os.symlink(str(real_root), str(link_root))
+            fd_dir = Path(real_root, "t260904-02-openfd")
+            fd_dir.mkdir()
+            fd_file = fd_dir / "held.txt"
+            fd_file.write_text("x")
+            backdate(fd_dir)
+            # SANCTIONED-WAIT: the holder child sleeps a ceiling; the case never
+            # waits on it (one readline proves the fd, then the finally reaps it).
+            fd_holder = subprocess.Popen(
+                [PY, "-c",
+                 # SANCTIONED-WAIT: ceiling only; one readline proves the fd, then the finally reaps it.
+                 "import sys,time;f=open(sys.argv[1],'r');print('open',flush=True);time.sleep(90)",
+                 str(fd_file)],
+                cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            try:
+                fd_holder.stdout.readline()
+                re_ = run_tool(["--root", str(link_root), "--apply", "--json"])
+                je = json.loads(re_.stdout)
+                ok(re_.returncode == 0, "E1 apply on a symlinked root exits 0")
+                ok(fd_dir.exists(),
+                   "E2 dir held open by a live fd (cwd elsewhere) survives")
+                ok("t260904-02-openfd" in json.dumps(je),
+                   "E3 kept open-fd holder is named in the machine receipt")
+                ok(fd_holder.poll() is None,
+                   "E4 the holder process is not killed (runner never --kill-carriers)")
+            finally:
+                fd_holder.terminate()
+                fd_holder.wait(timeout=15)
         finally:
             carrier.terminate()
             carrier.wait(timeout=15)
