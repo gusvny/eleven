@@ -50,7 +50,11 @@ suite's output lines AS THEY ARE PRINTED TODAY by
 ``FAIL [name] exit=N (dur)`` / ``ENV_FAIL [name] exit=N (dur)`` result
 blocks (~line 6220), the pool banners ``点名 [name]（池=…）`` /
 ``跳过 [name]（池=…）`` and the pool-exclusion summary
-``本轮跳过池=…（少 N 条）``, and the ``INTEG_SUMMARY `` end mark. Any other
+``本轮跳过池=…（少 N 条）``, the retired-premise exclusion lines
+``RETIRED_PREMISE [name]（前提=…，退役=…：…）`` (t261029-76: a different
+decision from a pool skip and deliberately a different word — an entry whose
+premise was retired is never judged, an entry in an excluded pool is merely
+not run by THIS round), and the ``INTEG_SUMMARY `` end mark. Any other
 or garbled line is IGNORED (named here, silent in code by design — the
 degrade rule), so vocabulary drift shows up as a stale face
 (counts stop moving, pool stays ``unknown``), never as a wrong count.
@@ -108,6 +112,11 @@ _FAIL_RE = re.compile(r"^FAIL \[(.+?)\] exit=\S+")
 _ENV_FAIL_RE = re.compile(r"^ENV_FAIL \[(.+?)\] exit=\S+")
 _POOL_RE = re.compile(r"^(?:点名|跳过) \[(.+?)\]（池=(.+?)）")
 _POOL_EXCLUDED_RE = re.compile(r"^本轮跳过池=(.+?)（少 \d+ 条）")
+#: t261029-76: the retired-premise exclusion vocabulary. A separate regex and a
+#: separate face field on purpose — `跳过` is a scheduling decision, this is an
+#: observability one, and a consumer must be able to tell them apart without
+#: parsing prose.
+_RETIRED_RE = re.compile(r"^RETIRED_PREMISE \[(.+?)\]（前提=(.+?)，退役=(.+?)：")
 SUMMARY_PREFIX = "INTEG_SUMMARY "
 
 #: Count vocabulary, both spellings the suite prints (pinned like the block
@@ -211,6 +220,10 @@ def snapshot_progress(text):
     scenario_lines_seen = False
     summary_counts = None
     summary_error = None
+    #: t261029-76: names the round EXCLUDED because their premise was retired
+    #: (named on the suite log with premise + retirement order + reason). Kept
+    #: apart from the pool banner: the two decisions never collapse into one.
+    retired = {}
     for line in (text or "").splitlines():
         line = line.strip()
         if line.startswith(SUMMARY_PREFIX):
@@ -223,6 +236,11 @@ def snapshot_progress(text):
                 summary_counts = normalize_summary_counts(payload)
                 if summary_counts is None:
                     summary_error = "integ_summary_counts_unreadable"
+            continue
+        m = _RETIRED_RE.match(line)
+        if m:
+            retired[m.group(1)] = {"premise": m.group(2),
+                                   "retired": m.group(3)}
             continue
         m = _POOL_EXCLUDED_RE.match(line)
         if m:
@@ -292,7 +310,8 @@ def snapshot_progress(text):
     out = {"counts": counts, "pool": pool,
            "last_scenario": last, "summary_seen": summary_seen,
            "scenario_lines_seen": scenario_lines_seen,
-           "summary_counts": summary_counts, "summary_error": summary_error}
+           "summary_counts": summary_counts, "summary_error": summary_error,
+           "retired_premise_names": sorted(retired)}
     return out
 
 
@@ -447,19 +466,30 @@ class FaceWriter:
                           "counts": snap["counts"],
                           "last_scenario": snap["last_scenario"],
                           "updated_at": _now_iso()})
+        # t261029-76: the exclusion is a RECEIPT fact, not a running count — the
+        # live face carries the names as soon as the suite declares them, and
+        # keeps carrying them at the terminal write.
+        if snap.get("retired_premise_names"):
+            self.face["retired_premise_names"] = list(
+                snap["retired_premise_names"])
         if note is not None:
             self.face["counts_note"] = note
         else:
             self.face.pop("counts_note", None)
 
     def finish(self, state, verdict=None, reason=None,
-               record_verdict=None, record_rule=None):
+               record_verdict=None, record_rule=None,
+               retired_premise_excluded=None):
         """Terminal write: face.json inside the run dir (outcome stays
         visible), then retire the live pointer ONLY IF it still names THIS
         run — a second, newer round may already own it. ``record_verdict`` /
         ``record_rule`` (t261024-30): the RECORD's content verdict beside the
         face's own (stricter) verdict, so an env-red face never silently
-        disagrees with the green record the engine certifies under."""
+        disagrees with the green record the engine certifies under.
+        ``retired_premise_excluded`` (t261029-76): the round's declared
+        exclusions (name + premise + retirement order + reason), published on
+        the terminal receipt so the exclusion is readable from the evidence
+        alone — never inferable, never silent."""
         self.face["state"] = state
         self.face["updated_at"] = _now_iso()
         outcome = {"verdict": verdict, "reason": reason or ""}
@@ -467,6 +497,9 @@ class FaceWriter:
             outcome["record_verdict"] = record_verdict
             outcome["record_rule"] = str(record_rule or "content-v1")
         self.face["outcome"] = outcome
+        if retired_premise_excluded:
+            self.face["retired_premise_excluded"] = [
+                dict(r) for r in retired_premise_excluded]
         try:
             atomic_write_json(self.run_dir / FACE_NAME, self.face)
         except OSError as e:

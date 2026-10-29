@@ -40,6 +40,16 @@ Environment seams:
 Asset hand-off (t261011-18): the runner exports SANDBAR_POC_PYTHON and
 SANDBAR_TEMPORAL_BIN into the suite env, resolved from this runner's own
 checkout; an unresolvable asset is a named could-not-run (asset_missing:<KEY>).
+
+Retired-premise exclusions (t261029-76): a case whose premise a host order
+retired (docker, order 261027) can never be judged again, so the suite does not
+run it and publishes the exclusion - name, premise, retirement order, reason -
+under ``retired_premise_excluded`` in its INTEG_SUMMARY. This runner relays that
+record onto the run HEADER (which the engine persists) and onto the terminal
+FACE, and names the excluded entries on stderr. The exclusion is neither a pool
+skip (a scheduling decision with its own vocabulary) nor a loosening: every
+premise still live keeps today's behaviour, so a real environment failure still
+books ENV_FAIL and still reds the round.
 """
 import json
 import os
@@ -527,6 +537,52 @@ def tail(text, n=300):
     return (text or "").strip()[-n:]
 
 
+def retired_premise_receipt(summary):
+    """The round's declared retired-premise exclusions (t261029-76).
+
+    The suite (``run_scenarios.py``) publishes ``retired_premise_excluded`` on
+    its ``INTEG_SUMMARY``: one record per entry it did NOT judge, carrying the
+    case name, the retired premise, the retirement order and the reason.
+    Returns ``(records, bad)``:
+
+    - key absent / empty list  -> ``([], None)`` (nothing declared: the header
+      keeps its pre-ticket shape, byte-identical);
+    - a record that is not an object, or whose name/premise/retired/reason is
+      not a non-empty string -> DROPPED and named in ``bad`` (a malformed
+      exclusion is never published as if it were a declaration, and never
+      silently swallowed either — the caller writes ``bad`` to stderr);
+    - duplicates        -> the FIRST record wins (a name is excluded once).
+    """
+    if not isinstance(summary, dict):
+        return [], None
+    raw = summary.get("retired_premise_excluded")
+    if raw is None:
+        return [], None
+    if not isinstance(raw, list):
+        return [], "retired_premise_excluded_not_a_list:%r" % (type(raw).__name__,)
+    out, bad, seen = [], [], set()
+    for item in raw:
+        if not isinstance(item, dict):
+            bad.append("record_not_object")
+            continue
+        rec = {}
+        _ok = True
+        for key in ("name", "premise", "retired", "reason"):
+            value = item.get(key)
+            if not isinstance(value, str) or not value.strip():
+                bad.append("field_missing:%s:%r" % (key, item.get("name")))
+                _ok = False
+                break
+            rec[key] = value.strip()
+        if not _ok:
+            continue
+        if rec["name"] in seen:
+            continue
+        seen.add(rec["name"])
+        out.append(rec)
+    return out, (";".join(bad) if bad else None)
+
+
 def resolve_face_dir(repos, env):
     """The develop dir this round's face publishes under (t261024-30: the
     ONE project-resolution rule). Primary: lib_round_face's lines.json
@@ -649,6 +705,38 @@ def run(env=None):
         header, why = read_header(primary, Path(run_root) / "ledger", summary)
         if header is None:
             die("suite_rc_%d:%s" % (rc, why))
+        # ---- t261029-76: the retired-premise exclusion rides the receipt ----
+        # The suite declares which entries it did NOT judge because their
+        # premise was retired (integration/retired-premises.json) and names
+        # each one with its premise, retirement order and reason. That record
+        # is relayed onto the run header (persisted by the engine) and onto the
+        # terminal face, so the exclusion is readable from the evidence alone.
+        # Two decisions, two names: a pool skip keeps its own vocabulary and is
+        # NOT this key. A name reported as excluded AND as unverified would mean
+        # the exclusion never applied — named loudly, never absorbed.
+        retired, retired_bad = retired_premise_receipt(summary)
+        if retired_bad:
+            sys.stderr.write("%s warn: malformed retired-premise record(s) "
+                             "dropped from the receipt: %s\n"
+                             % (TAG, retired_bad))
+        if retired:
+            header["retired_premise_excluded"] = retired
+            header["retired_premise_count"] = len(retired)
+            sys.stderr.write("%s note: %d entry(ies) NOT judged this round — "
+                             "premise retired (named on the receipt): %s\n"
+                             % (TAG, len(retired),
+                                ",".join("%s(premise=%s,retired=%s)"
+                                         % (r["name"], r["premise"],
+                                            r["retired"]) for r in retired)))
+            _leak = sorted(n for n in (header.get("unverified_names") or [])
+                           if isinstance(n, str)
+                           and n in {r["name"] for r in retired})
+            if _leak:
+                header["retired_premise_leak"] = _leak
+                sys.stderr.write("%s warn: excluded entries were still reported "
+                                 "as unverified (%s) — the exclusion did not "
+                                 "apply; the record says so\n"
+                                 % (TAG, ",".join(_leak)))
         if face is not None:
             # outcome stays visible (t261011-26 spec 4) — and TRUTHFUL
             # (t261012-01): green requires ran > 0, the face counts agree
@@ -717,7 +805,8 @@ def run(env=None):
             # green record the engine certifies under.
             face.finish("done", verdict, reason,
                         record_verdict=lib_round_face.content_verdict(counts),
-                        record_rule="content-v1")
+                        record_rule="content-v1",
+                        retired_premise_excluded=retired)
             # the relative-certification caliber (261014): the fail NAME set,
             # so the engine can judge new-regressions-vs-main, not just counts
             if isinstance(header, dict):

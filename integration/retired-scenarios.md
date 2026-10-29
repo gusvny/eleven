@@ -260,3 +260,38 @@ t261002-03 并发标定合并处置）——按 261002 直修批同款「终态/
 - 为什么暂缓：D1-D3 面依赖 line 侧 `server/tools/verify_lane.py`（only_check 支持），本道是 main 侧版。
 - 移交：verify_lane.py 随 line squash 归队后逐字恢复本条。
 - 认赔：quick 闸收窄契约本道暂无场景（其 L1 真值表在 test_quickmanual_lane.py 仍在）。
+
+---
+
+## 261029 退役前提批（t261029-76：docker 前提退役后，条目按名"不判"而不隐藏）
+
+背景（实测）：宿主令 261027 退役 docker，但两条线轮条目仍要求 docker 守护，于是每一轮
+都记 2 条 env_fail，红把 develop-buffer 线冻住（run-01M63CEX71YDHNH56E612BX86C：
+ran=688 pass=685 fail=1 env_fail=2，冻结 frz-01M63HN38C3CFFY5M8WE8H8FAR），每次冻结都
+花一次人工判断。处置机制：**退役前提 = 显式数据 + 按名排除 + 回执具名**
+（`integration/retired-premises.json`，读面 `integration/lib_retired_premise.py`，
+轮面 `integration/run_scenarios.py`，回执面 `integration/line_round_runner.py`）。
+本轮**不**判这些条目、不记 env_fail；回执逐条点名「前提 + 退役令号 + 原因」；词汇与池
+排除（`跳过`/`本轮跳过池`）刻意不同名；条目**仍列在册**（本文件与注册表原位留痕）。
+
+### t260921-06-batch-ns-isolation（integration/t260921-06/sc_batch_ns_isolation.py）
+- 守什么：批内命名空间隔离与反用例——同批两并发 ns-acquire A/B ⇒ A 的自定义 SA 与
+  workflow 不出现在 B 的命名空间；A 搞坏自己 ns ⇒ B 的面完好。
+- 为什么退：它的两条子用例都要**真批台**（compose 起台 + 容器内 temporal CLI）。docker 前提
+  已由宿主令 261027 退役，任何一轮都不可能再满足；进程台只有一个 dev server、没有命名
+  空间，跨命名空间隔离在无 docker 的世界里**没有可观测面**，故不重指向、按名退出判定。
+- 移交：批台消费缝/清单/runner 形态三条仍由同族场景（batch-seam-regression /
+  batch-manifest-contract / batch-runner-form）看守；`register_namespace` 幂等面本就在
+  stage_docker selftest/L1。**跨命名空间隔离语义本身无替代看守**。
+- 认赔：服务端作用域隔离语义（SA/workflow 可见性）不再有集成回归网；前提若复活
+  （docker 回归或被别的隔离技术承担），按 `retired-premises.json` 撤名即可复活该条。
+
+### t261027-11-stage-process-backend-zero-docker（**未退役，已重指向**）
+- 守什么：process 后端「零容器」+ 非法 backend 不静默回落到 docker 载荷 + 双面零残留。
+- 处置：它的主张（`zero containers ran`）在无守护进程时仍可观测，故**保留并重指向**：
+  子进程 PATH 首位放一个会记账的 `docker` 替身（`lib_herd_case.docker_shim`），逐次记
+  每次 CLI 调用，断言 run/create/start/up 族（含 compose/container 子命令）为**零**；
+  `docker ps` 类巡检调用被点名记录、不算容器。假回落会因为记到 creating 调用而判红——
+  观测面仍有牙。判定记录同时写在 `retired-premises.json` 的 dispositions 里。
+- 认赔：不再断言守护进程侧的 `docker ps -a` 库存（前提已退役）；「零容器」改由产品
+  自己的调用流证明（比库存更靠近被测代码）。

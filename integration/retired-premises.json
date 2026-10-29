@@ -1,0 +1,32 @@
+{
+  "_what": "Retired premises and the entries excluded by them (ticket t261029-76). Read by integration/lib_retired_premise.py, consumed by integration/run_scenarios.py (the round does not judge these entries and names them) and relayed onto the round receipt by integration/line_round_runner.py. A round must never guess an exclusion from an evidence string: both the premise and the entry are declared here, by name, with a reason. 'reason' is the one-line receipt face; 'detail' is the long account for a human reader.",
+  "schema": "retired-premises-v1",
+  "premises": [
+    {
+      "id": "docker",
+      "retired": "261027",
+      "reason": "Host order 261027 retired docker from the test estate: no docker daemon, no compose stack and no docker CLI exists on this host any more. A case whose legs need one can never pass again, so a round must not judge it."
+    }
+  ],
+  "excluded": [
+    {
+      "name": "t260921-06-batch-ns-isolation",
+      "premise": "docker",
+      "reason": "premise retired 261027: its namespace-isolation legs need a real docker batch bench (compose bring-up + temporal CLI in containers)",
+      "detail": "The legs are namespace isolation and the anti-case over a REAL batch bench: compose bring-up plus the temporal CLI inside containers (ns-acquire / ns-drop against the batch stage). There is no docker-free observation face for that claim: the process bench gives one namespace-less dev server, so 'namespace A's service account and workflow do not appear in namespace B' cannot be observed at all. Excluded, not re-pointed - the claim needs the retired premise. The sibling batch cases that already migrated (batch-runner-form, batch-seam-regression, batch-manifest-contract) keep their own contracts; the namespace-isolation claim is recorded as retired in integration/retired-scenarios.md.",
+      "evidence": "Round run-01M63CEX71YDHNH56E612BX86C (revision 6df0b76b, 2026-10-29) booked ENV_FAIL: 'ENV_FAIL: docker daemon 不可达——隔离/反用例段需要真批台'."
+    }
+  ],
+  "dispositions": [
+    {
+      "name": "t260921-06-batch-ns-isolation",
+      "disposition": "excluded",
+      "detail": "EXCLUDED (it booked env_fail every round). Its premise is the retired docker daemon and no docker-free face can observe cross-namespace isolation. Still listed in the registry, named on every round receipt with premise + retirement order + reason, never judged, never silently dropped."
+    },
+    {
+      "name": "t261027-11-stage-process-backend-zero-docker",
+      "disposition": "repointed",
+      "detail": "RE-POINTED (still runs, no exclusion). Its claim 'zero containers ran' is now observed without a daemon: a recording `docker` stand-in sits first on the child's PATH and logs every docker CLI invocation; the legs assert zero container-creating invocations (run/create/start/up, including the compose and container groups) while the process-backend lease is live, after a malformed backend value, and at the terminal face. Container inspections (docker ps scans) are named, never hidden. A silent fallback to the docker payload would record a creating invocation and red the case, so the observation face still bites."
+    }
+  ]
+}

@@ -155,6 +155,97 @@ def tcp_open(port, timeout=2.0):
         return False
 
 
+# ---- the docker-CLI observation face (t261029-76) ---------------------------
+#
+# Host order 261027 retired docker from the test estate, so "ask the daemon
+# whether it holds containers" is a premise that can never hold again
+# (measured 2026-10-29, round run-01M63CEX71YDHNH56E612BX86C: two cases booked
+# ENV_FAIL on an unreachable daemon every round). The claim those legs carry is
+# "ZERO containers ran". That claim is observable WITHOUT a daemon, and the
+# observation sits closer to the code under test: a container cannot start
+# unless the product invokes the docker CLI. The case therefore puts a
+# recording stand-in named `docker` FIRST on the child's PATH: every
+# invocation is appended to a log, and the call answers "daemon unreachable"
+# (nonzero exit, empty stdout), which is what a docker-free host looks like to
+# every caller.
+#
+# Grey-box discipline: the assertion binds to the docker CLI's own argv
+# vocabulary (a public, documented interface), never to product internals. A
+# `docker ps`-family INSPECTION call is not a container: it is recorded and
+# named, never hidden; only the creating/starting family is a violation.
+
+#: docker CLI verbs that create or start a container (or a compose stack).
+DOCKER_CONTAINER_VERBS = frozenset(("run", "create", "start", "up"))
+
+
+def docker_shim(root):
+    """Install a recording `docker` stand-in under ``root``.
+
+    Returns ``(shim_dir, log_path)``. The shim appends one line per invocation
+    (argv verbatim) to ``log_path`` and exits 127 with empty stdout, i.e. it
+    behaves like a docker CLI with no reachable daemon. Callers put
+    ``shim_dir`` first on the child's PATH and hand ``log_path`` to
+    ``docker_calls``. Idempotent: an existing shim directory is rewritten, so
+    a second call in the same case re-arms the recorder with the same script.
+    """
+    shim_dir = os.path.join(root, "docker-shim")
+    log_path = os.path.join(root, "docker-calls.log")
+    os.makedirs(shim_dir, exist_ok=True)
+    script = (
+        "#!/bin/sh\n"
+        "# recording stand-in for the docker CLI (integration fixture; no daemon)\n"
+        "printf '%s\\n' \"$*\" >> \"$DOCKER_SHIM_LOG\"\n"
+        "exit 127\n")
+    path = os.path.join(shim_dir, "docker")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(script)
+    os.chmod(path, 0o755)
+    return shim_dir, log_path
+
+
+def shim_env(shim_dir, log_path, base=None):
+    """The child environment for a shimmed run: the shim first on PATH and the
+    recorder's log path declared. Everything else is inherited verbatim."""
+    env = dict(os.environ if base is None else base)
+    env["PATH"] = shim_dir + os.pathsep + (env.get("PATH") or "")
+    env["DOCKER_SHIM_LOG"] = log_path
+    return env
+
+
+def docker_calls(log_path):
+    """Every docker CLI invocation the shim recorded, verbatim, in order.
+    A missing log = zero invocations (the good case, not an error)."""
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as fh:
+            return [ln.strip() for ln in fh if ln.strip()]
+    except OSError:
+        return []
+
+
+def container_calls(calls):
+    """The subset of recorded invocations that could have created or started a
+    container: a docker call whose verb (or compose/container sub-verb) is in
+    DOCKER_CONTAINER_VERBS. Inspection calls (``ps``, ``info``, ``events``) are
+    NOT container-creating and are deliberately excluded here — the caller
+    names them separately, so they can never hide behind this filter."""
+    out = []
+    for line in calls:
+        # global flags may precede the verb; a verb is a bare word inside the
+        # leading token run (a docker group name is followed by its sub-verb).
+        tokens = [t for t in line.split() if not t.startswith("-")]
+        for i, tok in enumerate(tokens[:4]):
+            low = tok.lower()
+            if low in ("compose", "container"):
+                nxt = tokens[i + 1].lower() if len(tokens) > i + 1 else ""
+                if nxt in DOCKER_CONTAINER_VERBS:
+                    out.append(line)
+                    break
+            elif low in DOCKER_CONTAINER_VERBS:
+                out.append(line)
+                break
+    return out
+
+
 def can_bind(port):
     """端口空闲可绑定探测（占用/空闲两态由调用方自证防恒真）。"""
     s = socket.socket()

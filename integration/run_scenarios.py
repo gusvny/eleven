@@ -127,18 +127,10 @@ import threading
 import time
 
 SCENARIOS = [
-    # ---- t261029-38: the tmp-fixture sweep's daily cadence (ticket deliverables 1/2/3) ----
-    ("t261029-38-tmp-sweep-daily-tick",
-     "The tmp-fixture sweep ticks once a day on the daily inspection face and leaves a receipt that names the leaker with an owner (ticket t261029-38; grey-box L3, the REAL cadence CLI as a subprocess over a private temp root and a private state dir, the REAL sweep tool as its child, a REAL live process for the holder guard, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A face selection - only the daily inspection shape ticks; a lane round (source=lane:<ticket>, owner=gate, known-red=1 - the exact per-ticket composition), a manual run, a nested round (depth 2), a narrowed round and a disabled config are each a named exit-0 inert with NO state write and NO delete, so a per-ticket gate can never be red by construction; B the real-face tick in report mode writes the receipt pair, deletes nothing, and its header names mode, the absolute root, the backlog and the delta plus the top leaker prefix WITH its repo, while its sections name the sister repo (project-content, never attributed to this repo), the cross-repo project-vision family by name and prefix, the excluded families with their owner and the uncovered families with an explicit unknown owner; the live open-fd holder is named and its process stays alive; a forced second tick carries the count delta (the KI-01M506 bounded-growth face) and a plain second tick is the named due-window skip; status/report are readable reader faces; C apply mode routes BOTH guards end to end - an aged unheld whitelisted dir is reclaimed, a fresh dir survives, a dir held open by a live process (cwd elsewhere) survives and is named, the holder is never killed (the runner never passes --kill-carriers), the foreign/excluded families survive (counted, never swept, deliverable 3), and a tick that overlaps a held state-dir lock is a named exit-0 lock-held skip with no second receipt and no delete (the scheduler's two-ticks-at-once surface), proven by ticking again after the holder stops; D the config inputs fail closed and named - corrupt config, unknown mode and an age below the tool floor exit 8, an unusable state dir exits 5, none deletes; E THE PRODUCTION FACE (acceptance item 1) - on the DAILY INSPECTION ROUND ONLY the scheduled shape ticks the REAL host temp root with the REAL state dir (~/.sandbar/tmp-sweep) and NO mode flag, so the host's `enable --mode apply` governs (report keeps, apply reclaims behind the same two guards): the periodic receipt exists outside any throwaway box: its header names the real root, the backlog and the delta word, its sections name the top leaker family with its repo and the cross-repo project-vision family by prefix and scenario files, the receipt's mode is the host-config mode (report asserts swept 0; apply asserts the age gate >= 1 h and that --kill-carriers was never passed), exactly ONE receipt is written per scheduled round (never a forced second tick: a forced tick would replace the reader's period delta with a tick-to-tick number and halve the history, and a source lock refuses it), the reader's delta is the period delta against the previous scheduled receipt or a named baseline on day one, the production history log gains this round's row, a skipped tick is a named N/A and never a stale receipt read as proof; any other round prints one named N/A line and writes nothing, so a per-ticket gate never touches the production state dir; an unwritable state dir is ENV_FAIL, never a silent pass; C proves the config governs in both directions on private boxes (report keeps, apply deletes) and a source lock refuses any tick call that passes --mode. Intent split (no duplication): the sweep tool's own CLI safety contract and the open-fd holder case belong to t261002-13-tmp-backlog-sweep-safety; the watermark alarm owner receipt to t261002-13-tmp-alarm-owner-receipt; producer zero residue to t261002-13-tmp-producer-zero-residue; the pure runner faces (round_shape/due/staleness/delta math/malformed state/the full M-table) to the developer L1 battery integration/tests/test_t261029_38_tmp_sweep_receipt.py; THIS entry owns the cadence CLI as a real process. Pre-implement missing runner = FAIL named (TDD signal); green required at the integration gate/merge. lsof or pgrep missing = ENV_FAIL exit 2. tier: the cadence journey no single-component contract can express (face selection, receipt attribution, guard routing, exit table); cost: seconds (three sweep subprocesses); budget: 300s",
-     "python3 integration/t261029-38/sc_tmp_sweep_daily_tick.py", "ro", "serial"),
-    # ---- t261029-38: the cadence's pure faces (the L1 battery the entry above cites) ----
-    ("t261029-38-tmp-sweep-receipt-math",
-     "The cadence receipt's own math, attribution and malformed-input matrix (ticket t261029-38; pure stdlib, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233, never reads the host temp root — KI-136): the round rule (only source=inspection ticks; lane/manual/depth>=2/narrowed are named inert) with a SOURCE LOCK against the engine's injection site so an engine change reds here instead of silently killing the cadence; the argv shape (no --kill-carriers, no --prefix, --apply only in apply mode, age gate explicit) and the budget clamp (10% of the runner budget, 570 s at 5700); the due window and the 30 h staleness bound with the baseline rule; the full M-table (M1-M6 config refusals named, M7/M8 torn state named with the due gate falling back to the newest receipt, M9-M11 sweep output untrusted, M12 malformed entry names, M13/M14 lsof rows outside the root and prefix-sharing siblings, M17 unwritable state); the debit/credit of report mode (0 swept, would-sweep kept apart); the delta rules (mode/root change and unreadable previous force a baseline, growth flag); the owner table (every whitelist prefix resolves, 33 derived + 22 override + 1 external, sister repo never attributed to this repo, drift lock against the engine TMP_FIXTURE_OWNERS); foreign prefixes refused in both directions and never whitelisted; count-only skipping the probe; the bounded batch stopping cleanly with remaining counts. Intent split (no duplication): the sweep tool's own CLI safety contract is t261002-13-tmp-backlog-sweep-safety; the cadence CLI as a real process (face inertness, receipt text, guard routing, config exit codes) is t261029-38-tmp-sweep-daily-tick; THIS entry owns the pure faces and the malformed-input matrix. tier: the receipt contract and the acceptance's malformed-input table, expressible only as a pure-face battery; cost: seconds (three real sweep subprocesses for the CLI-shaped rows)",
-     "python3 integration/tests/test_t261029_38_tmp_sweep_receipt.py", "ro", "serial"),
-    # ---- t261029-18: a multi-repo lane root tree is on lane/<id>-root ----
-    ("t261029-18-lane-branch-root",
-     "A multi-repo lane's ROOT tree is on lane/<id>-root while the gate hands the placeholder lane/<id>: the file-level blast radius must stop degrading to a full run and the degrade must be readable (ticket t261029-18; incident = project-vision multi-repo tickets timed out in merge_check/verify_lane because git merge-base main lane/<ticket> could not resolve the placeholder, changed_files returned an error, and every round ran the whole suite; grey-box L2, the REAL agent_activities.changed_files and lane_head_sha activities plus the REAL shared.changed_files_blast_radius and shared.targeted_rerun_plan decision faces over REAL git multi-repo lane fixtures - a root worktree on lane/<id>-root, a member worktree on lane/<id>-<member>, and the on-disk repo_worktrees.json the engine writes - offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A the incident shape returns the committed and dirty files of every tree (member paths repo-prefixed) with no error, and the decision narrows instead of the full-run sentinel; B non-vacuity - the placeholder really does not resolve on that lane while the root-tree twin does, and the pre-fix failure input still rides the sentinel; C a multi-repo lane whose manifest is gone must FAIL CLOSED - the resolved root-tree twin is itself the evidence that the lane's root branch is lane/<id>-root, so the root list alone is not the lane's change set (a manifest-free single-repo lane keeps returning its own list, as the control) - and the ordinary path emits one scope line per tree naming the scope and the resolved branch (the ticket's gate-log requirement); D an unresolvable name, a corrupt manifest and a missing member tree each give files=[] plus a named error and the sentinel, and never raise (accepted plan A4); E a member path whose tail is a shared face (a member-repo verify.yaml) reads shared, so a prefixed member path cannot silently narrow the round; F lane_head_sha resolves the root-tree tip on the same real lane (the merge gate's green-run face can be recorded again) and keeps its fail-closed shape for an unresolvable name. tier: the real-git multi-repo lane shape and the composed collect-then-decide seam, which no single component's stub contract can express (the unit tier bans real git). cost: seconds. Why L1 cannot carry it: the unit tier bans real git (server/engine/tests/conftest.py) and this property IS git ref resolution over the assembled lane shape. Why not L3: the workflow arm needs a real worker and Temporal (minutes) and would re-run the same activity; the one link only the assembly holds (the gate handing meta.branch down) is pinned by an engine unit leg. The fixture builder is the shared integration/t260921-09/lib_lane_fixture.py, extended in place for the root-tree entry (no third builder). Intent split: the candidate truth tables, the failure-message matrix, the wall-clock leg and the naming lock belong to developer L1 (server/engine/tests/test_t261029_18_lane_branch_root.py); THIS entry uniquely owns the real-git lane shapes and the composed decision. Anchor: behaviour in integration/test_anchors.json. Accepted plan rev2 contract: ChangedFilesResult.resolved carries '<scope>:<branch>'. Any future red on this face fails the round; git or the engine venv missing = ENV_FAIL exit 2",
-     "sh integration/py_interp.sh integration/t261029-18/sc_t261029_18_lane_branch_root.py", "ro"),
+    # ---- t261029-76: a retired premise is excluded and NAMED, never judged silently ----
+    ("sc_retired_premise_round_face",
+     "A round EXCLUDES an entry whose premise was retired and NAMES it; a live premise that fails still books ENV_FAIL and still reds the round (ticket t261029-76, incident = host order 261027 retired docker while two line-round cases still demanded a daemon, so every round booked two env_fail entries and the red froze the develop-buffer line on a premise that can never hold again; measured 2026-10-29 on round run-01M63CEX71YDHNH56E612BX86C ran=688 pass=685 fail=1 env_fail=2, freeze frz-01M63HN38C3CFFY5M8WE8H8FAR; grey-box L3, the REAL run_scenarios.py round driven over stub registries plus the REAL line_round_runner.py over a stub suite and a real git fixture, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233/8233; every nested round writes only inside its own temp ledger/lease/projects roots): S the shipped declaration and roster agree - integration/retired-premises.json parses, every excluded entry is STILL listed in the registry (no case disappears), each exclusion names a declared premise with its retirement order and a reason, and both measured entries carry a disposition (t260921-06-batch-ns-isolation EXCLUDED, t261027-11-stage-process-backend-zero-docker RE-POINTED); X exclusion BY CONSTRUCTION with a STUB premise - a stub entry under a retired stub premise neither runs nor books anything (no PASS, no ENV_FAIL, out of the expected roster count), it is NAMED on the receipt with premise + retirement order + reason, and the round is GREEN under BOTH the engine's run_verdict and the face's stricter rule; N the NEGATIVE BRANCH BITES - the same construction with a LIVE premise and a failing environment leg books ENV_FAIL exactly as today (not_checked=1, the name in env_red_names) and the round is RED under both rules (no blanket 'env_fail does not count'); V the two decisions keep two NAMES - the retired-premise line carries none of the pool-skip vocabulary and a pool-excluded round prints no retired-premise line; R the RECEIPT names the exclusion end to end - the real runner relays it onto the run header and the terminal face.json, names it on stderr, and a round whose cases carry a live env_fail still reds its face; D the re-pointed observation face has teeth - the fixture's recording `docker` stand-in records real invocations, flags the container-creating family and never calls an inspection a container. Intent split: the loader/decision purity (schema truth table, malformed data, select/line shaping) belongs to developer L1; the round's own roster arithmetic for known-red/pool/own calibers stays with their entries (t260930-01, t260920-01/t261025-02, t260913-03) and is not re-asserted here; THIS entry uniquely owns 'a retired premise is excluded and named, a live premise still bites, and the two decisions are distinguishable on the receipt'. Declaration data missing or unreadable = FAIL named (the guard exists to catch exactly that); git absent for the receipt leg = ENV_FAIL exit 2",
+     "sh integration/py_interp.sh integration/t261029-76/sc_retired_premise_round_face.py", "ro"),
     # ---- t261026-11: the degrade matrix on every read face ----
     ("t261026-11-inspection-coverage-degrade",
      "The inspection-coverage read face must SPEAK on bad data and must render the producer's own payload (ticket t261026-11, host ruling 261026: feed a read face the five payload shapes - missing / unreadable / empty / garbage / the producer's REAL payload - and one rule: a placeholder is allowed only with a reason a person can act on, and the real payload must render what the face promises; grey-box L3, the REAL buildCoverageCore + recordsToAttempts over the archive payload chain, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): the degrade matrix (integration/lib_degrade_matrix.mjs) runs all five shapes - each broken shape must no-throw AND name a reason (the copy words, not a dash), and the real archive payload must render period-x-instance rows with their produced and unreadable copy words. Registered GREEN before the line (ran=12 pass=12); any future red on this face fails the round. Intent split: this entry uniquely owns the coverage face's degrade contract; the five-state copy truth table belongs to t261009-49 (L1/L3 precedent); the funnel/union migration of this face belongs to this ticket's implement stage and may not change the rendered words. matrix lib missing or face module unimportable = FAIL named; node missing = ENV_FAIL exit 2. fast-catch: the coverage read face degrading to a dash or a silent zero on bad archive data (the 261026 host-report class: READER disagrees with WRITER) is caught here in offline seconds instead of at the next human look at the panel",
@@ -906,8 +898,14 @@ SCENARIOS = [
     # backend (the migration itself lands in the developer stage); this entry
     # guards the migration's own user-visible outcome - zero docker face, no
     # silent fallback on a malformed backend value, dual-face zero residue.
+    # RE-POINTED (t261029-76): the "zero containers" claim is observed without a
+    # docker daemon - a recording `docker` stand-in first on the child's PATH
+    # logs every docker CLI invocation and the legs assert zero
+    # container-creating invocations (run/create/start/up). The retired-daemon
+    # premise booked ENV_FAIL every round; the case still runs and still bites.
+    # Disposition recorded in integration/retired-premises.json.
     ("t261027-11-stage-process-backend-zero-docker",
-     "stage_docker under SANDBAR_STAGE_BACKEND=process creates ZERO docker containers and reclaims every host process (ticket t261027-11, host order 261027 'retire docker from the test estate a few cases at a time'; grey-box L3; owns the migration's user-visible outcome while the five migrated t260910-12 cases keep owning the lease/queue/idempotence contracts and t261022-10-process-bench-docker-free keeps owning the bare bench lifecycle - no intent-level overlap): L0 a process-backend ensure succeeds with the lease ports in the band window [21000,25000) minus the forbidden set and each port TCP-live, consulting no docker precondition; L1 the docker face stays empty - `docker ps -a` filtered by the project's compose label returns zero containers while the lease is live, and an unreachable docker daemon makes this leg ENV_FAIL (named, never a silent green); L2 a malformed SANDBAR_STAGE_BACKEND value exits non-zero with an error naming the value and creates no container (a silent fallback to the docker payload would re-create the dependency this ticket retires); L3 down leaves zero residue on both faces read from the outside - down rc=0, a second down is idempotent, every leased port is re-bindable (kernel evidence, not the stopped process's word), and no hold/CLI process for the project survives (pgrep). Red before the implement stage lands is the expected TDD signal; must be green at arbitrate/merge. Offline, seconds, no browser, never touches 3099/7233/8233; tier: the docker-retirement seam (stage_docker backend dispatch + dual-face residue) that no single-component contract can express; cost: seconds)",
+     "stage_docker under SANDBAR_STAGE_BACKEND=process creates ZERO docker containers and reclaims every host process (ticket t261027-11, host order 261027 'retire docker from the test estate a few cases at a time'; grey-box L3; owns the migration's user-visible outcome while the five migrated t260910-12 cases keep owning the lease/queue/idempotence contracts and t261022-10-process-bench-docker-free keeps owning the bare bench lifecycle - no intent-level overlap): L0 a process-backend ensure succeeds with the lease ports in the band window [21000,25000) minus the forbidden set and each port TCP-live; L1 ZERO container-creating docker CLI invocations while the lease is live - observed WITHOUT a daemon (a recording `docker` stand-in first on the child's PATH logs every invocation; run/create/start/up, including the compose and container groups, are the violation family; docker ps-style inspections are recorded and named, never hidden); L2 a malformed SANDBAR_STAGE_BACKEND value exits non-zero with an error naming the value and records no container-creating invocation (a silent fallback to the docker payload would re-create the dependency this ticket retires) L3 down leaves zero residue on both faces read from the outside - down rc=0, a second down is idempotent, every leased port is re-bindable (kernel evidence, not the stopped process's word), no hold/CLI process for the project survives (pgrep), and the terminal docker face still shows zero container-creating invocations. Re-pointed 2026-10-29 (t261029-76): the daemon-query legs booked ENV_FAIL on every round of every tree after docker was retired (round run-01M63CEX71YDHNH56E612BX86C); the claim is unchanged, the observation face moved to the product's own call stream. Offline, seconds, no browser, no docker daemon, never touches 3099/7233/8233; tier: the docker-retirement seam (stage_docker backend dispatch + dual-face residue) that no single-component contract can express; cost: seconds)",
      "python3 integration/t261027-11/sc_stage_process_backend_zero_docker.py", "engine"),
 
     # ---- t261006-08: worker shutdown reclaims its child process tree (KI-210) ----
@@ -1867,9 +1865,6 @@ SCENARIOS = [
     ("t260903-03-paths-spawn-seam",
      "路径契约化端到端（跨组件：注册条目×路径解析×spawn 组装×patch 产物，观测=cmd --patch 链与 patch 文件内容）：声明命中用声明值（roles patch 指声明目录、模型来自声明表，声明优先于现行约定）；未声明多态（无 paths 节/条目不存在/key 空/key 非法含穿越形状）角色 patch 走现行约定（roles 语义不变）而模型面无表=不打 model patch+引擎面点名 state=decl_missing（t260914-05 兜底分支退役，禁静默回落仓内表）；锚点在内容缺走软语义不红（t260903-03 ①d 用户旅程）",
      "sh integration/py_interp.sh integration/t260903-03/sc_paths_spawn_seam.py"),
-    ("t261028-54-role-preset-fallback",
-     "角色定义逐文件回落+缺项留痕（t261028-54，灰盒 L2，直调引擎 spawn 唯一准备入口，观测=cmd --patch 链、泳道内物化副本、[role_preset] 日志行与 role_preset_<tag>.json 留痕；离线秒级、零 docker、零 Temporal、不碰 3099）：A 声明 roles_dir 两处皆缺→不打角色 patch+state=declared_missing+一条告警点名角色与两条绝对候选；B 声明缺+引擎库命中→恰一份物化副本在 agent cwd 内、与库文件逐字节相等、宿主库路径绝不进 cmd（容器不可见）、无 .part 残留、state=engine；C 未声明项目（project-vision/project-content 形状）→不打 patch、无 [role_preset] 告警、undeclared_missing/declared=false（机制休眠、行为冻结）；D 项目文件优先于引擎库同名文件（state=project、不物化）；E SANDBAR_ROLE_PRESET_FALLBACK=0→库路径关、fallback_enabled=false、仍响亮；F 畸形角色名（穿越/斜杠/前导点/换行+伪造标记/65 字符）→不读文件不阻断、state=invalid_role、单行转义不可伪造；G 64 字符边界=合法形状→declared_missing 而非 invalid_role；H 内置人设角色 inspection→state=builtin、安静、不打 patch。实现落地前红=预期（TDD 信号），arbitrate/merge 期必须绿；引擎模块不可导入=ENV_FAIL exit 2",
-     "sh integration/py_interp.sh integration/t261028-54/sc_t261028_54_role_preset_fallback.py", "ro"),
     ("t260903-03-paths-failclosed-red",
      "路径契约化故障面对抗（spawn 缝隙红传导，用户视角=红工单点名文件而非静默猜着跑）：条目 project.yaml 损坏（现行约定在位也必须红，不静默回落）、无表三态（t260914-05：指向缺失文件/未声明/目录当表=spawn 不红+无模型 patch+引擎面点名 state+指纹，三态互异不静默回落仓内表）、roles_dir 锚点缺失与类型错位仍红（roles 契约未放宽）、声明值畸形代表例（未知键/绝对路径/../穿越）一律红且文案点名键或解析后路径（t260903-03 ①d 三态）",
      "sh integration/py_interp.sh integration/t260903-03/sc_paths_failclosed_red.py", "ro"),
@@ -3093,7 +3088,7 @@ SCENARIOS = [
      "批台 runner 生命周期与真全轮 churn 形态（t260921-06，灰盒 L3 真 docker）：宿主令验收①④的执法面——含台消费者的轮恰预起 1 个批台（batch-* 工程容器/卷/网各恰 1），窗口内本泳道新现其余 compose 工程名全部∈例外清单形（清单外即红=要求4 执法半边；窗口差分按 compose working_dir label 限定本泳道防并行泳道假红）；消费缝注入面（消费者子进程 env 拿 SANDBAR_STAGE_BATCH=批台名、两消费者各自 ns 同指一个批台地址）；每票集测段形态（exclude engine,exclusive）零预起零注入（最高频路径零回归）；轮终与 SIGTERM 信号路径批台拆台零残留（拆台纪律不因批共享改变）；docker 缺席=整轮 exit 2 快速环境红不烧整套。假表注入（SCENARIOS 覆写+run_inner_runner 子进程直调 main()，既有手法不经单飞锁），条目=真消费缝探针。与 batch-ns-isolation 不同面（彼守服务端 ns 隔离语义，本条守 runner 资产计数与生命周期）；与 t260910-12/t260912-02/t260904-19 族不同 intent（彼守单台机械本体，批台=普通租约复用其判据不重复）。实现落地前红属预期（TDD 验收门），arbitrate/merge 期必须绿；docker 缺席=ENV_FAIL exit 2",
      "python3 -B integration/t260921-06/sc_batch_runner_form.py", "engine"),
     ("t260921-06-batch-ns-isolation",
-     "批内命名空间隔离与反用例（t260921-06，灰盒 L3 真批台+temporal CLI）：宿主令验收②③+要求2/5——同批两并发 ns-acquire A/B ⇒ A 的自定义 SA 与 workflow 不出现在 B 的命名空间（服务端作用域语义非约定）；反用例段=A 搞坏自己 ns（优先 delete，CLI 不支持则污染形态降级并留痕）⇒ B 的 SA/workflow 面完好、批台容器身份不变；不假绿段=批台不在位 ns-acquire=ENV_FAIL exit 2 点名（绝不静默回落「没跑」）、ns-drop 幂等（NotFound=ok）且释放后可重申请。双模式看守：外层真全轮注入批 env 则直消费外层批台（生产形态零自建），独立跑自管批台 finally 拆台零残留。与 batch-runner-form 不同面（彼数 docker 资产/守生命周期，本条守 temporal 服务端隔离语义与反用例）；register_namespace 幂等单面归 stage_docker selftest/L1 不重复。实现落地前红属预期（TDD 验收门），arbitrate/merge 期必须绿；docker/temporal CLI 缺席=ENV_FAIL exit 2 — tier: batch-stage namespace isolation over a real batch bench; cost: seconds",
+     "批内命名空间隔离与反用例（t260921-06，灰盒 L3 真批台+temporal CLI）：宿主令验收②③+要求2/5——同批两并发 ns-acquire A/B ⇒ A 的自定义 SA 与 workflow 不出现在 B 的命名空间（服务端作用域语义非约定）；反用例段=A 搞坏自己 ns（优先 delete，CLI 不支持则污染形态降级并留痕）⇒ B 的 SA/workflow 面完好、批台容器身份不变；不假绿段=批台不在位 ns-acquire=ENV_FAIL exit 2 点名（绝不静默回落「没跑」）、ns-drop 幂等（NotFound=ok）且释放后可重申请。双模式看守：外层真全轮注入批 env 则直消费外层批台（生产形态零自建），独立跑自管批台 finally 拆台零残留。与 batch-runner-form 不同面（彼数 docker 资产/守生命周期，本条守 temporal 服务端隔离语义与反用例）；register_namespace 幂等单面归 stage_docker selftest/L1 不重复。实现落地前红属预期（TDD 验收门），arbitrate/merge 期必须绿；docker/temporal CLI 缺席=ENV_FAIL exit 2 — RETIRED PREMISE (t261029-76): excluded from every round by integration/retired-premises.json (premise=docker, retired 261027; its batch-bench legs can never be observed again); listed, never judged, named on the round receipt — tier: batch-stage namespace isolation over a real batch bench; cost: seconds",
      "python3 -B integration/t260921-06/sc_batch_ns_isolation.py", "exclusive"),
     ("t260921-06-batch-seam-regression",
      "消费缝迁移回归（t260921-06，灰盒 L2 组件契约）：「批级共享不得改变任何判定口径」的缝面执法——lib_gate.require_stage（约 30 场景唯一消费缝）env 缺席=现行行为逐字（自起独立台、sa_registered 判定、stage_down 拆台零残留=直跑/例外场景零回归锚），env 在场=批模式（零新建台、ns=申请值、地址=批台端口、stage_down 绝不拆批台）；with_stage.sh 壳面桩测（cwd 桩 stage_docker 记录子命令序列）：批模式=ns-acquire→跑→ns-drop 绝不 ensure/down、env 缺席=ensure→跑→down 现行逐字、ns-acquire 红=壳 exit 2 透传不吞不改；批台护栏=--kind batch 与 --keep 互斥 usage 拒收（「不得退化整机共享」CLI 闸）。与 batch-runner-form 不同面（彼守 runner 预起/收口/窗口形态，本条守缝与壳调用序契约）；与 t260904-19 CLI 契约族不同 intent（彼守单台 up/ensure/down 本体，本条只守批模式新增分叉）。真台段 docker 缺席=环境红（桩面段照跑）。实现落地前红属预期（TDD 验收门），arbitrate/merge 期必须绿",
@@ -6762,9 +6757,10 @@ def pool_of(entry):
     return opt if (opt and opt != "serial") else "main"
 
 
-def expected_entries(scenarios, excluded_pools, known_red_skipped, own=()):
+def expected_entries(scenarios, excluded_pools, known_red_skipped, own=(),
+                     retired=()):
     """Runnable entry count for the round (pure face, 261022; t261025-02 adds
-    the own caliber).
+    the own caliber; t261029-76 adds the retired-premise caliber).
 
     Caliber: full table − entries in an excluded pool that are NOT the ticket's
     own − entries in the known-red roster that are NOT in an excluded pool.
@@ -6782,15 +6778,25 @@ def expected_entries(scenarios, excluded_pools, known_red_skipped, own=()):
     own scenario lives in engine/exclusive. ``own`` carries the round's
     declared own names; the default empty set = callers not touching the own
     face keep the legacy value byte-identically. No pool exclusion = legacy
-    value verbatim; the return never goes negative."""
+    value verbatim; the return never goes negative.
+
+    ``retired`` (t261029-76) is the round's declared retired-premise exclusion
+    set (integration/retired-premises.json, by name): those entries are not
+    judged by any round, so they are not part of the round's roster either -
+    leaving them inside expected would self-red the ran+reused==expected
+    completeness invariant of a green round. The default empty set keeps every
+    existing caller byte-identical."""
     excluded = set(excluded_pools or ())
     skipped = set(known_red_skipped or ())
     own_set = {str(n).strip() for n in (own or ()) if str(n).strip()}
+    retired_set = {str(n).strip() for n in (retired or ()) if str(n).strip()}
     runnable = [e for e in scenarios
                 if not (excluded and pool_of(e) in excluded
                         and e[0] not in own_set)]
     if skipped:
         runnable = [e for e in runnable if e[0] not in skipped]
+    if retired_set:
+        runnable = [e for e in runnable if e[0] not in retired_set]
     return max(0, len(runnable))
 
 
@@ -8118,6 +8124,66 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
               % (len(only_names), FAST_SET_BUDGET_MIN), flush=True)
         print("FAST_SET_BUDGET %s" % FAST_SET_BUDGET_NOTE, flush=True)
     registry = SCENARIOS
+    # ---- t261029-76: retired-premise exclusions (explicit data, by name) ----
+    # A premise retired by a host order (docker, order 261027) can never hold
+    # again, so a case resting on it can never pass: judging it booked an
+    # environment failure on every round of every tree, and the red froze the
+    # line (measured 2026-10-29, round run-01M63CEX71YDHNH56E612BX86C).
+    # The exclusion is DECLARED data (integration/retired-premises.json), never
+    # a heuristic on an evidence string; it is NAMED on the receipt with its
+    # premise and reason; and it is a different decision from a pool skip, so it
+    # carries different vocabulary (`RETIRED_PREMISE` vs `跳过`/`本轮跳过池`).
+    # Fail-closed direction: unreadable/malformed data excludes NOTHING (the
+    # pre-ticket behaviour, which reds a real failure) and says so by name.
+    # Nothing here touches a premise that is still live: those entries keep
+    # exactly today's behaviour (a real environment failure still books
+    # ENV_FAIL and still reds the round).
+    retired_records, retired_err = [], None
+    try:
+        _rs_here = os.path.dirname(os.path.abspath(__file__))
+        if _rs_here not in sys.path:
+            sys.path.insert(0, _rs_here)
+        import lib_retired_premise as _retired_mod
+        _retired_data, retired_err = _retired_mod.load()
+        if _retired_data is not None:
+            retired_records = _retired_mod.exclusions(_retired_data)
+    except Exception as _re:  # noqa: BLE001 — a broken data file never hides a red
+        retired_err = "module_unreadable:%s: %s" % (type(_re).__name__, _re)
+    if retired_err:
+        # fail-closed: exclude nothing, name the reason, keep judging.
+        print("INTEG_RETIRED_PREMISE_WARN 退役前提数据不可读（%s）——本轮**不**排除"
+              "任何条目（照旧判红）；数据面须修复" % retired_err,
+              file=sys.stderr, flush=True)
+    _in_registry = {e[0] for e in SCENARIOS}
+    _ghost = sorted(r["name"] for r in retired_records
+                    if r["name"] not in _in_registry)
+    if _ghost:
+        # "no case may simply disappear": a declared exclusion whose entry is
+        # gone from the registry is the disappearance itself, named here (the
+        # integration case sc_retired_premise_round_face reds on it).
+        print("INTEG_RETIRED_PREMISE_WARN 声明条目不在册：%s——登记的退役前提条目"
+              "必须仍列在注册表（条目不许消失）" % ",".join(_ghost),
+              file=sys.stderr, flush=True)
+    # The receipt names what THIS round excluded: a declared entry that is not
+    # in the registry of this run cannot have been excluded by it (the ghost is
+    # named above). Keeping the two apart keeps the receipt honest when a caller
+    # runs a different registry (fixture/injected) than the repository's own.
+    retired_round = [r for r in retired_records if r["name"] in _in_registry]
+    if retired_round:
+        print(_retired_mod.banner(retired_round), flush=True)
+        for _r in retired_round:
+            print("  " + _retired_mod.line(_r), flush=True)
+    retired_set = {r["name"] for r in retired_round}
+    _own_retired = sorted(n for n in own_set if n in retired_set)
+    if _own_retired:
+        # a ticket's own scenario is its proof obligation: a retired premise
+        # cannot silently swallow it (fail-closed, nothing runs).
+        print("REFUSED [__own_set__] 本票声明的自有场景属已退役前提：%s——一条都未跑"
+              "（自有场景是本票的举证义务，不能由退役前提摘走；请换用现役观测面）"
+              % ",".join(_own_retired), flush=True)
+        print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
+        return 2
+    _dropped_by_retired = {}
     if only_names:
         by_name = {e[0]: e for e in SCENARIOS}
         missing_only = [n for n in only_names if n not in by_name]
@@ -8144,39 +8210,20 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
                 {"ran": 0, "missing": missing_only,
                  "error": "点名名单含不在册条目"}, ensure_ascii=False), flush=True)
             return 2
-        # t261029-18 (arbitration rounds 8-16): the documented rule is "a
-        # ticket's own declared scenarios are always in its gate run, whatever
-        # pool they live in". The engine's caliber also unions them
-        # (dev_lane 54308d93+), but a lane's serving worker may still be running
-        # pre-union code, so the executor guarantees the rule itself: append
-        # every declared own name the pointer omitted (dedupe, order kept). A
-        # round that already lists its own names is unaffected (no-op), and a
-        # declared own name absent from the registry keeps the fail-closed
-        # refusal family (named, nothing runs, no side effects).
-        if own_set:
-            _reg_names = {e[0] for e in SCENARIOS}
-            _own_absent = [n for n in own_names if n not in _reg_names]
-            if _own_absent:
-                print("REFUSED [__own_set__] declared own scenario(s) absent from "
-                      "the registry: %s - nothing ran (the own proof is this "
-                      "ticket's obligation; absence = supply bug, fail-closed)"
-                      % ",".join(_own_absent), flush=True)
-                print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)",
-                      flush=True)
-                return 2
-            _own_injected = [n for n in own_names if n not in only_names]
-            if _own_injected:
-                only_names = list(only_names) + _own_injected
-                print("INTEG_OWN_INJECT own scenario(s) joined the pointed face: "
-                      "%d (%s) - the executor guarantees the own proof runs "
-                      "(t261029-18)" % (len(_own_injected),
-                                        ",".join(_own_injected)), flush=True)
         # t261024-40：点名面的池排除逐条归因；自有场景（OWN）**不摘**——在被排除
         # 池里也照排进它自己的池（便宜的池=调度属性，不是少跑理由），并具名
         # own_kept。非自有点名名保持逐字旧语义（落被排除池=不跑，只记归因面）。
         registry = []
         for _n in only_names:
             _e = by_name[_n]
+            if _n in retired_set:
+                # t261029-76: a pointed retired-premise entry is STILL not
+                # judged (the premise is retired for every round, not only for
+                # the automatic one). It is named above and attributed here, so
+                # a `--only` reproduction of such a case says EXCLUDED instead
+                # of booking a fresh environment failure.
+                _dropped_by_retired[_n] = "retired_premise"
+                continue
             if excluded and pool_of(_e) in excluded:
                 if _n in own_set:
                     own_kept.append(_n)
@@ -8185,12 +8232,39 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
                     continue
             registry.append(_e)
         _skipped_only = len(_dropped_by_pool)
-        print("本轮只跑点名 %d 条（点名=%s%s）"
+        print("本轮只跑点名 %d 条（点名=%s%s%s）"
               % (len(registry), ",".join(only_names),
-                 ("；其中 %d 条属被排除池未跑" % _skipped_only) if _skipped_only else ""),
+                 ("；其中 %d 条属被排除池未跑" % _skipped_only) if _skipped_only else "",
+                 ("；其中 %d 条属已退役前提未判" % len(_dropped_by_retired))
+                 if _dropped_by_retired else ""),
               flush=True)
         for e in registry:
             print("  点名 [%s]（池=%s）" % (e[0], pool_of(e)), flush=True)
+        if _dropped_by_retired and not registry:
+            # Every pointed name is excluded by a retired premise: nothing is
+            # judged, nothing is red, and this is NOT the "narrowed face empty"
+            # case (that one widens to the full registry - which would run a
+            # whole round for a diagnostic reproduction). Named and bounded.
+            print("INTEG_RETIRED_ONLY 点名面 %d 条全部属已退役前提（%s）——一条都未跑，"
+                  "本轮不判红也不判绿（退役前提不可满足；这些条目不提供本轮证据）"
+                  % (len(_dropped_by_retired), ",".join(sorted(_dropped_by_retired))),
+                  flush=True)
+            print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)", flush=True)
+            try:
+                print("INTEG_SUMMARY " + json.dumps({
+                    "ran": 0, "pass": 0, "fail": 0, "not_checked": 0,
+                    "expected": 0, "reused": 0, "wall_s": 0.0,
+                    "retired_premise_excluded": retired_round,
+                    "retired_premise_count": len(retired_round),
+                    "only_scenarios": list(only_names)}, ensure_ascii=False),
+                    flush=True)
+            except (TypeError, ValueError):
+                pass
+            return 0
+    else:
+        # The full round: the retired-premise entries are not judged by it.
+        if retired_set:
+            registry = [e for e in registry if e[0] not in retired_set]
     try:
         conc_width = max(1, int(os.environ.get("SANDBAR_POOL_CONC", "4")))
     except ValueError:
@@ -8249,7 +8323,8 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         # the fallback face carries the same own caliber as the pool split.
         registry = [e for e in SCENARIOS
                     if not (excluded and pool_of(e) in excluded
-                            and e[0] not in own_set)]
+                            and e[0] not in own_set)
+                    and e[0] not in retired_set]
         if own_set:
             _own_fallback = sorted(n for n in own_set
                                    if any(e[0] == n for e in registry))
@@ -8301,6 +8376,21 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
     expected = len(registry) if only_names \
         else expected_entries(SCENARIOS, excluded, known_red_skipped,
                               own=own_set)
+    # ---- t261029-76: the retired-premise caliber, as its own step ----
+    # The own-caliber call above is a CONTRACT text on the integration side:
+    # t261025-02's L1 lock pins those two lines verbatim (the rule that a gate's
+    # pool exclusion never drops the ticket's OWN scenario), so the retired
+    # caliber is NOT threaded into it. It rides the SAME pure face in its own
+    # step instead - one caliber, one function, no second subtraction rule. By
+    # the time this runs the retired names are already out of the judged roster
+    # (the full-round branch above); leaving them inside the expected count
+    # would self-red a green round's ran+reused==expected invariant.
+    # NOTE: the continuation indent below is pinned by this ticket's own L1
+    # source lock (integration/tests/test_t261022_expected_pool_knownred.py) -
+    # do not realign it.
+    if not only_names and retired_set:
+        expected = expected_entries(SCENARIOS, excluded, known_red_skipped,
+                              own=own_set, retired=retired_set)
     # ---- t260930-01 台账绿行复用（本段只**判定**；跳过发生在池切分处，见下）----
     # 前置检查一次性算出本轮复用名单；复用条目不进 pools/exclusives（既不跑也不计 ran），
     # expected 仍是本轮在册数，故不变式是 ran + reused == expected（汇总/闸两处同口径）。
@@ -8657,6 +8747,16 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
             _summary["known_red_names"] = list(known_red_skipped)
         if known_red_skipped:
             _summary["known_red_names"] = list(known_red_skipped)
+        # ---- t261029-76: the retired-premise exclusion rides the receipt ----
+        # Additive keys, always present when the data declares any exclusion:
+        # the records name the entry, the premise, the retirement order and the
+        # reason, so no consumer has to infer an exclusion from a count, and the
+        # key NAMES the decision (pool skips keep their own vocabulary/keys).
+        if retired_round:
+            _summary["retired_premise_excluded"] = [dict(r) for r in retired_round]
+            _summary["retired_premise_count"] = len(retired_round)
+        if _dropped_by_retired:
+            _summary["retired_premise_pointed_skipped"] = sorted(_dropped_by_retired)
         if excluded:
             _summary["excluded_pools"] = list(excluded)
             _summary["excluded_count"] = len(excluded_entries)
@@ -8761,6 +8861,11 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
             _report["excluded_count"] = len(excluded_entries)
             _report["known_red_skipped"] = len(known_red_skipped)
             _report["known_red_names"] = list(known_red_skipped)
+        if retired_round:
+            # t261029-76: the observation face of the same decision the summary
+            # carries (additive keys; absent when nothing is excluded).
+            _report["retired_premise_excluded"] = [dict(r) for r in retired_round]
+            _report["retired_premise_count"] = len(retired_round)
         if only_names:
             _report["only_scenarios"] = list(only_names)
             # t261024-40：点名面逐条归因（additive 观测键；缺省键形状=老报告零漂移）

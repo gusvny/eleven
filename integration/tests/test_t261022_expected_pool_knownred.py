@@ -67,6 +67,21 @@ class ExpectedCounts(unittest.TestCase):
         self.assertEqual(rs.expected_entries(MINI, ["engine"], ROSTER + ["ghost"]),
                          2)
 
+    def test_retired_premise_caliber_is_subtracted_once(self):
+        # t261029-76: an entry excluded because its premise was retired is not
+        # judged by any round, so it is not part of the round's roster either.
+        # The default (no declaration) keeps every existing value verbatim.
+        self.assertEqual(rs.expected_entries(MINI, [], [], retired=["a2"]), 4)
+        self.assertEqual(rs.expected_entries(MINI, [], ROSTER, retired=["a2"]), 2)
+        # a retired name that is ALSO in an excluded pool is deducted once
+        self.assertEqual(rs.expected_entries(MINI, ["engine"], [], retired=["c1"]),
+                         3)
+        # ghost retired names are harmless, and the result never goes negative
+        self.assertEqual(rs.expected_entries(MINI, [], [], retired=["ghost"]), 5)
+        self.assertEqual(
+            rs.expected_entries(MINI, [], [], retired=["a1", "a2", "b1", "c1",
+                                                       "c2"]), 0)
+
 
 class SourceLock(unittest.TestCase):
     """The runner must use the pure face, not an inline subtraction."""
@@ -77,8 +92,12 @@ class SourceLock(unittest.TestCase):
         # the declared own set into the same pure face (the expected caliber
         # must equal the pool-split caliber); the no-inline-subtraction lock
         # itself is unchanged.
+        # t261029-76: the retired-premise caliber threads through the SAME pure
+        # face (its exclusion records are the round's declared exclusion set);
+        # the no-inline-subtraction lock below is unchanged.
         self.assertIn("expected_entries(SCENARIOS, excluded, known_red_skipped,\n"
-                      "                              own=own_set)", src)
+                      "                              own=own_set, retired=retired_set)",
+                      src)
         self.assertNotIn(
             "len(SCENARIOS) - len(excluded_entries) - len(known_red_skipped)", src)
 
