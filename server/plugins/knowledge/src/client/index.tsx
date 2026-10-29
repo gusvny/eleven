@@ -7,7 +7,10 @@
  * conversationViews/uiConversation 零消费、零注册。
  *
  * 功能（工单 t260821-09 → t260821-10 M2/M3）：
- *   ① 列表按分类（design/content/ops/reference）/标签/状态过滤；
+ *   ① the list filters by category (the docs/index.json categories:
+ *      design/content/ops/reference/epics), tag and status; an epic row (the epics
+ *      category) renders its own schema's code/retired/summary, and a field its schema
+ *      does not have is an explicit 'n/a' — never a blank cell (t261029-49);
  *   ② 关键词检索（标题 + frontmatter tags）；
  *   ③ 读全文（点条目中栏内嵌 list→doc 两态切换）：markdown render（HTML，非 raw；表格/代码块
  *      高亮+复制/链接/列表），可切 raw 查看原文；头部「← 返回」按钮回到列表，筛选条件不丢；
@@ -38,6 +41,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { CLIENT_INJECT } from './inject-contract'
 import { renderMarkdown } from './markdown'
 import { splitCells } from '../shared/blocks'
+// t261029-49: the five-cell row projection (five-field pages vs the epic store schema).
+import { docRow } from '../shared/doc-row'
+import type { DocRow } from '../shared/doc-row'
 
 export const name = 'sandbar-knowledge/client'
 export const inject = CLIENT_INJECT
@@ -81,6 +87,7 @@ const CSS = `
 .kb-cat[data-cat=content]{background:#dafbe1;color:#116329;border-color:#7dd9a0}
 .kb-cat[data-cat=ops]{background:#fff8c5;color:#7d4e00;border-color:#eac54f}
 .kb-cat[data-cat=reference]{background:#fbefff;color:#6f42c1;border-color:#d3b9f0}
+.kb-cat[data-cat=epics]{background:#fff1e5;color:#bc4c00;border-color:#f5c9a8}
 .kb-tag{font-size:11px;color:#57606a;background:#f6f8fa;border:1px solid #e8ebef;border-radius:6px;
   padding:1px 6px;margin-right:4px}
 .kb-title-cell{font-weight:600;color:#0969da}
@@ -89,6 +96,12 @@ const CSS = `
 .kb-status[data-status=active]{background:#dafbe1;color:#116329}
 .kb-status[data-status=draft]{background:#fff8c5;color:#7d4e00}
 .kb-status[data-status=deprecated]{background:#ffebe9;color:#cf222e}
+.kb-status[data-status=retired]{background:#ffebe9;color:#cf222e}
+/* t261029-49: explicit 'n/a' cells (a field the row's schema does not have) — never the
+ * blank cell that reads as missing data. Muted but still 4.9:1 on white. */
+.kb-na{font-size:11px;color:#57606a;font-style:italic}
+.kb-code{font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#bc4c00;
+  background:#fff1e5;border:1px solid #f5c9a8;border-radius:6px;padding:0 6px;margin-left:6px}
 .kb-empty{font-size:12px;color:#57606a;padding:12px 0}
 .kb-back-btn{font:inherit;font-size:13px;padding:3px 12px;border-radius:6px;cursor:pointer;
   border:1px solid #d0d7de;background:#ffffff;color:#1f2328;transition:background .12s}
@@ -231,15 +244,22 @@ async function apiPost(path: string, body: unknown): Promise<any> {
 
 /* ---------------------------------------------------------------- 类型 */
 
+/** One docs/index.json row. The five keys are the knowledge-base frontmatter schema; an
+ *  epic row (category='epics') carries its own schema — code/retired/summary — so a
+ *  missing status/updated/tags is a legal shape, not missing data (t261029-49; the one
+ *  projection lives in ../shared/doc-row.ts). Malformed rows take the optional keys. */
 interface DocEntry {
   path: string
-  file: string
-  title: string
-  category: string
-  tags: string[]
-  status: string
-  updated: string
-  has_frontmatter: boolean
+  file?: string
+  title?: string
+  category?: string
+  tags?: string[]
+  status?: string
+  updated?: string
+  code?: string
+  retired?: boolean | string
+  summary?: string
+  has_frontmatter?: boolean
 }
 
 interface IndexData {
@@ -497,22 +517,24 @@ export function KnowledgeSection({ projectKey }: { projectKey?: string }) {
 
   const allTags = useMemo(() => {
     const s = new Set<string>()
-    for (const d of data?.docs ?? []) for (const t of d.tags) s.add(t)
+    for (const d of data?.docs ?? []) for (const t of (Array.isArray(d.tags) ? d.tags : [])) s.add(t)
     return [...s].sort()
   }, [data])
 
   const filtered = useMemo(() => {
     const q = kw.trim().toLowerCase()
     return (data?.docs ?? []).filter(d => {
+      const tags = Array.isArray(d.tags) ? d.tags : []
       if (filterCat !== '' && d.category !== filterCat) return false
-      if (filterTag !== '' && !d.tags.includes(filterTag)) return false
+      if (filterTag !== '' && !tags.includes(filterTag)) return false
       if (filterStatus !== '' && d.status !== filterStatus) return false
       if (q !== '') {
-        const hay = (d.title + ' ' + d.tags.join(' ')).toLowerCase()
+        const hay = `${d.title ?? ''} ${tags.join(' ')}`.toLowerCase()
         if (!hay.includes(q)) return false
       }
       return true
-    }).sort((a, b) => a.category.localeCompare(b.category) || a.path.localeCompare(b.path))
+    }).sort((a, b) => String(a.category ?? '').localeCompare(String(b.category ?? ''))
+      || a.path.localeCompare(b.path))
   }, [data, filterCat, filterTag, filterStatus, kw])
 
   const review = data?.review
@@ -712,18 +734,34 @@ export function KnowledgeSection({ projectKey }: { projectKey?: string }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(d => (
-                <tr key={d.path} onClick={() => { void openDoc(d.path, d.title) }}>
-                  <td>
-                    <span className="kb-title-cell">{d.title}</span>
-                    <span className="kb-path">　{d.path}</span>
-                  </td>
-                  <td><span className="kb-cat" data-cat={d.category}>{d.category}</span></td>
-                  <td>{d.tags.map(t => <span className="kb-tag" key={t}>{t}</span>)}</td>
-                  <td><span className="kb-status" data-status={d.status}>{d.status}</span></td>
-                  <td>{d.updated}</td>
-                </tr>
-              ))}
+              {filtered.map(d => {
+                // Every row's five cells come from docRow: an epic row fills them with its
+                // own code/retired/summary, and a cell its schema does not have is an
+                // explicit 'n/a' — never the blank cell that reads as missing data (t261029-49).
+                const row: DocRow = docRow(d)
+                return (
+                  <tr key={row.path} data-doc-category={row.category}
+                    onClick={() => { void openDoc(row.path, row.title.text) }}>
+                    <td>
+                      <span className="kb-title-cell">{row.title.text}</span>
+                      {row.isEpic && row.code !== '' && (
+                        <span className="kb-code" data-field="code" title="epic code">{row.code}</span>
+                      )}
+                      <span className="kb-path">　{row.path}</span>
+                    </td>
+                    <td><span className="kb-cat" data-cat={row.category}>{row.category}</span></td>
+                    <td>{row.tags.length > 0
+                      ? row.tags.map(t => <span className="kb-tag" key={t}>{t}</span>)
+                      : <span className="kb-na" data-field={row.tagsCell.field}>{row.tagsCell.text}</span>}</td>
+                    <td>{row.status.na
+                      ? <span className="kb-na" data-field={row.status.field}>{row.status.text}</span>
+                      : <span className="kb-status" data-status={row.status.text} data-field={row.status.field}>{row.status.text}</span>}</td>
+                    <td>{row.updated.na
+                      ? <span className="kb-na" data-field={row.updated.field}>{row.updated.text}</span>
+                      : <span data-field={row.updated.field} title={row.updated.field === 'summary' ? 'epic summary' : undefined}>{row.updated.text}</span>}</td>
+                  </tr>
+                )
+              })}
               {filtered.length === 0 && (
                 <tr><td colSpan={5} className="kb-empty">没有符合筛选的文档。</td></tr>
               )}

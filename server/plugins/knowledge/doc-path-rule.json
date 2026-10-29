@@ -1,0 +1,16 @@
+{
+  "_what": "The ONE docs-path admission rule (t261029-49). A path is admitted when it names a category directory of docs/index.json and one plain .md file inside it, expressed as a path relative to docs/. Containment: the pattern starts at a category name, so an absolute path cannot match; the file segment is [^/]+, so a traversal segment or a nested directory cannot match; the extension check is the trailing .md.",
+  "_readers": [
+    "server/plugins/knowledge/node.ts (host routes: /api/doc, /api/diff, /api/review, /api/review/save)",
+    "server/plugins/knowledge/review_store.py (pipeline/agent CLI: save, show, rework)"
+  ],
+  "_discipline": "Both readers load this one file. The pattern must equal '^(' + categories.join('|') + ')/[^/]+<backslash>.md$' — both readers check that and refuse loudly when it does not hold, so this file cannot self-drift.",
+  "categories": [
+    "design",
+    "content",
+    "ops",
+    "reference",
+    "epics"
+  ],
+  "pattern": "^(design|content|ops|reference|epics)/[^/]+\\.md$"
+}

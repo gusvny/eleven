@@ -10,8 +10,9 @@
  *                                        项目无 docs/index.json → {empty:true, reason} 人话降级
  *   GET /sandbar-knowledge/api/doc?project=<key>&path=design/平台架构设计.md
  *                                     → 直读 <项目主目录>/docs/<path> 的全文（纯只读，
- *                                        path 白名单 design|content|ops|reference/*.md，
- *                                        防穿路径）
+ *                                        path 白名单 = docs/index.json 的五个分类目录
+ *                                        （词表见 doc-path-rule.json，含 epics）下的一层
+ *                                        .md，规则单源该文件，防穿路径）
  *   GET /sandbar-knowledge/api/refresh?project=<key>
  *                                     → 重建 index（spawn python3 <主目录>/docs/scripts/build_index.py；
  *                                        项目无该脚本 → 人话降级不可用）
@@ -37,7 +38,7 @@
 
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { appendFile, readFile, stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve, sep } from 'node:path'
@@ -71,8 +72,58 @@ interface SuyouKnowledgeConfig {
   timeoutMs?: number
 }
 
-/** 允许直读的 docs 相对路径（四分类目录下的一层 .md），防穿路径。 */
-const DOC_PATH_RE = /^(design|content|ops|reference)\/[^/]+\.md$/
+/** The docs-relative paths this plugin may serve directly: one plain .md inside one of
+ *  the index's category directories (traversal-proof).
+ *
+ * t261029-49: the rule is no longer hard-coded here — its one source is
+ * doc-path-rule.json (this package root), the same file review_store.py reads.
+ * docs/index.json now registers the `epics` category (docs/epics/, epic frontmatter
+ * schema), so the docs list shows those rows while the path rule refused them — opening
+ * one answered 404 'path 不合法'. Only the category vocabulary changed; the containment
+ * does not: the path must start with a category name (so an absolute path cannot match),
+ * the file segment is [^/]+ (so a traversal or a nested directory cannot match), and the
+ * extension check stays .md. */
+interface DocPathRule {
+  /** Category vocabulary (for the error copy; the order is the index's categories order). */
+  categories: string[]
+  /** The one admission pattern source. */
+  pattern: string
+}
+
+const RULE_FILE = join(dirname(fileURLToPath(import.meta.url)), 'doc-path-rule.json')
+
+/** Read the rule file and self-check it (the pattern must equal the alternation of its
+ *  categories, so the file cannot self-drift). Missing/malformed -> a named error: the
+ *  plugin goes red at load time and never silently widens to "anything under docs/". */
+function loadDocPathRule(): DocPathRule {
+  let raw: any
+  try {
+    raw = JSON.parse(readFileSync(RULE_FILE, 'utf8'))
+  } catch (err: any) {
+    throw new Error(`doc-path-rule.json unreadable / not JSON (${RULE_FILE}): ${String(err?.message ?? err)}`)
+  }
+  const categories = Array.isArray(raw?.categories) ? raw.categories.filter((c: unknown) => typeof c === 'string' && c !== '') : []
+  if (categories.length === 0) throw new Error(`doc-path-rule.json has no categories (${RULE_FILE})`)
+  const expected = `^(${categories.join('|')})/[^/]+\\.md$`
+  if (raw?.pattern !== expected) {
+    throw new Error(`doc-path-rule.json contradicts itself (${RULE_FILE}): pattern ${JSON.stringify(raw?.pattern)} is not the alternation of its categories ${JSON.stringify(expected)}`)
+  }
+  const re = new RegExp(expected)
+  if (!re.test(`${categories[0]}/probe.md`)) throw new Error(`doc-path-rule.json pattern rejects its own first category (${RULE_FILE})`)
+  return { categories, pattern: expected }
+}
+
+const DOC_PATH_RULE = loadDocPathRule()
+
+/** The admission pattern (one source = doc-path-rule.json; review_store.py reads it too). */
+export const DOC_PATH_RE = new RegExp(DOC_PATH_RULE.pattern)
+
+/** The category vocabulary (error copy and tests; same source as the pattern). */
+export const DOC_PATH_CATEGORIES: readonly string[] = DOC_PATH_RULE.categories
+
+/** Whitelist form for error copy (human-readable; the categories come from the rule file
+ *  and are never listed in this file). */
+const DOC_PATH_HINT = `${DOC_PATH_CATEGORIES.join('|')}/<文件>.md`
 
 /* ------------------------------------------------------------ block diff（纯函数） */
 
@@ -172,7 +223,7 @@ export function apply(ctx: Context, config?: SuyouKnowledgeConfig): void {
     const url = new URL(req.url ?? '/', 'http://x')
     const p = url.searchParams.get('path') ?? ''
     if (!DOC_PATH_RE.test(p)) {
-      sendJson(res, 404, { ok: false, error: 'path 不合法（只允许 design|content|ops|reference/<文件>.md）' })
+      sendJson(res, 404, { ok: false, error: `path 不合法（只允许 ${DOC_PATH_HINT}）` })
       return null
     }
     const docsDir = join(primaryDir(proj), 'docs')
@@ -299,7 +350,7 @@ export function apply(ctx: Context, config?: SuyouKnowledgeConfig): void {
     const p = typeof body?.path === 'string' ? body.path : ''
     if (!DOC_PATH_RE.test(p)) {
       await audit(runId, 'review.save', { project: proj.key, path: p }, false, 'path 不合法')
-      sendJson(res, 404, { ok: false, run_id: runId, error: 'path 不合法（只允许 design|content|ops|reference/<文件>.md）' })
+      sendJson(res, 404, { ok: false, run_id: runId, error: `path 不合法（只允许 ${DOC_PATH_HINT}）` })
       return
     }
     const base = typeof body?.base === 'string' ? body.base : 'HEAD'

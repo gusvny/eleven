@@ -87,8 +87,56 @@ def anchor_guard_error():
             'write into another checkout. Set the anchor to the lane root or '
             'unset it.' % (anchor, str(own)))
 
-# 与 node.ts DOC_PATH_RE 同源白名单（防穿路径）：四分类目录下的一层 .md。
-DOC_PATH_RE = re.compile(r'^(design|content|ops|reference)/[^/]+\.md$')
+# The path admission rule (traversal-proof). One source: doc-path-rule.json in this
+# package root; node.ts reads the same file (t261029-49 replaced the hand-copied mirror
+# of node.ts's regex, which could drift). A missing/malformed rule file refuses every
+# path with a named error (fail-closed) — it never widens to "anything under docs/".
+RULE_FILE = HERE / 'doc-path-rule.json'
+_RULE = None
+
+
+def _doc_path_rule():
+    """Load the rule lazily: importing this module must stay possible when the file is
+    copied on its own (the anchor-guard fixture in the engine tests does exactly that)."""
+    global _RULE
+    if _RULE is not None:
+        return _RULE
+    try:
+        raw = json.loads(RULE_FILE.read_text('utf-8'))
+        categories = [str(c) for c in raw['categories']]
+        pattern = str(raw['pattern'])
+    except Exception as e:  # missing / bad JSON / missing key: a named refusal, never a guess
+        raise ReviewError('doc-path-rule.json unreadable / malformed (%s): %s' % (RULE_FILE, e))
+    if not categories:
+        raise ReviewError('doc-path-rule.json has no categories (%s)' % RULE_FILE)
+    expected = '^(' + '|'.join(categories) + r')/[^/]+\.md$'
+    if pattern != expected:
+        raise ReviewError('doc-path-rule.json contradicts itself (%s): pattern %r is not the '
+                          'alternation of its categories %r' % (RULE_FILE, pattern, expected))
+    _RULE = (categories, re.compile(pattern))
+    return _RULE
+
+
+def doc_path_categories():
+    """The category vocabulary (error copy and tests; same source as the pattern)."""
+    return _doc_path_rule()[0]
+
+
+def doc_path_hint():
+    return '|'.join(doc_path_categories()) + '/<文件>.md'
+
+
+def doc_path_admits(p):
+    """Whether the path is inside the admission set. Malformed input (non-string / empty)
+    is always False and never raises.
+    fullmatch, not match: Python's `$` also matches before a trailing newline (so
+    'x.md\n' would slip through), while JS's `$` without the m flag only matches the end
+    of the input. fullmatch anchors both ends, so both readers return the same verdict."""
+    if not isinstance(p, str) or p == '':
+        return False
+    return _doc_path_rule()[1].fullmatch(p) is not None
+
+
 CONCLUDES = ('approved', 'changes-requested', 'in-progress')
 DECISIONS = ('approve', 'reject')
 BASE_RE = re.compile(r'^[A-Za-z0-9._~^/-]+$')
@@ -168,8 +216,8 @@ def op_save(a):
         _guard = anchor_guard_error()
         if _guard:
             raise ReviewError(_guard)
-        if not DOC_PATH_RE.match(p):
-            raise ReviewError('path 不合法（只允许 design|content|ops|reference/<文件>.md）: %r' % p)
+        if not doc_path_admits(p):
+            raise ReviewError('path 不合法（只允许 %s）: %r' % (doc_path_hint(), p))
         base = a.get('base') if isinstance(a.get('base'), str) and a.get('base') else 'HEAD'
         if base != 'HEAD' and not BASE_RE.match(base):
             raise ReviewError('base 不合法: %r' % base)
@@ -199,8 +247,8 @@ def op_save(a):
 
 
 def op_show(p):
-    if not DOC_PATH_RE.match(p or ''):
-        raise ReviewError('path 不合法（只允许 design|content|ops|reference/<文件>.md）: %r' % p)
+    if not doc_path_admits(p):
+        raise ReviewError('path 不合法（只允许 %s）: %r' % (doc_path_hint(), p))
     return load_review(p)
 
 

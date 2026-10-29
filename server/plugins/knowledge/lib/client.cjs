@@ -66,9 +66,9 @@ function inlineFormat(s) {
 	s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, txt, url) => `<a href="${safeUrl(url)}">${txt}</a>`);
 	s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
 	s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-	s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+	s = s.replace(/(^|[^0-9A-Za-z_])__([^_]+)__(?![0-9A-Za-z_])/g, "$1<strong>$2</strong>");
 	s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
-	s = s.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, "$1<em>$2</em>");
+	s = s.replace(/(^|[^0-9A-Za-z_])_([^_\n]+)_(?![0-9A-Za-z_])/g, "$1<em>$2</em>");
 	return s;
 }
 const KEYWORDS_JS = "const|let|var|function|return|if|else|for|while|import|export|from|class|interface|type|new|async|await|this|extends|implements|public|private|readonly|typeof|of|in|throw|try|catch|finally|switch|case|break|default";
@@ -248,6 +248,81 @@ function splitCells(line) {
 	if (s.endsWith("|")) s = s.slice(0, -1);
 	return s.split("|").map((c) => c.trim());
 }
+/** The epic category name (one of the index categories; the path rule reads the same store). */
+const EPIC_CATEGORY = "epics";
+function str(v) {
+	return typeof v === "string" ? v.trim() : "";
+}
+function cell(text, field) {
+	return {
+		text,
+		na: false,
+		field
+	};
+}
+function na(field) {
+	return {
+		text: "n/a",
+		na: true,
+		field
+	};
+}
+/** File stem (epics/<code>.md -> <code>; malformed input -> ''). */
+function stemOf(path) {
+	const base = path.slice(path.lastIndexOf("/") + 1);
+	return base.endsWith(".md") ? base.slice(0, -3) : base;
+}
+/** The retired flag (booleans as they are; the strings 'true'/'false' too, because an
+*  index may carry either shape). Unrecognised -> null, so the caller shows n/a and
+*  never guesses. */
+function retiredFlag(v) {
+	if (v === true || v === false) return v;
+	if (typeof v === "string") {
+		const s = v.trim().toLowerCase();
+		if (s === "true") return true;
+		if (s === "false") return false;
+	}
+	return null;
+}
+/** Project any docs/index.json entry into the five cells the list draws. A malformed
+*  entry lands on defined values (n/a / the path name) and never throws. */
+function docRow(entry) {
+	const e = entry && typeof entry === "object" && !Array.isArray(entry) ? entry : {};
+	const path = str(e.path);
+	const category = str(e.category);
+	const isEpic = category === EPIC_CATEGORY;
+	const titleText = str(e.title) || str(e.file) || path;
+	const tags = Array.isArray(e.tags) ? e.tags.filter((t) => typeof t === "string" && t.trim() !== "") : [];
+	const code = str(e.code) || (isEpic ? stemOf(path) : "");
+	if (isEpic) {
+		const retired = retiredFlag(e.retired);
+		const summary = str(e.summary);
+		return {
+			path,
+			category,
+			isEpic: true,
+			title: titleText !== "" ? cell(titleText, "title") : na("title"),
+			code,
+			tags: [],
+			tagsCell: na("tags"),
+			status: retired === null ? na("retired") : cell(retired ? "retired" : "active", "retired"),
+			updated: summary !== "" ? cell(summary, "summary") : na("summary")
+		};
+	}
+	const status = str(e.status);
+	const updated = str(e.updated);
+	return {
+		path,
+		category,
+		isEpic: false,
+		title: titleText !== "" ? cell(titleText, "title") : na("title"),
+		code: "",
+		tags,
+		tagsCell: tags.length > 0 ? cell(tags.join(", "), "tags") : na("tags"),
+		status: status !== "" ? cell(status, "status") : na("status"),
+		updated: updated !== "" ? cell(updated, "updated") : na("updated")
+	};
+}
 //#endregion
 //#region src/client/index.tsx
 /**
@@ -259,7 +334,10 @@ function splitCells(line) {
 * conversationViews/uiConversation 零消费、零注册。
 *
 * 功能（工单 t260821-09 → t260821-10 M2/M3）：
-*   ① 列表按分类（design/content/ops/reference）/标签/状态过滤；
+*   ① the list filters by category (the docs/index.json categories:
+*      design/content/ops/reference/epics), tag and status; an epic row (the epics
+*      category) renders its own schema's code/retired/summary, and a field its schema
+*      does not have is an explicit 'n/a' — never a blank cell (t261029-49);
 *   ② 关键词检索（标题 + frontmatter tags）；
 *   ③ 读全文（点条目中栏内嵌 list→doc 两态切换）：markdown render（HTML，非 raw；表格/代码块
 *      高亮+复制/链接/列表），可切 raw 查看原文；头部「← 返回」按钮回到列表，筛选条件不丢；
@@ -320,6 +398,7 @@ const CSS = `
 .kb-cat[data-cat=content]{background:#dafbe1;color:#116329;border-color:#7dd9a0}
 .kb-cat[data-cat=ops]{background:#fff8c5;color:#7d4e00;border-color:#eac54f}
 .kb-cat[data-cat=reference]{background:#fbefff;color:#6f42c1;border-color:#d3b9f0}
+.kb-cat[data-cat=epics]{background:#fff1e5;color:#bc4c00;border-color:#f5c9a8}
 .kb-tag{font-size:11px;color:#57606a;background:#f6f8fa;border:1px solid #e8ebef;border-radius:6px;
   padding:1px 6px;margin-right:4px}
 .kb-title-cell{font-weight:600;color:#0969da}
@@ -328,6 +407,12 @@ const CSS = `
 .kb-status[data-status=active]{background:#dafbe1;color:#116329}
 .kb-status[data-status=draft]{background:#fff8c5;color:#7d4e00}
 .kb-status[data-status=deprecated]{background:#ffebe9;color:#cf222e}
+.kb-status[data-status=retired]{background:#ffebe9;color:#cf222e}
+/* t261029-49: explicit 'n/a' cells (a field the row's schema does not have) — never the
+ * blank cell that reads as missing data. Muted but still 4.9:1 on white. */
+.kb-na{font-size:11px;color:#57606a;font-style:italic}
+.kb-code{font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#bc4c00;
+  background:#fff1e5;border:1px solid #f5c9a8;border-radius:6px;padding:0 6px;margin-left:6px}
 .kb-empty{font-size:12px;color:#57606a;padding:12px 0}
 .kb-back-btn{font:inherit;font-size:13px;padding:3px 12px;border-radius:6px;cursor:pointer;
   border:1px solid #d0d7de;background:#ffffff;color:#1f2328;transition:background .12s}
@@ -675,20 +760,21 @@ function KnowledgeSection({ projectKey }) {
 	}
 	const allTags = (0, react.useMemo)(() => {
 		const s = /* @__PURE__ */ new Set();
-		for (const d of data?.docs ?? []) for (const t of d.tags) s.add(t);
+		for (const d of data?.docs ?? []) for (const t of Array.isArray(d.tags) ? d.tags : []) s.add(t);
 		return [...s].sort();
 	}, [data]);
 	const filtered = (0, react.useMemo)(() => {
 		const q = kw.trim().toLowerCase();
 		return (data?.docs ?? []).filter((d) => {
+			const tags = Array.isArray(d.tags) ? d.tags : [];
 			if (filterCat !== "" && d.category !== filterCat) return false;
-			if (filterTag !== "" && !d.tags.includes(filterTag)) return false;
+			if (filterTag !== "" && !tags.includes(filterTag)) return false;
 			if (filterStatus !== "" && d.status !== filterStatus) return false;
 			if (q !== "") {
-				if (!(d.title + " " + d.tags.join(" ")).toLowerCase().includes(q)) return false;
+				if (!`${d.title ?? ""} ${tags.join(" ")}`.toLowerCase().includes(q)) return false;
 			}
 			return true;
-		}).sort((a, b) => a.category.localeCompare(b.category) || a.path.localeCompare(b.path));
+		}).sort((a, b) => String(a.category ?? "").localeCompare(String(b.category ?? "")) || a.path.localeCompare(b.path));
 	}, [
 		data,
 		filterCat,
@@ -1005,35 +1091,65 @@ function KnowledgeSection({ projectKey }) {
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "状态" }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: "更新时间" })
 					] }) }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tbody", { children: [filtered.map((d) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", {
-						onClick: () => {
-							openDoc(d.path, d.title);
-						},
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("td", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "kb-title-cell",
-								children: d.title
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "kb-path",
-								children: ["　", d.path]
-							})] }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "kb-cat",
-								"data-cat": d.category,
-								children: d.category
-							}) }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: d.tags.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "kb-tag",
-								children: t
-							}, t)) }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "kb-status",
-								"data-status": d.status,
-								children: d.status
-							}) }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: d.updated })
-						]
-					}, d.path)), filtered.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tr", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tbody", { children: [filtered.map((d) => {
+						const row = docRow(d);
+						return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", {
+							"data-doc-category": row.category,
+							onClick: () => {
+								openDoc(row.path, row.title.text);
+							},
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("td", { children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "kb-title-cell",
+										children: row.title.text
+									}),
+									row.isEpic && row.code !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "kb-code",
+										"data-field": "code",
+										title: "epic code",
+										children: row.code
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+										className: "kb-path",
+										children: ["　", row.path]
+									})
+								] }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "kb-cat",
+									"data-cat": row.category,
+									children: row.category
+								}) }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: row.tags.length > 0 ? row.tags.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "kb-tag",
+									children: t
+								}, t)) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "kb-na",
+									"data-field": row.tagsCell.field,
+									children: row.tagsCell.text
+								}) }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: row.status.na ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "kb-na",
+									"data-field": row.status.field,
+									children: row.status.text
+								}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "kb-status",
+									"data-status": row.status.text,
+									"data-field": row.status.field,
+									children: row.status.text
+								}) }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: row.updated.na ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "kb-na",
+									"data-field": row.updated.field,
+									children: row.updated.text
+								}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									"data-field": row.updated.field,
+									title: row.updated.field === "summary" ? "epic summary" : void 0,
+									children: row.updated.text
+								}) })
+							]
+						}, row.path);
+					}), filtered.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tr", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
 						colSpan: 5,
 						className: "kb-empty",
 						children: "没有符合筛选的文档。"
