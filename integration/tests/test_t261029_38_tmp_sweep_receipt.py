@@ -5,9 +5,10 @@
 Pure faces and the malformed-input table (M1-M20 of the plan), so every case is offline,
 needs no clock, no process table and no host temp root (KI-136: a test must not bind the
 real `$TMPDIR`). The cadence CLI as a real process — face selection, the receipt pair, the
-count delta, the guard routing and the config exit codes — belongs to the registered
-scenario `integration/sc_t261029_38_tmp_sweep_tick.py`; the sweep tool's own CLI safety
-contract belongs to `integration/t261002-13/sc_tmp_backlog_sweep_safety.py`.
+count delta, the guard routing and the config exit codes — belongs to the cadence CLI
+scenario on the develop line (t261029-38's L3, not carried by this branch); the sweep
+tool's own CLI safety contract belongs to
+`integration/t261002-13/sc_tmp_backlog_sweep_safety.py`.
 
 Intent split (no duplication):
   - round_shape / inert reasons / due / staleness / clamp: here;
@@ -18,9 +19,11 @@ Intent split (no duplication):
 
 Run directly: python3 integration/tests/test_t261029_38_tmp_sweep_receipt.py
 """
+import glob
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -58,13 +61,35 @@ LANE_ENV = {"SANDBAR_INTEG_LEDGER_SOURCE": "lane:t261029-38",
 _MINTED = []
 
 
+#: Scratch parent for this battery's fixtures. `out/` is preferred: it is gitignored, so the
+#: fixtures never show up in a diff, and it is reclaimed with the worktree.
+SCRATCH_PARENT = REPO / "out"
+
+
+def _scratch_parent():
+    """The directory fixtures are minted under, created on demand (None = system temp dir).
+
+    A fresh worktree contains nothing but the checkout, so `out/` does not exist there: a
+    battery that needs its own scratch parent to be pre-created reds on the tree's shape
+    instead of on the product (t261030-06: the gate ran this file in a fresh worktree and got
+    one failed test - the fixture parent was missing, not the owner table). The parent is
+    therefore created here. A checkout that cannot hold it (read-only tree) falls back to the
+    system temp dir rather than failing, and the fixtures are still reclaimed at exit.
+    """
+    try:
+        SCRATCH_PARENT.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    return str(SCRATCH_PARENT)
+
+
 def _tmpdir(prefix="t261029-38-ut-"):
-    """A scratch dir under the gitignored out/, reclaimed when this module finishes.
+    """A scratch dir under the gitignored out/ (minted on demand), reclaimed at exit.
 
     The battery mints its own fixtures; like every other test face in this repo it reclaims
     them in full at exit (L8 tmp-dir hygiene, KI-01M506 family).
     """
-    path = tempfile.mkdtemp(prefix=prefix, dir=str(REPO / "out"))
+    path = tempfile.mkdtemp(prefix=prefix, dir=_scratch_parent())
     _MINTED.append(path)
     return path
 
@@ -79,6 +104,36 @@ def _reclaim_all():
 import atexit      # noqa: E402
 
 atexit.register(_reclaim_all)
+
+
+#: The environment keys the tick's own round rule reads (`round_shape` / `round_depth` /
+#: `inert_reason`). A case that ticks must STATE these, never inherit them: the gate runs a
+#: narrowed round and exports `SANDBAR_SCENARIO_ONLY=<scenario>` (a nested round carries
+#: `INTEG_RUN_DEPTH` >= 2), and either one makes the tick return EXIT_OK before it reads
+#: config.json at all. Measured (t261030-06): under the gate's `--only` round this battery's
+#: M6 saw exit 0 where EXIT_CONFIG was due, because the case updated `os.environ` instead of
+#: owning it - the tick was inert for the gate's reason, not the config's.
+ROUND_ENV_KEYS = (cad.LEDGER_SOURCE_ENV, cad.DEPTH_ENV, cad.NARROW_ENV,
+                  cad.RUNNER_BUDGET_ENV)
+
+
+def _tick(argv, env=None, state=None):
+    """Run one tick under an environment THIS CASE owns, and return its exit code.
+
+    `env` (default: the composed inspection shape `INSPECTION_ENV`) is applied after every
+    ambient round-shape key is dropped, so an inherited round can never decide a case.
+    """
+    old = os.environ.copy()
+    try:
+        for key in ROUND_ENV_KEYS:
+            os.environ.pop(key, None)
+        os.environ.update(INSPECTION_ENV if env is None else env)
+        if state is not None:
+            os.environ["SANDBAR_TMP_SWEEP_DIR"] = str(state)
+        return cad.main(list(argv))
+    finally:
+        os.environ.clear()
+        os.environ.update(old)
 
 
 class RoundShape(unittest.TestCase):
@@ -105,14 +160,7 @@ class RoundShape(unittest.TestCase):
         state = _tmpdir()
         r = cad.main(["disable", "--state-dir", state])
         self.assertEqual(r, 0)
-        env = dict(os.environ, **INSPECTION_ENV, SANDBAR_TMP_SWEEP_DIR=state)
-        old = os.environ.copy()
-        try:
-            os.environ.update(env)
-            self.assertEqual(cad.main(["tick", "--state-dir", state]), 0)
-        finally:
-            os.environ.clear()
-            os.environ.update(old)
+        self.assertEqual(_tick(["tick", "--state-dir", state], state=state), 0)
 
     def test_composed_env_is_source_locked_to_the_engine(self):
         """The hand-written env above must match the engine's injection site (C-b).
@@ -190,15 +238,20 @@ class MalformedConfig(unittest.TestCase):
         state = _tmpdir()
         (Path(state) / "config.json").write_text('{"mode":"report","root":"relative/path"}',
                                                 encoding="utf-8")
+        self.assertEqual(_tick(["tick", "--state-dir", state], state=state), cad.EXIT_CONFIG)
+        # Regression lock (t261030-06): the AMBIENT round shape must never decide this case.
+        # The gate's `--only` round exports SANDBAR_SCENARIO_ONLY into the scenario's child;
+        # inherited, it made the tick inert (exit 0) before config.json was read, and this
+        # assertion saw 0 != 8 while a hand run stayed green.
         old = os.environ.copy()
         try:
-            os.environ.update(INSPECTION_ENV)
-            os.environ["SANDBAR_TMP_SWEEP_DIR"] = state
-            rc = cad.main(["tick", "--state-dir", state])
+            os.environ.update(INSPECTION_ENV,
+                              SANDBAR_SCENARIO_ONLY="t261029-38-tmp-sweep-receipt-math")
+            self.assertEqual(_tick(["tick", "--state-dir", state], state=state),
+                             cad.EXIT_CONFIG)
         finally:
             os.environ.clear()
             os.environ.update(old)
-        self.assertEqual(rc, cad.EXIT_CONFIG)
 
 
 class MalformedState(unittest.TestCase):
@@ -405,19 +458,123 @@ class ForeignAndCountOnly(unittest.TestCase):
         self.assertEqual(j["remaining"], 3)
 
 
+def _load_module(path, name):
+    """Load a module by file path (the battery never imports the engine package)."""
+    spec = importlib.util.spec_from_file_location(name, str(path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def surface_divergences(deleted, counted):
+    """Families on only ONE of the two sides, named ([] = the two surfaces are one list).
+
+    Reads the surfaces the two consumers actually use - the sweeper's delete whitelist and
+    the alarm face's counted families - so a family that reached one side through any other
+    route comes back named instead of silently uncounted.
+    """
+    gone, seen = [str(p) for p in deleted], [str(p) for p in counted]
+    out = []
+    for p in gone:
+        if p not in seen:
+            out.append("%s: reclaimed by the sweeper but NOT counted by the alarm face" % p)
+    for p in seen:
+        if p not in gone:
+            out.append("%s: counted by the alarm face but NOT reclaimed by the sweeper" % p)
+    return out
+
+
+#: The ONE family declaration (t261029-81): prefix / kind / project / reason / producer /
+#: measured / added_by per family. It is the sweeper's delete surface, the alarm face's
+#: counted surface, and the owner evidence the receipt attributes - one file, three readers.
+DECLARATION_FILE = REPO / "integration" / "tools" / "tmp_fixture_families.json"
+#: Projects that mean "this repository owns the family" (see the receipt's OWN_PROJECTS).
+OWN_PROJECTS = ("", "unknown", "sandbar")
+#: A producer citation inside a declaration record: `path[:line]` with a language suffix.
+PRODUCER_PATH = re.compile(r"([A-Za-z0-9_./*-]+\.(?:py|mjs|js|ts|sh))(?::(\d+))?")
+
+
 class OwnerTable(unittest.TestCase):
+    """The owner table is one view of the one declaration (t261029-81).
+
+    The battery used to lock a hand-kept structure per side: a prefix tuple in the sweeper
+    with the producer in its comments, an owner dict in the engine, and an override table in
+    the receipt. All three are gone - the declaration file replaced them - so a leg that
+    parses any of them reads a structure that no longer exists and proves nothing about the
+    surface actually swept. These legs now read the declaration and lock what the battery
+    exists to protect: every family on the delete surface has an owner with evidence, the
+    sister repo is never absorbed into this one, and the engine's mirror and the sweeper read
+    the same list.
+    """
+
     def setUp(self):
+        self.records = json.loads(DECLARATION_FILE.read_text(encoding="utf-8"))["families"]
         self.owners = rr.load_owners(str(REPO), sw.TMP_FIXTURE_PREFIXES)
+        self.alarm = _load_module(REPO / "server" / "engine" / "inspection_lane_watchdog.py",
+                                  "t261030_06_watchdog_mirror")
+
+    def _expected_sources(self):
+        """The (derived, override, external) triple, counted from the declaration file.
+
+        An independent rule, written here on purpose: the receipt classifies a family as
+        `derived` when a producer path cited by the record resolves in this tree, `override`
+        when the evidence is stated by name (or not recorded at all), and `external` when the
+        family belongs to a sibling project. Two implementations of one rule disagree the
+        moment either drifts, which is exactly what this leg is for.
+        """
+        def resolves(candidate):
+            return ((REPO / candidate).exists()
+                    or bool(glob.glob(str(REPO / candidate))))
+
+        derived = override = external = 0
+        for rec in self.records:
+            if rec.get("project") not in OWN_PROJECTS:
+                external += 1
+            elif any(resolves(m.group(1))
+                     for m in PRODUCER_PATH.finditer(rec.get("producer") or "")):
+                derived += 1
+            else:
+                override += 1
+        return (derived, override, external)
 
     def test_every_whitelist_prefix_has_a_row(self):
         self.assertEqual(sorted(self.owners), sorted(sw.TMP_FIXTURE_PREFIXES))
+        self.assertEqual(sorted(self.owners), sorted(r["prefix"] for r in self.records))
 
     def test_derived_and_override_counts_are_the_measured_ones(self):
-        derived = [p for p, r in self.owners.items() if r["source"] == "derived"]
-        override = [p for p, r in self.owners.items() if r["source"] == "override"]
-        external = [p for p, r in self.owners.items() if r["source"] == "external"]
-        self.assertEqual((len(derived), len(override), len(external)), (33, 22, 1),
-                         "the derivation rule and the override table must stay in step")
+        """The three counts are measured from the declaration, never a pinned number.
+
+        A hand-written triple was the old defect: it pinned 56 families in three numbers, so
+        a family added to the declaration changed the surface while the leg kept passing. The
+        counts now come from the file, and the leg still bites: a family that leaves the
+        surface while the receipt keeps citing it reds by name (the external table below), and
+        a classifier that puts a record in another bucket than the rule above reds the triple.
+        """
+        got = tuple(sum(1 for r in self.owners.values() if r["source"] == src)
+                    for src in (rr.SOURCE_DERIVED, rr.SOURCE_OVERRIDE, rr.SOURCE_EXTERNAL))
+        self.assertEqual(got, self._expected_sources(),
+                         "the derivation rule and the declaration must stay in step")
+        self.assertEqual(sum(got), len(self.records),
+                         "every declared family must land in exactly one bucket")
+        self.assertEqual(sum(got), len(sw.TMP_FIXTURE_PREFIXES))
+        self.assertEqual([p for p, r in self.owners.items()
+                          if r["source"] not in (rr.SOURCE_DERIVED, rr.SOURCE_OVERRIDE,
+                                                 rr.SOURCE_EXTERNAL)], [],
+                         "a family on the surface with no evidence class is a hole")
+        external = {p for p, r in self.owners.items() if r["source"] == rr.SOURCE_EXTERNAL}
+        self.assertEqual(external,
+                         {r["prefix"] for r in self.records
+                          if r.get("project") not in OWN_PROJECTS})
+        # The receipt cites producers it cannot resolve (the sister repo's lock). Every such
+        # citation must still be a family on the swept surface, or the receipt would keep
+        # pointing at a family nothing counts any more.
+        self.assertLessEqual(set(rr.EXTERNAL_OWNERS), external,
+                            "a cited external family is not on the swept surface: %s"
+                            % sorted(set(rr.EXTERNAL_OWNERS) - external))
+        # A sibling project the receipt does not know would arrive unattributed.
+        self.assertLessEqual({r.get("project") for r in self.records} - set(OWN_PROJECTS),
+                             set(rr.SIBLING_PROJECTS),
+                             "the declaration names a project the receipt does not know")
 
     def test_rows_name_a_repo_and_evidence(self):
         for p, row in self.owners.items():
@@ -431,27 +588,70 @@ class OwnerTable(unittest.TestCase):
                 self.assertTrue(row.get("reason"))
 
     def test_sister_repo_is_not_attributed_to_this_repo(self):
+        """Attribution follows the evidence, in both directions.
+
+        Direction 1: a sibling project's family must never be attributed to this repo - that
+        is how a leak becomes nobody's. Direction 2 is the mirror that a renamed project field
+        cannot slip past: a family whose producer cites a file inside THIS tree belongs to
+        this repo. A record that moves such a family to the sister project would otherwise
+        keep every leg green while the receipt pointed the reader at the wrong team.
+        """
+        self.assertTrue("project-content-integ-run-" in self.owners,
+                        "the sister family project-content-integ-run- is not on the swept surface: "
+                        "the receipt would stop counting it")
         row = self.owners["project-content-integ-run-"]
         self.assertEqual(row["repo"], "project-content")
         self.assertNotIn("sandbar", row["producer"])
+        for rec in self.records:
+            prefix, owners_row = rec["prefix"], self.owners[rec["prefix"]]
+            producer_in_tree = any((REPO / m.group(1)).exists()
+                                   or bool(glob.glob(str(REPO / m.group(1))))
+                                   for m in PRODUCER_PATH.finditer(rec.get("producer") or ""))
+            if producer_in_tree:
+                self.assertEqual(owners_row["repo"], "sandbar",
+                                 "prefix %r names a producer inside this tree but is "
+                                 "attributed to %r" % (prefix, owners_row["repo"]))
+            if rec.get("project") in OWN_PROJECTS:
+                continue
+            self.assertEqual(owners_row["repo"], rec["project"],
+                             "prefix %r is a %s family attributed to %r"
+                             % (prefix, rec["project"], owners_row["repo"]))
+            self.assertNotEqual(owners_row["repo"], "sandbar")
 
     def test_drift_lock_against_the_engine_table(self):
-        """The whitelist and the engine's owner table are one list (drift lock)."""
-        import ast
-        src = (REPO / "server" / "engine" / "inspection_lane_watchdog.py").read_text(
-            encoding="utf-8")
-        engine_keys = set()
-        for node in ast.parse(src).body:
-            if isinstance(node, ast.Assign) and any(
-                    isinstance(t, ast.Name) and t.id == "TMP_FIXTURE_OWNERS"
-                    for t in node.targets):
-                engine_keys = set(ast.literal_eval(node.value).keys())
-        self.assertTrue(engine_keys, "engine owner table parsed empty (lock broken)")
-        missing = engine_keys - set(sw.TMP_FIXTURE_PREFIXES)
-        self.assertEqual(missing, set(),
-                         "engine owner keys outside the whitelist: %s" % sorted(missing))
-        for p in engine_keys:
-            self.assertEqual(self.owners[p]["repo"], "sandbar")
+        """The sweeper's surface and the engine's mirror read are one list (drift lock).
+
+        The engine keeps no literal owner dict any more (t261029-81): it derives
+        `TMP_FIXTURE_PREFIXES` and `TMP_FIXTURE_OWNERS` from the same declaration. Parsing a
+        literal here would therefore read a structure that no longer exists, so the lock
+        compares the two DERIVED surfaces - what the sweeper deletes against what the alarm
+        face counts - in both directions, and the owner hints against the receipt's rows.
+        """
+        self.assertEqual(self.alarm.TMP_FIXTURE_DECLARATION["status"], "loaded",
+                         self.alarm.TMP_FIXTURE_DECLARATION.get("detail"))
+        self.assertEqual(str(Path(self.alarm.TMP_FIXTURE_DECLARATION["path"]).resolve()),
+                         str(DECLARATION_FILE.resolve()))
+        self.assertEqual(list(sw.TMP_FIXTURE_PREFIXES), list(self.alarm.TMP_FIXTURE_PREFIXES))
+        self.assertTrue(self.alarm.TMP_FIXTURE_PREFIXES,
+                        "engine family list read empty (lock broken)")
+        self.assertEqual(sorted(self.owners), sorted(self.alarm.TMP_FIXTURE_PREFIXES))
+        # The engine's prefix -> producer hints are the declaration's producer field, so a row
+        # that records an owner and the mirror must carry the same evidence text.
+        self.assertEqual(self.alarm.TMP_FIXTURE_OWNERS,
+                         {p: r["producer"] for p, r in self.owners.items()
+                          if r["owner_recorded"]},
+                         "the receipt's evidence and the engine's mirror disagree")
+        # The lock bites in both directions, by name.
+        self.assertEqual(surface_divergences(sw.TMP_FIXTURE_PREFIXES,
+                                             self.alarm.TMP_FIXTURE_PREFIXES), [])
+        swept_only = surface_divergences(list(sw.TMP_FIXTURE_PREFIXES) + ["drift-probe-"],
+                                         self.alarm.TMP_FIXTURE_PREFIXES)
+        self.assertEqual(len(swept_only), 1, swept_only)
+        self.assertIn("drift-probe-", swept_only[0])
+        counted_only = surface_divergences(list(self.alarm.TMP_FIXTURE_PREFIXES),
+                                           list(self.alarm.TMP_FIXTURE_PREFIXES) + ["mirror-probe-"])
+        self.assertEqual(len(counted_only), 1, counted_only)
+        self.assertIn("mirror-probe-", counted_only[0])
 
 
 class ReceiptMath(unittest.TestCase):

@@ -22,15 +22,19 @@ Sections of a receipt, in reader order:
   8. uncovered families (owner unknown, never guessed);
   9. capacity arithmetic (entries and bytes against the measured inflow) and notes.
 
-Owner table. 33 of the 56 whitelisted prefixes yield a producer `path[:line]` straight
-from the whitelist's own comments (`derive_owners` implements the rule below); the
-remaining 23 are listed in `OWNER_OVERRIDES` with a producer or an explicit reason. The
-shared prefixes are drift-locked against the engine table
-(`server/engine/inspection_lane_watchdog.py::TMP_FIXTURE_OWNERS`) by the battery, and this
-module never imports the engine (the sweep must run where the engine cannot).
+Owner table. One row per family on the sweep's delete surface, read from the ONE family
+declaration (`integration/tools/tmp_fixture_families.json`, t261029-81) that the sweeper
+deletes from and the alarm face counts. Each row carries the declaration's `project` (the
+repo), its `producer` (the evidence: a path that resolves in this tree, a named producer,
+or nothing at all - rendered as `owner=unknown`, never guessed) and its `reason`. There is
+no second copy of that evidence here: a hand-kept override table is exactly the structure
+that drifts away from the surface it describes. The battery drift-locks the surface and
+the evidence against the engine's own mirror read
+(`server/engine/inspection_lane_watchdog.py::TMP_FIXTURE_OWNERS`), and this module never
+imports the engine (the sweep must run where the engine cannot).
 
-No filesystem access in the pure faces: `derive_owners` takes source text,
-`build_receipt` takes parsed JSON. `load_owners(repo_root)` is the only reader.
+No filesystem access in the pure faces: `build_receipt` takes parsed JSON.
+`load_owners(repo_root)` is the only reader.
 """
 from __future__ import annotations
 
@@ -40,9 +44,18 @@ import re
 
 SCHEMA = "tmp-sweep-receipt-v1"
 
-#: Prefixes whose producer lives in another repository. `external` rows carry evidence
-#: instead of a path inside this tree (a `~/` path is never resolved here: tests must not
-#: read a machine-specific home).
+#: The projects whose families this repo's temp root can carry without this repo being
+#: able to fix them. A declaration record whose `project` is not ours must name one of
+#: these: a fourth project would otherwise appear in the owner table silently, and the
+#: next occurrence would point at nobody. This is a list of PROJECTS, never of families -
+#: the families themselves live in the one declaration.
+SIBLING_PROJECTS = ("project-content", "project-vision")
+
+#: External evidence cited on the receipt: a producer we can name but not resolve. A `~/`
+#: path is never resolved here (tests must not read a machine-specific home), so these
+#: rows carry the citation instead of `producer_path`. The battery cross-locks this table
+#: against the declaration: every prefix cited here must still be on the swept surface,
+#: otherwise the receipt would stop counting a family it claims to know about.
 EXTERNAL_OWNERS = {
     "project-content-integ-run-": {
         "repo": "project-content",
@@ -109,166 +122,186 @@ EXCLUDED_OWNERS = {
     "tmp": "BSD mktemp default template",
 }
 
-#: The 23 prefixes whose whitelist comment does not yield a single producer path. A row
-#: with `producer_path` None must carry a `reason`; the table lock enforces that.
-OWNER_OVERRIDES = {
-    "integ-e2e-fixture-": {
-        "producer": "integration/ticket-lifecycle-scenes.mjs e2e fixture family (no single file: "
-                    "the .mjs carrier moves with the scene suite)",
-        "reason": "comment names a scene suite, not one file",
-    },
-    "fix10-": {"producer": "integration/t26* .mjs scenario fixtures", "reason": "family comment"},
-    "fix14-": {"producer": "integration/t26* .mjs scenario fixtures", "reason": "family comment"},
-    "fix17-": {"producer": "integration/t26* .mjs scenario fixtures", "reason": "family comment"},
-    "pathgate-": {"producer": "integration/t260911-03 pathgate scenario fixtures",
-                  "producer_path": "integration/t260911-03"},
-    "t260907-12-ut": {"producer": "server/engine/tests/test_multirepo_anchor.py",
-                      "producer_path": "server/engine/tests/test_multirepo_anchor.py"},
-    "t26092212-": {"producer": "integration/t260922-12 family (whitelist comment carries no path)",
-                   "reason": "family comment"},
-    "t260906-": {"producer": "integration/t260906-* family (whitelist comment carries no path)",
-                 "reason": "family comment"},
-    "lease-ut-": {"producer": "integration/tests/test_stage_lease.py stage-lease unit fixtures",
-                  "producer_path": "integration/tests/test_stage_lease.py"},
-    "t260904-02-": {"producer": "server/engine/tests/test_t260904_02_registry_anchor.py",
-                    "producer_path": "server/engine/tests/test_t260904_02_registry_anchor.py"},
-    "t260901-21-": {"producer": "integration/t260901-21 read-side fixtures",
-                    "producer_path": "integration/t260901-21"},
-    "t02-lane": {"producer": "integration/t260902-02 lane fixtures", "producer_path": "integration/t260902-02"},
-    "t26090704-lane": {"producer": "integration/t260907-04 lane fixtures",
-                       "producer_path": "integration/t260907-04"},
-    "wb-": {"producer": "server/plugins/workbench/tests workbench unit fixtures",
-            "producer_path": "server/plugins/workbench/tests"},
-    "t260907-12-ch": {"producer": "server/engine/tests/test_multirepo_root_activity.py",
-                      "producer_path": "server/engine/tests/test_multirepo_root_activity.py"},
-    "sandbar-credentials-": {"producer": "integration/stage_docker.py:1333 credentials copy",
-                            "producer_path": "integration/stage_docker.py", "producer_line": 1333},
-    "project-content-integ-run-": {"producer": "sister project (project-content) single-flight lock file",
-                           "reason": "external producer", "external": True},
-    "t260910-10-": {"producer": "integration/t260910-10 docs scenario fixtures",
-                    "producer_path": "integration/t260910-10"},
-    "t090506-": {"producer": "integration/t260905-06 docs scenario fixtures",
-                 "producer_path": "integration/t260905-06"},
-    "t26092404-": {"producer": "integration/t260924-04 project-template scenario fixtures",
-                   "producer_path": "integration/t260924-04"},
-    "t26092523-": {"producer": "integration/t260925-23/tests template pathgate fixtures",
-                   "producer_path": "integration/t260925-23/tests"},
-    "t260923-": {"producer": "integration/t260923-* family scenario fixtures",
-                 "reason": "ticket-namespace family (no stable single path)"},
-    "t260925-": {"producer": "integration/t260925-* family scenario fixtures",
-                 "reason": "ticket-namespace family (no stable single path)"},
-}
+#: The ONE family declaration the owner table is read from (t261029-81). The sweeper
+#: deletes exactly the families this file declares and the alarm face counts exactly the
+#: same ones, so this is also the surface the receipt attributes - prefix, project, producer
+#: and reason arrive as data. A record's fields: prefix / kind / project / reason / producer
+#: / measured / added_by.
+OWNER_TABLE_FILENAME = "tmp_fixture_families.json"
+OWNER_TABLE_RELPATH = os.path.join("integration", "tools", OWNER_TABLE_FILENAME)
 
-#: Producer-derivation rule (verbatim, so the measured counts are reproducible):
-#:   1. take the text from `TMP_FIXTURE_PREFIXES = (` up to `BATCH2_MERGED_PREFIXES`;
-#:   2. an "entry line" is a line that holds one or more quoted prefix tokens; every
-#:      token on it belongs to that entry;
-#:   3. the entry comment is the text after `#` on its own line plus the following
-#:      pure-comment lines;
-#:   4. scan the comment left to right, whitespace/`，`-separated; skip any token that
-#:      carries `{`, `}` or `,` (those are brace expansions, not one path — they would
-#:      fail the path lock); the first token matching `path.py|mjs|js|ts|sh[:line]` wins.
-#: Measured with this rule on the whitelist as landed by t261029-38: 44 entry lines,
-#: 56 prefixes, 33 derived, 23 overrides (the table above).
-_ENTRY_BLOCK_START = "TMP_FIXTURE_PREFIXES = ("
-_ENTRY_BLOCK_END = "BATCH2_MERGED_PREFIXES"
-_TOKEN = re.compile(r'"([^"]+)"')
-_PRODUCER = re.compile(r'^`?([A-Za-z0-9_./*-]+\.(?:py|mjs|js|ts|sh))(?::(\d+))?')
+#: Projects that mean "this repository owns the family". An empty or explicitly unknown
+#: `project` is this repo's own namespace too: the sweeper reclaims it, so the row must name
+#: this repo and say that the owner is unknown - it may never be attributed to a sibling.
+OWN_PROJECTS = ("", "unknown", "sandbar")
+
+#: Evidence classes of one owner row.
+SOURCE_DERIVED = "derived"      # the producer names a path that resolves in this tree
+SOURCE_OVERRIDE = "override"    # the producer is stated by name, or not recorded at all
+SOURCE_EXTERNAL = "external"    # the producer lives in another project
+SOURCE_UNKNOWN = "unknown"      # no row at all: the prefix is not on the declared surface
+
+#: What a row says when the declaration records no producer (the census left several
+#: families without an owner). Rendered as owner=unknown; never guessed.
+UNKNOWN_PRODUCER = "unknown (the declaration records no producer)"
+
+#: A producer citation inside the declaration's `producer` field: a repository-relative
+#: `path` with a language suffix, optionally `:line`. Braces (`{a,b}.py`), shell globs and
+#: family sentences yield no single path and stay a named producer (see the rule below).
+_PRODUCER = re.compile(r"([A-Za-z0-9_./*-]+\.(?:py|mjs|js|ts|sh))(?::(\d+))?")
 
 
-def derive_owners(src_text, prefixes):
-    """Whitelist source text -> {prefix: {producer, producer_path, producer_line}}.
+def declaration_path(repo_root):
+    """The declaration file for a repository root (the sweeper's own directory)."""
+    return os.path.join(str(repo_root), OWNER_TABLE_RELPATH)
 
-    Implements the rule documented above. Prefixes that yield no producer are simply
-    absent; the caller fills them from OWNER_OVERRIDES and the lock refuses a gap.
+
+def load_declaration(repo_root):
+    """Read the family declaration -> (records, status).
+
+    `records` are the raw dict records, in attribution order. `status` is
+    `{"path", "status": "loaded"|"absent"|"malformed", "detail"}` - the same vocabulary the
+    sweeper and the alarm face use, so one reader can compare all three.
+    Structural rules match theirs: the document holds a `families` list, every record is an
+    object with a non-empty `prefix`, and the strings are stripped. A duplicate prefix is
+    malformed: two rows for one family would attribute an occurrence twice.
     """
+    path = declaration_path(repo_root)
+    out = {"path": path, "status": "absent", "detail": ""}
     try:
-        block = src_text[src_text.index(_ENTRY_BLOCK_START):src_text.index(_ENTRY_BLOCK_END)]
-    except ValueError:
-        return {}
-    wanted = set(prefixes)
-    entries = []
-    cur = None
-    for line in block.splitlines():
-        toks = [t for t in _TOKEN.findall(line.split("#", 1)[0]) if t in wanted]
-        if toks:
-            if cur:
-                entries.append(cur)
-            cur = [toks, line.split("#", 1)[1].strip() if "#" in line else ""]
-        elif cur is not None and line.strip().startswith("#"):
-            cur[1] += " " + line.strip()[1:]
-    if cur:
-        entries.append(cur)
-    out = {}
-    for toks, comment in entries:
-        for tok in comment.replace("，", " ").split():
-            if "{" in tok or "}" in tok or "," in tok:
-                continue
-            m = _PRODUCER.match(tok)
-            if not m:
-                continue
-            for p in toks:
-                out[p] = {"producer": m.group(1) + (":" + m.group(2) if m.group(2) else ""),
-                          "producer_path": m.group(1),
-                          "producer_line": int(m.group(2)) if m.group(2) else None,
-                          "source": "derived"}
-            break
-    return out
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = fh.read()
+    except FileNotFoundError:
+        out["detail"] = "the declaration file is absent"
+        return [], out
+    except OSError as exc:
+        out["status"] = "malformed"
+        out["detail"] = "cannot read the declaration: %s: %s" % (type(exc).__name__, exc)
+        return [], out
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        out["status"] = "malformed"
+        out["detail"] = "the declaration is not valid JSON: %s" % exc
+        return [], out
+    listed = data.get("families") if isinstance(data, dict) else None
+    if not isinstance(listed, list):
+        out["status"] = "malformed"
+        out["detail"] = "the declaration carries no `families` list"
+        return [], out
+    records, problems, seen = [], [], set()
+    for i, rec in enumerate(listed):
+        if not isinstance(rec, dict):
+            problems.append("family #%d is not an object" % i)
+            continue
+        row = {k: str(rec.get(k) or "").strip() for k in
+               ("prefix", "kind", "project", "reason", "producer", "measured", "added_by")}
+        if not row["prefix"]:
+            problems.append("family #%d has no prefix" % i)
+            continue
+        if row["prefix"] in seen:
+            problems.append("%s: declared twice" % row["prefix"])
+            continue
+        seen.add(row["prefix"])
+        records.append(row)
+    if problems:
+        out["status"] = "malformed"
+        out["detail"] = "; ".join(problems[:8])
+        return records, out
+    out["status"] = "loaded"
+    return records, out
+
+
+def _resolves(repo_root, candidate):
+    """Does a produced `path` (or glob) exist in this tree?"""
+    try:
+        if os.path.exists(os.path.join(str(repo_root), candidate)):
+            return True
+        import glob as _glob
+        return bool(_glob.glob(os.path.join(str(repo_root), candidate)))
+    except OSError:
+        return False
+
+
+def declared_path(repo_root, producer):
+    """First producer path cited by the record that resolves in this tree -> (path, line).
+
+    Returns `(None, None)` when the record states its producer by name (a family sentence, a
+    brace list, a ticket namespace) or records no producer at all. A cited path that does not
+    resolve is not an owner we can point at, so it stays a named producer rather than
+    becoming a dead `producer_path` in the receipt.
+    """
+    for m in _PRODUCER.finditer(producer or ""):
+        candidate = m.group(1)
+        if _resolves(repo_root, candidate):
+            return candidate, int(m.group(2)) if m.group(2) else None
+    return None, None
+
+
+def owner_row(repo_root, record, status=None):
+    """One owner row from one declaration record (or an explicit unknown row).
+
+    A row is a dict: `{repo, producer, producer_path|None, producer_line|None, reason|None,
+    external, source, path_ok, declared_project, owner_recorded}`.
+
+    - `repo` is the record's `project`; an empty/unknown project means this repo (the sweeper
+      reclaims it) and keeps `declared_project="unknown"` for the reader.
+    - `source` is `external` for a sibling project, `derived` when the producer path resolves
+      in this tree, and `override` otherwise (evidence stated by name, or not recorded).
+    - `producer_path` is only a path that exists here: a citation outside this tree (a `~/`
+      path, another project's file) stays evidence text, never a resolvable path.
+    """
+    status = status or {"status": "loaded", "detail": ""}
+    if record is None:
+        reason = "the declaration names no record for this prefix"
+        if status.get("status") != "loaded":
+            reason = "the declaration could not be read: %s" % (
+                status.get("detail") or status.get("status"))
+        return {"repo": "unknown", "producer": UNKNOWN_PRODUCER, "producer_path": None,
+                "producer_line": None, "reason": reason, "external": False,
+                "source": SOURCE_UNKNOWN, "path_ok": None, "declared_project": "",
+                "owner_recorded": False}
+    project = record.get("project") or ""
+    own = project in OWN_PROJECTS
+    repo = "sandbar" if own else project
+    producer = (record.get("producer") or "").strip()
+    reason = (record.get("reason") or "").strip() or None
+    if not own:
+        return {"repo": repo, "producer": producer or UNKNOWN_PRODUCER,
+                "producer_path": None, "producer_line": None, "reason": reason,
+                "external": True, "source": SOURCE_EXTERNAL, "path_ok": None,
+                "declared_project": project, "owner_recorded": bool(producer)}
+    path, line = declared_path(repo_root, producer) if producer else (None, None)
+    if path:
+        return {"repo": repo, "producer": producer, "producer_path": path,
+                "producer_line": line, "reason": reason, "external": False,
+                "source": SOURCE_DERIVED, "path_ok": True, "declared_project": project,
+                "owner_recorded": True}
+    # No fabricated reason: a record with no path and no reason is a declaration defect, and
+    # the receipt says so by leaving `reason` None. The battery names the prefix.
+    return {"repo": repo, "producer": producer or UNKNOWN_PRODUCER, "producer_path": None,
+            "producer_line": None, "reason": reason, "external": False,
+            "source": SOURCE_OVERRIDE, "path_ok": None, "declared_project": project,
+            "owner_recorded": bool(producer)}
 
 
 def load_owners(repo_root, prefixes):
-    """Full owner table: derived rows, then overrides, then external rows (repo name last).
+    """The owner table for `prefixes`, read from the one declaration -> {prefix: row}.
 
-    A row is a dict: {repo, producer, producer_path|None, producer_line|None,
-    reason|None, external|bool, source: "derived"|"override"|"external"}.
+    A prefix with no record still gets a row: `owner=unknown` with a named reason, because a
+    family the sweeper reclaims without an owner must be visible, not absent. The declaration
+    status is not swallowed either - `load_owners_status` returns it next to the rows.
     """
-    sweep = os.path.join(repo_root, "integration", "tools", "sweep_tmp_fixtures.py")
-    try:
-        with open(sweep, encoding="utf-8") as f:
-            src = f.read()
-    except OSError:
-        src = ""
-    rows = derive_owners(src, prefixes)
-    for p in prefixes:
-        if p in rows:
-            continue
-        base = dict(OWNER_OVERRIDES.get(p) or {})
-        ext = EXTERNAL_OWNERS.get(p)
-        if ext:
-            base.update(ext)
-            base["source"] = "external"
-        else:
-            base.setdefault("source", "override")
-        base.setdefault("repo", "sandbar")
-        base.setdefault("producer", base.get("producer") or "unknown producer")
-        base.setdefault("producer_path", None)
-        base.setdefault("producer_line", None)
-        base.setdefault("reason", None)
-        base.setdefault("external", False)
-        rows[p] = base
-    for p, row in rows.items():
-        row.setdefault("repo", "sandbar")
-        row.setdefault("external", bool(EXTERNAL_OWNERS.get(p)))
-        row.setdefault("reason", None)
-        row.setdefault("producer_path", None)
-        row.setdefault("producer_line", None)
-        path = row.get("producer_path")
-        if not path:
-            row["path_ok"] = None
-            continue
-        # Report a citation that no longer resolves instead of hiding it: the producer
-        # may be retired or renamed, and the row then needs a reason (table lock).
-        ok = os.path.exists(os.path.join(repo_root, path)) or os.path.exists(path)
-        if not ok:
-            try:
-                import glob as _glob
-                ok = bool(_glob.glob(os.path.join(repo_root, path)) or _glob.glob(path))
-            except Exception:      # noqa: BLE001 — a glob pattern must never crash the table
-                ok = False
-        row["path_ok"] = bool(ok)
-        if not ok and not row.get("reason"):
-            row["reason"] = "cited producer path is not in the tree (retired or renamed)"
+    rows, _status = load_owners_status(repo_root, prefixes)
     return rows
+
+
+def load_owners_status(repo_root, prefixes):
+    """`(rows, status)` - the owner table plus the declaration status it was read from."""
+    records, status = load_declaration(repo_root)
+    by_prefix = {r["prefix"]: r for r in records}
+    rows = {p: owner_row(repo_root, by_prefix.get(p), status) for p in prefixes}
+    return rows, status
 
 
 def owner_of(prefix, owners):
