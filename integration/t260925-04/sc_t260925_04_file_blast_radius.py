@@ -115,9 +115,13 @@ def make_lane_fixture(tmp):
          what="fixture repo identity (git config user.email)")
     _git(root, "config", "user.name", "integ",
          what="fixture repo identity (git config user.name)")
-    # 引擎仓自己的 .gitignore 立场（.lane/ .worktrees/ .sandbar/ .suyou/ 永不入库）：
-    # 基座提交带上同一份，泳道工作树与协调目录才不会以未跟踪面目污染 status 面。
-    (root / ".gitignore").write_text(".lane/\n.worktrees/\n.sandbar/\n.suyou/\n")
+    # Ignore stance, kept to the one entry this fixture needs: the engine's lane
+    # convention dir (`<repo>/.lane/<id>`) is the only coordination dir the case
+    # creates, and ignoring it keeps the mounted worktree off the status face. Other
+    # repository ignore rules stay out on purpose - a rule the legs never exercise
+    # can only hide a change they must see (a `tickets/` rule would mask F2's
+    # untracked dir), and the fixture must not depend on the outer repo's config.
+    (root / ".gitignore").write_text(".lane/\n")
     (root / "base.txt").write_text("base\n")
     (root / "app").mkdir()
     _git(root, "add", "-A",
