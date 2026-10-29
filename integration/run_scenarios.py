@@ -1264,6 +1264,37 @@ SCENARIOS = [
     ("t261002-13-tmp-producer-zero-residue",
      "夹具生产者全终态零残留（t261002-13，灰盒 L3，真子进程 pytest×隔离 TMPDIR 沙盒零碰宿主 temp；生产者=ticket 直方图 #1 家族 test_t260904_02_registry_anchor.py，15,640 存量/~437 每 24h 每日巡检重跑即增生）：A pass 终态=套件全绿退出后隔离 TMPDIR 里 t260904-02-* 残留恰 0（用户可感知契约：巡检重跑不再累积）；B cancel 终态=运行中 SIGINT（在夹具目录出现的瞬间打点）走完收口退出后残留恰 0（中断不是豁免口——261001 载体风暴「finally 没跑就漏」的对面）；C 生产者迁移钉=文件内零裸 tempfile.mkdtemp( 且经 mkdtemp_reclaimed（revert 即红；与 lint L8 baseline 互补：L8 管全仓新债、本条钉本票点名文件）。fail/env-fail 终态与 pass 同走解释器退出+atexit 同一条回收路，由 developer L1 helper 终态矩阵钉住，此处不重复（intent 分工：_tmp_reclaim 注册/幂等 reap/终态矩阵归 L1 白盒；其余家族同机制不逐家族重复本场景）。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "python3 integration/t261002-13/sc_tmp_producer_zero_residue.py", "ro", "serial"),
+    # ---- t261029-78: the tmp sweeper's declared family list + the per-family receipt ----
+    ("sc_sweep_family_whitelist",
+     "The sweeper's declared family list and the guards around it (t261029-78, grey-box L3, "
+     "offline, fabricated temp root in the lane's own reclaimed dir - zero dependence on "
+     "the host's real temp dir, zero docker, never touches 3099/7233). Measured fault: the "
+     "host temp dir held 212 GB and the sweeper reclaimed 877.6 MB because its prefix "
+     "whitelist only knew the 260926/260927/261002 producer families, while today's disk "
+     "fillers are dz3-pyc (35,074 dirs, tens of GB), t261014-08-pyc (36,311 empty dirs), "
+     "t261018-04-ut (9,498), dz3-no-numpy (2,565), agg-test (2,389) and coverage-test "
+     "(1,768). A the declaration is DATA - every measured family is declared with kind / "
+     "project / reason / producer file:line / measured sample / declaring ticket, the "
+     "effective whitelist is the unchanged drift-locked core list plus exactly the declared "
+     "families, and a half-written record (no reason, or a prefix a core prefix shadows) is "
+     "a NAMED defect instead of a family that silently never matches. B by construction on "
+     "the fabricated root: a stale entry of a newly declared family is swept, a fresh one is "
+     "kept (the 6h age floor bites), an unlisted family is never swept, an "
+     "EXCLUDED_PREFIXES family is never swept. C the guards keep their teeth for the NEW "
+     "families: a file held by a live flock is kept and named, a directory whose cwd carries "
+     "a live process is kept and named. D the receipt is per family in BOTH modes: --apply "
+     "prints the same lines (same layout, real numbers) the dry-run prints, the swept family "
+     "stays visible with its count and freed bytes, and the ENGINE MIRROR GAP line names the "
+     "families the water line does not count yet. E the 1h hard floor on --apply still "
+     "refuses a more aggressive value. Intent split: the judgment functions (scan buckets, "
+     "file/dir split, carrier-by-cwd truth table, BATCH2 regression lock) belong to "
+     "developer L1 (test_t260927_tmp_fixture_family.py, "
+     "tests/test_t261001_fixture_carriers.py); the CLI safety quadrants belong to "
+     "t261002-13/sc_tmp_backlog_sweep_safety.py; THIS entry uniquely owns the declared "
+     "family list and the per-family receipt in applied mode. cost: seconds (two real CLI "
+     "sweeps plus one refusal). Tool missing or fcntl absent = ENV_FAIL exit 2; green "
+     "required at the integration gate/merge",
+     "python3 integration/t261029-78/sc_sweep_family_whitelist.py", "ro", "serial"),
     # ---- t261004-22: D2b carrier test wait-for-condition contract (flake blocked merge_check) ----
     ("t261004-22-d2b-carrier-wait-contract",
      "D2b carrier test wait-for-condition contract (t261004-22, grey-box L3, real venv pytest subprocess on the real tree, offline, zero docker; incident = a fixed sleep(1.0) before scanning a child's cwd flaked under load and blocked unrelated tickets at merge_check, host saw 1 failed/3358 passed on main): A green path - untouched environment, the single case passes and its wall clock stays far below its own deadline (poll must be cheap, fixed sleep gone, and the unresolved-root regression assertion still holds per ticket R4); B enumeration unavailable - a PATH stub shadows pgrep with exit 127 (the executor sandbox refuses process tools, reachable in practice) so the run must NOT go red for the wrong reason: exit 0 with the case skipped and the named reason (pgrep/enumeration) visible (R3); C cwd unresolvable - stubs where pgrep answers a pid but lsof reports no cwd, so no poll iteration can hit: the deadline must fire, pytest must FAIL, and the failure output must name the deadline and the cwd scan (a slow child, readable as such) and must NOT show the generic carrier-is-invisible regression message (R2). Intent split: the poll/deadline unit matrix and the skip choice belong to the developer L1 battery in the same engine test file; this entry locks only the end-to-end subprocess face a reader of a red or yellow run actually sees. venv/pytest or target file missing = ENV_FAIL exit 2; implementation not landed = FAIL with the name (TDD-phase red expected; arbitrate/merge must be green)",

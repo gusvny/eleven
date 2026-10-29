@@ -6033,6 +6033,10 @@
       "anchor": "behaviour",
       "note": "t261029-76 grey-box L3: a retired premise excludes its entry by NAME (no run, no booking, named on the receipt with premise + retirement order + reason, out of the expected count) while a LIVE premise that fails still books ENV_FAIL and still reds the round; the two decisions keep two vocabularies (retired-premise vs pool skip); the real runner relays the exclusion onto the run header and the terminal face; the re-pointed docker observation face records real CLI invocations and flags container-creating ones.",
       "sync_path": ""
+    },
+    "integration/t261029-78/sc_sweep_family_whitelist.py": {
+      "anchor": "behaviour",
+      "note": "t261029-78: the sweeper's declared family list and the per-family receipt, on a fabricated temp root - a stale entry of a newly declared family is swept and a fresh one is kept (age floor), an unlisted and an EXCLUDED_PREFIXES family are never swept, a live flock holder and a live cwd carrier are kept BY NAME, the declaration is data (reason + producer file:line per family, half-written record refused by name, drift-locked core list untouched) and --apply prints the same per-family receipt lines the dry-run prints (swept count + freed bytes visible), with the ENGINE MIRROR GAP between the sweeper's families and the engine water line named on every run; sync_path: integration/tools/sweep_tmp_fixtures.py"
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

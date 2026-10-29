@@ -31,6 +31,30 @@
 安全：默认 dry-run（只报数不删），`--apply` 才删；`--apply` 的年龄闸有 1 小时硬地板
 （拒绝更激进的取值）。日志一行一动作，失败逐条点名。
 
+Family declaration is DATA (t261029-78): each `DECLARED_FAMILIES` record carries the
+prefix, the entry kind, the producing project, the reason, the producer file:line, the
+sample measured for this ticket, and the ticket that declared it. The effective whitelist
+= the engine-mirrored core `TMP_FIXTURE_PREFIXES` (unchanged; the drift lock still pins it)
++ the declared extension. `declaration_errors()` is fail-closed on that data itself: an
+empty field, a collision with `EXCLUDED_PREFIXES`, a prefix shadowed by a core prefix, or
+a duplicate is a NAMED refusal — a half-written record is exactly the gap the next sweep
+would fall into.
+
+The receipt is PER FAMILY (t261029-78): dry-run and `--apply` share ONE printer
+(`family_receipt()`), so both modes print the same lines — count / d,f / live / oldest /
+est≈ / swept (dry-run "would-sweep", apply the real count) / freed≈ / kept: live·lock·
+carrier·failed plus the names and reasons of what was kept. A declared family adds `why:`
+(reason) and `who:` (project + producer + declaring ticket + measured sample). `--json`
+carries the same rows as `per_family`. A swept family therefore stays visible on the
+applied receipt instead of collapsing into one total.
+
+Known gap, named on every run rather than left silent: the engine water line
+(`server/engine/inspection_lane_watchdog.py::TMP_FIXTURE_PREFIXES`) is drift-locked to the
+core list in this file, and the families added by t261029-78 live only on the sweeper side
+(server/ is outside this lane's write set). The `ENGINE MIRROR GAP:` line names the
+families this tool reclaims but the alarm face does not count yet; closing it needs its own
+ticket on the server/ side (not this one).
+
 用法（cwd=仓库根）：
   python3 integration/tools/sweep_tmp_fixtures.py                  # dry-run：各前缀命中数 + 占用估算
   python3 integration/tools/sweep_tmp_fixtures.py --json           # 机器可读
@@ -155,6 +179,124 @@ EXCLUDED_PREFIXES = (
     "tmp",                    # BSD `mktemp` 缺省模板（`tmpXXXXXXXX`）：归因不到本仓，不碰
 )
 
+#: One declared family (t261029-78). Fields, all printed on the receipt and carried by
+#: `--json`, so no reader has to guess why an entry is sweepable:
+#:   prefix    the top-level name prefix the producer mints (this IS the safety property)
+#:   kind      what the producer leaves behind: "dir" | "file" | "dir+file"
+#:   project   who mints it: "sandbar" (this repo) or the sibling project key
+#:   reason    short answer to "why is this entry ours to reclaim?"
+#:   producer  producer file:line inside that project (repository-relative; "" = unknown)
+#:   measured  the sample that put this family on the list (host temp dir, 2026-10-29)
+#:   added_by  the ticket that declared it (so the evidence can be re-read)
+FixtureFamily = namedtuple(
+    "FixtureFamily", "prefix kind project reason producer measured added_by")
+
+#: Families this ticket adds on top of the engine-mirrored core list. Order = descending
+#: measured weight, so the biggest reclaim is read first. Producers are NOT fixed here
+#: (one ticket per producing project; dz3-* and the t26* families belong to project-vision,
+#: the agg-test/coverage-test families to an unwritten-teardown unittest in this repo,
+#: which lives under server/ and is outside this lane's write set) - the sweeper is the
+#: backstop, and every entry names where it comes from.
+DECLARED_FAMILIES = (
+    FixtureFamily(
+        prefix="dz3-pyc", kind="dir", project="project-vision",
+        reason="pytest pycache staging dirs, one per check run, never reclaimed",
+        producer="fpv-midnight/check.py:625 (tempfile.mkdtemp(prefix='dz3-pyc-'))",
+        measured="35,074 entries; 1.3-4.0 MB each (5 sampled) => tens of GB; oldest 15.4h",
+        added_by="t261029-78"),
+    FixtureFamily(
+        prefix="t261014-08-pyc", kind="dir", project="project-vision",
+        reason="PYTHONPYCACHEPREFIX staging dirs, minted empty and left behind",
+        producer="fpv-midnight/tools/tests/test_cache_bust.py:98 "
+                 "(tempfile.mkdtemp(prefix='t261014-08-pyc-'))",
+        measured="36,311 entries, all empty dirs (du 0); oldest 15.4h",
+        added_by="t261029-78"),
+    FixtureFamily(
+        prefix="t261018-04-ut", kind="dir", project="project-vision",
+        reason="anchor-extraction unittest fixture roots (models/*.glb, parts ledger)",
+        producer="fpv-midnight/tools/tests/test_extract_anchors.py:192 "
+                 "(tempfile.mkdtemp(prefix='t261018-04-ut-'))",
+        measured="9,498 entries; ~16 KB each (5 sampled); oldest 15.4h",
+        added_by="t261029-78"),
+    FixtureFamily(
+        prefix="dz3-no-numpy", kind="dir", project="project-vision",
+        reason="check-env shim dirs from the guard test (fake tools, no numpy)",
+        producer="fpv-midnight/tools/tests/test_check_env_guard.py:41 "
+                 "(tempfile.mkdtemp(prefix='dz3-no-numpy-'))",
+        measured="2,565 entries; ~4 KB each (5 sampled); oldest 11.0h",
+        added_by="t261029-78"),
+    FixtureFamily(
+        prefix="agg-test", kind="dir", project="sandbar",
+        reason="inspection-aggregate unittest: bare mkdtemp in setUp, no teardown",
+        producer="server/engine/tests/test_261006_inspection_aggregate.py:48 "
+                 "(tempfile.mkdtemp(prefix='agg-test-'))",
+        measured="2,389 entries; ~4-24 KB each (5 sampled); oldest 58.5h",
+        added_by="t261029-78"),
+    FixtureFamily(
+        prefix="coverage-test", kind="dir", project="sandbar",
+        reason="face-coverage unittest: bare mkdtemp in setUp, no teardown",
+        producer="server/engine/tests/test_t261009_49_face_coverage.py:28 "
+                 "(tempfile.mkdtemp(prefix='coverage-test-'))",
+        measured="1,768 entries; ~0-8 KB each (5 sampled); oldest 58.5h",
+        added_by="t261029-78"),
+)
+
+DECLARED_PREFIXES = tuple(f.prefix for f in DECLARED_FAMILIES)
+#: Declared family by prefix (receipt lookup).
+DECLARED_BY_PREFIX = {f.prefix: f for f in DECLARED_FAMILIES}
+#: The effective default whitelist: the engine-mirrored core (unchanged, drift-locked to
+#: server/engine/inspection_lane_watchdog.py) + the declared extension. Core prefixes come
+#: first so their historical attribution never changes; `declaration_errors()` refuses an
+#: extension that a core prefix would shadow.
+SWEEP_PREFIXES = TMP_FIXTURE_PREFIXES + tuple(
+    p for p in DECLARED_PREFIXES if p not in TMP_FIXTURE_PREFIXES)
+
+
+def families_outside_engine_mirror():
+    """Declared prefixes the engine water-line mirror does not count (named every run).
+
+    The mirror is `server/engine/inspection_lane_watchdog.py::TMP_FIXTURE_PREFIXES`, kept
+    byte-identical to the core list above by the drift lock. Anything the sweeper reclaims
+    beyond it is invisible to the alarm face ("swept but not alarmed" is exactly the silent
+    gap the drift lock exists to prevent), so the run prints the names instead of letting
+    the gap hide. Closing it needs a ticket that may write server/.
+    """
+    return tuple(f.prefix for f in DECLARED_FAMILIES if f.prefix not in TMP_FIXTURE_PREFIXES)
+
+
+def declaration_errors(families=None, core=TMP_FIXTURE_PREFIXES, excluded=EXCLUDED_PREFIXES):
+    """Named defects in the family declaration (pure; [] = clean).
+
+    A declaration record with a missing field is a trap, not a style issue: the family is
+    then swept with no answer to "why", or never swept at all. Every defect is returned as
+    a string, so the caller refuses with the whole list rather than the first one.
+    """
+    fams = DECLARED_FAMILIES if families is None else tuple(families)
+    errs = []
+    seen = set()
+    for f in fams:
+        if not f.prefix:
+            errs.append("empty prefix")
+            continue
+        if f.prefix in seen:
+            errs.append("%s: declared twice" % f.prefix)
+        seen.add(f.prefix)
+        for field in ("kind", "project", "reason", "producer", "measured", "added_by"):
+            if not str(getattr(f, field) or "").strip():
+                errs.append("%s: empty %s" % (f.prefix, field))
+        if f.kind not in ("dir", "file", "dir+file"):
+            errs.append("%s: unknown kind %r (want dir | file | dir+file)"
+                        % (f.prefix, f.kind))
+        if any(f.prefix.startswith(x) for x in excluded):
+            errs.append("%s: collides with EXCLUDED_PREFIXES %r (excluded must win)"
+                        % (f.prefix, next(x for x in excluded if f.prefix.startswith(x))))
+        shadow = next((c for c in core if c != f.prefix and f.prefix.startswith(c)), "")
+        if shadow:
+            errs.append("%s: shadowed by core prefix %r (entries would be attributed to the"
+                        " core family)" % (f.prefix, shadow))
+    return errs
+
+
 DEFAULT_MAX_AGE_H = 6.0
 DEFAULT_SAMPLE = 10
 DEFAULT_SAMPLE_BUDGET_S = 8.0
@@ -162,55 +304,9 @@ DEFAULT_SAMPLE_BUDGET_S = 8.0
 APPLY_MIN_AGE_H = 1.0
 #: 报告里逐条点名的上限（失败/跳过/在册锁档各自截断，但计数不截断）
 NAMED_CAP = 40
-
-#: Foreign fixture families (t261029-38). Another repository mints these under the same
-#: temp root. This tool COUNTS them (--count-only) and NEVER sweeps them: a caller-supplied
-#: prefix set that overlaps one of these is refused on --apply, by name (see
-#: foreign_overlap). Do not add a sandbar prefix that shares these bytes: the invariant
-#: case refuses such a whitelist entry instead of silently widening the sweep.
-#: Producers (verified by reading that repo; nothing there is edited by this ticket):
-#:   project-vision integration/sc_fpv_part_intake_gate.py:122 (:339 -absent-)
-#:   project-vision integration/sc_fpv_part_intake_refs_rule.py:71
-#:   project-vision integration/sc_fpv_part_intake_lane_gate.py:110 (:249 -absent-)
-FOREIGN_PREFIXES = (
-    "t26101406-",
-    "t26101409-",
-)
-
-#: Absolute probe binaries. A launchd/executor shell can carry a minimal PATH, and a
-#: probe that silently disappears must never read as "no holder" (t261029-38).
-PGREP_BIN = "/usr/bin/pgrep"
-LSOF_BIN = "/usr/sbin/lsof"
-
-#: Exit code for a degraded holder scan: some rows parsed, but the probe could not be
-#: trusted, so every remaining candidate directory was kept. Distinct from 1 (delete
-#: failures) and 2 (refusal) so a reader can tell the three apart.
-EXIT_DEGRADED = 3
-
-#: Untouched entry names kept for the receipt's "uncovered families" section. Bounded so
-#: a 150k-entry temp root cannot blow up the JSON; the count is never truncated.
-UNTOUCHED_NAMES_CAP = 20000
-
-
-def probe_bin(absolute: str, fallback: str) -> str:
-    """Absolute probe path when the binary is there; the PATH name otherwise."""
-    return absolute if os.path.exists(absolute) else fallback
-
-
-def foreign_overlap(prefixes) -> str:
-    """First foreign prefix the caller-supplied set collides with ("" = no collision).
-
-    Collision is checked in BOTH directions: `--prefix t26101406-gate-` (narrower) and
-    `--prefix t26101` (wider) both touch a foreign family, so both are refused. This is
-    the mechanical tooth behind "counted, never swept".
-    """
-    for p in prefixes or ():
-        for f in FOREIGN_PREFIXES:
-            if not p or not f:
-                continue
-            if p.startswith(f) or f.startswith(p):
-                return f
-    return ""
+#: How many kept-entry names one family's receipt detail line carries (the counts above it
+#: are never truncated - only the printed names are).
+RECEIPT_KEPT_CAP = 5
 
 
 def human(n: float) -> str:
@@ -247,7 +343,6 @@ def scan(root: str, prefixes, max_age_h: float, now: float = None,
     """
     now = time.time() if now is None else now
     stale, live, not_swept_named = [], [], []
-    untouched_names = []
     entries = untouched = 0
     locked = 0
     excluded_by_prefix = {p: 0 for p in excluded}
@@ -264,8 +359,6 @@ def scan(root: str, prefixes, max_age_h: float, now: float = None,
                 continue
             if not match_prefix(name, prefixes):
                 untouched += 1
-                if len(untouched_names) < UNTOUCHED_NAMES_CAP:
-                    untouched_names.append(name)
                 continue
             try:
                 if ent.is_symlink():
@@ -289,8 +382,6 @@ def scan(root: str, prefixes, max_age_h: float, now: float = None,
     stale.sort()
     live.sort()
     return {"entries": entries, "untouched": untouched, "stale": stale, "live": live,
-            "untouched_names": untouched_names,
-            "untouched_names_truncated": untouched > len(untouched_names),
             "not_swept_named": not_swept_named, "not_swept": locked,
             "excluded_by_prefix": excluded_by_prefix,
             "excluded_count": sum(excluded_by_prefix.values()),
@@ -381,16 +472,8 @@ def _all_pids():
     「扫不到」与「没有载体」是两件事：前者会让人以为机器干净（261001 风暴里正是这个幻觉
     让人以为收口了）。所以工具缺席一律把原因写进报告。
     """
-
-    # Observation (t261029-38, recorded not acted on): on this host `pgrep -f .` can bump the
-    # mtime of a directory that a live process holds as its cwd (measured: 8.0h before the
-    # call, 0.0h after). The effect is safe in direction (the entry then reads "fresh" and is
-    # kept), but it means an "aged directory + live cwd carrier" state is short lived in
-    # production, and a fixture that wants to pin it must re-age the directory after the
-    # probe has settled.
     try:
-        r = subprocess.run([probe_bin(PGREP_BIN, "pgrep"), "-f", "."],
-                           capture_output=True, text=True, timeout=30)
+        r = subprocess.run(["pgrep", "-f", "."], capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as e:
         return None, "pgrep unavailable: %s: %s" % (type(e).__name__, e)
     if r.returncode not in (0, 1):
@@ -402,7 +485,7 @@ def _all_pids():
 def _pid_cwd(pid: int):
     """该进程的 cwd（`lsof -a -p PID -d cwd -Fn`）；取不到=None（进程已死/无权限）。"""
     try:
-        r = subprocess.run([probe_bin(LSOF_BIN, "lsof"), "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+        r = subprocess.run(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
                            capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -412,114 +495,7 @@ def _pid_cwd(pid: int):
     return None
 
 
-def _lsof_pass():
-    """One `lsof -nP -w -F pcn` pass -> ([(pid, kind, path)], ok, error).
-
-    kind is "cwd" for the process working directory and "fd" for an open descriptor.
-    Why one pass: the per-pid loop costs one `lsof` per process (measured 807 processes
-    on this host, ~25 s), while this pass costs 0.16 s and yields 639 resolved pids with
-    524 cwd rows. `ok=False` means the probe could not be trusted (exit != 0); parsed
-    rows are still returned so a partial answer can be used and named.
-    """
-    try:
-        # A hard ceiling for a one-shot probe, not a wait on a condition: the sweep never
-        # polls here, and a timeout becomes a named degraded probe (never a silent
-        # "no holders").
-        r = subprocess.run([probe_bin(LSOF_BIN, "lsof"), "-nP", "-w", "-F", "pcn"],  # SANCTIONED-WAIT: one-shot probe ceiling; a timeout is a named degraded probe, not a poll
-                           capture_output=True, text=True, timeout=120)  # SANCTIONED-WAIT: same one-shot probe ceiling as the line above
-    except (OSError, subprocess.SubprocessError) as e:
-        return [], False, "%s: %s" % (type(e).__name__, e)
-    rows, pid, kind = [], None, None
-    for line in r.stdout.splitlines():
-        if not line:
-            continue
-        tag, val = line[0], line[1:]
-        if tag == "p":
-            pid = val
-        elif tag == "f":
-            kind = "cwd" if val == "cwd" else "fd"
-        elif tag == "n" and pid:
-            rows.append((pid, kind or "fd", val))
-    if r.returncode != 0:
-        err = "lsof exit=%d" % r.returncode
-        tail = (r.stderr or "").strip()
-        return rows, False, (err + ": " + tail[:200]) if tail else err
-    return rows, True, None
-
-
-def entry_of(path: str, root_real: str, names) -> str:
-    """First path segment under the sweep root, when it names a candidate entry ("" = no).
-
-    Segment-exact by construction: `/root/foo-bar/x` has first segment `foo-bar`, so a
-    candidate named `foo` is never marked as its holder (prefix sharing is the trap this
-    avoids). Paths outside the root return "" and are counted by the caller.
-    """
-    try:
-        real = os.path.realpath(path)
-    except OSError:
-        return ""
-    root_real = os.path.realpath(root_real).rstrip("/")
-    if real == root_real:
-        return ""
-    prefix = root_real + os.sep
-    if not real.startswith(prefix):
-        return ""
-    seg = real[len(prefix):].split(os.sep, 1)[0]
-    return seg if seg in names else ""
-
-
-def probe_open_holders(root: str, entries, lsof_rows=None, lsof_error=None):
-    """Open-descriptor holders among the aged entries -> ({entry name: [pid…]}, info).
-
-    A directory is "held open" when a live process has a working directory or an open
-    descriptor at or below it (t261029-38 deliverable 1, guard 2). The answer is
-    conservative by construction: when the probe cannot be trusted (`ok` false, or an
-    empty answer while processes exist), `info["degraded"]` is True and the caller keeps
-    every remaining candidate directory — "cannot scan" is never "no holder".
-    """
-    info = {"probe": "lsof-pass", "rows": 0, "cwd_rows": 0, "fd_rows": 0,
-            "in_root_rows": 0, "outside_root_rows": 0, "matched_pids": 0,
-            "degraded": False, "error": None, "pids": 0}
-    if lsof_rows is None:
-        rows, ok, err = _lsof_pass()
-    else:
-        # Rows handed in by the caller: the pass status must be handed in too, or a failed
-        # probe would be read as a clean empty answer (t261029-38 review point).
-        rows, ok, err = list(lsof_rows), (lsof_error is None), lsof_error
-    info["rows"] = len(rows)
-    info["error"] = err
-    pids, _perr = _all_pids()
-    info["pids"] = len(pids or ())
-    if not ok:
-        info["degraded"] = True
-        return {}, info
-    if not rows and (pids or ()):
-        # Zero rows on a live machine is a denied probe, not a quiet machine.
-        info["degraded"] = True
-        info["error"] = "lsof pass returned no rows for %d process(es)" % len(pids)
-        return {}, info
-    names = {e.name for e in entries}
-    root_real = os.path.realpath(root)
-    hits = {}
-    for pid, kind, path in rows:
-        if kind == "cwd":
-            info["cwd_rows"] += 1
-        else:
-            info["fd_rows"] += 1
-        in_root = os.path.realpath(path).startswith(root_real.rstrip("/") + os.sep)
-        if in_root:
-            info["in_root_rows"] += 1
-        else:
-            info["outside_root_rows"] += 1
-        name = entry_of(path, root_real, names)
-        if not name:
-            continue
-        hits.setdefault(name, []).append(int(pid))
-    info["matched_pids"] = len({p for v in hits.values() for p in v})
-    return hits, info
-
-
-def live_carriers(root: str, entries, lsof_rows=None):
+def live_carriers(root: str, entries):
     """越龄夹具条目里还活着的进程（**载体**）→ ({条目名: [pid…]}, 扫描面错误或 None)。
 
     为什么按 **cwd** 判、不按命令行：261001 自递归风暴里那些进程的 args 是**相对路径**
@@ -550,24 +526,9 @@ def live_carriers(root: str, entries, lsof_rows=None):
             dirs[os.path.realpath(os.path.join(root_real, e.name)).rstrip("/") + os.sep] = e.name
     if not dirs:
         return {}, None
-    # One pass first (0.16 s), per-pid `lsof` only for pids the pass did not resolve.
-    # A pass that failed or answered nothing leaves every pid to the fallback, so an
-    # unavailable/denied probe keeps the old, conservative behaviour (t261004-22 case C
-    # stubs the per-pid form and depends on exactly that).
-    cwd_by_pid = {}
-    if lsof_rows is None:
-        lsof_rows, ok, _err = _lsof_pass()
-    else:
-        ok = True
-    if ok:
-        for pid, kind, path in lsof_rows:
-            if kind == "cwd":
-                cwd_by_pid[pid] = path
     hits = {}
     for pid in pids:
-        cwd = cwd_by_pid.get(str(pid))
-        if not cwd:
-            cwd = _pid_cwd(pid)
+        cwd = _pid_cwd(pid)
         if not cwd:
             continue
         cwd_real = os.path.realpath(cwd)
@@ -665,6 +626,76 @@ def estimate(root: str, per_prefix: dict, sample: int, budget_s: float):
     return rows, est_total, notes
 
 
+def _empty_row(prefix: str) -> dict:
+    """Zero row, shaped like an `estimate()` row (a declared family with no hits)."""
+    return {"prefix": prefix, "count": 0, "dirs": 0, "files": 0, "oldest_h": 0.0,
+            "est_bytes": 0, "sampled": 0, "dir_avg_bytes": 0.0, "truncated": False}
+
+
+def _kept_bucket(kept_by: dict, prefix: str) -> dict:
+    """Per-family "kept" counters (live/lock/carrier/failed/unverified)."""
+    return kept_by.setdefault(prefix, {"live": 0, "lock": 0, "carrier": 0,
+                                       "failed": 0, "unverified": 0})
+
+
+def _note_kept(kept_names_by: dict, prefix: str, text: str) -> None:
+    """Record one kept entry (name + reason) for the per-family receipt detail line."""
+    kept_names_by.setdefault(prefix, []).append(text)
+
+
+def family_receipt(prefixes, rows, live_rows, swept_by, freed_by, kept_by, kept_names_by,
+                   label, kept_cap=None):
+    """Per-family receipt rows — ONE builder for dry-run and `--apply` (t261029-78).
+
+    Why one builder: the applied mode used to collapse into a single total, so "which
+    family was swept, and what did it cost" was unreadable exactly when it mattered. Both
+    modes now print the same line layout; only the swept column's label differs
+    (`would-sweep` = candidates in a dry-run, `swept` = really deleted).
+
+    Families with no candidates and no live entries are skipped — except declared ones,
+    which always print (at zero too), so the reader sees the declared coverage.
+
+    Returns a list of dicts; each has `line` (preformatted) and the raw numbers, and the
+    same list is exported as `per_family` in the JSON receipt.
+    """
+    cap = RECEIPT_KEPT_CAP if kept_cap is None else kept_cap
+    est_by = {r["prefix"]: r for r in rows}
+    out = []
+    for p in prefixes:
+        r = est_by.get(p) or _empty_row(p)
+        live_n = len(live_rows.get(p) or [])
+        decl = DECLARED_BY_PREFIX.get(p)
+        if not (r["count"] or live_n or decl):
+            continue
+        kept = _kept_bucket(kept_by, p)
+        kept["live"] = live_n
+        swept_n = swept_by.get(p, 0)
+        freed = freed_by.get(p, 0.0)
+        names = kept_names_by.get(p) or []
+        line = ("  family %-22s stale=%-6d (d=%-6d f=%-5d) live=%-5d oldest=%-8s "
+                "est≈%-9s %s=%-6d freed≈%-9s | kept: live=%-5d lock=%-4d carrier=%-4d "
+                "failed=%d%s"
+                % (p, r["count"], r["dirs"], r["files"], live_n,
+                   ("%.1fh" % r["oldest_h"]) if r["count"] else "-",
+                   human(r["est_bytes"]) if r["count"] else "-",
+                   label, swept_n, human(freed) if swept_n else "-",
+                   live_n, kept["lock"], kept["carrier"], kept["failed"],
+                   (" unverified=%d" % kept["unverified"]) if kept["unverified"] else ""))
+        out.append({"prefix": p, "declared": bool(decl),
+                    "stale": r["count"], "dirs": r["dirs"], "files": r["files"],
+                    "live": live_n, "oldest_h": r["oldest_h"],
+                    "est_bytes": r["est_bytes"], "swept": swept_n,
+                    "freed_bytes": freed, "kept": dict(kept),
+                    "kept_names": names,
+                    "reason": decl.reason if decl else "",
+                    "producer": decl.producer if decl else "",
+                    "project": decl.project if decl else "",
+                    "measured": decl.measured if decl else "",
+                    "added_by": decl.added_by if decl else "",
+                    "line": line})
+    return out
+
+
 def make_tree_writable(path: str) -> None:
     """把一棵树里的目录/文件补上写位（**只在常规删除失败时**走这条路）。
 
@@ -718,30 +749,19 @@ def run(argv=None) -> int:
     ap.add_argument("--kill-carriers", action="store_true",
                     help="kill orphan processes whose cwd still lives inside an aged-out "
                          "whitelisted fixture entry, then sweep it (default = report only)")
-    # t261029-38: a count-only verb exists so the cadence receipt can name foreign
-    # families without ever holding a delete path. It is exclusive with --apply.
-    ap.add_argument("--count-only", action="store_true",
-                    help="scan and report only; refuses --apply and skips the holder probe "
-                         "(a count makes no delete decision)")
-    # t261029-38: batch bounds. Defaults stay 0 = unlimited, so today's documented
-    # `--apply` behaviour is unchanged; the daily runner passes explicit values.
-    ap.add_argument("--limit", type=int, default=0,
-                    help="stop after this many candidate entries (0 = unlimited)")
-    ap.add_argument("--budget-s", type=float, default=0.0,
-                    help="stop between entries after this many seconds (0 = unlimited)")
     args = ap.parse_args(argv)
 
     root = os.path.abspath(args.root or tempfile.gettempdir())
     # 空串前缀 = 形同没有前缀闸（`match_prefix` 对空串恒真）——一律剔除，宁严不松：
     # 剔除后若白名单为空，下面 `--apply` 的空白名单闸会拒收。
-    prefixes = tuple(p for p in args.prefix if p) if args.prefix else TMP_FIXTURE_PREFIXES
-    mode = "count-only" if args.count_only else ("apply" if args.apply else "dry-run")
-    out = {"mode": mode, "root": root,
+    # The default is the effective whitelist = engine-mirrored core + declared families
+    # (t261029-78); `--prefix` still overrides both, for tests and for a narrow sweep.
+    prefixes = tuple(p for p in args.prefix if p) if args.prefix else SWEEP_PREFIXES
+    decl_errors = declaration_errors()
+    out = {"mode": "apply" if args.apply else "dry-run", "root": root,
            "max_age_h": args.max_age_h, "prefixes": list(prefixes),
-           "prefix_source": "caller" if args.prefix else "whitelist",
-           "foreign_prefixes": list(FOREIGN_PREFIXES),
-           "count_only": bool(args.count_only), "limit": int(args.limit),
-           "budget_s": float(args.budget_s)}
+           "declared_families": [f._asdict() for f in DECLARED_FAMILIES],
+           "families_outside_engine_mirror": list(families_outside_engine_mirror())}
     log = (lambda m: print(m, file=sys.stderr, flush=True)) if args.json \
         else (lambda m: print(m, flush=True))
 
@@ -753,10 +773,13 @@ def run(argv=None) -> int:
             print("REFUSED: " + msg)
         return code
 
+    if decl_errors:
+        # Fail-closed on the declaration itself: a half-written record (no reason, no
+        # producer, shadowed prefix) is the trap the next reader walks into, so it is a
+        # named refusal instead of a family that silently never matches.
+        return bail("declared family list is malformed: %s" % "; ".join(decl_errors[:8]))
     if not os.path.isdir(root):
         return bail("root is not a directory: %s" % root)
-    if args.count_only and args.apply:
-        return bail("--count-only and --apply are exclusive (a count makes no delete decision)")
     if args.max_age_h <= 0:
         return bail("--max-age-h must be > 0 (a sweep without an age gate could kill a running suite)")
     if args.apply and args.max_age_h < APPLY_MIN_AGE_H:
@@ -764,19 +787,9 @@ def run(argv=None) -> int:
                     % (args.max_age_h, APPLY_MIN_AGE_H))
     if args.apply and not prefixes:
         return bail("whitelist is empty — refusing to sweep with no prefix gate")
-    # t261029-38: counted, never swept. A caller-supplied prefix set that touches a
-    # foreign family is refused on --apply, by name, before any scan or delete.
-    if args.apply and args.prefix:
-        hit = foreign_overlap(prefixes)
-        if hit:
-            return bail("--apply on foreign prefix %r is refused: it is minted by the "
-                        "project-vision repo (integration/sc_fpv_part_intake_gate.py, "
-                        "sc_fpv_part_intake_lane_gate.py, sc_fpv_part_intake_refs_rule.py) "
-                        "and this repo never sweeps it" % hit)
 
     if not args.apply:
-        log("COUNT-ONLY (nothing is deleted)" if args.count_only
-            else "DRY-RUN (nothing is deleted; pass --apply to delete)")
+        log("DRY-RUN (nothing is deleted; pass --apply to delete)")
     log("root=%s max-age=%sh prefixes=%d" % (root, args.max_age_h, len(prefixes)))
 
     t0 = time.monotonic()
@@ -786,34 +799,10 @@ def run(argv=None) -> int:
     live_rows = by_prefix(sc["live"], prefixes)
     n_dirs = sum(1 for e in sc["stale"] if e.kind == "dir")
     n_files = len(sc["stale"]) - n_dirs
-    # One lsof pass feeds both holder faces (cwd carriers and open descriptors).
-    lsof_rows, lsof_ok, lsof_err = ([], True, None) if args.count_only else _lsof_pass()
     # 载体（第三条判据，261001 自递归风暴新增）：**越龄**夹具里还活着的进程。它们是
     # 「宿主点名的实报」的承载者——树是死的、进程是活的，按名字杀打不中，只有按 cwd 才认得出。
     carriers, carrier_err = live_carriers(root, sc["stale"])
     carriers_n = sum(len(v) for v in carriers.values())
-    # Open-descriptor holders (t261029-38 guard 2). Count-only scans skip the probe.
-    if args.count_only:
-        holders, holder_info = {}, {"probe": "skipped", "probe_skipped": True,
-                                    "degraded": False, "error": None, "rows": 0,
-                                    "cwd_rows": 0, "fd_rows": 0, "outside_root_rows": 0,
-                                    "pids": 0}
-    else:
-        holders, holder_info = probe_open_holders(root, sc["stale"], lsof_rows=lsof_rows,
-                                                  lsof_error=lsof_err)
-    # A cwd carrier is reported on the carrier face (its own counter and its own reap
-    # opt-in); only the remaining holder entries count on the open-fd face, so the two
-    # faces never double-count an entry and `carriers kept` cannot read 0 for an entry
-    # that was kept as a carrier.
-    holders_only = {n: v for n, v in holders.items() if n not in carriers}
-    holders_n = sum(len(v) for v in holders_only.values())
-    # Two probe faces, two contracts (t261002-13 keeps the first one):
-    #   carrier (cwd) probe unavailable -> keep every directory, name it, exit 0;
-    #   open-fd holder probe degraded   -> keep every directory, name it, exit 3.
-    carrier_degraded = bool(carrier_err)
-    holder_degraded = bool(holder_info.get("degraded"))
-    degraded = carrier_degraded or holder_degraded
-    degraded_reason = carrier_err or holder_info.get("error")
     log("scanned %d top-level entries in %.1fs: %d whitelisted stale (>=%sh: %d dirs / %d files), "
         "%d whitelisted live, %d untouched (outside whitelist), %d not swept"
         % (sc["entries"], time.monotonic() - t0, len(sc["stale"]), args.max_age_h,
@@ -829,44 +818,31 @@ def run(argv=None) -> int:
                                                 ",".join(str(p) for p in carriers[name][:8])))
         if len(carriers) > NAMED_CAP:
             log("  ... (%d more carrier entries suppressed; see the count)" % (len(carriers) - NAMED_CAP))
-    if holder_info.get("probe_skipped"):
-        log("HOLDER PROBE SKIPPED (count-only: no delete decision, no holder question)")
-    elif holder_info.get("degraded"):
-        log("HOLDER SCAN DEGRADED: %s —— 目录族按「可能有持有者」处置（不当作没有），exit=%d"
-            % (degraded_reason, EXIT_DEGRADED))
-    elif holders_only:
-        log("OPEN HOLDERS: %d process(es) hold %d aged-out entr(ies) open (fd, no cwd carrier)"
-            " —— 条目按在册保留（不删）" % (holders_n, len(holders_only)))
-        for name in sorted(holders_only)[:NAMED_CAP]:
-            log("  holder %s: %d pid(s) %s" % (name, len(holders_only[name]),
-                                               ",".join(str(p) for p in holders_only[name][:8])))
-        if len(holders_only) > NAMED_CAP:
-            log("  ... (%d more holder entries suppressed; see the count)"
-                % (len(holders_only) - NAMED_CAP))
-    for r in rows:
-        live_n = len(live_rows.get(r["prefix"], []))
-        log("  %-24s stale=%-7d (d=%-6d f=%-5d) live=%-5d oldest=%-8s est≈%s%s"
-            % (r["prefix"], r["count"], r["dirs"], r["files"], live_n,
-               ("%.1fh" % r["oldest_h"]) if r["count"] else "-",
-               human(r["est_bytes"]) if r["count"] else "-",
-               (" (from %d sampled)" % r["sampled"]) if r["dirs"] else ""))
-    for n in notes:
-        log("  note: %s" % n)
     if sc["excluded_count"]:
         log("excluded by policy (never swept): %d entries — %s"
             % (sc["excluded_count"],
                ", ".join("%s=%d" % (p, c) for p, c in sorted(sc["excluded_by_prefix"].items())
                          if c)))
-
+    # Honest face of the extension (t261029-78): families this tool reclaims but the water
+    # line does not count are NAMED every run. "Swept but never alarmed" is the silent gap
+    # the drift lock exists to prevent; closing it means writing server/ (outside this
+    # lane's write set), so this run reports it instead of hiding it.
+    mirror_gap = () if args.prefix else families_outside_engine_mirror()
+    if mirror_gap:
+        log("ENGINE MIRROR GAP: %d declared famil(ies) are not in the engine water-line "
+            "mirror (server/engine/inspection_lane_watchdog.TMP_FIXTURE_PREFIXES): %s — this"
+            " tool reclaims them, the alarm face does not count them yet (closing that needs"
+            " a ticket that may write server/)" % (len(mirror_gap), ", ".join(mirror_gap)))
     freed = 0.0
     failed, failed_named = 0, []
     done = 0
-    processed = 0
-    partial = False
     done_dirs = done_files = 0
     locked_kept, locked_named = 0, []
     carriers_kept, carriers_killed, carriers_named, unverified_kept = 0, 0, [], 0
-    holders_kept, holders_named = 0, []
+    # Per-family bookkeeping, feeding the shared receipt (t261029-78). Counts are complete;
+    # only the printed names are capped.
+    swept_by, freed_by, kept_by, kept_names_by = {}, {}, {}, {}
+    stale_by = by_prefix(sc["stale"], prefixes)
     if args.apply:
         # 目录族的实际释放量按「逐前缀实测平均 × 实删条数」重算（不直接抄全量估算）；
         # 文件族按实删字节累计（精确，无需采样）。
@@ -876,54 +852,29 @@ def run(argv=None) -> int:
                 dir_avg_by_prefix[r["prefix"]] = r["dir_avg_bytes"]
         log("APPLY: deleting %d entries (>=%sh, whitelist only, live locks kept, "
             "carrier entries kept unless --kill-carriers) ..." % (len(sc["stale"]), args.max_age_h))
-        if args.limit or args.budget_s:
-            log("BOUNDED BATCH: limit=%s entries, budget=%ss (stop between entries; "
-                "'partial' in the receipt says so)" % (args.limit or "-", args.budget_s or "-"))
         for entry in sc["stale"]:
-            # Bounded batch (t261029-38): stop cleanly BETWEEN entries, never mid-rmtree,
-            # and let the receipt say how much is left. Exit stays 0 — a bounded stop is
-            # not a failure, and the next tick continues.
-            if args.limit and processed >= args.limit:
-                partial = True
-                log("  PARTIAL STOP: entry limit %d reached; %d candidate(s) left"
-                    % (args.limit, len(sc["stale"]) - processed))
-                break
-            if args.budget_s and (time.monotonic() - t0) >= args.budget_s:
-                partial = True
-                log("  PARTIAL STOP: budget %.0fs reached; %d candidate(s) left"
-                    % (args.budget_s, len(sc["stale"]) - processed))
-                break
-            processed += 1
             p = match_prefix(entry.name, prefixes)
-            if degraded and entry.kind == "dir":
+            bucket = _kept_bucket(kept_by, p)
+            if carrier_err and entry.kind == "dir":
                 # 探测面不可用 = **不知道**有没有载体。不知道就不删目录（树里有活进程时删树
                 # 只留更脏的半态）；文件族与目录的判据不同（活锁判据独立可查），照旧处置。
                 unverified_kept += 1
+                bucket["unverified"] += 1
+                _note_kept(kept_names_by, p, "%s (carrier scan unavailable)" % entry.name)
                 if len(carriers_named) < NAMED_CAP:
-                    carriers_named.append("%s (holder scan unavailable: %s)" % (entry.name, degraded_reason))
-                log("  KEPT %s (holder scan unavailable — refusing to assume 'no holders')"
+                    carriers_named.append("%s (carrier scan unavailable: %s)" % (entry.name, carrier_err))
+                log("  KEPT %s (carrier scan unavailable — refusing to assume 'no carriers')"
                     % entry.name)
                 continue
-            if entry.kind == "file":
-                held = lock_held(os.path.join(root, entry.name))
-                if held is True:      # 在用的锁档绝不删（第三条文件族判据）
-                    locked_kept += 1
-                    if len(locked_named) < NAMED_CAP:
-                        locked_named.append("%s (lock held by a live process)" % entry.name)
-                    log("  KEPT %s (flock held by a live process)" % entry.name)
-                    continue
-            reaped_here = False
             if carriers.get(entry.name):
-                # A cwd carrier keeps its OWN accounting and its OWN opt-in reap (the
-                # t261002-13 contract: `carriers_kept` / `carriers_named` name the entry,
-                # and `--kill-carriers` still reaps it). This branch must stay ahead of the
-                # open-fd holder branch: the one-pass probe sees a cwd carrier as a holder
-                # too, and routing it there would report "kept 0" while keeping the entry.
                 pids = carriers[entry.name]
                 if not args.kill_carriers:
                     # 有活载体的条目**不删**：删树不杀进程 = 留下更脏的半态（进程继续在
                     # 已被 unlink 的目录里跑，报告却显示「已清」）。这与文件族的活锁同一条纪律。
                     carriers_kept += 1
+                    bucket["carrier"] += 1
+                    _note_kept(kept_names_by, p, "%s (%d live carrier pid(s))"
+                               % (entry.name, len(pids)))
                     if len(carriers_named) < NAMED_CAP:
                         carriers_named.append("%s (%d live pid(s) %s; --kill-carriers to reap)"
                                               % (entry.name, len(pids),
@@ -933,36 +884,38 @@ def run(argv=None) -> int:
                     continue
                 kr = kill_carriers(pids)
                 carriers_killed += kr["termed"]
-                reaped_here = kr["termed"] > 0
                 if kr["failed"]:
                     for m in kr["failed"][:NAMED_CAP]:
                         if len(failed_named) < NAMED_CAP:
                             failed_named.append("%s carrier reap failed: %s" % (entry.name, m))
                 log("  REAPED %s carriers: termed=%d killed=%d failed=%d"
                     % (entry.name, kr["termed"], kr["killed"], len(kr["failed"])))
-            if holders.get(entry.name) and not reaped_here:
-                # An open descriptor inside the entry with no cwd carrier: KEEP it, name
-                # it. Deleting the tree under a live holder leaves the dirtier half-state
-                # the 261001 storm taught us to avoid.
-                holders_kept += 1
-                if len(holders_named) < NAMED_CAP:
-                    holders_named.append("%s (%d live holder pid(s) %s: open fd)"
-                                         % (entry.name, len(holders[entry.name]),
-                                            ",".join(str(x) for x in holders[entry.name][:8])))
-                log("  KEPT %s (%d live holder pid(s): open fd)"
-                    % (entry.name, len(holders[entry.name])))
-                continue
+            if entry.kind == "file":
+                held = lock_held(os.path.join(root, entry.name))
+                if held is True:      # 在用的锁档绝不删（第三条文件族判据）
+                    locked_kept += 1
+                    bucket["lock"] += 1
+                    _note_kept(kept_names_by, p, "%s (lock held by a live process)" % entry.name)
+                    if len(locked_named) < NAMED_CAP:
+                        locked_named.append("%s (lock held by a live process)" % entry.name)
+                    log("  KEPT %s (flock held by a live process)" % entry.name)
+                    continue
             try:
                 if entry.kind == "dir":
                     _delete(root, entry)
-                    freed += dir_avg_by_prefix.get(p, 0.0)
+                    got = dir_avg_by_prefix.get(p, 0.0)
                     done_dirs += 1
                 else:
-                    freed += _delete(root, entry)
+                    got = _delete(root, entry)
                     done_files += 1
+                freed += got
+                freed_by[p] = freed_by.get(p, 0.0) + got
+                swept_by[p] = swept_by.get(p, 0) + 1
                 done += 1
             except Exception as e:            # noqa: BLE001 —— 单条失败不中断全局清扫
                 failed += 1
+                bucket["failed"] += 1
+                _note_kept(kept_names_by, p, "%s (delete failed: %s)" % (entry.name, type(e).__name__))
                 if len(failed_named) < NAMED_CAP:
                     failed_named.append("%s: %s: %s" % (entry.name, type(e).__name__, e))
                 elif len(failed_named) == NAMED_CAP:
@@ -972,54 +925,73 @@ def run(argv=None) -> int:
                 log("  progress: %d/%d deleted, %d failed, %.1fs elapsed, freed≈%s"
                     % (done, len(sc["stale"]), failed, time.monotonic() - t0, human(freed)))
     else:
-        # dry-run：三个计数都是**候选**数（谁会被删；`kept live` 与 `locks kept` 另计）。
-        # 有活载体的条目缺省**不删**（要 `--kill-carriers` 才动），所以候选里先摘掉它们——
-        # 否则 dry-run 报「要删 N 条」而 apply 只删 N-M 条，报告与行为分叉。
-        # 同理摘掉有打开描述符/cwd 持有者的条目（t261029-38 guard 2）。
+        # dry-run: the candidate set must EQUAL what `--apply` would delete, so the same
+        # three judgments run here read-only: the carrier cwd probe already happened above,
+        # the lock probe is one flock(LOCK_NB) peek that holds nothing, and an unavailable
+        # carrier probe still keeps every DIR family (unknown is not "none"). Otherwise the
+        # dry-run would promise N deletions and --apply would do N-M.
         carriers_kept = len(carriers)
-        holders_kept = len(holders_only)
-        for _name in sorted(carriers)[:NAMED_CAP]:
-            carriers_named.append("%s (%d live carrier pid(s) %s; --kill-carriers to reap)"
-                                  % (_name, len(carriers[_name]),
-                                     ",".join(str(x) for x in carriers[_name][:8])))
-        for _name in sorted(holders_only)[:NAMED_CAP]:
-            holders_named.append("%s (%d live holder pid(s) %s: open fd)"
-                                 % (_name, len(holders_only[_name]),
-                                    ",".join(str(x) for x in holders_only[_name][:8])))
-        if degraded:
-            # 探测面不可用：目录族一律不算候选（不知道 ≠ 没有），文件族照旧
-            unverified_kept = n_dirs
+        if carrier_err:
             carriers_kept = 0
-            done = len(sc["stale"]) - n_dirs
-            done_dirs, done_files = 0, n_files
-        else:
-            kept_names = set(carriers) | set(holders_only)
-            done = len(sc["stale"]) - sum(1 for e in sc["stale"] if e.name in kept_names)
-            done_dirs, done_files = n_dirs, n_files
-        if args.limit and done > args.limit:
-            partial = True
-            done = args.limit
-        freed = est_total
+        est_by = {r["prefix"]: r["est_bytes"] for r in rows}
+        for entry in sc["stale"]:
+            p = match_prefix(entry.name, prefixes)
+            bucket = _kept_bucket(kept_by, p)
+            share = est_by.get(p, 0.0) / len(stale_by[p]) if stale_by.get(p) else 0.0
+            if carrier_err and entry.kind == "dir":
+                unverified_kept += 1
+                bucket["unverified"] += 1
+                _note_kept(kept_names_by, p, "%s (carrier scan unavailable)" % entry.name)
+                continue
+            if carriers.get(entry.name) and not args.kill_carriers:
+                carriers_kept += 1
+                bucket["carrier"] += 1
+                _note_kept(kept_names_by, p, "%s (%d live carrier pid(s))"
+                           % (entry.name, len(carriers[entry.name])))
+                continue
+            if entry.kind == "file" and lock_held(os.path.join(root, entry.name)) is True:
+                locked_kept += 1
+                bucket["lock"] += 1
+                _note_kept(kept_names_by, p, "%s (lock held by a live process)" % entry.name)
+                if len(locked_named) < NAMED_CAP:
+                    locked_named.append("%s (lock held by a live process)" % entry.name)
+                continue
+            done += 1
+            if entry.kind == "dir":
+                done_dirs += 1
+            else:
+                done_files += 1
+            swept_by[p] = swept_by.get(p, 0) + 1
+            freed_by[p] = freed_by.get(p, 0.0) + share
+        freed = sum(freed_by.values())
 
+    # ---- per-family receipt: ONE shared printer, both modes (t261029-78) --------------
+    label = "swept" if args.apply else "would-sweep"
+    receipt = family_receipt(prefixes, rows, live_rows, swept_by, freed_by, kept_by,
+                             kept_names_by, label)
+    log("PER-FAMILY RECEIPT (%s; the same lines in both modes):" % label)
+    for row in receipt:
+        log(row["line"])
+        if row["declared"]:
+            log("      why: %s" % row["reason"])
+            log("      who: %s:%s (declared by %s; measured %s)"
+                % (row["project"], row["producer"], row["added_by"], row["measured"]))
+        if row["kept_names"]:
+            shown = row["kept_names"][:RECEIPT_KEPT_CAP]
+            more = len(row["kept_names"]) - len(shown)
+            log("      kept: %s%s" % ("; ".join(shown), (" (+%d more)" % more) if more else ""))
+    for n in notes:
+        log("  note: %s" % n)
     summary = ("%sswept %d (dirs %d / files %d) | kept %d live | carriers %d in %d entr(ies) "
-               "(reaped %d, kept %d, unverified %d) | holders %d in %d entr(ies) | failed %d | "
-               "locks kept %d | freed≈%s%s"
-               % ("COUNT-ONLY: " if args.count_only else ("" if args.apply else "DRY-RUN: "),
-                  done, done_dirs, done_files,
+               "(reaped %d, kept %d, unverified %d) | failed %d | locks kept %d | freed≈%s"
+               % ("" if args.apply else "DRY-RUN: ", done, done_dirs, done_files,
                   len(sc["live"]), carriers_n, len(carriers), carriers_killed, carriers_kept,
-                  unverified_kept, holders_n, len(holders_only), failed, locked_kept,
-                  human(freed), " | PARTIAL" if partial else ""))
+                  unverified_kept, failed, locked_kept, human(freed)))
     log(summary)
     log("done in %.1fs" % (time.monotonic() - t0))
     out.update({"entries": sc["entries"], "untouched": sc["untouched"],
-                "untouched_names": sc["untouched_names"],
-                "untouched_names_truncated": sc["untouched_names_truncated"],
                 "swept": done, "swept_dirs": done_dirs, "swept_files": done_files,
                 "candidate_dirs": n_dirs, "candidate_files": n_files,
-                "candidates_total": len(sc["stale"]), "processed": processed,
-                "partial": partial,
-                "remaining": max(0, len(sc["stale"]) - processed) if args.apply else
-                             max(0, len(sc["stale"]) - done),
                 "kept_live": len(sc["live"]), "failed": failed,
                 "failed_named": failed_named,
                 "locks_kept": locked_kept, "locks_kept_named": locked_named,
@@ -1028,18 +1000,15 @@ def run(argv=None) -> int:
                 "carriers_scan_error": carrier_err, "carriers_reaped": carriers_killed,
                 "carriers_kept": carriers_kept, "carriers_unverified_kept": unverified_kept,
                 "carriers_named": carriers_named,
-                "holders": {k: sorted(v) for k, v in holders.items()},
-                "holders_only": {k: sorted(v) for k, v in holders_only.items()},
-                "holders_count": holders_n, "holders_entries": len(holders_only),
-                "holders_scan_error": holder_info.get("error"),
-                "holders_named": holders_named, "holders_kept": holders_kept,
-                "probe": holder_info, "probe_skipped": bool(holder_info.get("probe_skipped")),
-                "degraded": degraded, "degraded_reason": degraded_reason,
-                "carrier_degraded": carrier_degraded,
-                "holder_degraded": holder_degraded,
                 "kill_carriers": bool(args.kill_carriers),
                 "freed_est_bytes": freed, "swept_is_estimate": not args.apply,
                 "per_prefix": rows,
+                # Same rows the human receipt printed (t261029-78): per-family counts, the
+                # swept column, kept-with-reason buckets and the declaration fields.
+                "per_family": [{k: v for k, v in row.items() if k != "line"}
+                               for row in receipt],
+                "per_family_receipt": [row["line"] for row in receipt],
+                "receipt_label": label,
                 "live_per_prefix": {p: len(v) for p, v in live_rows.items()},
                 "excluded_by_prefix": {p: c for p, c in sc["excluded_by_prefix"].items() if c},
                 "excluded_named": sc["excluded_named"],
@@ -1047,12 +1016,7 @@ def run(argv=None) -> int:
                 "summary": summary})
     if args.json:
         print(json.dumps(out, ensure_ascii=False, indent=2))
-    # Exit contract (t261029-38): 0 done (including a bounded partial stop and a
-    # count-only scan), 1 delete failures, 2 refusal, 3 degraded holder scan (candidates
-    # kept because the probe could not be trusted).
-    if failed:
-        return 1
-    return EXIT_DEGRADED if holder_degraded else 0
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":
