@@ -26,12 +26,15 @@ holds it on a face that exists today:
   (old: the root-degrade guard — an unusable/foreign root is refused, not
   destroyed).
 
-KNOWN GAP, reported on the ticket and deliberately NOT pinned as behaviour:
-``process_bench.start(root=<unwritable>)`` raises a bare ``PermissionError``
-(the public ``up --root`` CLI leaves with a traceback and exit 1) while the
-module documents its refusals as ``{"ok": false, "reason": <named>}`` with exit
-2. A regression case for it waits for a product fix: writing today's traceback
-into this file as the expected result would lock the defect in.
+FORMER GAP, closed by t261029-31 (KI-389): this battery reported that
+``process_bench.start(root=<unwritable>)`` raised a bare ``PermissionError``
+(the public ``up --root`` CLI left with a traceback and exit 1) while the module
+documents its refusals as ``{"ok": false, "reason": <named>}`` with exit 2, and
+that an unwritable bench registry let the bench run unregistered. It
+deliberately did not pin the defect as behaviour. Both faces are fixed now, and
+their regression cases live in
+``integration/tests/test_t261029_32_process_bench_failure_faces.py``; this file
+keeps its acquirer/residue faces.
 
 Faces: offline, seconds, no docker, no Temporal server, no network beyond a
 loopback listener the test itself opens, and it never touches the console on

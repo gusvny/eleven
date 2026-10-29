@@ -28,6 +28,14 @@ Usage (cwd = repo root):
       unless --include-detached says otherwise. Exit 0 always: this is a
       report, not a verdict.
 
+Every refusal is named the same way — {ok: false, reason: "<which path, which
+check failed>"} and exit 2, never a bare traceback and never exit 1. That
+covers a bad --bin, a requested port already in use, an unwritable --root (or a
+missing root whose parent cannot take it), and an unwritable bench registry.
+The registry refusal is a REFUSAL, not a warning: a bench that cannot be
+recorded is invisible to the residue sweep and to every reader that enumerates
+benches, so it must not run at all.
+
 Isolation this gives:
 - one free host port picked by the kernel (127.0.0.1:<port>), so the bench
   never competes for 7233/8233 and never touches the production server;
@@ -181,21 +189,35 @@ def _entry_path(pid):
 
 
 def _write_entry(entry):
-    """Write one registry entry atomically (a reader never sees half a file)."""
+    """Write one registry entry atomically (a reader never sees half a file).
+
+    Returns (path, None) when the entry landed, (None, reason) when the registry
+    refused it. The reason is NAMED - which path, which check failed - because
+    the caller turns it into a refusal: a bench nobody can find is worse than no
+    bench, so this None is never swallowed (KI-389).
+    """
     directory = registry_dir()
-    directory.mkdir(parents=True, exist_ok=True)
     path = _entry_path(entry["pid"])
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return None, ("bench registry dir cannot be created: %s (%s: %s)"
+                      % (directory, type(exc).__name__, exc))
+    if not directory.is_dir():
+        return None, ("bench registry path is not a directory: %s"
+                      % directory)
     tmp = path.with_name("%s.tmp%d" % (path.name, os.getpid()))
     try:
         tmp.write_text(json.dumps(entry, sort_keys=True), encoding="utf-8")
         os.replace(str(tmp), str(path))
-    except OSError:
+    except OSError as exc:
         try:
             tmp.unlink()
         except OSError:
             pass
-        return None
-    return path
+        return None, ("bench registry is not writable: %s (%s: %s)"
+                      % (path, type(exc).__name__, exc))
+    return path, None
 
 
 def entries():
@@ -217,13 +239,28 @@ def entries():
     return out
 
 
-def register(pid, pgid, port, db):
-    """Record a started bench so a later start or down can find it again."""
+def _register_entry(pid, pgid, port, db):
+    """(path, reason): the named write face behind register().
+
+    Kept apart so `register` keeps its published contract (path or None) while
+    the caller that must judge the failure gets the reason to put on its
+    receipt.
+    """
     db_dir = pathlib.Path(str(db)).expanduser().resolve().parent
     return _write_entry({"pid": int(pid), "pgid": int(pgid), "port": int(port),
                          "db_dir": str(db_dir),
                          "started_at": round(time.time(), 3),
                          "owner_pid": os.getpid(), "detached": False})
+
+
+def register(pid, pgid, port, db):
+    """Record a started bench so a later start or down can find it again.
+
+    Returns the entry path, or None when the registry refused the write; the
+    refusal reason lives in _register_entry (see start, which refuses to run an
+    unregistered bench).
+    """
+    return _register_entry(pid, pgid, port, db)[0]
 
 
 def unregister(pid):
@@ -246,7 +283,7 @@ def _mark_detached(pid):
     entry["detached"] = True
     entry["detached_at"] = round(time.time(), 3)
     entry["owner_pid"] = 0
-    return _write_entry(entry) is not None
+    return _write_entry(entry)[0] is not None
 
 
 def reclaim_dir(dir_path):
@@ -668,18 +705,69 @@ def _spawn(argv, db_dir, log_path):
             "dead_w": write_fd}
 
 
+def _takes_entries(path):
+    """True when `path` is a directory this process can create entries in."""
+    return path.is_dir() and os.access(str(path), os.W_OK | os.X_OK)
+
+
+def root_refusal(root):
+    """Judge a bench root BEFORE anything is created, started or swept.
+
+    Returns a named reason - which path, which check failed - or None when the
+    root can take a bench temp dir. A root that does not exist is created later
+    (today's behaviour) but only when its nearest existing parent can take the
+    new directory; otherwise it is the same named refusal. The checks run
+    outside in, because "the root is not a directory", "the root is not
+    writable" and "the parent cannot take the root" are different faults and a
+    refusal has to say which one it hit (KI-389: this used to escape as a bare
+    PermissionError with exit 1).
+    """
+    if root is None:
+        return None
+    path = pathlib.Path(str(root)).expanduser()
+    try:
+        path = path.resolve()
+    except OSError as exc:
+        return ("bench root path cannot be resolved: %s (%s: %s)"
+                % (path, type(exc).__name__, exc))
+    if path.exists():
+        if not path.is_dir():
+            return "bench root is not a directory: %s" % path
+        if not _takes_entries(path):
+            return ("bench root is not writable (needs write and execute): %s"
+                    % path)
+        return None
+    ancestor = path.parent
+    while not ancestor.exists() and ancestor != ancestor.parent:
+        ancestor = ancestor.parent
+    if not ancestor.is_dir():
+        return ("bench root cannot be created: %s (its parent %s is not a "
+                "directory)" % (path, ancestor))
+    if not _takes_entries(ancestor):
+        return ("bench root cannot be created: %s (its parent %s is not "
+                "writable)" % (path, ancestor))
+    return None
+
+
 def start(bin_path=None, boot_s=None, root=None, port=None):
     """Start one bench; return the contract dict {ok, port, pid, start_s, db}.
 
     A refusal returns {"ok": False, "reason": <named>} and leaves NOTHING
-    behind: the binary is checked before any directory or process is created,
-    and a boot that fails is stopped and its temp dir removed before returning.
+    behind: the root, the binary and the port are all checked before any
+    directory or process is created, and a boot that fails (or a registry that
+    cannot record the bench) is stopped and its temp dir removed before
+    returning.
 
     Every start first sweeps the registry (see sweep), so a bench whose owner
     died without the deadman is reaped by the next bench activity.
     """
     bin_path = str(bin_path or default_bin())
     boot_s = BOOT_S if boot_s is None else float(boot_s)
+    # The root is judged before everything, the sweep included: a refusal must
+    # cost nothing at all, and the sweep is an activity of its own.
+    refusal = root_refusal(root)
+    if refusal:
+        return {"ok": False, "reason": refusal}
     try:
         sweep()
     except Exception:                                    # noqa: BLE001
@@ -707,9 +795,24 @@ def start(bin_path=None, boot_s=None, root=None, port=None):
 
     mkdir_kw = {"prefix": TEMP_PREFIX}
     if root is not None:
-        pathlib.Path(str(root)).mkdir(parents=True, exist_ok=True)
-        mkdir_kw["dir"] = str(root)
-    db_dir = pathlib.Path(tempfile.mkdtemp(**mkdir_kw))
+        root_path = pathlib.Path(str(root)).expanduser()
+        try:
+            root_path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return {"ok": False,
+                    "reason": "bench root dir could not be created: %s (%s: %s)"
+                              % (root_path, type(exc).__name__, exc)}
+        mkdir_kw["dir"] = str(root_path)
+    # The probe above is cheap and runs first, but it is not a guarantee (ACLs,
+    # a read-only mount, a quota): the mkdtemp failure is named too, so no path
+    # out of start() can raise a bare traceback.
+    where = mkdir_kw.get("dir") or tempfile.gettempdir()
+    try:
+        db_dir = pathlib.Path(tempfile.mkdtemp(**mkdir_kw))
+    except OSError as exc:
+        return {"ok": False,
+                "reason": "bench temp dir could not be created under %s (%s: %s)"
+                          % (where, type(exc).__name__, exc)}
     db_file = db_dir / "temporal.db"
     log_path = db_dir / "server.log"
     ui_port = free_port()
@@ -731,10 +834,32 @@ def start(bin_path=None, boot_s=None, root=None, port=None):
         return {"ok": False, "reason": "temporal bench spawn failed (%s): %s"
                 % (type(exc).__name__, exc)}
     _install_signal_handlers()
-    register(handle["pid"], handle["pgid"], port, db_file)
+    # The handle is stored BEFORE the registry write, so a refusal below can
+    # close the deadman pipe (and reap its own child) instead of leaving a shim
+    # watching a dead bench.
     _HANDLES[handle["pid"]] = {"proc": handle["proc"], "port": port,
                                "db": str(db_file), "pgid": handle["pgid"],
                                "dead_w": handle["dead_w"]}
+    entry_path, registry_reason = _register_entry(
+        handle["pid"], handle["pgid"], port, db_file)
+    if not entry_path:
+        # REFUSED, not started-unregistered: an unregistered bench is invisible
+        # to the residue sweep and to every reader that enumerates benches, so
+        # it must not run. Stop it and reclaim its temp dir before saying no.
+        try:
+            stop(port, handle["pid"], pgid=handle["pgid"], db=str(db_file))
+        except Exception as exc:                         # noqa: BLE001
+            # The refusal must still be a receipt, and it must say the truth: the
+            # bench could not be stopped, so this pid is named for a human. The
+            # handle stays in _HANDLES so the atexit backstop tries again.
+            return {"ok": False,
+                    "reason": ("unregistered bench refused: %s; AND the refused "
+                               "bench could not be stopped (%s: %s) — reap pid %s"
+                               % (registry_reason, type(exc).__name__, exc,
+                                  handle["pid"]))}
+        _HANDLES.pop(handle["pid"], None)
+        return {"ok": False,
+                "reason": "unregistered bench refused: %s" % registry_reason}
 
     ok, detail = wait_ready(bin_path, port, boot_s, proc=handle["proc"],
                             log_path=log_path)
@@ -963,6 +1088,12 @@ def detach(pid):
     byte on the deadman pipe (the shim then stops watching the owner), and
     marks the registry entry detached so the sweep leaves the bench alone. The
     caller then owns the handle and must run `down`.
+
+    Returns True only when the hand-over completed. A bench that is serving but
+    whose entry could NOT be marked detached is said out loud on stderr: the
+    next sweep would read it as an orphan and reap a bench that is still in use
+    (KI-389: that write's None used to vanish here, in the `up` CLI and in
+    stage_docker).
     """
     handle = _HANDLES.pop(int(pid), None)
     if not handle:
@@ -977,8 +1108,14 @@ def detach(pid):
             os.close(int(fd))
         except OSError:
             pass
-    _mark_detached(pid)
-    return True
+    if _mark_detached(pid):
+        return True
+    print("WARN: bench pid %s is serving but its registry entry was not marked "
+          "detached (%s) — a later sweep may reap it as an orphan; run "
+          "`down --port %s --pid %s`"
+          % (int(pid), _entry_path(pid), handle.get("port"), int(pid)),
+          file=sys.stderr, flush=True)
+    return False
 
 
 def _reap_all():

@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 360,
-      "scenarios": 856
+      "engine_tests": 358,
+      "scenarios": 855
     },
     "vocab": [
       "behaviour",
@@ -1762,11 +1762,6 @@
       "anchor": "behaviour",
       "note": "t261028-35 L1: the ORDINARY (merge-lane) close mints the post-close witness - the per-ticket worker's watch round is the only engine actor that OBSERVES a ticket settle on that path (the merge stage archives the ticket while it is still open, so that face can never carry a terminal fact). Pins: a settled ticket leaves exactly one closed.json in its own data dir carrying the OBSERVED terminal status, the target ticket's project key, the registered watch writer id (engine:worker.ticket-watch, in shared.CLOSED_WITNESS_WRITERS) and the engine version, minted through the SAME shared writer as the client close entries (one schema, no second marker); a RUNNING ticket writes nothing and a failed query neither stops the watcher nor writes; a torn post-settle describe writes nothing and names the failing check; CONTINUED_AS_NEW is never a closure (unclosed watcher handover) and an unreadable project key is never guessed - both named; the witness's closed_at is the workflow's own close time; all five eligible terminal statuses recorded verbatim; idempotence and attribution are the shared writer's unchanged (second observation a no-op with byte-identical bytes, a hand-made/foreign marker refused by name and never overwritten); the settle log keeps its consumed 「收口…自退」 line and adds a witness line that never dresses up a refusal; nothing written outside the ticket data dir and an existing archive manifest keeps its bytes; and the sweep-facing leg - a blocker head citing such a ticket closes on the marker citation (bucket archived_closed, via=archive, evidence naming marker path + terminal_status + writer) while the same head without the marker stays open with both refusals named. Fixture roots only (SANDBAR_PROJECTS_DIR / SANDBAR_PANEL_DIR, stub Temporal handles); zero production store, zero live ledger, zero real Temporal."
     },
-    "server/engine/tests/test_t261028_54_role_preset_fallback.py": {
-      "anchor": "behaviour",
-      "note": "t261028-54: role presets resolve per FILE with a trace - the project leg wins, the engine library serves only a project that DECLARES roles_dir (undeclared keeps the pre-ticket path byte for byte, no warning), a directory-shaped candidate never reads as present, a hostile role name reads nothing and cannot forge a log line, the engine preset is copied inside the lane (never a host path), and a copy/trace failure leaves the spawn alive. `patch_arg_added` means the argument was added, not that dsh applied it.",
-      "sync_path": "server/engine/shared.py; server/engine/agent_activities.py"
-    },
     "server/engine/tests/test_t261028_56_gate_row_shapes.py": {
       "anchor": "behaviour",
       "note": "t261028-56 L1: ONE gate-row rule for the engine's merge_check faces (family close after t261028-46/-48) - a row verdict read across BOTH engine receipt shapes (script {check, level, count} and agent/human {item, by, done, green}) in field order green -> level -> verdict -> done, conflicting signals resolve red, no signal stays unknown (shown red, never invented green), unknown words and malformed values invent nothing; the row name from item -> check -> id; the red set keeps unproven scalar/array/no-verdict rows visible while a green script row is NOT a red (the retired not-c.get(green) predicate counted 3 reds where 2 are green script rows); the quiet-baseline coverage predicate now judges that same red set (a green script row no longer keeps a covered round blocked forever, a real red still needs its quiet verdicts); and source locks pin that both merge_check writers (dev lane + quickmanual lane) write red_count through the shared rule with the private copies gone.",
@@ -1776,10 +1771,10 @@
       "anchor": "behaviour",
       "note": "t261028-57 / t261029-14 L1: the in-lane code gate's wait is derived from the checks' own declared budgets, and an outer-wait expiry is a named budget fact instead of an unnamed red - verify_lane_code_gate_budget (max(declared timeout, documented 600s default) + documented 120s chain margin; an absent/malformed declaration falls back to the default bound and names every defaulted check), _read_verify_lane_check_budgets (reads the same <tree>/verify.yaml verify_lane reads, and names why it fell back), code_gate_expiry_receipt (budget used, slowest declared check, gate wall, host load, no invented per-check elapsed) and _verify_lane_code_expiry_row (green=False still blocks; reason_code gate_budget_exhausted separates could-not-complete from verify_red); the green and red rows are driven through the real _merge_check_one_scope with a stubbed verify_lane child and compared byte for byte (key order included) to the pre-ticket dicts; source locks pin that no bare 900 literal decides the wait, that the wait fits inside MERGE_CHECK_TO, and that the process group is reaped before the expiry receipt is built (sync_path: server/engine/agent_activities.py, verify.yaml)."
     },
-    "server/engine/tests/test_t261028_54_merge_verify_diagnosis.py": {
-      "anchor": "contract",
-      "note": "t261028-54 L1 (merge resolution): the red-item diagnosis for a process that may not run the lane's code - a timeout/expiry row names a process/lane tree mismatch (loaded agent_activities.py bytes vs the lane's copy: a lane-only activity fix cannot take effect, and replacing the process reloads the same tree) and the mtime-based case where modules were loaded before they were edited (there a replacement does load the fix); the note rides main's gate_budget_exhausted expiry row without changing its blocking verdict, a clean process adds no key, and a broken stamp never raises. The wait-budget derivation itself belongs to t261028_57_gate_budget_derivation (main), not to this file.",
-      "sync_path": "server/engine/agent_activities.py (_verify_tree_note / _verify_stale_code_note); verify.yaml (lanes.code.checks)"
+    "server/engine/tests/test_t261029_32_process_bench_failure_faces.py": {
+      "anchor": "behaviour",
+      "note": "t261029-31/t261029-35 KI-389: the process bench's two fail-open faces on its findability surface - an unwritable --root is a NAMED refusal ({\"ok\": false, \"reason\": \"<path>: <check>\"}, exit 2, the bench binary never executed) including the missing-root-under-an-unwritable-parent and root-is-a-file faults, and an unwritable bench registry REFUSES the start (the just-spawned bench is stopped, its temp dir reclaimed, receipt names the registry path and check) rather than running a bench no sweep can find; plus the writable-registry control and the unchanged happy path (same receipt keys, same temp dir under --root, same registry entry shape, same down block).",
+      "sync_path": "integration/process_bench.py"
     }
   },
   "scenarios": {
@@ -2128,7 +2123,7 @@
     },
     "integration/t260903-03/sc_paths_spawn_seam.py": {
       "anchor": "behaviour",
-      "note": "t260903-03 ①d path contract at the spawn seam (declared roles_dir/model_routes win over the convention; undeclared keeps the convention and names state=decl_missing; anchor-vs-content soft semantics) plus, from t261028-54, the per-role-file engine-library fallback: declared-only leg, project leg wins, lane-internal materialized copy (a host engine path never enters cmd), trace state vocabulary (project/engine/declared_missing/undeclared_missing/invalid_role), the undeclared-project behavior freeze, the SANDBAR_ROLE_PRESET_FALLBACK=0 silence refusal and the malformed-role no-read/no-block/one-escaped-line matrix.",
+      "note": "",
       "sync_path": ""
     },
     "integration/t260903-04/sc_t01_parallel_stages_meta.py": {
@@ -6014,11 +6009,6 @@
       "anchor": "behaviour",
       "note": "t261027-11 gate blocker: the migration's user-visible outcome on public faces only (zero docker containers for the project pattern, no silent backend fallback, dual-face zero residue incl. a delayed re-probe past the re-bind window).",
       "sync_path": ""
-    },
-    "integration/t261028-54/sc_t261028_54_role_preset_fallback.py": {
-      "anchor": "contract",
-      "note": "t261028-54 L2 (offline seconds, no docker/Temporal/browser): the spawn-seam role-preset contract - A declared miss on both legs = no patch, trace state=declared_missing, one warning naming role + both absolute candidates; B declared miss + engine hit = one materialized copy inside the agent cwd, byte-equal, no .part, host library path never in cmd, trace state=engine; C undeclared project = no patch, no [role_preset] warning, undeclared_missing/declared=false (mechanism dormant, behavior frozen); D the project file wins and nothing is materialized; E the rollback knob off still warns; F malformed role text reads nothing and cannot forge a line; G the 64-character boundary is a valid shape; H the built-in persona role is quiet and materializes nothing.",
-      "sync_path": "server/engine/shared.py; server/engine/agent_activities.py"
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {
