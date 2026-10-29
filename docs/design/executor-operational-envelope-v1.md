@@ -1,3 +1,15 @@
+---
+title: "The executor's operational envelope v1 — run watch, stop tiers, request audience"
+category: design
+tags:
+  - executor
+  - operational-envelope
+  - run-watch
+  - stop-tiers
+status: active
+updated: 2026-10-26
+---
+
 # The executor's operational envelope v1 — run watch, stop tiers, request audience
 
 Status: design (host-ruled 261019). Implementation is separate tickets.

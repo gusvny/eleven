@@ -1,3 +1,15 @@
+---
+title: "The engine operation face"
+category: reference
+tags:
+  - engine
+  - operations
+  - entry-point
+  - on-demand
+status: active
+updated: 2026-10-16
+---
+
 # The engine operation face
 
 Read this file on demand. It is the full form of the two-line pointer in

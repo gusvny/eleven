@@ -18,7 +18,18 @@ Rules (design section 3; severity per rule, stated once):
   M1 doc-m1-*          index three-way consistency: docs/index.json ↔
                        docs/README.md ↔ actual files (page exists but
                        unregistered / registered but file gone / README leg
-                       drift / frontmatter five fields missing). Severity med.
+                       drift / frontmatter fields missing). Frontmatter is
+                       SCHEMA-AWARE (host ruling 261029): a page under
+                       docs/epics/ is judged by the epic schema
+                       (doc-m1-frontmatter-epic — required code / retired /
+                       summary, code identical to the file stem, defined by
+                       docs/design/epic-registry-v1.md), every other docs/ page
+                       by the five knowledge-base fields (doc-m1-frontmatter).
+                       A malformed epic page is a named finding, never an
+                       exemption. The README leg covers the four knowledge-base
+                       categories: a page registered under another index
+                       category (the epic store) is catalogued by its own
+                       registry, not by a README row. Severity med.
   M2 doc-m2-unreachable  referenced paths reachable — NORMATIVE face only
                        (docs/README.md, docs/reference/*, docs/ops/*,
                        testing-guide.md, terminology.md). Only explicit shapes:
@@ -73,6 +84,14 @@ single-base reading of either style is exactly the 140-false-positive shape; a
 bare filename resolves doc-directory first with a repo-wide basename search on
 top (see `_missing`).
 
+Catalogue rows (same discipline, host ruling 261029): a docs/README.md row is
+RESOLVED, never blindly prefixed with `docs/` — docs base first (the only base a
+row carrying a directory component is written against), then the repository
+root, then a unique basename match under docs/ for a bare file name (see
+`_resolve_row`). A row that resolves to an existing file outside docs/ is a
+non-library reference, not a catalogue row; a row that resolves nowhere keeps
+the docs/-relative form so the missing-row finding still fires.
+
 Output shape: identical to agent findings (inspection_inspect.py) —
 subject / severity / evidence[{path,line,quote}] / why / suggestion, id minted
 by the same mint_finding_id (content hash, stable across periods), scan =
@@ -115,10 +134,22 @@ from inspection_inspect import mint_finding_id  # noqa: E402  (single id mint)
 # ---- lexical constants (top of file; any change ships with a truth-table UT) ----
 DOC_ROOT = "docs"
 DESIGN_SUB = "docs/design"
+EPICS_SUB = "docs/epics"
 NOTES_ROOT = "notes"
 REQUIRED_FIELDS = ("title", "category", "tags", "status", "updated")   # carried S9
 CATEGORIES = ("design", "content", "ops", "reference")
 STATUSES = ("active", "draft", "deprecated")
+#: the epic store keeps its OWN frontmatter schema (docs/design/epic-registry-v1.md,
+#: host ruling 261029): one boolean of state, a code identical to the file stem and
+#: a one-sentence summary. The five knowledge-base fields do not apply to it, and
+#: the epic schema is not widened onto the rest of the library either.
+EPIC_REQUIRED_FIELDS = ("code", "retired", "summary")
+EPIC_BOOL_VALUES = ("true", "false")
+#: index categories outside the knowledge-base four. A page registered there is
+#: catalogued by its own store, not by the docs/README.md rows (the README lists
+#: design/content/ops/reference pages; the epics are one file per code, listed by
+#: the epic registry and the Docs tab group).
+NON_CATALOGUE_CATEGORIES = ("epics",)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SEVERITY = "med"          # M1-M6: static surfaces never certify high (C1 item 9)
 SEVERITY_M7_PTR = "low"   # M7(a) pointer findings only
@@ -126,6 +157,7 @@ SEVERITY_M7_PTR = "low"   # M7(a) pointer findings only
 RULE_M1_INDEX = "doc-m1-index"              # index leg drift (unregistered / ghost)
 RULE_M1_README = "doc-m1-readme"            # README leg drift
 RULE_M1_FRONTMATTER = "doc-m1-frontmatter"  # frontmatter five fields
+RULE_M1_FRONTMATTER_EPIC = "doc-m1-frontmatter-epic"  # the docs/epics schema
 RULE_M2 = "doc-m2-unreachable"
 RULE_M3_DOCS = "doc-m3-language-docs"
 RULE_M3_NOTES = "doc-m3-language-notes"
@@ -190,6 +222,18 @@ def _is_normative(rel: str) -> bool:
 
 def _is_docs(rel: str) -> bool:
     return _norm_slash(rel).startswith(DOC_ROOT + "/")
+
+
+def _is_epic_page(rel: str) -> bool:
+    """A page under docs/epics/ is an EPIC record: judged by the epic schema."""
+    return _norm_slash(rel).startswith(EPICS_SUB + "/")
+
+
+def _non_catalogue_page(rel: str, indexed_category: str) -> bool:
+    """True when a page is NOT a docs/README.md catalogue row: it lives in the
+    epic store, or the index registers it under a non-catalogue category. The
+    README catalogue covers the four knowledge-base categories only."""
+    return _is_epic_page(rel) or indexed_category in NON_CATALOGUE_CATEGORIES
 
 
 def _is_url_or_anchor(tok: str) -> bool:
@@ -291,6 +335,28 @@ def frontmatter_defects(fields: Dict[str, Any], well_formed: bool) -> List[str]:
             out.append("status %r not in %s" % (val, ",".join(STATUSES)))
         if key == "updated" and not DATE_RE.match(str(val)):
             out.append("updated %r not YYYY-MM-DD" % val)
+    return out
+
+
+def epic_frontmatter_defects(fields: Dict[str, Any], well_formed: bool,
+                             rel: str) -> List[str]:
+    """Epic-schema legality for a docs/epics/ page (epic-registry-v1, host ruling
+    261029). Returns human-readable defect tokens; an empty list means the page
+    satisfies the schema it is registered under. A malformed epic page is a
+    NAMED finding here — the directory is judged, never exempted."""
+    if not well_formed:
+        return ["missing or unterminated frontmatter block"]
+    out: List[str] = []
+    for key in EPIC_REQUIRED_FIELDS:
+        if not fields.get(key):
+            out.append("%s empty" % key)
+    code = str(fields.get("code") or "")
+    stem = Path(_norm_slash(rel)).stem
+    if code and code != stem:
+        out.append("code %r does not match the file stem %r" % (code, stem))
+    retired = str(fields.get("retired") or "").lower()
+    if retired and retired not in EPIC_BOOL_VALUES:
+        out.append("retired %r not true/false" % fields.get("retired"))
     return out
 
 
@@ -421,13 +487,16 @@ def rule_m1(repo: Path, pages: Dict[str, str], index: Any, index_err: Optional[s
             "consistency check is absent this period.",
             "Fix docs/index.json (run docs/scripts/build_index.py), then re-run."))
     indexed = set()
+    indexed_category: Dict[str, str] = {}
     if isinstance(index, dict):
         for d in index.get("docs") or []:
             if isinstance(d, dict) and d.get("path"):
                 # index.json paths are docs/-relative ("design/x.md"); normalize to
                 # repo-relative so they compare against the actual-file set.
                 p = _norm_slash(str(d["path"])).lstrip("./")
-                indexed.add(p if p.startswith(DOC_ROOT + "/") else DOC_ROOT + "/" + p)
+                rel = p if p.startswith(DOC_ROOT + "/") else DOC_ROOT + "/" + p
+                indexed.add(rel)
+                indexed_category[rel] = str(d.get("category") or "")
     actual = {r for r in all_rels if _is_docs(r)}
     # file vs index
     for rel in sorted(actual - indexed):
@@ -447,8 +516,13 @@ def rule_m1(repo: Path, pages: Dict[str, str], index: Any, index_err: Optional[s
             "docs/index.json", 1, rel,
             "docs/index.json registers %s but no such file exists — a ghost entry." % rel,
             "Remove the ghost entry (rebuild the index) or restore the file."))
-    # README leg
+    # README leg (narrowed by class: the catalogue lists the knowledge-base
+    # categories. A page registered under another category — the epic store, one
+    # file per code — is catalogued by its own registry, so its absence from the
+    # README rows is not drift).
     for rel in sorted((actual & indexed) - readme_rels):
+        if _non_catalogue_page(rel, indexed_category.get(rel, "")):
+            continue
         if _exempted(exempts.get(rel, set()), RULE_M1_README):
             continue
         out.append(_finding(
@@ -465,19 +539,30 @@ def rule_m1(repo: Path, pages: Dict[str, str], index: Any, index_err: Optional[s
             "docs/README.md", 1, rel,
             "docs/README.md lists %s but the file is not there (moved or gone)." % rel,
             "Fix the catalogue path or restore the file."))
-    # frontmatter (S9 carried)
+    # frontmatter (S9 carried; schema-aware since 261029 — docs/epics/ is judged
+    # by the epic schema, everything else by the five knowledge-base fields)
     for rel in sorted(actual):
         text = pages.get(rel)
         if text is None:
             continue
         fields, well = parse_frontmatter(text)
-        defects = frontmatter_defects(fields, well)
-        if defects and not _exempted(exempts.get(rel, set()), RULE_M1_FRONTMATTER):
+        if _is_epic_page(rel):
+            defects = epic_frontmatter_defects(fields, well, rel)
+            rule = RULE_M1_FRONTMATTER_EPIC
+            why = ("A docs/epics/ page carries the epic schema — required code / retired "
+                   "/ summary, and code identical to the file stem "
+                   "(docs/design/epic-registry-v1.md).")
+        else:
+            defects = frontmatter_defects(fields, well)
+            rule = RULE_M1_FRONTMATTER
+            why = ("Every other docs/ page carries YAML frontmatter with title/category/"
+                   "tags/status/updated (docs/README.md maintenance conventions).")
+        if defects and not _exempted(exempts.get(rel, set()), rule):
             out.append(_finding(
-                RULE_M1_FRONTMATTER, "frontmatter five-field check failed: " + "; ".join(defects),
+                rule, ("frontmatter epic-schema check failed: " if _is_epic_page(rel)
+                       else "frontmatter five-field check failed: ") + "; ".join(defects),
                 rel, 1, text.splitlines()[0][:200],
-                "Every docs/ page carries YAML frontmatter with title/category/tags/"
-                "status/updated (docs/README.md maintenance conventions).",
+                why,
                 "Add or fix the frontmatter fields listed in the subject."))
     return out
 
@@ -731,15 +816,64 @@ def rule_m7(repo: Path, pages: Dict[str, str], changed_files: List[str],
 # scan entry point
 # ========================================================================
 
-def _readme_rels(readme_text: str) -> set:
-    """Catalogue rows in docs/README.md: backticked `*.md` paths inside tables
-    and prose (explicit shapes only)."""
+def _resolve_row(repo: Path, tok: str) -> Optional[str]:
+    """Resolve one docs/README.md catalogue row → repo-relative path, or None.
+
+    A row is written the way the reader of its section resolves it, so the same
+    token can be docs-relative (`design/x.md`), repository-root-relative (the
+    maintenance prose names `notes/README.md` and the root `CLAUDE.md`) or a bare
+    file name that lives in one of the docs sub-directories (the Root level table
+    names `writing-standard.md`, which sits in `docs/reference/`). Fixed order,
+    no prose guessing:
+      1. the catalogue's own base, docs/ — the only base a row carrying a
+         directory component is written against;
+      2. the repository root;
+      3. for a bare file name only, a UNIQUE basename match anywhere under docs/.
+         An ambiguous name never resolves: it stays a missing-row finding, so the
+         drift stays visible instead of being guessed away.
+    """
+    t = _norm_slash(tok).lstrip("./")
+    if not t:
+        return None
+    sub = t[len(DOC_ROOT) + 1:] if t.startswith(DOC_ROOT + "/") else t
+    if (repo / DOC_ROOT / sub).exists():
+        return DOC_ROOT + "/" + sub
+    if (repo / sub).exists():
+        return sub
+    if "/" in sub:
+        return None
+    hits = sorted(p for p in (repo / DOC_ROOT).rglob("*.md")
+                  if p.is_file() and p.name == sub)
+    if len(hits) == 1:
+        return _norm_slash(hits[0].relative_to(repo).as_posix())
+    return None
+
+
+def _readme_rels(repo: Path, readme_text: str) -> set:
+    """Catalogue rows in docs/README.md → repo-relative docs paths.
+
+    Rows are backticked `*.md` paths inside tables and prose (explicit shapes
+    only). Each row is RESOLVED (see `_resolve_row`) rather than blindly
+    prefixed with `docs/`: the README writes some rows from the section they sit
+    in and some from the repository root, and prefixing was reporting live files
+    as missing (host ruling 261029 — fix the checker, not the docs).
+
+    A row that resolves to an existing file OUTSIDE docs/ is a reference to a
+    non-library file, not a catalogue row (it is never asked to appear in a docs
+    leg). A row that resolves nowhere keeps the docs/-relative form, so the
+    missing-row finding still fires.
+    """
     out = set()
     for tok, _off in extract_paths(readme_text):
         t = _norm_slash(tok).lstrip("./")
         if not t.endswith(".md"):
             continue          # catalogue paths only; json/yaml rows are not M1 legs
-        out.add(t if t.startswith(DOC_ROOT + "/") else DOC_ROOT + "/" + t)
+        rel = _resolve_row(repo, t)
+        if rel is None:
+            out.add(t if t.startswith(DOC_ROOT + "/") else DOC_ROOT + "/" + t)
+        elif _is_docs(rel):
+            out.add(rel)
+        # else: resolves outside docs/ — a legitimate non-library reference
     return out
 
 
@@ -773,7 +907,7 @@ def run_doc_mech(repo_root: str,
         index_err = str(e)[:200]
 
     readme_text = pages.get("docs/README.md", "")
-    readme_rels = _readme_rels(readme_text) if readme_text else set()
+    readme_rels = _readme_rels(repo, readme_text) if readme_text else set()
 
     exempts = {rel: collect_exemptions(t) for rel, t in pages.items()}
     fm = {rel: parse_frontmatter(t)[0] for rel, t in pages.items()}

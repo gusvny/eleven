@@ -1,11 +1,12 @@
 {
-  "generated_at": "2026-10-27T09:51:00+08:00",
-  "total": 38,
+  "generated_at": "2026-10-29T13:36:33+08:00",
+  "total": 54,
   "categories": [
     "design",
     "content",
     "ops",
-    "reference"
+    "reference",
+    "epics"
   ],
   "docs": [
     {
@@ -112,20 +113,30 @@
       "file": "epic-registry-v1.md",
       "title": "Epic registry v1 — `docs/epics/`, one boolean, enforced at ticket creation",
       "category": "design",
-      "tags": [],
+      "tags": [
+        "epic-registry",
+        "epics",
+        "frontmatter",
+        "ticket-creation"
+      ],
       "status": "active",
-      "updated": "",
-      "has_frontmatter": false
+      "updated": "2026-10-19",
+      "has_frontmatter": true
     },
     {
       "path": "design/executor-operational-envelope-v1.md",
       "file": "executor-operational-envelope-v1.md",
       "title": "The executor's operational envelope v1 — run watch, stop tiers, request audience",
       "category": "design",
-      "tags": [],
+      "tags": [
+        "executor",
+        "operational-envelope",
+        "run-watch",
+        "stop-tiers"
+      ],
       "status": "active",
-      "updated": "",
-      "has_frontmatter": false
+      "updated": "2026-10-26",
+      "has_frontmatter": true
     },
     {
       "path": "design/failure-classification-protocol-v1.md",
@@ -317,10 +328,15 @@
       "file": "quickmanual-lane-v1.md",
       "title": "Quickmanual lane v1 — a recorded lane where a session works directly",
       "category": "design",
-      "tags": [],
+      "tags": [
+        "lane",
+        "quickmanual-lane",
+        "ticket-workflow",
+        "gate"
+      ],
       "status": "active",
-      "updated": "",
-      "has_frontmatter": false
+      "updated": "2026-10-19",
+      "has_frontmatter": true
     },
     {
       "path": "design/sandbar-distribution-v1.md",
@@ -396,6 +412,182 @@
       ],
       "status": "deprecated",
       "updated": "2026-09-28",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/agent-backend.md",
+      "file": "agent-backend.md",
+      "title": "agent-backend",
+      "category": "epics",
+      "tags": [],
+      "code": "agent-backend",
+      "retired": false,
+      "summary": "Pluggable agent backends: a ticket can run on a different executor than its neighbour, chosen per ticket, two running side by side.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/concurrency-limit.md",
+      "file": "concurrency-limit.md",
+      "title": "concurrency-limit",
+      "category": "epics",
+      "tags": [],
+      "code": "concurrency-limit",
+      "retired": false,
+      "summary": "A per-project cap on how many stages run at once, with a queue behind it.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/console-ui.md",
+      "file": "console-ui.md",
+      "title": "console-ui",
+      "category": "epics",
+      "tags": [],
+      "code": "console-ui",
+      "retired": false,
+      "summary": "The three-column console: the queue on the left, the executor panel in the middle, the chat on the right.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/develop-buffer.md",
+      "file": "develop-buffer.md",
+      "title": "develop-buffer",
+      "category": "epics",
+      "tags": [],
+      "code": "develop-buffer",
+      "retired": false,
+      "summary": "The delivery line: land a ticket on develop-buffer, certify the revision, promote it to main.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/doc-lifecycle.md",
+      "file": "doc-lifecycle.md",
+      "title": "doc-lifecycle",
+      "category": "epics",
+      "tags": [],
+      "code": "doc-lifecycle",
+      "retired": false,
+      "summary": "Two directories, two kinds of text: notes/ is scratch, docs/ is the archive.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/dsh-upgrade.md",
+      "file": "dsh-upgrade.md",
+      "title": "dsh-upgrade",
+      "category": "epics",
+      "tags": [],
+      "code": "dsh-upgrade",
+      "retired": false,
+      "summary": "Upgrade the dsh runtime through a process, never a drop-in swap.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/engine-hardening.md",
+      "file": "engine-hardening.md",
+      "title": "engine-hardening",
+      "category": "epics",
+      "tags": [],
+      "code": "engine-hardening",
+      "retired": false,
+      "summary": "Make the engine honest: settle and disposal hygiene, line rounds that cannot lie, gates that name what failed.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/inspection.md",
+      "file": "inspection.md",
+      "title": "inspection",
+      "category": "epics",
+      "tags": [],
+      "code": "inspection",
+      "retired": false,
+      "summary": "A periodic inspector: suite, docs and simplify faces that review the repository and open tickets.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/lane-editor.md",
+      "file": "lane-editor.md",
+      "title": "lane-editor",
+      "category": "epics",
+      "tags": [],
+      "code": "lane-editor",
+      "retired": false,
+      "summary": "A lane editor: a person and an agent working in the same ticket at the same time.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/localization.md",
+      "file": "localization.md",
+      "title": "localization",
+      "category": "epics",
+      "tags": [],
+      "code": "localization",
+      "retired": false,
+      "summary": "Localization: UI labels in English, data untouched.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/project-executor.md",
+      "file": "project-executor.md",
+      "title": "project-executor",
+      "category": "epics",
+      "tags": [],
+      "code": "project-executor",
+      "retired": false,
+      "summary": "One resident executor session per project: it signs, fixes stuck tickets and only calls you when it truly cannot continue.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/project-lifecycle.md",
+      "file": "project-lifecycle.md",
+      "title": "project-lifecycle",
+      "category": "epics",
+      "tags": [],
+      "code": "project-lifecycle",
+      "retired": false,
+      "summary": "Project lifecycle: add, quarantine and remove a project without corrupting the registry.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/rework-visibility.md",
+      "file": "rework-visibility.md",
+      "title": "rework-visibility",
+      "category": "epics",
+      "tags": [],
+      "code": "rework-visibility",
+      "retired": false,
+      "summary": "Make rework and dead ends visible: why a ticket came back, who sent it and what changed.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/session-entry.md",
+      "file": "session-entry.md",
+      "title": "session-entry",
+      "category": "epics",
+      "tags": [],
+      "code": "session-entry",
+      "retired": true,
+      "summary": "Session entry and resume: one handle per session, never a torn state.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/stage-ops.md",
+      "file": "stage-ops.md",
+      "title": "stage-ops",
+      "category": "epics",
+      "tags": [],
+      "code": "stage-ops",
+      "retired": false,
+      "summary": "Stage leases and test benches: one owner per bench, no orphans left behind.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/ticket-pause.md",
+      "file": "ticket-pause.md",
+      "title": "ticket-pause",
+      "category": "epics",
+      "tags": [],
+      "code": "ticket-pause",
+      "retired": false,
+      "summary": "Pause a ticket between stages, honestly.",
       "has_frontmatter": true
     },
     {
@@ -475,10 +667,15 @@
       "file": "engine-operation-face.md",
       "title": "The engine operation face",
       "category": "reference",
-      "tags": [],
+      "tags": [
+        "engine",
+        "operations",
+        "entry-point",
+        "on-demand"
+      ],
       "status": "active",
-      "updated": "",
-      "has_frontmatter": false
+      "updated": "2026-10-16",
+      "has_frontmatter": true
     },
     {
       "path": "reference/ledger-record-models-v1.md",
@@ -573,15 +770,11 @@
     }
   ],
   "review": {
-    "missing_frontmatter": [
-      "design/epic-registry-v1.md",
-      "design/executor-operational-envelope-v1.md",
-      "design/quickmanual-lane-v1.md",
-      "reference/engine-operation-face.md"
-    ],
+    "missing_frontmatter": [],
     "deprecated": [
       "design/ticket-workflow-console-design.md"
     ],
-    "stale": []
+    "stale": [],
+    "malformed_epics": []
   }
 }

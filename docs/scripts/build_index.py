@@ -25,6 +25,13 @@ OUT = DOCS / "index.json"
 
 CATEGORIES = ["design", "content", "ops", "reference"]
 
+# The epic store registers as its own category: docs/epics/ keeps the epic
+# frontmatter schema (code / retired / summary, docs/design/epic-registry-v1.md),
+# not the knowledge-base five fields (host ruling 261029).
+EPIC_CATEGORY = "epics"
+EPIC_DIR = DOCS / EPIC_CATEGORY
+EPIC_REQUIRED_KEYS = ["code", "retired", "summary"]
+
 # updated 超过多少天视为「过旧」（review 里提示，不阻断）。
 STALE_DAYS = 180
 
@@ -118,7 +125,8 @@ def parse_date(s: str):
 
 def build() -> dict:
     docs = []
-    review = {"missing_frontmatter": [], "deprecated": [], "stale": []}
+    review = {"missing_frontmatter": [], "deprecated": [], "stale": [],
+              "malformed_epics": []}
     today = date.today()
 
     # 260928：扫描面 = 四类目录 + docs/ 根级散篇（README/terminology/testing-guide 等）。
@@ -175,14 +183,67 @@ def build() -> dict:
 
     docs.sort(key=lambda d: (d["category"], d["path"]))
 
+    # The epic store is its own index category (host ruling 261029). It keeps its
+    # own frontmatter schema — code / retired / summary, defined by
+    # docs/design/epic-registry-v1.md — so its entries carry those fields instead
+    # of the five knowledge-base fields, and a malformed epic is reported by name
+    # instead of being counted as "missing frontmatter".
+    docs.extend(build_epics(review))
+    docs.sort(key=lambda d: (d["category"], d["path"]))
+
     payload = {
         "generated_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
         "total": len(docs),
-        "categories": CATEGORIES,
+        "categories": CATEGORIES + [EPIC_CATEGORY],
         "docs": docs,
         "review": review,
     }
     return payload
+
+
+def build_epics(review: dict) -> list:
+    """Scan docs/epics/ into index entries under the epic schema."""
+    out: list = []
+    if not EPIC_DIR.is_dir():
+        return out
+    for md in sorted(EPIC_DIR.glob("*.md")):
+        rel = md.relative_to(DOCS).as_posix()
+        try:
+            text = md.read_text(encoding="utf-8")
+        except OSError as e:
+            print(f"[warn] 读不了 {rel}: {e}", file=sys.stderr)
+            continue
+
+        meta, _body = parse_frontmatter(text)
+        code = str(meta.get("code") or "")
+        retired_raw = str(meta.get("retired") or "").lower()
+
+        defects = [f"{k} empty" for k in EPIC_REQUIRED_KEYS if not meta.get(k)]
+        if code and code != md.stem:
+            defects.append(f"code {code!r} is not the file stem {md.stem!r}")
+        if retired_raw and retired_raw not in ("true", "false"):
+            defects.append(f"retired {meta.get('retired')!r} is not true/false")
+        if defects:
+            review["malformed_epics"].append({"path": rel, "defects": defects})
+            print(f"[warn] {rel} epic frontmatter malformed: {defects}", file=sys.stderr)
+
+        out.append({
+            "path": rel,
+            "file": md.name,
+            "title": extract_title_from_heading(text) or md.stem,
+            "category": EPIC_CATEGORY,
+            # tags stays an empty LIST, never absent: the Docs tab maps over every
+            # entry's tags, so an epic entry without the key would break the table.
+            # No status / updated here on purpose — an epic's only state is
+            # `retired`; inventing the knowledge-base fields would re-import the
+            # vocabulary the epic schema exists to replace.
+            "tags": [],
+            "code": code or md.stem,
+            "retired": retired_raw == "true",
+            "summary": str(meta.get("summary") or ""),
+            "has_frontmatter": bool(meta),
+        })
+    return out
 
 
 def main() -> int:

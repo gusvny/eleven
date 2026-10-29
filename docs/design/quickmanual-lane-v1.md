@@ -1,3 +1,15 @@
+---
+title: "Quickmanual lane v1 — a recorded lane where a session works directly"
+category: design
+tags:
+  - lane
+  - quickmanual-lane
+  - ticket-workflow
+  - gate
+status: active
+updated: 2026-10-19
+---
+
 # Quickmanual lane v1 — a recorded lane where a session works directly
 
 Status: design (host-ruled 261019). Implementation is a separate ticket.

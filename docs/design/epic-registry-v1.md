@@ -1,3 +1,15 @@
+---
+title: "Epic registry v1 — `docs/epics/`, one boolean, enforced at ticket creation"
+category: design
+tags:
+  - epic-registry
+  - epics
+  - frontmatter
+  - ticket-creation
+status: active
+updated: 2026-10-19
+---
+
 # Epic registry v1 — `docs/epics/`, one boolean, enforced at ticket creation
 
 Status: design (host-ruled 261019). Implementation is a separate ticket.

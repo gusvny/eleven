@@ -44,6 +44,12 @@ updated: 2026-09-28
 | `design/sandbar-project-onboarding-contract-v1.md` | sandbar project onboarding contract v1 (key table / handover faces / append-style change log) |
 | `design/project-external-workflow-template-loader-v1.md` | Project external workflow template loader v1 (t260924-04: register-then-load / per-template isolated rejection / evolution discipline / determinism rules) |
 | `design/devlane-lite-v1.md` | Lightweight dev lane: effort proportional to risk (three profiles, round economy, proportional gate, scoped execution environments) — **draft, awaiting host decision** |
+| `design/epic-registry-v1.md` | Epic registry v1 (host-ruled 261019): epics live in `docs/epics/`, one file per code, frontmatter `code` / `retired` / `summary`, and `retired: true` refuses a new ticket by name |
+| `design/executor-operational-envelope-v1.md` | Executor operational envelope v1 (host-ruled 261019): one long-lived executor session per project — run watch, stop tiers, request audience |
+| `design/quickmanual-lane-v1.md` | Quickmanual lane v1 (host-ruled 261019): a recorded, gated lane where one session does the work, without developer and integration agent stages |
+| `design/markdown-reviewer-panel-design.md` | Markdown reviewer panel design (t261022-14): what the changed-files reviewer is, where its comment store lives, and the rules the implementation pins |
+| `design/metrics-token-face-delta.md` | Metrics token face and population — delta rulings 261025 (additive delta over `metrics-api-contract-v2.md`: show what the ratio measured, not only the ratio) |
+| `design/project-external-workflow-templates.md` | Project external workflow templates: how a project ships its own workflow templates and how the engine loads them |
 
 ## ops (operations — build / deploy / monitor)
 
@@ -67,6 +73,7 @@ updated: 2026-09-28
 ## Maintenance conventions
 
 - Every document carries YAML frontmatter: `title` (the first `#` heading) / `category` (design|content|ops|reference) / `tags` / `status` (active|draft|deprecated) / `updated` (date of the last substantive change).
+- The epic store under `docs/epics/` is the one exception (host ruling 261029): an epic keeps its own frontmatter — `code` (identical to the file name without `.md`) / `retired` (true|false) / `summary` (one English sentence) — defined by `design/epic-registry-v1.md`, and it is catalogued by that store instead of this table. The doc-mech checker and `docs/index.json` judge it by that schema.
 - Adding a document: put it in the matching category directory + add frontmatter, then run `python3 docs/scripts/build_index.py` to refresh `docs/index.json`.
 - Related documents **link to each other** (relative paths; three relations: depends-on/depended-on-by, supersedes/superseded-by, practical reference — see `design/knowledge-base-design.md` §3.2).
 - The repository-root `CLAUDE.md` is the master handover entry point and this directory is its detailed knowledge base; process discussions and epic proposals live in `notes/` (division of labour and graduation policy in `notes/README.md`).

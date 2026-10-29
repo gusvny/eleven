@@ -8,7 +8,14 @@ fire on a planted fixture, including the review-pinned cases:
   - historical face (docs/design) does not fire for path drift;
   - malformed inputs (broken index.json, unreadable page, bogus diff paths) degrade
     with meta caveats, never crash, never fake green;
-  - ids are content-stable across two identical runs (mint_finding_id).
+  - ids are content-stable across two identical runs (mint_finding_id);
+  - SCHEMA-AWARE frontmatter (host ruling 261029): a docs/epics/ page is judged by
+    the epic schema (code / retired / summary, code == file stem) and a malformed
+    epic page is still a named finding — never an exemption;
+  - catalogue ROWS are resolved, never blindly docs/-prefixed (host ruling 261029):
+    a bare row resolves into the docs sub-directory that holds it, a repository-root
+    row is a non-library reference, a genuinely missing row still fires, and an
+    ambiguous bare name is never guessed away.
 """
 
 import atexit
@@ -145,6 +152,103 @@ class M1Test(unittest.TestCase):
         res = _run(repo)
         self.assertFalse(res["meta"]["heartbeat"])   # frontmatter/README legs still judged
         self.assertTrue(any("index" in c for c in res["meta"]["caveats"]))
+
+
+EPIC_FM = "---\ncode: {code}\nretired: {retired}\nsummary: one sentence.\n---\n\n"
+
+
+def _epic_findings(res):
+    return [f for f in res["findings"] if f["scan"] == "doc-m1-frontmatter-epic"]
+
+
+class EpicSchemaTest(unittest.TestCase):
+    """Host ruling 261029: docs/epics/ keeps ITS OWN frontmatter schema
+    (code / retired / summary, docs/design/epic-registry-v1.md). The checker
+    learns it — and a malformed epic page is still a named finding."""
+
+    def tearDown(self):
+        _reap_tmp()
+
+    def _repo_with_epic(self, text: str):
+        repo = _mk_repo(**{"docs/epics/alpha.md": text})
+        idx = json.loads((repo / "docs" / "index.json").read_text())
+        for d in idx["docs"]:
+            d["category"] = "epics" if d["path"].startswith("epics/") else "reference"
+        (repo / "docs" / "index.json").write_text(json.dumps(idx), encoding="utf-8")
+        return repo
+
+    def test_well_formed_epic_page_passes_both_rules(self):
+        repo = self._repo_with_epic(
+            EPIC_FM.format(code="alpha", retired="false") + "# alpha\n")
+        scans = _scans(_run(repo))
+        self.assertNotIn("doc-m1-frontmatter", scans)        # five fields never demanded
+        self.assertNotIn("doc-m1-frontmatter-epic", scans)
+
+    def test_code_not_matching_stem_is_named(self):
+        repo = self._repo_with_epic(
+            EPIC_FM.format(code="beta", retired="false") + "# alpha\n")
+        epic = _epic_findings(_run(repo))
+        self.assertEqual(len(epic), 1)
+        self.assertIn("does not match the file stem", epic[0]["subject"])
+
+    def test_missing_summary_and_bad_retired_are_named(self):
+        repo = self._repo_with_epic(
+            "---\ncode: alpha\nretired: partly\n---\n\n# alpha\n")
+        epic = _epic_findings(_run(repo))
+        self.assertEqual(len(epic), 1)
+        self.assertIn("summary empty", epic[0]["subject"])
+        self.assertIn("not true/false", epic[0]["subject"])
+
+    def test_epic_page_without_frontmatter_is_named_not_exempted(self):
+        epic = _epic_findings(_run(self._repo_with_epic("# alpha\n")))
+        self.assertEqual(len(epic), 1)
+        self.assertIn("missing or unterminated frontmatter block", epic[0]["subject"])
+
+    def test_indexed_epic_needs_no_readme_catalogue_row(self):
+        repo = self._repo_with_epic(
+            EPIC_FM.format(code="alpha", retired="true") + "# alpha\n")
+        (repo / "docs" / "README.md").write_text(
+            FM + "# docs index\n\n| `docs/README.md` | x |\n", encoding="utf-8")
+        self.assertNotIn("doc-m1-readme", _scans(_run(repo)))
+
+
+class ReadmeRowResolutionTest(unittest.TestCase):
+    """Host ruling 261029 (c): a catalogue row is RESOLVED, never blindly
+    prefixed with docs/ — the README writes some rows from the section they sit
+    in and some from the repository root."""
+
+    def tearDown(self):
+        _reap_tmp()
+
+    def _readme(self, repo, body: str):
+        (repo / "docs" / "README.md").write_text(FM + "# docs index\n\n" + body,
+                                                 encoding="utf-8")
+
+    def test_bare_row_resolves_into_a_docs_subdirectory(self):
+        repo = _mk_repo(**{"docs/reference/writing-standard.md": FM + "std"})
+        self._readme(repo, "| `docs/README.md` | x |\n| `writing-standard.md` | std |\n")
+        self.assertNotIn("doc-m1-readme", _scans(_run(repo)))
+
+    def test_repository_root_rows_are_not_catalogue_rows(self):
+        repo = _mk_repo(**{"docs/reference/a.md": FM + "a",
+                           "notes/README.md": "# notes\n"})
+        (repo / "CLAUDE.md").write_text("# entry\n", encoding="utf-8")
+        self._readme(repo, "| `docs/README.md` | x |\n| `docs/reference/a.md` | a |\n\n"
+                           "The ledger is `notes/README.md`; the root `CLAUDE.md` is the entry.\n")
+        self.assertNotIn("doc-m1-readme", _scans(_run(repo)))
+
+    def test_missing_row_still_fires(self):
+        repo = _mk_repo()
+        self._readme(repo, "| `docs/README.md` | x |\n| `design/gone.md` | gone |\n")
+        self.assertIn("doc-m1-readme", _scans(_run(repo)))
+
+    def test_ambiguous_bare_row_is_never_guessed(self):
+        repo = _mk_repo(**{"docs/reference/dup.md": FM + "r",
+                           "docs/design/dup.md": FM + "d"})
+        self._readme(repo, "| `docs/README.md` | x |\n| `dup.md` | ambiguous |\n")
+        rows = [f for f in _run(repo)["findings"]
+                if f["scan"] == "doc-m1-readme" and "does not exist" in f["subject"]]
+        self.assertEqual([f["evidence"][0]["quote"] for f in rows], ["docs/dup.md"])
 
 
 class M2Test(unittest.TestCase):
