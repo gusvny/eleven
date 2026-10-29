@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 362,
-      "scenarios": 857
+      "engine_tests": 358,
+      "scenarios": 855
     },
     "vocab": [
       "behaviour",
@@ -1767,28 +1767,19 @@
       "note": "t261028-56 L1: ONE gate-row rule for the engine's merge_check faces (family close after t261028-46/-48) - a row verdict read across BOTH engine receipt shapes (script {check, level, count} and agent/human {item, by, done, green}) in field order green -> level -> verdict -> done, conflicting signals resolve red, no signal stays unknown (shown red, never invented green), unknown words and malformed values invent nothing; the row name from item -> check -> id; the red set keeps unproven scalar/array/no-verdict rows visible while a green script row is NOT a red (the retired not-c.get(green) predicate counted 3 reds where 2 are green script rows); the quiet-baseline coverage predicate now judges that same red set (a green script row no longer keeps a covered round blocked forever, a real red still needs its quiet verdicts); and source locks pin that both merge_check writers (dev lane + quickmanual lane) write red_count through the shared rule with the private copies gone.",
       "sync_path": "server/engine/dev_lane.py (gate_row_field_verdict / gate_row_verdict / gate_row_name / gate_row_reds + both merge_check red_count writers; the same fixture is fed through the console reader by server/plugins/workbench/tests/t261028-56-verdict-readers.mjs)"
     },
-    "server/engine/tests/test_t261029_18_lane_branch_root.py": {
-      "anchor": "behaviour",
-      "note": "t261029-18 L1: the lane branch naming source and the per-scope changed-file receipt - shared.lane_branch/lane_branch_candidates (root-tree twin, no -root-root, no twin for a member scope), _lane_branch_resolve (first hit, fallback trace, both miss names the candidates and never asks main), the stub-git changed_files matrix (manifest-present vs manifest-absent, per-scope union with repo prefixes, corrupt manifest, named diff/status failures with a scope tag, -uall kept, timeout propagates), lane_head_sha's root-twin resolve, and the wall-clock leg. Stub git only: the unit tier bans real git."
-    },
     "server/engine/tests/test_t261028_57_gate_budget_derivation.py": {
       "anchor": "behaviour",
       "note": "t261028-57 / t261029-14 L1: the in-lane code gate's wait is derived from the checks' own declared budgets, and an outer-wait expiry is a named budget fact instead of an unnamed red - verify_lane_code_gate_budget (max(declared timeout, documented 600s default) + documented 120s chain margin; an absent/malformed declaration falls back to the default bound and names every defaulted check), _read_verify_lane_check_budgets (reads the same <tree>/verify.yaml verify_lane reads, and names why it fell back), code_gate_expiry_receipt (budget used, slowest declared check, gate wall, host load, no invented per-check elapsed) and _verify_lane_code_expiry_row (green=False still blocks; reason_code gate_budget_exhausted separates could-not-complete from verify_red); the green and red rows are driven through the real _merge_check_one_scope with a stubbed verify_lane child and compared byte for byte (key order included) to the pre-ticket dicts; source locks pin that no bare 900 literal decides the wait, that the wait fits inside MERGE_CHECK_TO, and that the process group is reaped before the expiry receipt is built (sync_path: server/engine/agent_activities.py, verify.yaml)."
-    },
-    "server/engine/tests/test_t261028_54_role_preset_fallback.py": {
-      "anchor": "behaviour",
-      "note": "t261028-54: role presets resolve per FILE with a trace - the project leg wins, the engine library serves only a project that DECLARES roles_dir (undeclared keeps the pre-ticket path byte for byte, no warning), a directory-shaped candidate never reads as present, a hostile role name reads nothing and cannot forge a log line, the engine preset is copied inside the lane (never a host path), and a copy/trace failure leaves the spawn alive. `patch_arg_added` means the argument was added, not that dsh applied it.",
-      "sync_path": "server/engine/shared.py; server/engine/agent_activities.py"
-    },
-    "server/engine/tests/test_t261028_54_merge_verify_diagnosis.py": {
-      "anchor": "contract",
-      "note": "t261028-54 L1 (merge resolution): the red-item diagnosis for a process that may not run the lane's code - a timeout/expiry row names a process/lane tree mismatch (loaded agent_activities.py bytes vs the lane's copy: a lane-only activity fix cannot take effect, and replacing the process reloads the same tree) and the mtime-based case where modules were loaded before they were edited (there a replacement does load the fix); the note rides main's gate_budget_exhausted expiry row without changing its blocking verdict, a clean process adds no key, and a broken stamp never raises. The wait-budget derivation itself belongs to t261028_57_gate_budget_derivation (main), not to this file.",
-      "sync_path": "server/engine/agent_activities.py (_verify_tree_note / _verify_stale_code_note); verify.yaml (lanes.code.checks)"
     },
     "server/engine/tests/test_t261029_32_process_bench_failure_faces.py": {
       "anchor": "behaviour",
       "note": "t261029-31/t261029-35 KI-389: the process bench's two fail-open faces on its findability surface - an unwritable --root is a NAMED refusal ({\"ok\": false, \"reason\": \"<path>: <check>\"}, exit 2, the bench binary never executed) including the missing-root-under-an-unwritable-parent and root-is-a-file faults, and an unwritable bench registry REFUSES the start (the just-spawned bench is stopped, its temp dir reclaimed, receipt names the registry path and check) rather than running a bench no sweep can find; plus the writable-registry control and the unchanged happy path (same receipt keys, same temp dir under --root, same registry entry shape, same down block).",
       "sync_path": "integration/process_bench.py"
+    },
+    "server/engine/tests/test_t261029_42_lane_repo_root_no_substitution.py": {
+      "anchor": "behaviour",
+      "note": "t261029-42 KI-414: the lane repo resolver never substitutes a repository the caller did not name. A worktree under <repo>/.lane/<id> (and the old .worktrees name) still answers that repo, and the convention wins over the lane being a repo root itself; a DIFFERENT git repository outside the convention (plain repo, linked worktree, and the single-scope list _lane_scopes builds - the join point the incident ran through) answers as ITSELF and is carried to a real rev-parse in the named repo, never REPO_ROOT; a path outside the convention that is not a git repo root (plain dir, missing path, subdirectory of a real repo) is a NAMED refusal carrying the path and both checks, never REPO_ROOT; a source lock parses the production function and proves no return path yields REPO_ROOT while the no-answer arm raises, plus a behavioural sentinel with REPO_ROOT pointed at a live repo; and the dependency-symlink call site keeps linking a lane of the ENGINE repo wherever that lane lives while a foreign lane gets nothing.",
+      "sync_path": "server/engine/agent_activities.py"
     }
   },
   "scenarios": {
@@ -2137,7 +2128,7 @@
     },
     "integration/t260903-03/sc_paths_spawn_seam.py": {
       "anchor": "behaviour",
-      "note": "t260903-03 ①d path contract at the spawn seam (declared roles_dir/model_routes win over the convention; undeclared keeps the convention and names state=decl_missing; anchor-vs-content soft semantics) plus, from t261028-54, the per-role-file engine-library fallback: declared-only leg, project leg wins, lane-internal materialized copy (a host engine path never enters cmd), trace state vocabulary (project/engine/declared_missing/undeclared_missing/invalid_role), the undeclared-project behavior freeze, the SANDBAR_ROLE_PRESET_FALLBACK=0 silence refusal and the malformed-role no-read/no-block/one-escaped-line matrix.",
+      "note": "",
       "sync_path": ""
     },
     "integration/t260903-04/sc_t01_parallel_stages_meta.py": {
@@ -6023,15 +6014,28 @@
       "anchor": "behaviour",
       "note": "t261027-11 gate blocker: the migration's user-visible outcome on public faces only (zero docker containers for the project pattern, no silent backend fallback, dual-face zero residue incl. a delayed re-probe past the re-bind window).",
       "sync_path": ""
-    },
-    "integration/t261029-18/sc_t261029_18_lane_branch_root.py": {
-      "anchor": "behaviour",
-      "note": "t261029-18: the real-git multi-repo lane shape whose root tree is on lane/<id>-root while the gate hands the placeholder lane/<id>. The incident shape (manifest present) returns every tree's committed and dirty files (member paths repo-prefixed) and the real blast-radius/targeted-plan decision narrows instead of the full-run sentinel; non-vacuity: the placeholder provably does not resolve there while the twin does, and the pre-fix failure input still rides the sentinel. Manifest ABSENT on a multi-repo lane fails closed by name (the root tree alone is not the lane's change set; member trees are enumerable only through the manifest), so the round cannot narrow, while a manifest-free SINGLE-repo lane still returns its own list (the control). A manifest-bearing lane whose scope branch is stale may use the root twin and log both names. Unresolvable names, a corrupt manifest and a missing member tree stay named fail-closed reds, and lane_head_sha keeps resolving the root-tree tip. Pool ro, seconds, offline."
-    },
-    "integration/t261028-54/sc_t261028_54_role_preset_fallback.py": {
-      "anchor": "contract",
-      "note": "t261028-54 L2 (offline seconds, no docker/Temporal/browser): the spawn-seam role-preset contract - A declared miss on both legs = no patch, trace state=declared_missing, one warning naming role + both absolute candidates; B declared miss + engine hit = one materialized copy inside the agent cwd, byte-equal, no .part, host library path never in cmd, trace state=engine; C undeclared project = no patch, no [role_preset] warning, undeclared_missing/declared=false (mechanism dormant, behavior frozen); D the project file wins and nothing is materialized; E the rollback knob off still warns; F malformed role text reads nothing and cannot forge a line; G the 64-character boundary is a valid shape; H the built-in persona role is quiet and materializes nothing.",
-      "sync_path": "server/engine/shared.py; server/engine/agent_activities.py"
     }
+  },
+  "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {
+    "anchor": "behaviour",
+    "note": "t261019-02 host ruling 261019: a ticket with a landing row on a declared develop line is refused named at the LEGACY merge gate (ruling quoted, line named, both ways out, retry_qc does not clear) through the ONE declared seam DevLaneWorkflow._line_landing_closeout_guard; never-landed passes, line-less project and absent ledger vacuous, corrupt ledger and malformed declaration block named, call-site source lock (after the develop-buffer fork, before prepare_human_gate, behind a unique patch id)",
+    "sync_path": ""
+  },
+  "server/engine/tests/test_t261019_02_line_landing_closeout_guard.py": {
+    "anchor": "behaviour",
+    "note": "t261019-02 developer L1: line_landing_closeout_verdict truth tables - vacuous passes (missing lines.json, absent ledger, no landing row), named blocks (landing row with ruling+line+ways-out+retry_qc wording, per-ticket/per-line isolation, malformed declaration, corrupt-ledger bad face, malformed/empty keys), blank ledger lines are not corruption, patch id literal pinned",
+    "sync_path": ""
+  },
+  "integration/t261024-16/sc_inspection_sign_caller_identity.py": {
+    "anchor": "contract",
+    "note": "t261024-16: the inspection sign channel judges caller identity per identity class after the validate-first reorder - declared foreign caller refused by name and the gate stays closed; agent who refused by name even with a clean own-project caller; absent who refused for its own reason, fail-closed; undeclared bare human sign is record-and-allow (ticket closes, ledger human_gate.who lands, a named record row for the undeclared sign is readable on the face/timeline). Sub-strand of t260915-08-sign-journey, which owns the close chain."
+  },
+  "server/engine/tests/test_t261024_16_inspection_sign_gate.py": {
+    "anchor": "behaviour",
+    "note": "t261024-16 developer L1: direct-handler drives of InspectionPeriodicWorkflow.sign - order authorize -> validate -> cross-project judge -> accept; policy=record at the sign call site books the undeclared record row into the timeline; guards kept (agent refused by name, malformed/absent who fail-closed, declared mismatch refused)."
+  },
+  "integration/t261025-08/sc_t26102508_narrowed_anchor_reach.py": {
+    "anchor": "behaviour",
+    "note": "t261025-08 L3 (KI-356): the enable event reaches an in-flight lane whose patched() memo is closed - a targeted green round then re-anchors the landing face on the CURRENT lane HEAD (narrowed marker, judged by name); inert without the event; idempotent + malformed-payload-safe; zero-run/red/sha-failure stay fail-closed; full rounds unchanged; land_to_line gets past the contains-main guard on a real fixture while a stale anchor still refuses by name"
   }
 }
