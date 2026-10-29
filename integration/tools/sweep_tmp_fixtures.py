@@ -81,84 +81,101 @@ from collections import namedtuple
 #: 白名单里的条目形态（`kind` = "dir" | "file"）
 FixtureEntry = namedtuple("FixtureEntry", "name mtime kind")
 
-#: 已知测试夹具前缀白名单（真源之一；另一份在 server/engine/inspection_lane_watchdog.py
-#: 的 TMP_FIXTURE_PREFIXES——两处一致性由机械漂移锁钉住
-#: server/engine/tests/test_t260926_tmp_fixture_water.py::test_f1_prefix_whitelist_single_source）。
-#: 本脚本**不 import 引擎包**：清扫器要在引擎装不上/被改坏的机器上也能跑（止血优先）。
-#: 260927 全族整治：第二批（原先只登记在 `CANDIDATE_PREFIXES_BATCH2` 里、**未启用**——
-#: 「登记了但没启用」这种半态本身就是陷阱：上一轮就是漏了 `t260907-12-act-/-ch-` 两个
-#: 变体，存量又攒了 6,399 个）已**正式并入本表**，不再有「候选」态。逐条证据=260927
-#: 只读普查（前缀 / 顶层条目数 / 最老年龄 / 生产者 file:line）：
-TMP_FIXTURE_PREFIXES = (
-    # ---- 第一批（260926 启用；`venv-compat-root` 260927 并入更宽的 `venv-compat-`）----
-    "integ-e2e-fixture-",     # integration 场景夹具（ticket-lifecycle-scenes.mjs）
-    "lint-pyc-",              # integration/lint_tests.py 的 pyc 暂存（atexit 回收已加）
-    "fix10-", "fix14-", "fix17-",   # integration/t26* 各票 .mjs 夹具
-    "pathgate-",              # t260911-03 pathgate 场景夹具
-    "t260907-06-ut-",         # server/engine/tests/test_multirepo_anchor.py（已修）
-    "t260907-12-ut",          # 同上 :276-362 的 -ut* 变体族（已修）
-    "sandbar-agent-presets-",  # integration/stage_docker.py 起的台（agent preset 物化，已修）
-    "t26092212-", "t260906-", "lease-ut-", "t260904-02-", "t260901-21-",
-    "t02-lane", "t26090704-lane",
-    "wb-",
-    # ---- 第二批（260927 启用；逐条 = 命中数 / 最老 / 生产者 file:line）----
-    "t260907-12-act-",        #  4,259  245h  server/engine/tests/test_multirepo_root_activity.py:51（已修；-ut 盖不住本变体）
-    "t260907-12-ch",          #  2,140  245h  同上 :125/:136（-ch-/-ch1- 同族）
-    "sandbar-admin-log-",     #  2,854  265h  integration/stage_docker.py:1332（**文件**；两条拆台路径已回收）
-    "sandbar-credentials-",   #  2,519  112h  同上 :1333（**文件**；凭据副本留在 $TMPDIR 属卫生面欠账）
-    "sandbar-integ-run-",     #  2,820  204h  integration/run_scenarios.py 的 `_run_lock_path`（**文件** 单飞锁档；260927 已修）
-    "project-content-integ-run-",     #  1,836  106h  同款锁档的旧前缀——生产者在**姊妹项目**的同一份 runner（naming-compat）
-                              #               （~/Documents/project-content/integration/run_scenarios.py:182），本仓修不到；
-                              #               存量由本表清（0 条 <6h = 已无新产）
-    "venv-compat-",           #  4,814  346h  integration/t260907-10/sc_engine_venv_compat.py:56-58（root+home 两族；260927 已修，原表只覆盖 -root）
-    "t26092114-",             #  8,115  132h  integration/t260921-14/lib_t26092114.py:131/156
-    "t26090704-lock",         #  3,251  245h  integration/t260907-04/sc_dispatcher_lock_fallback.py:35
-    "t260904-18-mg",          #  3,257  245h  integration/t260904-18/lib_t260904_18.py:153
-    "t260910-10-",            #  5,785  346h  integration/t260910-10/{sc_docs_project_anchor.mjs:111, sc_docs_ui_mock_v1.mjs:121-122}
-    "t090506-",               #  3,230  346h  integration/t260905-06/sc_doc_{read_through,entry_present}.mjs
-    "t260904-13-itest",       #  1,900  245h  integration/t260904-13/lib_ki044.py:47
-    "sandbar-t26091202-",     #     35  321h  integration/t260912-02/lib_lifecycle_case.py:564（目录 + 文件混族）
-    "detailred-e2e-",         #  1,568  292h  integration/t260915-01/tests/sc_detail_red_refusal_receipt.py:76
-    "sandbar-reg-",           #  1,529  305h  server/plugins/workbench/tests/registry-loader.mjs:47（JS 侧，零回收动词）
-    "t260915-10-",            #  2,204  285h  integration/t260915-10/sc_docs_follow_project.mjs:87-88
-    "t26092404-",             #  2,123   64h  integration/t260924-04/sc_project_template_{journey,gate}.py
-    # ---- 第三批（t261002-13 增补：t* 直方图 top 族的白名单缺口——逐条 = 命中数 / 生产者 file:line）----
-    "t260924-04-",            # 10,037  server/engine/tests/test_t260924_04_project_templates.py:78（261002-13 已修；
-                              #               巡检套件日跑，10k 存量主要来自它——261002 普查时误并入 t26092404- 桶）
-    # ---- 第三批续（t261002-13：短前缀尾族——生产者已点名；workbench .mjs 在写集外，清扫器兜底）----
-    "t01-",                   #  1,928  integration/t260902-02/t01_archive_paths.py:67（261002-13 已修）
-    "t02-sb-",                #  1,157  integration/t260902-02/sc_t02_archive_ticket.py:50（261002-13 已修）
-    "t03-",                   #  2,323  integration/t260902-02/sc_t03_merge_teardown.py:95（tag 变体 -old/-defer；261002-13 已修）
-    "t04-sb-",                #  1,157  integration/t260902-02/sc_t04_prune_archive_legacy.py:87（261002-13 已修）
-    "t08-guard-",             #  1,982  integration/t260905-08/sc_wb_contrast_guard.mjs（.mjs freshDir，写集外→清扫器兜底）
-    "t09-",                   #  3,492  server/plugins/workbench/tests/*.mjs freshDir（t09-{bump,donut,fast,kpi,pri}；写集外→清扫器兜底）
-    "t25-t03-",               #  1,130  integration/t260901-25/t03_reap_process_group.py:122（261002-13 已修）
-    "t26092523-",             #  4,599  integration/t260925-23/tests/sc_template_pathgate_{load_contract.py:134-189,faces.py:48}（261002-13 已修：mkdtemp_reclaimed）
-    "t260901-14-",            #  3,477  server/engine/tests/test_t260901_14_registry_loader.py:34-65（261002-13 已修：mkdtemp_reclaimed）
-    "t260908-02-",            #  1,982  server/engine/tests/test_t260908_02_payload_roundtrip.py:55/:66（261002-13 已修；
-                              #               原 "t260908-02-ut" 盖不住同文件 :67 的 -sg 变体——实测 653 条只因变体漏网）
-    "t26091004-sc-",          #      3  4.6h  integration/t260910-04/sc_console_paused_list.mjs:200（**261001 载体风暴的巢**：
-                              #               场景被 900s 执行器帽杀 → `finally` 的 rmSync 没跑 → 树 + 台内后代进程
-                              #               一起活过收口；2.5h 后那片冻结代码（克隆自修前的 main）重跑闸，
-                              #               自递归风暴。实测 3 条存量 / 最老 4.6h / ≈849MB）
-    # 各期场景自建夹具族（前缀形态 = 本仓票号命名空间；有实命中的三条在前，其余为前瞻覆盖）
-    "t260923-",               #    168    5h  integration/t260923-01 族场景夹具
-    "t260925-",               #  1,053   55h  integration/t260925-* 族场景夹具
-    "t260916-",               #  1,256  112h  integration/t260916-15/sc_sidebar_merged_sort_ui.mjs:52
-    "t260922-", "t260921-", "t260917-", "t260918-", "t260919-", "t260920-",
-)
+#: ONE declaration of the temp-fixture families (t261029-81): `tmp_fixture_families.json`,
+#: next to this file. Both consumers read it - this sweeper (which deletes) and the engine
+#: alarm face (`server/engine/inspection_lane_watchdog.py`, which counts the water level) -
+#: and neither keeps a prefix list of its own. A family cannot be declared for sweeping on
+#: one side and stay invisible on the other, because there is no second list to write it
+#: into. Adding a family = appending one record to the file.
+#:
+#: Dependency direction (why this cannot form an import cycle): the file belongs to this
+#: directory. The sweeper is the deleting side, so its declaration IS the delete surface;
+#: the engine only reads the same file by path. A data file imports nothing, and this script
+#: never imports the engine (`import`s below are standard library only - the sweeper must run
+#: on a machine where the engine does not install), so the seam carries no import edge in
+#: either direction.
+#:
+#: Absence is fail-closed, never "no families": a missing or malformed file returns no
+#: families plus named errors, and `run()` refuses to sweep a surface it could not read (the
+#: engine side names the same state as `absent`/`malformed` and refuses to judge the water
+#: level).
+DECLARATION_FILENAME = "tmp_fixture_families.json"
+DECLARATION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), DECLARATION_FILENAME)
 
-#: 第二批并入的前缀快照（**只作留证与回归锁**：它是 `TMP_FIXTURE_PREFIXES` 的子集，
-#: 由 `server/engine/tests/test_t260927_tmp_fixture_family.py` 钉住「真已启用」；
-#: 不是第二份可独立增删的清单——白名单真源只有上面那一个）。
-BATCH2_MERGED_PREFIXES = (
-    "t260907-12-act-", "t260907-12-ch", "sandbar-admin-log-", "sandbar-credentials-",
-    "sandbar-integ-run-", "project-content-integ-run-", "venv-compat-", "t26092114-",  # naming-compat（姊妹项目同款前缀，非退役旧名）
-    "t26090704-lock", "t260904-18-mg", "t260910-10-", "t090506-",
-    "t260904-13-itest", "sandbar-t26091202-", "detailred-e2e-", "sandbar-reg-",
-    "t260915-10-", "t26092404-", "t260923-", "t260925-", "t260922-", "t260921-",
-    "t260916-", "t260917-", "t260918-", "t260919-", "t260920-",
-)
+#: One declared family (t261029-78 shape, kept). Every field is carried by the receipt, so no
+#: reader has to guess why an entry is sweepable:
+#:   prefix    the top-level name prefix the producer mints (this IS the safety property)
+#:   kind      what the producer leaves behind: "dir" | "file" | "dir+file"
+#:   project   who mints it: "sandbar" (this repo), a sibling project key, or "unknown"
+#:   reason    short answer to "why is this entry ours to reclaim?"
+#:   producer  producer file:line inside that project ("" = no owner recorded: rendered as
+#:             owner=unknown, never guessed)
+#:   measured  the sample that put this family on the list ("" = not measured)
+#:   added_by  the ticket or sweep round that declared it
+FixtureFamily = namedtuple(
+    "FixtureFamily", "prefix kind project reason producer measured added_by")
+#: The record fields, in receipt order (the data file uses the same names).
+FAMILY_FIELDS = FixtureFamily._fields
+#: Allowed `kind` values (what the producer leaves behind).
+FAMILY_KINDS = ("dir", "file", "dir+file")
+
+
+def load_families(path=None):
+    """Read the family declaration file -> (families, status dict, structural errors).
+
+    Structural only: a record must be an object with a non-empty `prefix`, and the file must
+    hold at least one record. Semantic rules (kind, provenance, collisions, unreachable
+    prefixes) are `declaration_errors()`.
+    """
+    p = path or DECLARATION_PATH
+    status = {"path": p, "status": "absent", "detail": ""}
+    try:
+        with open(p, "r", encoding="utf-8") as fh:
+            raw = fh.read()
+    except FileNotFoundError:
+        status["detail"] = "the declaration file is absent"
+        return (), status, ["%s: absent (the swept surface cannot be read)" % p]
+    except OSError as exc:
+        status["status"] = "malformed"
+        status["detail"] = "cannot read the declaration: %s: %s" % (type(exc).__name__, exc)
+        return (), status, [status["detail"]]
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        status["status"] = "malformed"
+        status["detail"] = "the declaration is not valid JSON: %s" % exc
+        return (), status, [status["detail"]]
+    records = data.get("families") if isinstance(data, dict) else None
+    if not isinstance(records, list):
+        status["status"] = "malformed"
+        status["detail"] = "the declaration carries no `families` list"
+        return (), status, [status["detail"]]
+    families, errors = [], []
+    for i, rec in enumerate(records):
+        if not isinstance(rec, dict):
+            errors.append("family #%d is not an object" % i)
+            continue
+        values = {k: str(rec.get(k) or "").strip() for k in FAMILY_FIELDS}
+        if not values["prefix"]:
+            errors.append("family #%d has no prefix" % i)
+            continue
+        families.append(FixtureFamily(**values))
+    if not families and not errors:
+        errors.append("the declaration lists no family (an empty surface would sweep nothing "
+                      "and say nothing)")
+    status["status"] = "malformed" if errors else "loaded"
+    if errors:
+        status["detail"] = "; ".join(errors[:8])
+    return tuple(families), status, errors
+
+
+#: The declared families, the declaration status (path/loaded|absent|malformed/detail) and the
+#: structural errors (empty tuple = usable). Read once at import: a running sweep must not see
+#: its delete surface change, and a caller that needs another file calls `load_families(path)`.
+FAMILIES, DECLARATION, DECLARATION_ERRORS = load_families()
+#: The prefix gate: every family the sweeper may delete, in attribution order (the first
+#: matching prefix wins). Derived from the declaration - never written by hand here.
+TMP_FIXTURE_PREFIXES = tuple(f.prefix for f in FAMILIES)
 
 #: **明确排除**的族：判据里排除优先（连白名单计数都不进），永不删——逐条给理由，
 #: 因为「不碰」本身也得是可复核的判定，而不是「恰好没写进白名单」的偶然：
@@ -191,109 +208,78 @@ EXCLUDED_PREFIXES = (
 FixtureFamily = namedtuple(
     "FixtureFamily", "prefix kind project reason producer measured added_by")
 
-#: Families this ticket adds on top of the engine-mirrored core list. Order = descending
-#: measured weight, so the biggest reclaim is read first. Producers are NOT fixed here
-#: (one ticket per producing project; dz3-* and the t26* families belong to project-vision,
-#: the agg-test/coverage-test families to an unwritten-teardown unittest in this repo,
-#: which lives under server/ and is outside this lane's write set) - the sweeper is the
-#: backstop, and every entry names where it comes from.
-DECLARED_FAMILIES = (
-    FixtureFamily(
-        prefix="dz3-pyc", kind="dir", project="project-vision",
-        reason="pytest pycache staging dirs, one per check run, never reclaimed",
-        producer="fpv-midnight/check.py:625 (tempfile.mkdtemp(prefix='dz3-pyc-'))",
-        measured="35,074 entries; 1.3-4.0 MB each (5 sampled) => tens of GB; oldest 15.4h",
-        added_by="t261029-78"),
-    FixtureFamily(
-        prefix="t261014-08-pyc", kind="dir", project="project-vision",
-        reason="PYTHONPYCACHEPREFIX staging dirs, minted empty and left behind",
-        producer="fpv-midnight/tools/tests/test_cache_bust.py:98 "
-                 "(tempfile.mkdtemp(prefix='t261014-08-pyc-'))",
-        measured="36,311 entries, all empty dirs (du 0); oldest 15.4h",
-        added_by="t261029-78"),
-    FixtureFamily(
-        prefix="t261018-04-ut", kind="dir", project="project-vision",
-        reason="anchor-extraction unittest fixture roots (models/*.glb, parts ledger)",
-        producer="fpv-midnight/tools/tests/test_extract_anchors.py:192 "
-                 "(tempfile.mkdtemp(prefix='t261018-04-ut-'))",
-        measured="9,498 entries; ~16 KB each (5 sampled); oldest 15.4h",
-        added_by="t261029-78"),
-    FixtureFamily(
-        prefix="dz3-no-numpy", kind="dir", project="project-vision",
-        reason="check-env shim dirs from the guard test (fake tools, no numpy)",
-        producer="fpv-midnight/tools/tests/test_check_env_guard.py:41 "
-                 "(tempfile.mkdtemp(prefix='dz3-no-numpy-'))",
-        measured="2,565 entries; ~4 KB each (5 sampled); oldest 11.0h",
-        added_by="t261029-78"),
-    FixtureFamily(
-        prefix="agg-test", kind="dir", project="sandbar",
-        reason="inspection-aggregate unittest: bare mkdtemp in setUp, no teardown",
-        producer="server/engine/tests/test_261006_inspection_aggregate.py:48 "
-                 "(tempfile.mkdtemp(prefix='agg-test-'))",
-        measured="2,389 entries; ~4-24 KB each (5 sampled); oldest 58.5h",
-        added_by="t261029-78"),
-    FixtureFamily(
-        prefix="coverage-test", kind="dir", project="sandbar",
-        reason="face-coverage unittest: bare mkdtemp in setUp, no teardown",
-        producer="server/engine/tests/test_t261009_49_face_coverage.py:28 "
-                 "(tempfile.mkdtemp(prefix='coverage-test-'))",
-        measured="1,768 entries; ~0-8 KB each (5 sampled); oldest 58.5h",
-        added_by="t261029-78"),
-)
-
-DECLARED_PREFIXES = tuple(f.prefix for f in DECLARED_FAMILIES)
+#: The declared families (t261029-78's name, t261029-81's single source). There is no core
+#: list / extension split any more: that split was the structure in which one side could hold a
+#: family the other never saw, so both sides now derive from the same records.
+DECLARED_FAMILIES = FAMILIES
+DECLARED_PREFIXES = TMP_FIXTURE_PREFIXES
 #: Declared family by prefix (receipt lookup).
-DECLARED_BY_PREFIX = {f.prefix: f for f in DECLARED_FAMILIES}
-#: The effective default whitelist: the engine-mirrored core (unchanged, drift-locked to
-#: server/engine/inspection_lane_watchdog.py) + the declared extension. Core prefixes come
-#: first so their historical attribution never changes; `declaration_errors()` refuses an
-#: extension that a core prefix would shadow.
-SWEEP_PREFIXES = TMP_FIXTURE_PREFIXES + tuple(
-    p for p in DECLARED_PREFIXES if p not in TMP_FIXTURE_PREFIXES)
+DECLARED_BY_PREFIX = {f.prefix: f for f in FAMILIES}
+#: The effective default whitelist. It equals the declaration by construction (kept as its own
+#: name because the CLI, the receipt and the pre-existing scenario cases read it).
+SWEEP_PREFIXES = TMP_FIXTURE_PREFIXES
 
 
 def families_outside_engine_mirror():
-    """Declared prefixes the engine water-line mirror does not count (named every run).
+    """Families the alarm face cannot count - none by construction (t261029-81).
 
-    The mirror is `server/engine/inspection_lane_watchdog.py::TMP_FIXTURE_PREFIXES`, kept
-    byte-identical to the core list above by the drift lock. Anything the sweeper reclaims
-    beyond it is invisible to the alarm face ("swept but not alarmed" is exactly the silent
-    gap the drift lock exists to prevent), so the run prints the names instead of letting
-    the gap hide. Closing it needs a ticket that may write server/.
+    Before t261029-81 this returned the declared families that the engine's own tuple did not
+    list, i.e. the "swept but never alarmed" gap of t261029-78. Both consumers now read the
+    same declaration file, so the swept surface and the counted surface are one list; a
+    non-empty answer here would mean somebody re-introduced a copy (the drift lock in
+    server/engine/tests/test_t260926_tmp_fixture_water.py bites on that). A failing READ on the
+    alarm side is named by the alarm itself (`status=absent`/`malformed`), not here.
     """
-    return tuple(f.prefix for f in DECLARED_FAMILIES if f.prefix not in TMP_FIXTURE_PREFIXES)
+    return ()
 
 
-def declaration_errors(families=None, core=TMP_FIXTURE_PREFIXES, excluded=EXCLUDED_PREFIXES):
+def declaration_errors(families=None, excluded=None):
     """Named defects in the family declaration (pure; [] = clean).
 
-    A declaration record with a missing field is a trap, not a style issue: the family is
-    then swept with no answer to "why", or never swept at all. Every defect is returned as
-    a string, so the caller refuses with the whole list rather than the first one.
+    A record with a missing field is a trap, not a style issue: the family is then swept with
+    no answer to "why", or never swept at all. An unreachable prefix is the same hole seen from
+    the other side (declared, but an earlier prefix claims every entry). Every defect is
+    returned as a string, so the caller refuses with the whole list rather than the first one.
+
+    `producer`/`measured` may be empty: the 260926/260927 census never recorded an owner for
+    several families, and inventing one would be worse than the explicit `owner=unknown` the
+    receipt already prints. `reason` may not be empty - that is the field that says why the
+    family is ours to reclaim.
     """
-    fams = DECLARED_FAMILIES if families is None else tuple(families)
-    errs = []
-    seen = set()
+    fams = FAMILIES if families is None else tuple(families)
+    excl = EXCLUDED_PREFIXES if excluded is None else tuple(excluded)
+    errs = list(DECLARATION_ERRORS) if families is None else []
+    # Duplicates are judged inside the list being validated. Reachability is judged against
+    # every EARLIER prefix: the ones already visited here, plus the shipped declaration when a
+    # caller passes its own list (a validator probe) - a candidate that the live list shadows
+    # would never own an entry either.
+    shipped = [f.prefix for f in FAMILIES] if families is not None else []
+    seen = []
     for f in fams:
         if not f.prefix:
             errs.append("empty prefix")
             continue
         if f.prefix in seen:
             errs.append("%s: declared twice" % f.prefix)
-        seen.add(f.prefix)
-        for field in ("kind", "project", "reason", "producer", "measured", "added_by"):
+        for field in ("kind", "project", "reason", "added_by"):
             if not str(getattr(f, field) or "").strip():
                 errs.append("%s: empty %s" % (f.prefix, field))
-        if f.kind not in ("dir", "file", "dir+file"):
-            errs.append("%s: unknown kind %r (want dir | file | dir+file)"
-                        % (f.prefix, f.kind))
-        if any(f.prefix.startswith(x) for x in excluded):
+        if f.kind and f.kind not in FAMILY_KINDS:
+            errs.append("%s: unknown kind %r (want %s)"
+                        % (f.prefix, f.kind, " | ".join(FAMILY_KINDS)))
+        hit = next((x for x in excl if f.prefix.startswith(x)), "")
+        if hit:
             errs.append("%s: collides with EXCLUDED_PREFIXES %r (excluded must win)"
-                        % (f.prefix, next(x for x in excluded if f.prefix.startswith(x))))
-        shadow = next((c for c in core if c != f.prefix and f.prefix.startswith(c)), "")
+                        % (f.prefix, hit))
+        shadow = next((s for s in (shipped + seen)
+                       if s != f.prefix and f.prefix.startswith(s)), "")
         if shadow:
-            errs.append("%s: shadowed by core prefix %r (entries would be attributed to the"
-                        " core family)" % (f.prefix, shadow))
+            errs.append("%s: shadowed by the earlier prefix %r (every entry would be "
+                        "attributed to it, so this family would never own one)"
+                        % (f.prefix, shadow))
+        seen.append(f.prefix)
+    if not fams:
+        errs.append("the declaration lists no family")
     return errs
 
 
@@ -760,6 +746,7 @@ def run(argv=None) -> int:
     decl_errors = declaration_errors()
     out = {"mode": "apply" if args.apply else "dry-run", "root": root,
            "max_age_h": args.max_age_h, "prefixes": list(prefixes),
+           "declaration": dict(DECLARATION, family_count=len(FAMILIES)),
            "declared_families": [f._asdict() for f in DECLARED_FAMILIES],
            "families_outside_engine_mirror": list(families_outside_engine_mirror())}
     log = (lambda m: print(m, file=sys.stderr, flush=True)) if args.json \
@@ -791,6 +778,8 @@ def run(argv=None) -> int:
     if not args.apply:
         log("DRY-RUN (nothing is deleted; pass --apply to delete)")
     log("root=%s max-age=%sh prefixes=%d" % (root, args.max_age_h, len(prefixes)))
+    log("declaration=%s (%d families, status=%s; the same file the alarm face reads)"
+        % (DECLARATION.get("path") or "?", len(FAMILIES), DECLARATION.get("status") or "?"))
 
     t0 = time.monotonic()
     sc = scan(root, prefixes, args.max_age_h)
@@ -828,6 +817,14 @@ def run(argv=None) -> int:
     # the drift lock exists to prevent; closing it means writing server/ (outside this
     # lane's write set), so this run reports it instead of hiding it.
     mirror_gap = () if args.prefix else families_outside_engine_mirror()
+    if not args.prefix:
+        # Single source (t261029-81): the alarm face counts the same declaration file, so the
+        # swept surface and the counted surface cannot diverge. This line states the coverage
+        # instead of the old gap report - and it stays a measurement, not a promise: the count
+        # is read from the file both sides read.
+        log("ENGINE MIRROR: %d families declared in %s; the alarm face counts the same file "
+            "(single source, t261029-81) - families outside it: %d"
+            % (len(FAMILIES), DECLARATION.get("path") or "?", len(mirror_gap)))
     if mirror_gap:
         log("ENGINE MIRROR GAP: %d declared famil(ies) are not in the engine water-line "
             "mirror (server/engine/inspection_lane_watchdog.TMP_FIXTURE_PREFIXES): %s — this"

@@ -569,16 +569,256 @@ def _load_module(path: Path, name: str):
     return mod
 
 
-def test_f1_prefix_whitelist_single_source():
-    """引擎判据面与清扫器的白名单**同一份清单**（两处各写一份必然漂移：清扫器删掉的
-    前缀与水位面统计的前缀一旦错位，就会出现「清扫器删了但不报警」或反之的静默缺口）。"""
-    sweep = _load_module(INTEG / "tools" / "sweep_tmp_fixtures.py", "sweep_probe")
-    assert tuple(sweep.TMP_FIXTURE_PREFIXES) == tuple(lw.TMP_FIXTURE_PREFIXES)
-    assert sweep.DEFAULT_MAX_AGE_H == lw.DEFAULT_TMP_FIXTURE_MAX_AGE_H   # 龄线同口径
-    # 清扫器是 dry-run 缺省的（宿主 temp 里可能有别的程序的东西）：--apply 才删 + 龄闸硬地板
+#: The ONE family declaration (t261029-81): the data file both consumers read.
+DECLARATION_FILE = INTEG / "tools" / "tmp_fixture_families.json"
+
+
+def _sweeper(name="sweep_probe"):
+    """The sweeper module as a consumer (loaded by path: it must never import the engine)."""
+    return _load_module(INTEG / "tools" / "sweep_tmp_fixtures.py", name)
+
+
+def surface_divergences(delete_prefixes, counted_prefixes):
+    """Named divergences between the two derived surfaces ([] = aligned).
+
+    This is the lock's core, and it reads the surfaces the two consumers actually USE -
+    the sweeper's delete whitelist and the alarm face's counted families - not a named
+    constant either side happens to export. A family on only one side comes back named.
+    """
+    deleted = [str(p) for p in delete_prefixes]
+    counted = [str(p) for p in counted_prefixes]
+    out = []
+    for p in deleted:
+        if p not in counted:
+            out.append("%s: reclaimed by the sweeper but NOT counted by the alarm face" % p)
+    for p in counted:
+        if p not in deleted:
+            out.append("%s: counted by the alarm face but NOT reclaimed by the sweeper" % p)
+    return out
+
+
+def test_f1_single_source_declaration_cannot_drift():
+    """ONE declaration feeds both consumers, and this lock guards the *effective* surfaces.
+
+    Before t261029-81 each side held its own hand-kept tuple and this test compared the two
+    tuples, so it only ever proved "the two copies agree". A family declared through any
+    other route (an extension list, a second table) was swept while the alarm never counted
+    it, and this test stayed green - that is exactly how the six families of t261029-78 went
+    invisible. The lock now compares what the sweeper deletes against what the alarm counts,
+    in both directions, and the lists themselves come from one data file.
+    """
+    sweep = _sweeper()
+    alarm = lw.load_tmp_fixture_declaration()
+    assert alarm["status"] == lw.DECLARATION_LOADED, alarm
+    # 1. both consumers read the SAME file (one source, not two agreeing copies)
+    assert Path(str(sweep.DECLARATION["path"])).resolve() == DECLARATION_FILE.resolve()
+    assert Path(str(alarm["path"])).resolve() == DECLARATION_FILE.resolve()
+    assert sweep.DECLARATION["status"] == lw.DECLARATION_LOADED
+    # 2. the two effective surfaces are the same list, in the same (attribution) order
+    assert surface_divergences(sweep.TMP_FIXTURE_PREFIXES, alarm["prefixes"]) == []
+    assert list(sweep.TMP_FIXTURE_PREFIXES) == list(alarm["prefixes"]) == list(lw.TMP_FIXTURE_PREFIXES)
+    # ... and both are exactly the file's families (nobody filters or appends behind it)
+    declared = [f["prefix"] for f in json.loads(DECLARATION_FILE.read_text(encoding="utf-8"))["families"]]
+    assert list(sweep.TMP_FIXTURE_PREFIXES) == declared
+    assert list(lw.TMP_FIXTURE_PREFIXES) == declared
+    assert len(declared) == len(set(declared)) and len(declared) >= 56
+    # 3. the declaration itself is well formed (a half-written record is a trap, not a family)
+    assert sweep.declaration_errors() == []
+    # 4. no hand-kept twin survives in either code file: a family name may not be a literal
+    for path in (POC / "inspection_lane_watchdog.py", INTEG / "tools" / "sweep_tmp_fixtures.py"):
+        src = path.read_text(encoding="utf-8")
+        leftovers = [p for p in declared if ('"%s"' % p) in src or ("'%s'" % p) in src]
+        assert leftovers == [], (path.name, leftovers)
+    # 5. the age line stays one number on both sides (a sweep and an alarm on different lines
+    #    would disagree about "nobody can still be using it")
+    assert sweep.DEFAULT_MAX_AGE_H == lw.DEFAULT_TMP_FIXTURE_MAX_AGE_H
+    # 6. the sweeper keeps its safety gates (this change must not widen what it deletes)
     src = (INTEG / "tools" / "sweep_tmp_fixtures.py").read_text(encoding="utf-8")
     assert 'ap.add_argument("--apply", action="store_true"' in src
     assert "APPLY_MIN_AGE_H" in src and "not a real directory" in src
+
+
+def test_f4_the_lock_bites_by_name_on_a_one_sided_family():
+    """The lock has teeth in BOTH directions (the assertion this test makes is the same
+    check `test_f1` runs, so a red here means a red there).
+
+    Direction 1 is the defect of t261029-78/: a family the sweeper reclaims that the alarm
+    face never counts. Direction 2 is its mirror: a family the alarm counts that the sweeper
+    never deletes (the alarm would report water it cannot have measured).
+    """
+    sweep = _sweeper("sweep_probe_f4")
+    delete_surface = list(sweep.TMP_FIXTURE_PREFIXES)
+    counted = list(lw.TMP_FIXTURE_PREFIXES)
+    assert surface_divergences(delete_surface, counted) == []      # the real pair: aligned
+
+    swept_only = surface_divergences(delete_surface + ["fake-family-"], counted)
+    assert len(swept_only) == 1, swept_only
+    assert "fake-family-" in swept_only[0]
+    assert "reclaimed by the sweeper but NOT counted" in swept_only[0]
+
+    counted_only = surface_divergences(delete_surface, counted + ["alarm-only-"])
+    assert len(counted_only) == 1, counted_only
+    assert "alarm-only-" in counted_only[0]
+    assert "counted by the alarm face but NOT reclaimed" in counted_only[0]
+
+
+def test_f5_a_new_family_is_one_record_with_no_code_change(tmp_path):
+    """The class fix, not the symptom: declaring a family is ONE record in the data file.
+
+    Two halves. (1) The family this ticket was opened for - `t261014-08-pyc`, 36k EMPTY
+    directories, dz3-pyc's sibling - is declared in the shipped file and the alarm face
+    COUNTS it (before t261029-81 the alarm's own tuple did not know it: the sweeper reclaimed
+    it and no alarm ever fired). (2) A family that exists only as a record in a private copy
+    of the file is counted and named by the alarm face with no code change, and the sweeper's
+    loader derives exactly the same surface from the same file - so the next family cannot be
+    swept with no alarm.
+    """
+    # (1) the measured family is on BOTH surfaces, from the shipped declaration
+    probe = "t261014-08-pyc"
+    assert probe in lw.TMP_FIXTURE_PREFIXES and probe in lw.TMP_FIXTURE_DECLARATION["prefixes"]
+    sweep_shipped = _sweeper("sweep_probe_f5_shipped")
+    assert probe in sweep_shipped.TMP_FIXTURE_PREFIXES
+    assert surface_divergences(sweep_shipped.TMP_FIXTURE_PREFIXES, lw.TMP_FIXTURE_PREFIXES) == []
+
+    # (2) a brand-new family: one record, no code change, both consumers agree
+    doc = json.loads(DECLARATION_FILE.read_text(encoding="utf-8"))
+    doc = dict(doc, families=list(doc["families"]) + [{
+        "prefix": "t261030-81-probe", "kind": "dir", "project": "sandbar",
+        "reason": "probe for the next-family case", "producer": "probe/t261029-81.py:1",
+        "measured": "probe", "added_by": "t261029-81"}])
+    decl_path = tmp_path / "tmp_fixture_families.json"
+    decl_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    alarm = lw.load_tmp_fixture_declaration(str(decl_path))
+    assert alarm["status"] == lw.DECLARATION_LOADED and "t261030-81-probe" in alarm["prefixes"]
+
+    root = tmp_path / "tmp-root"
+    root.mkdir()
+    old = time.time() - 9 * 3600
+    for i in range(3):
+        d = root / ("t261030-81-probe-%d" % i)        # EMPTY directories: no file inside
+        d.mkdir()
+        os.utime(d, (old, old))
+    scan = activities.scan_tmp_fixture_dirs(str(root), alarm["prefixes"])
+    out = lw.tmp_fixture_scan_result(scan, {"tmp_fixture_max_dirs": 2,
+                                            "tmp_fixture_max_age_h": 6}, declaration=alarm)
+    sec = out["section"]
+    assert sec["dirs"] == 3 and sec["by_prefix"]["t261030-81-probe"] == 3
+    assert "t261030-81-probe" in sec["families"]
+    assert out["findings"] and "t261030-81-probe x3" in out["findings"][0]["evidence"]
+    assert ins.finding_language_violations(out["findings"]) == []
+
+    # the sweeper reads the same record shape from the same file -> same surface, no drift
+    sweep = _sweeper("sweep_probe_f5")
+    families, status, errors = sweep.load_families(str(decl_path))
+    assert status["status"] == "loaded" and errors == []
+    assert "t261030-81-probe" in [f.prefix for f in families]
+    assert sweep.declaration_errors(families) == []
+    assert surface_divergences([f.prefix for f in families], alarm["prefixes"]) == []
+
+
+def test_f6_an_absent_or_malformed_declaration_is_named_never_zero(tmp_path):
+    """Fail-closed: an unreadable declaration is a named finding, not a zero water level.
+
+    The engine must stay runnable without the integration tree, so the file may be absent -
+    but "no declaration" must never render as "nothing leaked" (that is the falsehood this
+    whole face exists to prevent). The sweeper side refuses on the same state.
+    """
+    missing = tmp_path / "absent.json"
+    absent = lw.load_tmp_fixture_declaration(str(missing))
+    assert absent["status"] == lw.DECLARATION_ABSENT and absent["prefixes"] == ()
+    assert "absent" in absent["detail"]
+    out = lw.tmp_fixture_scan_result(_scan([]), {"tmp_fixture_max_dirs": 1,
+                                                "tmp_fixture_max_age_h": 6},
+                                     declaration=absent)
+    assert len(out["findings"]) == 1
+    f = out["findings"][0]
+    assert f["severity"] == "med" and "not declared (absent)" in f["subject"]
+    assert out["section"]["declaration"]["status"] == "absent"
+    assert out["section"]["family_count"] == 0 and out["section"]["families"] == []
+    assert ins.finding_language_violations([f]) == []
+
+    for body, why in (("{not json", "not valid JSON"),
+                      ('{"schema": "x"}', "no `families` list"),
+                      ('{"families": []}', "lists no family"),
+                      ('{"families": [{"kind": "dir"}]}', "has no prefix"),
+                      ('{"families": [{"prefix": "a-"}, {"prefix": "a-"}]}', "declared twice")):
+        bad = tmp_path / "bad.json"
+        bad.write_text(body, encoding="utf-8")
+        decl = lw.load_tmp_fixture_declaration(str(bad))
+        assert decl["status"] == lw.DECLARATION_MALFORMED, (body, decl)
+        assert why in decl["detail"], (why, decl["detail"])
+        named = lw.tmp_fixture_scan_result(_scan(_dirs(1)), {"tmp_fixture_max_dirs": 0,
+                                                            "tmp_fixture_max_age_h": 6},
+                                           declaration=decl)
+        assert "not declared (malformed)" in named["findings"][0]["subject"]
+
+    # the sweeper side is fail-closed on the same states (it never sweeps a surface it
+    # could not read, and never reports an empty sweep as success)
+    sweep = _sweeper("sweep_probe_f6")
+    assert sweep.load_families(str(missing))[0] == ()
+    assert sweep.load_families(str(missing))[1]["status"] == "absent"
+    assert sweep.declaration_errors(families=()) != []
+
+
+def test_f7_the_alarm_names_every_family_it_counts():
+    """A count nobody can inspect is a claim, not a measurement: the receipt carries the
+    family list, one count per family (zeros included), and the declaration it came from."""
+    sweep = _sweeper("sweep_probe_f7")
+    scan = _scan(_dirs(3, prefix="t260904-02-", age_h=9.0), untouched=2)
+    out = lw.tmp_fixture_scan_result(scan, {"tmp_fixture_max_dirs": 2,
+                                            "tmp_fixture_max_age_h": 6})
+    sec = out["section"]
+    assert sec["families"] == list(sweep.TMP_FIXTURE_PREFIXES)   # one list, both consumers
+    assert sec["family_count"] == len(sec["families"]) == len(sweep.TMP_FIXTURE_PREFIXES)
+    assert set(sec["by_prefix"]) == set(sec["families"])         # every family named, zeros too
+    assert sec["by_prefix"]["t260904-02-"] == 3
+    assert sec["declaration"]["status"] == "loaded"
+    assert sec["declaration"]["family_count"] == sec["family_count"]
+    assert Path(sec["declaration"]["path"]).resolve() == DECLARATION_FILE.resolve()
+    ev = out["findings"][0]["evidence"]
+    assert "families counted: %d declared in" % sec["family_count"] in ev
+    assert "t260904-02- x3" in ev                                # names the leaker family, not a number
+
+
+def test_f8_directory_family_of_empty_dirs_is_counted_by_the_water_line(monkeypatch, tmp_path):
+    """The judgement on a DIRECTORY family whose members are EMPTY directories.
+
+    A water line that only ever counted files reports zero for a family like this, and zero
+    reads as green. Exercised here through the real activity shell on a fabricated temp root
+    (never the host's real temp dir): four empty directories of a declared directory family,
+    aged out, plus one file-family member that must stay out of the directory count.
+    """
+    root = tmp_path / "tmp-root"
+    root.mkdir()
+    old = time.time() - 9 * 3600
+    for i in range(4):
+        d = root / ("t261014-08-pyc-%d" % i)       # the measured DIR family, empty inside
+        d.mkdir()
+        os.utime(d, (old, old))
+    (root / "sandbar-integ-run-probe.lock").write_text("x", encoding="utf-8")
+    (root / "com.google.Chrome.profile").mkdir()
+
+    scan = activities.scan_tmp_fixture_dirs(str(root), lw.TMP_FIXTURE_PREFIXES)
+    assert len(scan["entries"]) == 4                 # empty dirs are directories, not nothing
+    assert scan["skipped_count"] == 1                # the file-family member is visible, not counted
+    assert scan["untouched"] == 1                    # somebody else's entry
+
+    _patch_io(monkeypatch)
+    out = _run_activity({"tmp_fixture_root": str(root), "tmp_fixture_scan_ttl_sec": 0,
+                         "watchdog": {"tmp_fixture_max_dirs": "3",
+                                      "tmp_fixture_max_age_h": "6"}})
+    tmp = out["result"]["tmp_fixture"]
+    assert tmp["section"]["dirs"] == 4               # NOT zero: directories are the unit
+    assert tmp["section"]["by_prefix"]["t261014-08-pyc"] == 4
+    assert tmp["section"]["oldest_age_h"] >= 9.0
+    assert len(tmp["findings"]) == 1
+    f = tmp["findings"][0]
+    assert f["severity"] == "high"                   # count and age both over the line
+    assert "dirs=4 (threshold 3)" in f["evidence"]
+    assert ins.finding_language_violations(tmp["findings"]) == []
+
+
 
 
 def test_f2_l8_lint_gate_behaviour(monkeypatch, tmp_path):

@@ -61,6 +61,11 @@
     代码缺陷——开「修码票」是错配（同 deadman 漏跑口径）；处置动作写在 why 里。
   - 畸形入参（快照非 dict / 时间戳不可解 / 轮次非数）一律**逐项降级并点名**，绝不抛、
     绝不当成「零发现」静默吞。
+  - (t261029-81) One named exception to "zero IO": `load_tmp_fixture_declaration` reads the
+    static family declaration file `<repo>/integration/tools/tmp_fixture_families.json` (the
+    single source the sweeper also reads). It is one small read of a file in this
+    repository - no network, no temp root, no state written - and a file that is absent is
+    reported as `absent`, never as "no families".
 
 阈值来源（宿主 260926 护栏②）：声明侧 `inspection.yaml` 实例级 `watchdog:` 档
 （`rerun_rounds`/`fault_loop_min`/`inflight_silent_min`）；缺失/畸形 → 回落本模块缺省，且
@@ -69,6 +74,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -109,65 +116,115 @@ STALL_LEGS = (LEG_CERT_WAIT, LEG_FREEZE_NO_REMEDY, LEG_REPAIR_NOWHERE)
 #: the rerun-rounds leg applies it too.)
 INFLIGHT_INAPPLICABLE_STATUS = "blocked"
 
-#: 已知测试夹具前缀白名单（**同一份清单**也用于 integration/tools/sweep_tmp_fixtures.py；
-#: 两处一致性由机械漂移锁钉住：server/engine/tests/test_t260926_tmp_fixture_water.py
-#: ::test_e1_prefix_whitelist_single_source）。白名单之外一律不计入水位——宿主 temp 目录里
-#: 还有别的程序（实测 `com.google.Chrome.*` 4,380 个目录）与**dsh 运行时自己的临时 spill
-#: 目录**（前缀逐条见清扫器的 `EXCLUDED_PREFIXES`：那是 harness 侧 mkdtemp 建的、**不是本仓
-#: 的夹具**——260926 普查曾把它误归成「本仓 dsh 子进程探针族」，260927 已改正并明确排除：
-#: 删活会话的 spill 目录会弄坏在飞的 agent 进程）。
-#: 260927 全族整治：第二批 28 个前缀（原只登记未启用）正式并入；本表按「目录族 + 文件族」
-#: 一视同仁——水位判据只数**真目录**，文件族（`*-integ-run-*.lock` 等）由清扫器处置。
-TMP_FIXTURE_PREFIXES = (
-    "integ-e2e-fixture-",
-    "lint-pyc-",
-    "fix10-", "fix14-", "fix17-",
-    "pathgate-",
-    "t260907-06-ut-",
-    "t260907-12-ut",
-    "sandbar-agent-presets-",
-    "t26092212-", "t260906-", "lease-ut-", "t260904-02-", "t260901-21-",
-    "t02-lane", "t26090704-lane",
-    "wb-",
-    # ---- 第二批（260927 启用；逐条证据见 integration/tools/sweep_tmp_fixtures.py 的同名表）----
-    "t260907-12-act-", "t260907-12-ch", "sandbar-admin-log-", "sandbar-credentials-",
-    "sandbar-integ-run-", "project-content-integ-run-", "venv-compat-", "t26092114-",  # naming-compat（姊妹项目同款前缀，非退役旧名）
-    "t26090704-lock", "t260904-18-mg", "t260910-10-", "t090506-",
-    "t260904-13-itest", "sandbar-t26091202-", "detailred-e2e-", "sandbar-reg-",
-    "t260915-10-", "t26092404-",
-    "t260924-04-",            # t261002-13 增补（证据见 integration/tools/sweep_tmp_fixtures.py 同名表）
-    "t01-", "t02-sb-", "t03-", "t04-sb-", "t08-guard-", "t09-", "t25-t03-",  # t261002-13 尾族（证据见 sweep_tmp_fixtures 同名表）
-    "t26092523-", "t260901-14-", "t260908-02-",
-    "t26091004-sc-",          # 261001 载体风暴的巢（证据见 integration/tools/sweep_tmp_fixtures.py 同名表）
-    "t260923-", "t260925-", "t260916-", "t260922-", "t260921-", "t260917-",
-    "t260918-", "t260919-", "t260920-",
-)
+#: ONE declaration of the temp-fixture families (t261029-81) - and there is no second one.
+#: Both consumers read the data file `integration/tools/tmp_fixture_families.json`: this
+#: alarm face (which counts the water level) and the sweeper
+#: `integration/tools/sweep_tmp_fixtures.py` (which deletes). The file is the only place a
+#: family is declared, so "declared for sweeping on one side, invisible on the alarm side"
+#: cannot be written down: there is no prefix tuple here and none in the sweeper.
+#:
+#: Dependency direction (why this cannot form an import cycle): the file belongs to the
+#: sweeper's directory, because the sweeper is the deleting side and its declaration IS the
+#: delete surface. This module only READS that file by path. A data file imports nothing,
+#: and the sweeper never imports the engine (it must run on a machine where the engine does
+#: not install), so the seam carries no import edge in either direction.
+#:
+#: Absence is NAMED and fail-closed, never silently "no families": an engine installed
+#: outside its repository finds no file, the status becomes `absent`, and
+#: `tmp_fixture_scan_result` raises a named finding and skips the threshold judgement -
+#: because "nothing declared" is not "nothing leaked" (a green water line there would be the
+#: exact falsehood this face exists to prevent).
+TMP_FIXTURE_DECLARATION_RELPATH = os.path.join(
+    "integration", "tools", "tmp_fixture_families.json")
+#: The declaration file this engine reads: repo root resolved from this file's location
+#: (server/engine/inspection_lane_watchdog.py -> two levels up).
+TMP_FIXTURE_DECLARATION_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    TMP_FIXTURE_DECLARATION_RELPATH)
+DECLARATION_LOADED = "loaded"
+DECLARATION_ABSENT = "absent"
+DECLARATION_MALFORMED = "malformed"
+#: Record fields this face reads from the declaration (unknown fields are ignored, so the
+#: declarer side can grow provenance without breaking the alarm).
+TMP_FIXTURE_FAMILY_FIELDS = ("prefix", "kind", "project", "reason", "producer",
+                             "measured", "added_by")
 
-#: 前缀 → 生产者（t261002-13「回执必须点名到族」）：水位发现里 `top_leakers[].owner`
-#: 的真源。只登记**已核实**的生产者（file:line 证据见 integration/tools/sweep_tmp_fixtures.py
-#: 同名白名单表）；不在这张表里的前缀一律 `owner=unknown`——宁可显式未知，绝不猜。
-TMP_FIXTURE_OWNERS = {
-    "t260904-02-": "server/engine/tests/test_t260904_02_{registry_anchor,worker_meta}.py (fixed 261002-13)",
-    "t260901-21-": "integration/t260901-21/{t01_read_side_resolution,sc_i01_parity_py_vs_mjs,t02_copy_creds}.py (fixed 261002-13)",
-    "t26092404-": "integration/t260924-04/sc_project_template_{gate,ticket_journey}.py (fixed 261002-13)",
-    "t26092523-": "integration/t260925-23/tests/sc_template_pathgate_{load_contract,faces}.py (fixed 261002-13)",
-    "t260901-14-": "server/engine/tests/test_t260901_14_registry_loader.py (fixed 261002-13)",
-    "t260908-02-": "server/engine/tests/test_t260908_02_payload_roundtrip.py (fixed 261002-13)",
-    "t260907-12-act-": "server/engine/tests/test_multirepo_root_activity.py (fixed 260926)",
-    "t260907-12-ch": "server/engine/tests/test_multirepo_root_activity.py (fixed 260926)",
-    "integ-e2e-fixture-": "integration ticket-lifecycle-scenes.mjs fixtures",
-    "pathgate-": "integration/t260911-03 pathgate scenarios",
-    "lease-ut-": "integration stage-lease unit fixtures",
-    # ---- t261002-13 尾族（短前缀；生产者已点名，.mjs 侧在写集外→清扫器兜底）----
-    "t260924-04-": "server/engine/tests/test_t260924_04_project_templates.py:78 (fixed 261002-13)",
-    "t01-": "integration/t260902-02/t01_archive_paths.py:67 (fixed 261002-13)",
-    "t02-sb-": "integration/t260902-02/sc_t02_archive_ticket.py:50 (fixed 261002-13)",
-    "t03-": "integration/t260902-02/sc_t03_merge_teardown.py:95 (fixed 261002-13)",
-    "t04-sb-": "integration/t260902-02/sc_t04_prune_archive_legacy.py:87 (fixed 261002-13)",
-    "t08-guard-": "integration/t260905-08/sc_wb_contrast_guard.mjs (sweep-only: .mjs out of dev write set)",
-    "t09-": "server/plugins/workbench/tests/*.mjs freshDir (sweep-only: out of dev write set)",
-    "t25-t03-": "integration/t260901-25/t03_reap_process_group.py:122 (fixed 261002-13)",
-}
+
+def load_tmp_fixture_declaration(path: str = "") -> Dict[str, Any]:
+    """Read the single family declaration file -> named status (pure read, no other IO).
+
+    Returns `{"path", "status", "families", "prefixes", "detail"}`:
+      - `status=loaded`   the file parsed and holds at least one usable record;
+      - `status=absent`   no file at that path (engine installed outside its repository);
+      - `status=malformed` unreadable, not JSON, no `families` list, a record without a
+        prefix, a duplicate prefix, or no record at all.
+    `absent`/`malformed` carry `detail` and (possibly partial) named families, so the caller
+    can name what it could not use. Callers must not treat a non-loaded status as zero
+    families: see `tmp_fixture_scan_result`.
+    """
+    p = path or TMP_FIXTURE_DECLARATION_PATH
+    out: Dict[str, Any] = {"path": p, "status": DECLARATION_ABSENT,
+                           "families": [], "prefixes": (), "detail": ""}
+    try:
+        with open(p, "r", encoding="utf-8") as fh:
+            raw = fh.read()
+    except FileNotFoundError:
+        out["detail"] = "the declaration file is absent"
+        return out
+    except OSError as exc:
+        out["status"] = DECLARATION_MALFORMED
+        out["detail"] = "cannot read the declaration: %s: %s" % (type(exc).__name__, exc)
+        return out
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        out["status"] = DECLARATION_MALFORMED
+        out["detail"] = "the declaration is not valid JSON: %s" % exc
+        return out
+    records = data.get("families") if isinstance(data, dict) else None
+    if not isinstance(records, list):
+        out["status"] = DECLARATION_MALFORMED
+        out["detail"] = "the declaration carries no `families` list"
+        return out
+    families: List[Dict[str, str]] = []
+    prefixes: List[str] = []
+    problems: List[str] = []
+    for i, rec in enumerate(records):
+        if not isinstance(rec, dict):
+            problems.append("family #%d is not an object" % i)
+            continue
+        fam = {k: str(rec.get(k) or "").strip() for k in TMP_FIXTURE_FAMILY_FIELDS}
+        if not fam["prefix"]:
+            problems.append("family #%d has no prefix" % i)
+            continue
+        if fam["prefix"] in prefixes:
+            problems.append("%s: declared twice" % fam["prefix"])
+            continue
+        families.append(fam)
+        prefixes.append(fam["prefix"])
+    if not prefixes and not problems:
+        problems.append("the declaration lists no family")
+    out["families"] = families
+    out["prefixes"] = tuple(prefixes)
+    if problems:
+        out["status"] = DECLARATION_MALFORMED
+        out["detail"] = "; ".join(problems[:8])
+        return out
+    out["status"] = DECLARATION_LOADED
+    return out
+
+
+#: The declaration as read at import (the water level is judged once per period; a running
+#: period must not change surface halfway).
+TMP_FIXTURE_DECLARATION = load_tmp_fixture_declaration()
+#: Every family the sweeper may delete, in the declaration's attribution order (the first
+#: matching prefix wins). Derived from the data file - never written by hand here.
+TMP_FIXTURE_PREFIXES = TMP_FIXTURE_DECLARATION["prefixes"]
+#: prefix -> producer hint (the declaration's `producer` field, when the census recorded
+#: one). Absent key = `owner=unknown`: never guessed. Derived, so a new family brings its
+#: owner along or explicitly says it has none.
+TMP_FIXTURE_OWNERS = {f["prefix"]: f["producer"]
+                      for f in TMP_FIXTURE_DECLARATION["families"] if f.get("producer")}
 
 #: 模块缺省阈值（真源；声明侧同名键可覆盖）。rerun_rounds 缺省 3 = 抓得住今天这种
 #: 「同一票 5 轮 × ~2h 全量」的形态；两道时间阈值单位=分钟。
@@ -1490,7 +1547,8 @@ def tmp_fixture_top_leakers(facts: Any, cap: int = 5) -> List[Dict[str, Any]]:
             for p, c in ranked[:max(1, int(cap))]]
 
 
-def tmp_fixture_legs(facts: Dict[str, Any], thresholds: Dict[str, Any]) -> List[Dict[str, Any]]:
+def tmp_fixture_legs(facts: Dict[str, Any], thresholds: Dict[str, Any],
+                     declaration: Any = None) -> List[Dict[str, Any]]:
     """水位判定（纯函数）→ 命中族列表（0 或 1 条：这是**宿主级**面，不按票聚合）。
 
     判据（两条任一越线即出发现——严格大于，与票级面同口径）：
@@ -1498,9 +1556,14 @@ def tmp_fixture_legs(facts: Dict[str, Any], thresholds: Dict[str, Any]) -> List[
       ② 最老目录年龄 > `tmp_fixture_max_age_h`（「没有任何活套件会用」的 6h 线）。
     只越一条 → med；两条同时越 → high（今天的实况：27.7 万个 + 300+ 小时，两条都越）。
     年龄/扫描错误未知时不判年龄（保守，不假报），但**证据里点名未知**——不静默。
+
+    `declaration` (t261029-81) is the family declaration this judgement is counting against;
+    its family count and its single-source path go into the evidence, so the alarm says WHAT
+    it counted (a count nobody can inspect is a claim, not a measurement).
     """
     if not isinstance(facts, dict):
         return []
+    decl = declaration if isinstance(declaration, dict) else TMP_FIXTURE_DECLARATION
     max_dirs = int(thresholds.get("tmp_fixture_max_dirs") or DEFAULT_TMP_FIXTURE_MAX_DIRS)
     max_age_h = float(thresholds.get("tmp_fixture_max_age_h") or DEFAULT_TMP_FIXTURE_MAX_AGE_H)
     dirs = int(facts.get("dirs") or 0)
@@ -1512,6 +1575,7 @@ def tmp_fixture_legs(facts: Dict[str, Any], thresholds: Dict[str, Any]) -> List[
     root = str(facts.get("root") or "?")
     where = "root=%s" % root
     per = tmp_fixture_prefix_text(facts)
+    fams = [str(p) for p in (decl.get("prefixes") or [])]
     if over_count and over_age:
         subject = ("test fixture temp dirs: %d dirs (threshold %d) and the oldest is %.1fh old "
                    "(threshold %dh) under %s" % (dirs, max_dirs, oldest, int(max_age_h), root))
@@ -1522,11 +1586,13 @@ def tmp_fixture_legs(facts: Dict[str, Any], thresholds: Dict[str, Any]) -> List[
         subject = ("test fixture temp dirs: the oldest is %.1fh old (threshold %dh) under %s"
                    % (oldest, int(max_age_h), root))
     evidence = ("test fixture dirs=%d (threshold %d) | oldest=%s (%s) | by prefix: %s | "
+                "families counted: %d declared in %s | "
                 "scanned %d top-level entries (%d outside the whitelist, untouched) | %s"
                 % (dirs, max_dirs,
                    ("%.1fh" % oldest) if facts.get("epochs") else "unknown",
                    (facts.get("oldest_name") or "?")[:80],
-                   per or "none", int(facts.get("entries_seen") or 0),
+                   per or "none", len(fams), str(decl.get("path") or "?"),
+                   int(facts.get("entries_seen") or 0),
                    int(facts.get("untouched") or 0), where))
     _top = tmp_fixture_top_leakers(facts)
     if _top:
@@ -1557,15 +1623,51 @@ def tmp_fixture_legs(facts: Dict[str, Any], thresholds: Dict[str, Any]) -> List[
 
 
 def tmp_fixture_scan_result(scan: Any, thresholds: Dict[str, Any], *, source: str = "",
-                            note: str = "", now_ts: float = 0.0) -> Dict[str, Any]:
+                            note: str = "", now_ts: float = 0.0,
+                            declaration: Any = None) -> Dict[str, Any]:
     """扫描回执 → 水位面回执（facts + 发现清单 + 段）。纯函数，畸形一律显式化不抛。
 
     零发现 = findings 空、段计数 0（**看得见**「扫了、没越线」）；扫描不到 = 一条具名
     med 发现 + 段里点名（绝不把「没扫到」渲染成「全绿」——这是本面存在的全部理由）；
-    逐条读不懂/截断 = 各一条 low 发现（不静默，但也不假装是漏水）。"""
-    facts = tmp_fixture_facts(scan, now_ts=now_ts)
+    and each unreadable entry or a truncated scan gets one low finding (named, but never
+    dressed up as a leak).
+
+    `declaration` (t261029-81) = the family declaration being counted (default: the one read
+    at import from the single-source file). A declaration that is not `loaded` (absent or
+    malformed) is FAIL-CLOSED: one named med finding says the families could not be
+    declared, and the threshold judgement is skipped - "nothing declared" must never render
+    as "nothing leaked".
+    """
+    decl = declaration if isinstance(declaration, dict) else TMP_FIXTURE_DECLARATION
+    status = str(decl.get("status") or "")
+    # The facts are counted against the SAME families this receipt judges (t261029-81): the
+    # counted surface and the declared surface are one list, never a default plus an override.
+    facts = tmp_fixture_facts(scan, now_ts=now_ts,
+                             prefixes=tuple(decl.get("prefixes") or ()))
     findings: List[Dict[str, Any]] = []
     from inspection_deadman import make_finding
+    if status != DECLARATION_LOADED:
+        # Fail-closed: no family declaration = the alarm cannot know what to count, so it
+        # says exactly that instead of judging a zero it did not measure.
+        # The per-entry notes below would otherwise list every top-level entry as "outside
+        # the whitelist" (nothing is whitelisted), so they are replaced by one counted line:
+        # the receipt must stay a receipt, not a dump of the host's temp directory.
+        if facts["malformed"]:
+            facts["malformed"] = ["%d top-level entries were not classified (no family "
+                                  "declared)" % len(facts["malformed"])]
+        findings.append(make_finding(
+            LANE_SCAN, "med", "test fixture temp dir families are not declared (%s)"
+            % (status or "unknown"),
+            "the temp-root water level cannot be judged this period: the family declaration "
+            "is %s at %s (%s). Counting nothing here would render the disk face green while "
+            "the sweeper may still delete whole families, so it is named instead. Restore "
+            "the declaration file, then re-run the inspection period."
+            % (status or "unknown", str(decl.get("path") or "?"),
+               str(decl.get("detail") or "no detail")), suggest=False))
+        return {"facts": facts,
+                "findings": findings,
+                "section": tmp_fixture_section(facts, findings, thresholds, source=source,
+                                               note=note, declaration=decl)}
     unreadable = (not isinstance(scan, dict)) or bool(facts["scan_error"]) or \
         not isinstance(scan.get("entries"), list)
     if unreadable:
@@ -1578,7 +1680,7 @@ def tmp_fixture_scan_result(scan: Any, thresholds: Dict[str, Any], *, source: st
             "root's readability, then re-run the inspection period."
             % (facts.get("root") or "?", err), suggest=False))
     else:
-        legs = tmp_fixture_legs(facts, thresholds)
+        legs = tmp_fixture_legs(facts, thresholds, declaration=decl)
         if legs:
             leg = legs[0]
             f = make_finding(LANE_SCAN, leg["severity"], leg["subject"], leg["evidence"],
@@ -1607,21 +1709,35 @@ def tmp_fixture_scan_result(scan: Any, thresholds: Dict[str, Any], *, source: st
     return {"facts": facts,
             "findings": findings,
             "section": tmp_fixture_section(facts, findings, thresholds,
-                                           source=source, note=note)}
+                                           source=source, note=note, declaration=decl)}
 
 
 def tmp_fixture_section(facts: Any, findings: Any, thresholds: Any, *, source: str = "",
-                        note: str = "") -> Dict[str, Any]:
-    """水位段（票面/回执）：计数 + 逐前缀 + 最老 + 阈值与**来源**（声明|env|缺省）全可见。"""
+                        note: str = "", declaration: Any = None) -> Dict[str, Any]:
+    """The water section (ticket face / receipt): counts, per-family counts, the oldest
+    entry, and the thresholds with their NAMED source (declaration | env | default).
+
+    t261029-81: the section also names the families it counted (`families` /
+    `family_count`) and where that list came from (`declaration`), so a reader can check the
+    count against an inspectable list instead of trusting a number.
+    """
     f = [x for x in (findings if isinstance(findings, list) else []) if isinstance(x, dict)]
     fct = facts if isinstance(facts, dict) else {}
     thr = thresholds if isinstance(thresholds, dict) else {}
+    decl = declaration if isinstance(declaration, dict) else TMP_FIXTURE_DECLARATION
+    fams = [str(p) for p in (decl.get("prefixes") or [])]
     return {
         "scan": LANE_SCAN,
         "scope": "host",
         "root": str(fct.get("root") or ""),
         "dirs": int(fct.get("dirs") or 0),
         "by_prefix": dict(fct.get("by_prefix") or {}),
+        "families": fams,
+        "family_count": len(fams),
+        "declaration": {"path": str(decl.get("path") or ""),
+                        "status": str(decl.get("status") or ""),
+                        "family_count": len(fams),
+                        "detail": str(decl.get("detail") or "")},
         "top_leakers": tmp_fixture_top_leakers(fct),
         "oldest_age_h": float(fct.get("oldest_age_h") or 0.0),
         "oldest_name": str(fct.get("oldest_name") or ""),

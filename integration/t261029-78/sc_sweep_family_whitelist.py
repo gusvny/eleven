@@ -11,10 +11,11 @@ dz3-pyc (35,074 dirs, 1.3-4.0 MB each => tens of GB), t261014-08-pyc (36,311 emp
 t261018-04-ut (9,498), dz3-no-numpy (2,565), agg-test (2,389), coverage-test (1,768).
 
 intent — ONE face, four claims:
-  A THE DECLARATION IS DATA: every measured family is declared with a reason, a project
-    and a producer file:line, the effective whitelist is core + declared, the core list
-    (drift-locked to the engine water line) is unchanged, and a half-written record is a
-    NAMED refusal rather than a family that silently never matches.
+  A THE DECLARATION IS DATA AND SINGLE-SOURCED (t261029-81): every measured family is
+    declared with a reason, a project and a producer file:line (or an explicit empty owner),
+    the swept surface IS the declared list, that list is the one data file the engine's
+    water-line face reads too, and a half-written record is a NAMED refusal rather than a
+    family that silently never matches.
   B BY CONSTRUCTION on a fabricated root: a stale entry of a newly declared family is
     swept; a fresh one is kept (the age floor bites); an unlisted family is never swept;
     an EXCLUDED_PREFIXES family is never swept.
@@ -161,25 +162,37 @@ def main():
     print("A. declared family list (data, reason + provenance)")
     for fam in MEASURED_FAMILIES:
         ok(fam in sw.DECLARED_PREFIXES, "A declared: %s is on the declared family list" % fam)
-    complete = []
+    # t261029-81 turned the declaration into one shared data file, so it also carries the
+    # 260926/260927 census families. Several of those never had an owner or a measurement
+    # recorded, and inventing one would be worse than the explicit owner=unknown the receipt
+    # prints - so the required fields are the ones that answer "why is this ours to reclaim".
+    required = ("prefix", "kind", "project", "reason", "added_by")
+    complete, missing = [], []
     for rec in sw.DECLARED_FAMILIES:
-        if all(str(getattr(rec, f) or "").strip() for f in
-               ("prefix", "kind", "project", "reason", "producer", "measured", "added_by")):
+        if all(str(getattr(rec, f) or "").strip() for f in required):
             complete.append(rec.prefix)
         else:
+            missing.append(rec.prefix)
             print("    incomplete record: %r" % (rec,))
-    ok(len(complete) == len(sw.DECLARED_FAMILIES),
-       "A every declared family carries kind/project/reason/producer/measured/added_by")
-    ok(all(":" in rec.producer for rec in sw.DECLARED_FAMILIES),
-       "A every declared family names a producer file:line (provenance, not a guess)")
-    core = tuple(sw.TMP_FIXTURE_PREFIXES)
-    ok(tuple(sw.SWEEP_PREFIXES[:len(core)]) == core,
-       "A the effective whitelist starts with the unchanged, drift-locked core list")
-    ok(tuple(sw.SWEEP_PREFIXES[len(core):]) == tuple(
-        p for p in sw.DECLARED_PREFIXES if p not in core),
-       "A the effective whitelist appends exactly the declared families")
-    ok(not [p for p in sw.DECLARED_PREFIXES if p in core],
-       "A no declared family hides inside the core list (the extension is what covers them)")
+    ok(not missing,
+       "A every declared family carries kind/project/reason/added_by (%d records; producer and "
+       "measured are optional, an unrecorded owner stays owner=unknown)" % len(complete))
+    # t261029-81 moved the declaration into the shared data file, so the list now also carries
+    # the census families whose producer was never recorded. Provenance is still data: an
+    # unrecorded owner stays explicit (owner=unknown on the receipt) instead of being invented.
+    owned = [rec for rec in sw.DECLARED_FAMILIES if rec.producer]
+    unowned = [rec for rec in sw.DECLARED_FAMILIES if not rec.producer]
+    ok(len(owned) + len(unowned) == len(sw.DECLARED_FAMILIES) and len(owned) >= 40,
+       "A %d of %d declared families name their producer; %d record no owner and stay "
+       "owner=unknown" % (len(owned), len(sw.DECLARED_FAMILIES), len(unowned)))
+    # No core/extension split any more: that split is the structure in which one side could
+    # hold a family the other never saw (the t261029-81 defect class). The swept surface IS the
+    # declared list, and the alarm face reads the same file.
+    ok(tuple(sw.SWEEP_PREFIXES) == tuple(sw.TMP_FIXTURE_PREFIXES) == tuple(sw.DECLARED_PREFIXES),
+       "A ONE declaration: the swept surface is exactly the declared family list")
+    decl_path = Path(str((sw.DECLARATION or {}).get("path") or ""))
+    ok(decl_path.is_file() and decl_path.name == "tmp_fixture_families.json",
+       "A that declaration is the data file the engine water-line face reads too (single source)")
     ok(sw.declaration_errors() == [], "A the shipped declaration is clean (no named defect)")
     bad = sw.FixtureFamily("dz3-pyc", "dir", "project-vision", "", "fpv-midnight/check.py:625",
                            "measured", "t261029-78")
@@ -259,8 +272,12 @@ def main():
         ok(any("why:" in ln for ln in dry_text.splitlines())
            and any("who:" in ln for ln in dry_text.splitlines()),
            "D1c a declared family's receipt line carries its reason and provenance")
-        ok("ENGINE MIRROR GAP:" in dry_text,
-           "D1d the engine water-line gap for the new families is NAMED, not silent")
+        # t261029-81 closed the gap structurally: the alarm face counts the same declaration
+        # file, so the receipt states the coverage (declared / outside the mirror) instead of
+        # naming a gap that can no longer open.
+        ok("ENGINE MIRROR:" in dry_text and "families outside it: 0" in dry_text,
+           "D1d the engine water-line coverage for the new families is NAMED (single source, "
+           "0 families outside it)")
         ok(any("dz3-pyc-held.lock (lock held by a live process)" in ln
                for ln in dry_text.splitlines()),
            "C1b the kept lock is named with its reason on the family receipt")

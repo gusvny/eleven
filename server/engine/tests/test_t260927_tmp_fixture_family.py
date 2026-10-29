@@ -512,12 +512,29 @@ def test_e1_producer_prefixes_are_all_covered_by_the_whitelist():
         POC / "tests" / "test_t260908_02_payload_roundtrip.py").read_text(encoding="utf-8")
 
 
+#: The batch-2 families (260927) as a HISTORICAL PIN (t261029-81): the declaration moved to
+#: the data file `integration/tools/tmp_fixture_families.json`, and this tuple is a test-side
+#: snapshot of what that round enabled - not a second declaration. It exists so that a later
+#: reorganisation cannot silently drop a family that is already in use.
+BATCH2_PREFIXES = (
+    "t260907-12-act-", "t260907-12-ch", "sandbar-admin-log-", "sandbar-credentials-",
+    "sandbar-integ-run-", "project-content-integ-run-", "venv-compat-", "t26092114-",  # naming-compat
+    "t26090704-lock", "t260904-18-mg", "t260910-10-", "t090506-",
+    "t260904-13-itest", "sandbar-t26091202-", "detailred-e2e-", "sandbar-reg-",
+    "t260915-10-", "t26092404-", "t260923-", "t260925-", "t260922-", "t260921-",
+    "t260916-", "t260917-", "t260918-", "t260919-", "t260920-",
+)
+
+
 def test_e2_batch2_prefixes_are_really_enabled_and_single_sourced():
     """第二批 28 个前缀**真已启用**（不再有「登记了但没启用」的半态），且两处同源。"""
     assert tuple(sw.TMP_FIXTURE_PREFIXES) == tuple(lw.TMP_FIXTURE_PREFIXES)
-    assert set(sw.BATCH2_MERGED_PREFIXES) <= set(sw.TMP_FIXTURE_PREFIXES)
-    assert len(sw.BATCH2_MERGED_PREFIXES) == 27   # t260908-02-ut 已并入更宽的 t260908-02-（t261002-13 第三批）
+    assert set(BATCH2_PREFIXES) <= set(sw.TMP_FIXTURE_PREFIXES)
+    assert len(BATCH2_PREFIXES) == 27   # t260908-02-ut folded into the wider t260908-02- (t261002-13)
     assert not hasattr(sw, "CANDIDATE_PREFIXES_BATCH2")   # 半态常量已退役（只剩白名单）
+    # t261029-81: the tool keeps no snapshot constant either - those names live in the data
+    # file now, and a snapshot tuple in code is the very twin this ticket removed.
+    assert not hasattr(sw, "BATCH2_MERGED_PREFIXES")
     # 前缀表里不许有重复（重复=两处判据可能分叉的温床）
     assert len(set(sw.TMP_FIXTURE_PREFIXES)) == len(sw.TMP_FIXTURE_PREFIXES)
     # 排除族逐条在册且带理由（不碰也得是可复核的判定，不是「恰好没写进白名单」）

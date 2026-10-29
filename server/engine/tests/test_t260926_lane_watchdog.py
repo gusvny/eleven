@@ -459,8 +459,27 @@ def test_c4_activity_registered_and_readonly_source_lock():
         assert forbidden not in src, forbidden
     assert "\"snapshot\"" in src and "list_workflows" in src
     ws = (POC / "inspection_lane_watchdog.py").read_text(encoding="utf-8")
-    for forbidden in ("subprocess", "open(", "write_text", "Path(", "os.environ"):
+    for forbidden in ("subprocess", "write_text", "Path(", "os.environ"):
         assert forbidden not in ws, forbidden
+    # t261029-81 narrowed the "zero IO" rule; it did not drop it. The judgement face gained
+    # ONE read: the family declaration file the sweeper reads too (the single source of what
+    # may be swept and what must be counted). The lock stays a lock by pinning that read
+    # down instead of waving it through:
+    #   - `open(` exists in exactly one place, inside `load_tmp_fixture_declaration`;
+    #   - that open is read-only with an explicit encoding (no write mode anywhere);
+    #   - no write/delete/spawn verb reappears (shutil/rmtree/unlink/remove/mkdtemp);
+    #   - the read happens ONCE at import (module level), never inside a judgement call, so
+    #     the water line itself still touches no disk.
+    decl_src = ws[ws.index("def load_tmp_fixture_declaration("):
+                  ws.index("TMP_FIXTURE_DECLARATION = load_tmp_fixture_declaration()")]
+    assert ws.count("open(") == decl_src.count("open(") == 1
+    assert 'open(p, "r", encoding="utf-8")' in decl_src
+    for write_verb in ('"w"', '"a"', '"w+"', "os.remove", "os.unlink", "shutil", "rmtree",
+                       "os.mkdir", "mkdtemp("):
+        assert write_verb not in ws, write_verb
+    judgement = ws[ws.index("def tmp_fixture_legs("):]
+    assert "load_tmp_fixture_declaration(" not in judgement
+    assert "open(" not in judgement
 
 
 # ---------------- D. 巡检接线（face 段 + 心跳 + 具名失败） ----------------

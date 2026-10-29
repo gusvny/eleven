@@ -1,0 +1,564 @@
+{
+  "schema": "sandbar.tmp-fixture-families/1",
+  "note": "The ONE declaration of the temp-fixture families (t261029-81). Two consumers read this file and neither keeps a prefix list of its own: the sweeper (integration/tools/sweep_tmp_fixtures.py, which deletes) and the alarm face (server/engine/inspection_lane_watchdog.py, which counts the water level). A family declared here is therefore swept AND counted; there is no second list to add it to, so 'swept but never alarmed' cannot be written down by accident. Add a family by appending one record here - never by editing a tuple in code. Field meaning: prefix = the top-level name prefix the producer mints (this IS the delete gate); kind = what the producer leaves behind (dir | file | dir+file); project = who mints it; reason = why this entry is ours to reclaim; producer = producer file:line or a named producer, empty only where the census recorded no owner (rendered as owner=unknown, never guessed); measured = the sample that put the family on the list; added_by = the ticket or sweep round that declared it. Order is attribution order: the first matching prefix wins, so append, do not reorder.",
+  "families": [
+    {
+      "prefix": "integ-e2e-fixture-",
+      "kind": "dir+file",
+      "project": "sandbar",
+      "reason": "integration scenario fixture roots minted by the ticket-lifecycle scenes",
+      "producer": "integration/ticket-lifecycle-scenes.mjs",
+      "measured": "1,086 entries / ~391 GB (260926 census)",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "lint-pyc-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "pyc staging dirs of the tests linter (atexit reclaim added 260927)",
+      "producer": "integration/lint_tests.py",
+      "measured": "",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "fix10-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "integration scenario fixtures of the fix* scenario families",
+      "producer": "integration/t26*/sc_*.mjs fixtures",
+      "measured": "",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "fix14-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "integration scenario fixtures of the fix* scenario families",
+      "producer": "integration/t26*/sc_*.mjs fixtures",
+      "measured": "",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "fix17-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "integration scenario fixtures of the fix* scenario families",
+      "producer": "integration/t26*/sc_*.mjs fixtures",
+      "measured": "",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "pathgate-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "path-gate scenario fixtures",
+      "producer": "integration/t260911-03 path-gate scenarios",
+      "measured": "",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "t260907-06-ut-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "multirepo-anchor unittest fixtures (producer reclaim fixed 260926)",
+      "producer": "server/engine/tests/test_multirepo_anchor.py",
+      "measured": "1.7k entries (260927 census)",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "t260907-12-ut",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "multirepo-anchor unittest -ut* variants (the -ut prefix did not cover them)",
+      "producer": "server/engine/tests/test_multirepo_anchor.py:276-362",
+      "measured": "6,399 entries (260927 census)",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "sandbar-agent-presets-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "agent-preset materialisation dirs of the docker stage (a bind mount point)",
+      "producer": "integration/stage_docker.py:1331 (both teardown paths reclaim since 260926)",
+      "measured": "20k entries / ~383 MB (260926 census)",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "t26092212-",
+      "kind": "dir",
+      "project": "unknown",
+      "reason": "fixture family from the 260926 census; producer not recorded",
+      "producer": "",
+      "measured": "",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "t260906-",
+      "kind": "dir",
+      "project": "unknown",
+      "reason": "fixture family from the 260926 census; producer not recorded",
+      "producer": "",
+      "measured": "",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "lease-ut-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "stage-lease unit fixtures",
+      "producer": "integration stage-lease unit fixtures",
+      "measured": "",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "t260904-02-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "registry-anchor / worker-meta unittest fixtures (producer reclaim fixed 261002-13)",
+      "producer": "server/engine/tests/test_t260904_02_{registry_anchor,worker_meta}.py (fixed 261002-13)",
+      "measured": "73k entries (ticket histogram #1)",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "t260901-21-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "read-side resolution / parity unittest fixtures (producer reclaim fixed 261002-13)",
+      "producer": "integration/t260901-21/{t01_read_side_resolution,sc_i01_parity_py_vs_mjs,t02_copy_creds}.py (fixed 261002-13)",
+      "measured": "ticket histogram #2",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "t02-lane",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "lane scenario fixtures of the 260902-02 family; producer not recorded",
+      "producer": "",
+      "measured": "",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "t26090704-lane",
+      "kind": "dir",
+      "project": "unknown",
+      "reason": "dispatcher lock-fallback lane fixtures; producer not recorded",
+      "producer": "",
+      "measured": "",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "wb-",
+      "kind": "dir",
+      "project": "unknown",
+      "reason": "workbench fixtures; producer not recorded",
+      "producer": "",
+      "measured": "",
+      "added_by": "260926"
+    },
+    {
+      "prefix": "t260907-12-act-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "root-activity unittest fixtures (a -ut prefix cannot cover this variant)",
+      "producer": "server/engine/tests/test_multirepo_root_activity.py:51 (fixed 260926)",
+      "measured": "4,259 entries, oldest 245h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260907-12-ch",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "root-activity unittest -ch-/-ch1- variants",
+      "producer": "server/engine/tests/test_multirepo_root_activity.py:125/:136 (fixed 260926)",
+      "measured": "2,140 entries, oldest 245h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "sandbar-admin-log-",
+      "kind": "file",
+      "project": "sandbar",
+      "reason": "admin log shadows written beside the stage (a file family, not a dir)",
+      "producer": "integration/stage_docker.py:1332 (both teardown paths reclaim since 260926)",
+      "measured": "2,854 entries, oldest 265h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "sandbar-credentials-",
+      "kind": "file",
+      "project": "sandbar",
+      "reason": "credential copies written beside the stage (a file family; hygiene debt)",
+      "producer": "integration/stage_docker.py:1333 (both teardown paths reclaim since 260926)",
+      "measured": "2,519 entries, oldest 112h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "sandbar-integ-run-",
+      "kind": "file",
+      "project": "sandbar",
+      "reason": "single-flight run lock files of the scenario runner (a file family, kept while held)",
+      "producer": "integration/run_scenarios.py _run_lock_path (fixed 260927)",
+      "measured": "2,820 entries, oldest 204h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "project-content-integ-run-",
+      "kind": "file",
+      "project": "project-content",
+      "reason": "the sibling project's copy of the same run lock file (naming-compat, not a retired name)",
+      "producer": "~/Documents/project-content/integration/run_scenarios.py:182 (cannot be fixed from this repo)",
+      "measured": "1,836 entries, oldest 106h; no new production below the age line",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "venv-compat-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "engine venv compatibility fixtures (root and home variants)",
+      "producer": "integration/t260907-10/sc_engine_venv_compat.py:56-58 (fixed 260927)",
+      "measured": "4,814 entries, oldest 346h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t26092114-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "t260921-14 family fixtures",
+      "producer": "integration/t260921-14/lib_t26092114.py:131/156",
+      "measured": "8,115 entries, oldest 132h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t26090704-lock",
+      "kind": "file",
+      "project": "sandbar",
+      "reason": "dispatcher lock-fallback lock files (a file family)",
+      "producer": "integration/t260907-04/sc_dispatcher_lock_fallback.py:35",
+      "measured": "3,251 entries, oldest 245h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260904-18-mg",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "t260904-18 family fixtures",
+      "producer": "integration/t260904-18/lib_t260904_18.py:153",
+      "measured": "3,257 entries, oldest 245h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260910-10-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "docs-anchor / docs-ui-mock scenario fixtures",
+      "producer": "integration/t260910-10/{sc_docs_project_anchor.mjs:111,sc_docs_ui_mock_v1.mjs:121-122}",
+      "measured": "5,785 entries, oldest 346h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t090506-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "docs read-through / entry-present scenario fixtures",
+      "producer": "integration/t260905-06/sc_doc_{read_through,entry_present}.mjs",
+      "measured": "3,230 entries, oldest 346h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260904-13-itest",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "t260904-13 integration-test fixtures",
+      "producer": "integration/t260904-13/lib_ki044.py:47",
+      "measured": "1,900 entries, oldest 245h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "sandbar-t26091202-",
+      "kind": "dir+file",
+      "project": "sandbar",
+      "reason": "lifecycle-case fixtures (a mixed dir + file family)",
+      "producer": "integration/t260912-02/lib_lifecycle_case.py:564",
+      "measured": "35 entries, oldest 321h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "detailred-e2e-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "detail-red-refusal scenario fixtures",
+      "producer": "integration/t260915-01/tests/sc_detail_red_refusal_receipt.py:76",
+      "measured": "1,568 entries, oldest 292h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "sandbar-reg-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "registry-loader fixtures minted on the JS side (zero reclaim verbs)",
+      "producer": "server/plugins/workbench/tests/registry-loader.mjs:47",
+      "measured": "1,529 entries, oldest 305h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260915-10-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "docs-follow-project scenario fixtures",
+      "producer": "integration/t260915-10/sc_docs_follow_project.mjs:87-88",
+      "measured": "2,204 entries, oldest 285h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t26092404-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "project-template scenario fixtures",
+      "producer": "integration/t260924-04/sc_project_template_{journey,gate}.py (fixed 261002-13)",
+      "measured": "2,123 entries, oldest 64h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260924-04-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "project-templates unittest fixtures (the 260927 bucket merged them into t26092404- by mistake)",
+      "producer": "server/engine/tests/test_t260924_04_project_templates.py:78 (fixed 261002-13)",
+      "measured": "10,037 entries",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t01-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "archive-paths scenario fixtures (tag variants follow the same prefix)",
+      "producer": "integration/t260902-02/t01_archive_paths.py:67 (fixed 261002-13)",
+      "measured": "1,928 entries",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t02-sb-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "archive-ticket scenario fixtures",
+      "producer": "integration/t260902-02/sc_t02_archive_ticket.py:50 (fixed 261002-13)",
+      "measured": "1,157 entries",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t03-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "merge-teardown scenario fixtures (tag variants -old/-defer)",
+      "producer": "integration/t260902-02/sc_t03_merge_teardown.py:95 (fixed 261002-13)",
+      "measured": "2,323 entries",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t04-sb-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "prune-archive scenario fixtures",
+      "producer": "integration/t260902-02/sc_t04_prune_archive_legacy.py:87 (fixed 261002-13)",
+      "measured": "1,157 entries",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t08-guard-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "workbench contrast-guard scenario fixtures (sweep-only: .mjs is out of the dev write set)",
+      "producer": "integration/t260905-08/sc_wb_contrast_guard.mjs (sweep-only: .mjs out of the dev write set)",
+      "measured": "1,982 entries",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t09-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "workbench .mjs freshDir fixtures (bump/donut/fast/kpi/pri; sweep-only)",
+      "producer": "server/plugins/workbench/tests/*.mjs freshDir (sweep-only: out of the dev write set)",
+      "measured": "3,492 entries",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t25-t03-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "process-group reaping scenario fixtures",
+      "producer": "integration/t260901-25/t03_reap_process_group.py:122 (fixed 261002-13)",
+      "measured": "1,130 entries",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t26092523-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "template path-gate scenario fixtures",
+      "producer": "integration/t260925-23/tests/sc_template_pathgate_{load_contract.py:134-189,faces.py:48} (fixed 261002-13)",
+      "measured": "4,599 entries (ticket histogram #4)",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t260901-14-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "registry-loader unittest fixtures",
+      "producer": "server/engine/tests/test_t260901_14_registry_loader.py:34-65 (fixed 261002-13)",
+      "measured": "3,477 entries (ticket histogram #5)",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t260908-02-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "payload-roundtrip unittest fixtures (covers the -ut/-sg variants)",
+      "producer": "server/engine/tests/test_t260908_02_payload_roundtrip.py:55/:66 (fixed 261002-13)",
+      "measured": "1,982 entries",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t26091004-sc-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "console paused-list scenario fixtures (the nest of the 261001 carrier storm: a capped run never reached its finally block)",
+      "producer": "integration/t260910-04/sc_console_paused_list.mjs:200",
+      "measured": "3 entries, oldest 4.6h, ~849 MB",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t260923-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "scenario fixtures of the t260923-* families",
+      "producer": "integration/t260923-01 family scenarios",
+      "measured": "168 entries, oldest 5h",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t260925-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "scenario fixtures of the t260925-* families",
+      "producer": "integration/t260925-* family scenarios",
+      "measured": "1,053 entries, oldest 55h",
+      "added_by": "261002-13"
+    },
+    {
+      "prefix": "t260916-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "sidebar merged-sort UI scenario fixtures",
+      "producer": "integration/t260916-15/sc_sidebar_merged_sort_ui.mjs:52",
+      "measured": "1,256 entries, oldest 112h",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260922-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "scenario fixtures of that week's ticket namespace (forward coverage)",
+      "producer": "",
+      "measured": "",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260921-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "scenario fixtures of that week's ticket namespace (forward coverage)",
+      "producer": "",
+      "measured": "",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260917-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "scenario fixtures of that week's ticket namespace (forward coverage)",
+      "producer": "",
+      "measured": "",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260918-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "scenario fixtures of that week's ticket namespace (forward coverage)",
+      "producer": "",
+      "measured": "",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260919-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "scenario fixtures of that week's ticket namespace (forward coverage)",
+      "producer": "",
+      "measured": "",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "t260920-",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "scenario fixtures of that week's ticket namespace (forward coverage)",
+      "producer": "",
+      "measured": "",
+      "added_by": "260927"
+    },
+    {
+      "prefix": "dz3-pyc",
+      "kind": "dir",
+      "project": "project-vision",
+      "reason": "pytest pycache staging dirs, one per check run, never reclaimed",
+      "producer": "fpv-midnight/check.py:625 (tempfile.mkdtemp(prefix='dz3-pyc-'))",
+      "measured": "35,074 entries; 1.3-4.0 MB each (5 sampled) => tens of GB; oldest 15.4h",
+      "added_by": "t261029-78"
+    },
+    {
+      "prefix": "t261014-08-pyc",
+      "kind": "dir",
+      "project": "project-vision",
+      "reason": "PYTHONPYCACHEPREFIX staging dirs, minted empty and left behind",
+      "producer": "fpv-midnight/tools/tests/test_cache_bust.py:98 (tempfile.mkdtemp(prefix='t261014-08-pyc-'))",
+      "measured": "36,311 entries, all empty dirs (du 0); oldest 15.4h",
+      "added_by": "t261029-78"
+    },
+    {
+      "prefix": "t261018-04-ut",
+      "kind": "dir",
+      "project": "project-vision",
+      "reason": "anchor-extraction unittest fixture roots (models/*.glb, parts ledger)",
+      "producer": "fpv-midnight/tools/tests/test_extract_anchors.py:192 (tempfile.mkdtemp(prefix='t261018-04-ut-'))",
+      "measured": "9,498 entries; ~16 KB each (5 sampled); oldest 15.4h",
+      "added_by": "t261029-78"
+    },
+    {
+      "prefix": "dz3-no-numpy",
+      "kind": "dir",
+      "project": "project-vision",
+      "reason": "check-env shim dirs from the guard test (fake tools, no numpy)",
+      "producer": "fpv-midnight/tools/tests/test_check_env_guard.py:41 (tempfile.mkdtemp(prefix='dz3-no-numpy-'))",
+      "measured": "2,565 entries; ~4 KB each (5 sampled); oldest 11.0h",
+      "added_by": "t261029-78"
+    },
+    {
+      "prefix": "agg-test",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "inspection-aggregate unittest: bare mkdtemp in setUp, no teardown",
+      "producer": "server/engine/tests/test_261006_inspection_aggregate.py:48 (tempfile.mkdtemp(prefix='agg-test-'))",
+      "measured": "2,389 entries; ~4-24 KB each (5 sampled); oldest 58.5h",
+      "added_by": "t261029-78"
+    },
+    {
+      "prefix": "coverage-test",
+      "kind": "dir",
+      "project": "sandbar",
+      "reason": "face-coverage unittest: bare mkdtemp in setUp, no teardown",
+      "producer": "server/engine/tests/test_t261009_49_face_coverage.py:28 (tempfile.mkdtemp(prefix='coverage-test-'))",
+      "measured": "1,768 entries; ~0-8 KB each (5 sampled); oldest 58.5h",
+      "added_by": "t261029-78"
+    }
+  ]
+}
