@@ -134,7 +134,7 @@ from shared import (
     build_repo_worktrees,
     is_multi_repo_layout,
     resolve_repos_for_paths,
-    roles_dir_for_spawn,
+    role_preset_for_spawn,
     routes_file_for_spawn,
 )
 
@@ -3789,6 +3789,151 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     return note
 
 
+#: Role preset spawn artifacts (ticket t261028-54), named with the spawn tag like
+#: model_patch_<tag>.yml / dsh_pin_<tag>.json. The copy carries the engine library
+#: preset into the lane; the record is the trace of the decision.
+ROLE_PATCH_NAME = "role_patch_%s.yml"
+ROLE_PRESET_TRACE_NAME = "role_preset_%s.json"
+
+
+def _role_text_for_log(role: str) -> str:
+    """Role text for a log line: JSON-escaped and truncated.
+
+    The role name arrives from a project-external workflow template, so it is
+    untrusted input and a log line is a sink: a raw newline or control character could
+    forge a second line (review C5). Escaping keeps one line per event."""
+    try:
+        text = json.dumps(role, ensure_ascii=False)
+    except (TypeError, ValueError):
+        text = repr(role)
+    if len(text) > 82:
+        text = text[:79] + "..."
+    return text
+
+
+def _role_candidate_text(decision: Dict[str, Any]) -> str:
+    """One readable line naming every preset candidate (leg, path, kind)."""
+    parts = []
+    for cand in decision.get("candidates") or []:
+        parts.append("%s=%s (%s)" % (cand.get("leg"), cand.get("file"), cand.get("kind")))
+    return "; ".join(parts) or "-"
+
+
+def _role_preset_patch_arg(decision: Dict[str, Any], artifacts_dir: Path,
+                           tag: str) -> Optional[str]:
+    """Turn a role decision into the --patch argument, or None.
+
+    The project leg passes the resolved file through unchanged (pre-ticket byte
+    identity). The engine leg is copied into the lane first: a --patch path into the
+    engine tree is a host path and the docker runtime cannot see it (the failure
+    recorded for the headless-resume runner above). The copy is written to <name>.part
+    and os.replace-d, so a half-written file never becomes an argument. Any failure
+    means no patch argument and a named trace line - never a host path."""
+    source = decision.get("source_file")
+    state = decision.get("state")
+    if state == "project" and source:
+        return str(source)
+    if state != "engine" or not source:
+        return None
+    dst = Path(artifacts_dir) / (ROLE_PATCH_NAME % tag)
+    part = dst.with_name(dst.name + ".part")
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        part.write_bytes(Path(source).read_bytes())
+        os.replace(str(part), str(dst))
+        decision["materialized"] = True
+        return str(dst)
+    except OSError as e:
+        decision["error"] = "materialize failed: %s" % str(e)[:200]
+        try:
+            part.unlink()
+        except OSError:
+            pass
+        return None
+
+
+def _record_role_preset(decision: Dict[str, Any], patch_arg: Optional[str],
+                        artifacts_dir: Path, tag: str, ticket_id: str) -> None:
+    """Leave the role-preset trace: one [role_preset] line plus one JSON record
+    (ticket t261028-54).
+
+    Best effort, in the dsh_pin_<tag>.json stance (carried: written into the lane's
+    .sandbar, tagged by the spawn tag, never blocking the spawn; upgraded: a failure is
+    a named warning; hardened: every field is pre-serialized so a non-JSON value cannot
+    raise during the write). `patch_arg_added` says only that the argument was added -
+    whether dsh applies the file is dsh's business (KI-102).
+
+    Level by state: info for project / builtin / no_role / undeclared_missing (the
+    pre-ticket silence for undeclared projects is preserved); warning for engine /
+    declared_missing / invalid_role / a failed engine copy."""
+    payload: Dict[str, Any] = {}
+    for k, v in decision.items():
+        payload[str(k)] = v if (v is None or isinstance(v, (str, int, float, bool,
+                                                           list, dict))) else str(v)
+    payload["patch"] = patch_arg
+    payload["patch_arg_added"] = bool(patch_arg)
+    payload["materialized"] = bool(decision.get("materialized"))
+    payload["ticket_id"] = str(ticket_id)
+    payload["tag"] = str(tag)
+    payload["ts"] = _dt_code.datetime.now(_dt_code.timezone.utc).isoformat(
+        timespec="seconds")
+    trace_file = Path(artifacts_dir) / (ROLE_PRESET_TRACE_NAME % tag)
+    try:
+        trace_file.parent.mkdir(parents=True, exist_ok=True)
+        trace_file.write_text(json.dumps(payload, ensure_ascii=False, indent=1) + "\n",
+                              "utf-8")
+    except (OSError, TypeError, ValueError) as e:
+        activity.logger.warning(
+            "[role_preset] trace write failed (%s): %s - spawn continues without the "
+            "record", trace_file, str(e)[:200])
+
+    state = str(decision.get("state") or "")
+    role_log = _role_text_for_log(str(decision.get("role") or ""))
+    cands = _role_candidate_text(decision)
+    if state == "project":
+        activity.logger.info("[role_preset] role=%s state=project preset=%s",
+                             role_log, patch_arg or "-")
+    elif state == "builtin":
+        activity.logger.info(
+            "[role_preset] role=%s state=builtin: the engine builds this persona at "
+            "spawn time (no preset file needed)", role_log)
+    elif state == "no_role":
+        activity.logger.info("[role_preset] no role requested: nothing resolved")
+    elif state == "undeclared_missing":
+        activity.logger.info(
+            "[role_preset] role=%s state=undeclared_missing: the project declares no "
+            "roles_dir, so the engine library is not consulted (project leg only, "
+            "unchanged) and the agent runs on the profile default persona (%s)",
+            role_log, cands)
+    elif state == "engine" and patch_arg:
+        activity.logger.warning(
+            "[role_preset] role=%s state=engine: no project preset, using the engine "
+            "library file %s (copied to %s); the engine library may carry another "
+            "project's wording (%s)", role_log, decision.get("source_file"),
+            patch_arg, cands)
+    elif state == "engine":
+        activity.logger.warning(
+            "[role_preset] role=%s state=engine: could not copy the engine library "
+            "file into the lane (%s), so no role patch was added and the agent runs "
+            "on the profile default persona (%s)",
+            role_log, str(decision.get("error") or "unknown"), cands)
+    elif state == "declared_missing":
+        activity.logger.warning(
+            "[role_preset] role=%s state=declared_missing: the project declares "
+            "roles_dir, but no preset was found (%s%s); the agent runs on the profile "
+            "default persona", role_log, cands,
+            (", %s" % decision.get("error")) if decision.get("error") else "")
+    elif state == "invalid_role":
+        activity.logger.warning(
+            "[role_preset] role=%s state=invalid_role: not a legal preset file stem, "
+            "so no file was read (%s); the agent runs on the profile default persona",
+            role_log, str(decision.get("error") or ""))
+    else:
+        activity.logger.warning(
+            "[role_preset] role=%s state=%s: unexpected decision, no role patch added",
+            role_log, state or "-")
+
+
 def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
                          artifacts_dir: Path, tag: str, project: str = "",
                          session_key: str = "",
@@ -3860,18 +4005,21 @@ def _prepare_agent_spawn(cwd: Path, role: str, kind: str, ticket_id: str,
     # 的二进制，enforce_expected 也比对被钉二进制的实证版）。
     resolved_dsh = _dsh_resolved(project)
     cmd = list(resolved_dsh["cmd"])
-    # Role preset patch (contract ①d, ticket t260903-03: the directory base comes
-    # from the registered entry's declared paths.roles_dir, falling back to
-    # <cwd>/server/roles when undeclared — the in-worktree copy keeps the ticket
-    # snapshot semantics): persona = the full role brief, and the cordis patch
-    # overrides by the same id. When undeclared and the concrete role file is absent
-    # (old base_ref) it is skipped, degrading to the profile's default persona — no
-    # hard failure; declared but the anchor directory is missing / the wrong kind =
-    # ProjectPathsError propagates (fail-closed red, the error names the entry file
-    # and the resolved path).
-    role_patch = roles_dir_for_spawn(project, cwd) / (role + ".yml")
-    if role and role_patch.is_file():
-        cmd += ["--patch", str(role_patch)]
+    # Role preset patch (ticket t261028-54; contract ①d base from t260903-03): one
+    # decision from shared.role_preset_for_spawn decides the persona file per ROLE
+    # FILE. Chain = project leg (declared paths.roles_dir, else <cwd>/server/roles; the
+    # in-worktree copy keeps the ticket snapshot semantics) -> engine-built persona ->
+    # engine library (ONLY when the project declares roles_dir; the declaration is the
+    # opt-in, so an undeclared project keeps the pre-ticket behavior byte for byte) ->
+    # profile default persona. A declared anchor that is missing or of the wrong kind
+    # still raises ProjectPathsError here (fail-closed red, the error names the entry
+    # file and the resolved path). The trace record and the line level per state are
+    # _record_role_preset's.
+    role_decision = role_preset_for_spawn(project, cwd, role)
+    role_patch = _role_preset_patch_arg(role_decision, artifacts_dir, tag)
+    if role_patch:
+        cmd += ["--patch", role_patch]
+    _record_role_preset(role_decision, role_patch, artifacts_dir, tag, ticket_id)
     # Runtime model routing (the only consumer left after gen.py retired): read the
     # route table for (role, kind) → provider/model and generate a one-shot patch
     # pinning agent-default-model. The division-of-labor kind comes from
@@ -6590,6 +6738,70 @@ def _verify_lane_code_expiry_row(detail: str, expiry: Dict[str, Any],
     return row
 
 
+#: t261028-54 (merge resolution): the fixed ceiling and the duplicated activity budget
+#: are gone - the wait is derived from the declared check budgets by
+#: verify_lane_code_gate_budget (main's t261028-57 / t261029-14 design). What the lane
+#: side keeps is the diagnosis below: why this process may not be running the lane's code.
+
+
+def _verify_tree_note(lane_root) -> str:
+    """Name a process/lane tree mismatch behind this class of incident (t261028-54).
+
+    The activity code lives in the SERVING PROCESS's tree; verify_lane's checks run in the
+    lane. A fix that exists only in the lane (measured: the verify wait budget) is
+    invisible to the process, and replacing the process re-loads the same tree - so
+    "restart the worker" alone does not deliver it. Comparing the loaded module's bytes
+    with the lane's copy is the exact test for that state; identical copies mean no note.
+
+    Read-only and best effort: unreadable or absent lane copy yields an empty string."""
+    try:
+        proc = Path(__file__).resolve()
+        lane = Path(lane_root).resolve() / "server" / "engine" / proc.name
+        if not lane.is_file():
+            return ""
+        if proc.read_bytes() == lane.read_bytes():
+            return ""
+        return ("this process runs the engine code at %s while the lane carries a "
+                "different copy (%s): an activity-side engine fix that exists only in the "
+                "lane (for example the verify wait budget) cannot take effect here - serve "
+                "the ticket with a lane worker or land the fix on this process's tree"
+                % (proc, lane))
+    except (OSError, TypeError, ValueError):
+        return ""
+
+
+def _verify_stale_code_note(lane_root=None) -> str:
+    """Name why this process may not be running the code the lane carries.
+
+    Two independent states (both read-only, both best effort, joined with " | "):
+      1. the process runs a different copy of this module than the lane
+         (`_verify_tree_note`): a lane-only fix cannot take effect, and replacing the
+         worker reloads the same tree;
+      2. the process loaded engine modules before they were last edited
+         (`shared.worker_code_stamp`): replacing the worker does load the fix.
+    Any failure yields an empty string (no invented diagnosis, no new raise on a failure
+    path). The shape this exists for (t261028-54): the merge gate reported an unnamed
+    timeout (a bare 900 s budget) after the wait fix had already landed on the lane, and
+    the reader had to know the ops rule to explain it. Wording note: the module must not
+    carry the old timeout sentence, so the incident is described, not quoted (the
+    t261028-57 source lock keeps that phrase out of the whole file)."""
+    parts = []
+    if lane_root is not None:
+        tree = _verify_tree_note(lane_root)
+        if tree:
+            parts.append(tree)
+    try:
+        stamp = shared.worker_code_stamp()
+    except Exception:                                  # noqa: BLE001 - diagnosis only
+        stamp = {}
+    stale = [str(x) for x in ((stamp or {}).get("stale") or [])]
+    if stale:
+        parts.append("this process holds pre-edit engine code (%s) - replace the worker "
+                     "(engine_ops.py restart) so the fix takes effect"
+                     % ", ".join(stale))
+    return " | ".join(parts)
+
+
 async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                  lane_root: Path, multi: bool) -> Dict[str, Any]:
     """Single-scope merge_check core (extracted from merge_check in ticket B
@@ -6887,6 +7099,8 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             # smaller than the slowest declared budget (1000), so the check could
             # never use the budget it declares. Derived once per scope, logged so a
             # green round also shows which budget the gate waited on.
+            # (Merge resolution t261028-54: main's derived budget supersedes the lane's
+            # fixed ceiling - one wait mechanism, not two.)
             _gate_checks, _gate_decl_diag = _read_verify_lane_check_budgets(sc["tree"])
             _gate_wait_sec, _gate_facts = verify_lane_code_gate_budget(_gate_checks)
             activity.logger.info(
@@ -6932,6 +7146,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             _v_wait_t0 = time.monotonic()
             _red_names: List[str] = []  # t261009-15 (1): exception paths default to no names (no exemption)
             _gate_expiry: Optional[Dict[str, Any]] = None
+            # t261028-54 (kept from the lane side): why this process may not be running
+            # the lane's engine code; filled on an expiry only, attached to the row.
+            _stale_note = ""
             try:
                 vo_b, ve_b = await asyncio.wait_for(vp.communicate(), timeout=_gate_wait_sec)
                 v_stdout, v_stderr = vo_b.decode("utf-8", "replace"), ve_b.decode("utf-8", "replace")
@@ -6971,12 +7188,14 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     _gate_wait_sec, _gate_facts, time.monotonic() - _v_wait_t0,
                     read_diag=_gate_decl_diag, loadavg=_machine_loadavg())
                 green = False
+                _stale_note = _verify_stale_code_note(lane_root)
             except asyncio.TimeoutError:
                 await reap_spawn_group(vp, tag="verify-lane-code")
                 detail, _gate_expiry = code_gate_expiry_receipt(
                     _gate_wait_sec, _gate_facts, time.monotonic() - _v_wait_t0,
                     read_diag=_gate_decl_diag, loadavg=_machine_loadavg())
                 green = False
+                _stale_note = _verify_stale_code_note(lane_root)
             except json.JSONDecodeError:
                 green, detail = False, (v_stderr or v_stdout or "无输出").strip()[-300:]
             finally:
@@ -7008,6 +7227,11 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             if _gate_expiry:
                 checks[-1] = _verify_lane_code_expiry_row(detail, _gate_expiry,
                                                           red_names=_red_names)
+                # t261028-54: an expiry caused by a process that cannot run the lane's
+                # code names that state too (the diagnosis rides the row; a clean
+                # process adds no key).
+                if _stale_note:
+                    checks[-1]["note"] = _stale_note
     except Exception as e:
         checks.append({"item": "In-lane verify_lane code is green", "green": False,
                        "detail": "verify_lane error: %s" % e,

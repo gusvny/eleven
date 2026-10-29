@@ -15,7 +15,7 @@
 - 双真源族（R1）：引擎 STAGES↔workbench host/inspection-face.ts INSPECTION_TOPOLOGY 由 tests/t260916-05-inspection-topology-lock.mjs 源级锁逐位比对（id 序+name 一致+变异自证），闸内由 integration/t260916-05/sc_inspection_dual_source_lock.mjs 真实执行——STAGES 改（增删改名换序）不改宿主表，锁必红。workbench 侧另有 tests/t260915-08-inspection-face.mjs 断言 scan 在场与短名。
 - UI 票判定：shared.py:2548 UI_WRITE_PREFIXES 按**声明条目**前缀匹配（KI-044 现行语义；根治方向未落地）——本票申报件无命中（见 report）。
 - 声明=inspection_decl.py 零依赖 YAML 子集解析器（unknown 键 fail-closed）；生产声明=仓根 inspection.yaml。运维通道=inspection_trigger.py（子命令表挂 verdict）；期票解析=inspection_ticketing.resolve_period_ticket_id。台账=out/inspection/inspection-<实例>-<期>.json + -suite.json（deadman ledger_periods 排除表已含 -suite.json）。
-- agent spawn=_prepare_agent_spawn（本地 .dsh 三拷/torn 检疫/role patch 缺席软跳过/model_route 查表钉模型+双 warning 点名/会话延续/docker sandbox pin）+agent_runtime.spawn_agent（host/docker、进程组 reap）。dsh 权限预设含 read-only（--dump-default-config 实证）。headless runner（server/headless-resume/node.ts:150）只把最终消息打 stdout、不写结果文件 ⇒ 只读 agent 产出必须走 stdout 围栏 JSON。
+- agent spawn=_prepare_agent_spawn（本地 .dsh 三拷/torn 检疫/role patch 逐文件回落（t261028-54：仅声明 roles_dir 的项目回落引擎库路径并留痕 role_preset_<tag>.json，两处皆缺才软跳过）/model_route 查表钉模型+双 warning 点名/会话延续/docker sandbox pin）+agent_runtime.spawn_agent（host/docker、进程组 reap）。dsh 权限预设含 read-only（--dump-default-config 实证）。headless runner（server/headless-resume/node.ts:150）只把最终消息打 stdout、不写结果文件 ⇒ 只读 agent 产出必须走 stdout 围栏 JSON。
 - UT harness=纯逻辑 pytest（server/engine/tests/，无真 Temporal/网络）；场景=run_scenarios.py 登记制（未登记 sc_=lint 红）。
 
 ## 1. 总体形态（新票，INSPECT_PATCH_ID="t260916-22-inspection-inspect-stage" 门内）

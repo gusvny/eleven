@@ -7898,12 +7898,187 @@ def roles_dir_for_spawn(project_key: str, cwd) -> pathlib.Path:
     <cwd>/server/roles (the current convention, the worktree ticket snapshot semantics
     unchanged; a missing directory doesn't blow up here — the soft skip for a missing
     concrete <role>.yml belongs to the call site's existing logic, and declared and
-    undeclared are equally soft at this layer)."""
+    undeclared are equally soft at this layer).
+
+    Since t261028-54 the spawn consumer is role_preset_for_spawn, which calls this
+    helper for the project leg and takes the declared flag from the same project_paths
+    read - the anchor rule stays here, in ONE place (no second copy to drift)."""
     info = project_paths(project_key, roles_base=str(cwd))
     if info["roles_dir"] is not None:
         _require_anchor(info["entry"], "roles_dir", info["roles_dir"], "dir")
         return info["roles_dir"]
     return pathlib.Path(cwd) / DEFAULT_ROLES_DIR
+
+
+# ---- Role preset resolution (ticket t261028-54): per-file fallback, traced ----
+# A stage's role buys an agent four things (persona, model route, ticket/lane naming,
+# in-code role branches); this section owns ONLY the persona file, and the spawn step
+# turns one decision from here into a --patch argument.
+#
+# Resolution is per ROLE FILE, not per directory: a project may own one role and
+# inherit the rest. Chain, first hit wins:
+#   1. project leg = <project roles dir>/<role>.yml (see _roles_dir_resolved).
+#   2. built-in    = roles whose persona the engine writes itself (inspection ->
+#                    inspection_inspect.build_persona_patch): a missing file is the
+#                    configured state, not a defect.
+#   3. engine leg  = <engine tree>/server/roles/<role>.yml, the cross-project generic
+#                    persona library named by
+#                    docs/design/sandbar-distribution-v1.md. It applies ONLY when the
+#                    project DECLARES paths.roles_dir: the declaration is the opt-in.
+#                    An undeclared project keeps the pre-ticket behavior byte for byte
+#                    (project leg only), so no project inherits another project's
+#                    persona doctrine by surprise (KI-063; review_plan round 1
+#                    decision D1).
+#   4. soft skip   = the profile's default persona. Undeclared = info only (the old
+#                    silence is preserved); declared = a warning naming both candidate
+#                    files, because a declaring project asked for a role and did not
+#                    get it.
+# The engine leg reads the tree that RUNS this code (_repo_root(), never an assumed main
+# checkout: in a lane worktree that imports the lane copy it IS the lane root). It
+# follows the live tree, not the lane snapshot, so a library edit reaches an in-flight
+# lane; the trace records source_sha256_16 so a mid-ticket change is attributable
+# (review C3/D4).
+ENGINE_ROLES_DIR_REL = "server/roles"   # the engine library base, relative to the engine tree
+# The role name becomes a file stem, and it arrives from a project-external workflow
+# template (untrusted input): letters/digits first, then letters/digits/._- up to 64
+# characters, no path separator and no leading dot.
+ROLE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+# Roles whose persona the engine builds itself at spawn time (no preset file needed).
+ENGINE_BUILTIN_ROLE_PERSONAS = ("inspection",)
+# Rollback knob: "0"/"false"/"off"/"no" turns the engine leg off without a code revert.
+ENV_ROLE_PRESET_FALLBACK = "SANDBAR_ROLE_PRESET_FALLBACK"
+ROLE_PRESET_STATES = ("project", "builtin", "engine", "declared_missing",
+                      "undeclared_missing", "invalid_role", "no_role")
+
+
+def engine_roles_dir() -> pathlib.Path:
+    """Base of the engine's cross-project role library (the tree running this code).
+
+    Separate function, not a module constant, so tests can inject a fixture library by
+    monkeypatching this name (the same injection stance as roles_base/routes_base)."""
+    return _repo_root() / ENGINE_ROLES_DIR_REL
+
+
+def _role_file_kind(p: pathlib.Path) -> str:
+    """Kind of a role preset candidate: 'file' | 'dir' | 'absent' | 'unreadable'.
+
+    A DIRECTORY named <role>.yml is not a preset; it is reported as its own kind and
+    never reads as present (review C5/K6). Never raises."""
+    try:
+        if p.is_file():
+            return "file"
+        if p.is_dir():
+            return "dir"
+        return "absent"
+    except OSError:
+        return "unreadable"
+
+
+def _role_file_sha256_16(p: pathlib.Path) -> Optional[str]:
+    """First 16 hex characters of the preset file's sha256 (attribution aid, review
+    C3). Unreadable file = None, never a raise."""
+    try:
+        h = hashlib.sha256()
+        with open(str(p), "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()[:16]
+    except OSError:
+        return None
+
+
+def role_preset_for_spawn(project_key: str, cwd, role,
+                          engine_dir=None) -> Dict[str, Any]:
+    """Resolve the role preset FILE for one spawn (ticket t261028-54).
+
+    Returns a decision dict; the spawn step turns it into a --patch argument and a
+    trace record. Keys (stable, asserted by the unit battery):
+      role, role_len, state, source, source_file, source_sha256_16, declared,
+      roles_rel, project_dir, engine_dir, fallback_enabled, candidates
+      [{leg, file, kind, consulted}], error.
+    `patch` / `patch_arg_added` / `materialized` are added by the spawn step.
+
+    state ∈ ROLE_PRESET_STATES. The function never raises for a missing or malformed
+    role; it raises only through the unchanged declarations contract (a declared
+    roles_dir anchor that is missing or of the wrong kind -> ProjectPathsError).
+
+    engine_dir is a test injection point; production callers pass nothing and get
+    engine_roles_dir()."""
+    cwd_path = pathlib.Path(cwd)
+    role_text = "" if role is None else (role if isinstance(role, str) else str(role))
+    knob = str(os.environ.get(ENV_ROLE_PRESET_FALLBACK, "1")).strip().lower()
+    fallback_enabled = knob not in ("0", "false", "off", "no")
+    engine_base = engine_roles_dir() if engine_dir is None else pathlib.Path(engine_dir)
+    decision: Dict[str, Any] = {
+        "role": role_text,
+        "role_len": len(role_text),
+        "state": "no_role",
+        "source": None,
+        "source_file": None,
+        "source_sha256_16": None,
+        "declared": False,
+        "roles_rel": None,
+        "project_dir": None,
+        "engine_dir": str(engine_base),
+        "fallback_enabled": fallback_enabled,
+        "candidates": [],
+        "error": "",
+    }
+    if not role_text:
+        return decision
+    if not isinstance(role, str) or ROLE_NAME_RE.match(role_text) is None:
+        # No file is read or stat-ed for a malformed name (review C5); the caller's
+        # trace names the raw text, escaped.
+        decision["state"] = "invalid_role"
+        decision["error"] = ("role name shape rejected: allowed = %s"
+                             % ROLE_NAME_RE.pattern.replace("\\Z", ""))
+        return decision
+    # Project leg: the declared flag comes from the same project_paths read the
+    # directory helper uses; the anchor rule itself lives only inside
+    # roles_dir_for_spawn (review K4: one implementation, one meaning).
+    paths_info = project_paths(project_key, roles_base=str(cwd_path))
+    declared = paths_info["roles_rel"] is not None
+    project_dir = roles_dir_for_spawn(project_key, cwd_path)
+    decision["declared"] = declared
+    decision["roles_rel"] = paths_info["roles_rel"]
+    decision["project_dir"] = str(project_dir)
+    project_file = project_dir / (role_text + ".yml")
+    engine_file = engine_base / (role_text + ".yml")
+    project_kind = _role_file_kind(project_file)
+    engine_kind = _role_file_kind(engine_file)
+    fallback_applies = declared and fallback_enabled
+    # Both candidates are always recorded, with `consulted` saying whether the leg was
+    # ALLOWED to serve (the declaration is the opt-in). A record therefore shows the
+    # alternative that existed, not only the branch that ran.
+    decision["candidates"] = [
+        {"leg": "project", "file": str(project_file), "kind": project_kind,
+         "consulted": True},
+        {"leg": "engine", "file": str(engine_file), "kind": engine_kind,
+         "consulted": bool(fallback_applies)},
+    ]
+    if project_kind == "file":
+        # A project hit stops here: the engine leg is recorded (with its kind) but it
+        # was not consulted for this decision.
+        decision["candidates"][1]["consulted"] = False
+        decision.update({"state": "project", "source": "project",
+                         "source_file": str(project_file),
+                         "source_sha256_16": _role_file_sha256_16(project_file)})
+        return decision
+    if role_text in ENGINE_BUILTIN_ROLE_PERSONAS:
+        # Engine-built persona: the absent file is the configured state (no warning,
+        # no engine leg - this role's persona never comes from the library).
+        decision["candidates"][1]["consulted"] = False
+        decision["state"] = "builtin"
+        return decision
+    if fallback_applies and engine_kind == "file":
+        decision.update({"state": "engine", "source": "engine",
+                         "source_file": str(engine_file),
+                         "source_sha256_16": _role_file_sha256_16(engine_file)})
+        return decision
+    decision["state"] = "declared_missing" if declared else "undeclared_missing"
+    if declared and not fallback_enabled:
+        decision["error"] = "engine fallback disabled by %s" % ENV_ROLE_PRESET_FALLBACK
+    return decision
 
 
 def dsh_bin_for_spawn(project_key: str) -> Optional[pathlib.Path]:

@@ -3,6 +3,7 @@
 # 条目 project.yaml 手写桩、spawn 缝隙调用、cmd --patch 观测、shared 模块告警捕获。
 # 只用标准库（t260914-05：PatchedRoutesFile 随 MODEL_ROUTES_FILE 常量一并退役——
 # 无表三态的观测面改为「capture_route_warnings 捕获 [model_route] 点名」）。
+import json
 import logging
 import os
 import shutil
@@ -152,3 +153,79 @@ def model_patch_files(art):
 def model_patch_text(art):
     fs = model_patch_files(art)
     return fs[0].read_text(encoding="utf-8") if fs else ""
+
+
+# ---- t261028-54: role-preset fallback faces (declared-only engine leg + trace) ----
+
+
+def role_trace(art, tag):
+    """The role-preset trace record of one spawn: <artifacts_dir>/role_preset_<tag>.json.
+
+    Absent -> None. The caller names the absence in its own assertion, so a missing
+    record reads as a finding with the expected path, not a stack trace."""
+    p = Path(art) / ("role_preset_%s.json" % tag)
+    if not p.is_file():
+        return None
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def role_patch_files(art):
+    """Materialized engine-leg preset copies (role_patch_*.yml) inside one artifacts dir."""
+    return sorted(Path(art).glob("role_patch_*.yml"))
+
+
+def part_files(art):
+    """Leftover partial copies (.part): a failed materialization must reclaim them."""
+    return sorted(Path(art).glob("*.part"))
+
+
+def engine_roles_dir():
+    """The engine library base of the running tree = <repo>/server/roles.
+
+    The scenario imports the engine from this tree, so the engine's own _repo_root()
+    resolves here too (the plan's D5: the running tree, never an assumed main tree)."""
+    return REPO / "server" / "roles"
+
+
+def within(path, base):
+    """True when path resolves inside base (the agent cwd: the container-visible face)."""
+    p = Path(path).resolve()
+    b = Path(base).resolve()
+    return p == b or b in p.parents
+
+
+def same_path(a, b):
+    return a is not None and b is not None and Path(a).resolve() == Path(b).resolve()
+
+
+def mentions_path(text, path):
+    """A log line names a candidate file: accept the constructed or the resolved form."""
+    return str(path) in text or str(Path(path).resolve()) in text
+
+
+@contextmanager
+def capture_spawn_warnings():
+    """Capture WARNING records of the spawn-preparation face ([role_preset] single point).
+
+    The engine logs through temporalio.activity.logger (logger name temporalio.activity)
+    outside an activity context; shared-side warnings go to the shared logger. Both are
+    attached and cleared on exit. Callers assert keywords, not whole sentences (KI-051
+    stance), so wording may change without breaking this case."""
+    records = []
+
+    class _H(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    h = _H()
+    loggers = [logging.getLogger("temporalio.activity"), logging.getLogger("shared")]
+    old_levels = [lg.level for lg in loggers]
+    for lg in loggers:
+        lg.addHandler(h)
+        lg.setLevel(logging.WARNING)
+    try:
+        yield records
+    finally:
+        for lg, level in zip(loggers, old_levels):
+            lg.removeHandler(h)
+            lg.setLevel(level)
