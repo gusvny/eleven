@@ -15,6 +15,11 @@ Intent（黑盒用户视角）：合并被 main 工作区未提交改动挡住�
      流行为子用例需 docker 台，池内以源码契约锁承接口）：dirty/failed 分流到
      _blocked("merge",…) 且写 blocked_detail{reason_code,files,next_action}（文件来自
      merge 回执——R3 回填回归守卫），conflict 才走 _auto_rework("merge_check")。
+     Anchor (t261029-29): the L1 source lock reads the DIRTY/FAILED BRANCH REGION
+     (its split test up to the conflict auto-return branch), never the first
+     `_blocked("merge"` in the file — that hit is the landing close-out guard and
+     left L1 green when the branch's own call was deleted. Leg L1b keeps the
+     mutation proof: on a scratch copy with that call deleted, L1 must turn red.
 
 分工（防 intent 级重复）：developer L1（server/engine/tests/test_ki048_merge_classify.
 py，白盒纯函数六形态电池随实现重写）之下、t260910-03 G7/G7b（保险丝B：清单缺失×成员
@@ -32,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -292,14 +298,94 @@ def behavior_legs():
               "action=%r ok=%r commit=%r" % (mr3.action, mr3.ok, mr3.merge_commit[:10]))
 
 
+def code_offsets(src, needle):
+    """Absolute offsets of `needle` on CODE lines only (a line whose first
+    non-space character is not '#'). A source lock must land on code: a comment
+    that merely names the call is still a guard with no teeth (t261029-29)."""
+    out = []
+    off = 0
+    for line in src.splitlines(True):
+        if not line.lstrip().startswith("#") and needle in line:
+            out.append(off + line.find(needle))
+        off += len(line)
+    return out
+
+
+def dirty_branch_lock(src):
+    """The merge stage's dirty/failed branch as offsets:
+    (split, blocked, rework) = (the `mr.action in ("dirty", "failed")` test,
+    the `self._blocked("merge"` call INSIDE that branch, the conflict
+    auto-return `_auto_rework("merge_check"` that must follow it), or -1 for a
+    leg that is absent.
+
+    t261029-29: the old lock took the FIRST `self._blocked("merge"` in the file
+    — dev_lane.py's landing close-out guard, an unrelated seam higher up the
+    merge stage — so deleting the dirty branch's own call left the lock green
+    (a guard that cannot fail). Anchoring the region on the split test and the
+    conflict branch that follows it makes that deletion red. Pure function: the
+    teeth leg runs exactly this over a mutated scratch copy of dev_lane.py."""
+    splits = code_offsets(src, 'mr.action in ("dirty", "failed")')
+    if not splits:
+        return -1, -1, -1
+    split = splits[0]
+    rework = [p for p in code_offsets(src, '_auto_rework("merge_check"')
+              if p > split]
+    if not rework:
+        return split, -1, -1
+    end = rework[0]
+    blocked = [p for p in code_offsets(src, 'self._blocked("merge"')
+               if split < p < end]
+    return split, (blocked[0] if blocked else -1), end
+
+
+def mutation_drops_dirty_blocked(src):
+    """TEETH-ONLY mutation of a source TEXT (never the product file): delete the
+    dirty/failed branch's `self._blocked("merge"` statement and keep everything
+    else. Returns "" when the branch carries no such call to drop."""
+    _split, blocked, _rework = dirty_branch_lock(src)
+    if blocked == -1:
+        return ""
+    line_start = src.rfind("\n", 0, blocked) + 1
+    line_end = src.find("\n", blocked)
+    if line_end == -1:
+        line_end = len(src)
+    return src[:line_start] + src[line_end + 1:]
+
+
 def source_lock_legs():
     """dev_lane 源码契约锁（stdlib 恒跑）：工作流分流面在 docker 台之外的可守部分。"""
     src = (REPO / "server" / "engine" / "dev_lane.py").read_text("utf-8")
-    pos_blocked = src.find('self._blocked("merge"')
-    pos_rework = src.find('_auto_rework("merge_check"')
+    # KI-048 / t261029-29: anchor on the DIRTY/FAILED BRANCH REGION (its split
+    # test up to the conflict auto-return branch), never on the first
+    # `_blocked("merge"` in the file — that one belongs to the landing close-out
+    # guard and says nothing about this branch.
+    pos_split, pos_blocked, pos_rework = dirty_branch_lock(src)
     check("L1 分流锁：dirty/failed → _blocked(\"merge\") 在位且先于 conflict 自动打回分支",
-          pos_blocked != -1 and pos_rework != -1 and pos_blocked < pos_rework,
-          "blocked@%d rework@%d" % (pos_blocked, pos_rework))
+          pos_split != -1 and pos_blocked != -1 and pos_rework != -1
+          and pos_split < pos_blocked < pos_rework,
+          "split@%d blocked@%d rework@%d" % (pos_split, pos_blocked, pos_rework))
+    # L1b (t261029-29 teeth): the lock's own mutation proof, kept as a
+    # regression — a scratch copy with the dirty branch's call deleted must turn
+    # L1 red, and the copy is written under a temp dir (the product file is read
+    # only). A future loosening of L1 (first-hit again, a substring that a
+    # comment satisfies, a region that swallows the close-out guard) makes THIS
+    # leg red: the lock can no longer pass on a source that lost the call.
+    scratch = Path(tempfile.mkdtemp(prefix="ki048-dirty-branch-"))
+    try:
+        mutated = mutation_drops_dirty_blocked(src)
+        copy = scratch / "dev_lane.py"
+        if mutated:
+            copy.write_text(mutated, encoding="utf-8")
+        mutated_src = copy.read_text("utf-8") if copy.exists() else ""
+        m_split, m_blocked, m_rework = (dirty_branch_lock(mutated_src)
+                                        if mutated_src else (-1, -1, -1))
+        check("L1b 锁牙口自证：删掉 dirty 分支的 _blocked(\"merge\") 后锁必须变红（临时副本）",
+              bool(mutated) and m_split != -1 and m_rework != -1
+              and m_blocked == -1,
+              "mutated=%r split@%d blocked@%d rework@%d"
+              % (bool(mutated), m_split, m_blocked, m_rework))
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
     check("L2 分类分流在位：merge 失败分支按 action 分出 dirty/failed（不再无差别打回）",
           'mr.action in ("dirty", "failed")' in src,
           "未找到 dirty/failed 分流条件")

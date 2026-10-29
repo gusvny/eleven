@@ -37,6 +37,15 @@ evidence is read from the on-disk ledgers, never from return receipts
 alone. Offline seconds; zero docker / Temporal / browser; never touches
 3099/7233.
 
+Receipt anchor (t261029-29): B1/B2 assert the STRUCTURED receipt the product
+emits (`tick["request_sweep"]` -> per-project object with resolved / skipped /
+residue / unchanged / malformed_lines counters, plus a named skip or error when
+the sweep cannot run), never a substring of the tick's JSON text — the old
+`"sweep" in json.dumps(tick)` was satisfied by the tick's own human summary
+line for ANY tick. Both legs carry a teeth leg that feeds the same predicate
+mutated tick dicts (receipt dropped, replaced by the bare word, faked success,
+decisions removed) and requires it to turn red.
+
 Run: python3 -B integration/t261026-07/sc_t261026_07_watch_sweep_residue.py
 (cwd = repo root)
 
@@ -146,6 +155,185 @@ def register_session(env: dict) -> None:
         {"version": 1, "sessions": [{"session_id": SESSION}]}))
 
 
+def declare_line(env: dict, line: str = "develop-buffer") -> None:
+    """Declare one develop line for the fixture project. The watch tick
+    enumerates projects through `develop_certify.declared_line_projects()`,
+    which lists only projects carrying `data/develop/lines.json` — with none
+    declared the tick sweeps nothing and its `request_sweep` object is empty,
+    so the receipt face B1/B2 pin would not be exercised at all (t261029-29)."""
+    d = Path(env["SANDBAR_PROJECTS_DIR"]) / PROJ / "data" / "develop"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "lines.json").write_text(json.dumps(
+        [{"version": 1, "line_id": line,
+          "repositories": [{"name": PROJ, "branch": "main"}]}]))
+
+
+def tick_of(env: dict) -> tuple:
+    """One REAL executor watch tick (`run_watch.run_watch_tick_engine`) in the
+    fixture env: (rc, tick dict or {}, raw output)."""
+    script = (
+        "import sys, json, time; sys.path.insert(0, %r)\n"
+        "import run_watch\n"
+        "out = run_watch.run_watch_tick_engine(int(time.time() * 1000))\n"
+        "print(json.dumps(out, ensure_ascii=False))\n" % str(ENGINE)
+    )
+    rc, out = run_py(env, script)
+    for candidate in (out, *(out.splitlines() or [""])):
+        try:
+            parsed = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            return rc, parsed, out
+    return rc, {}, out
+
+
+def b1_receipt_defects(tick: dict) -> list:
+    """Named defects of B1's contract — empty list means pass.
+
+    t261029-29: B1 read `"request_sweep" in json.dumps(tick) or "sweep" in
+    json.dumps(tick)`, and run_watch's own human summary line already contains
+    the word "sweep" for EVERY tick — so the structured receipt could vanish and
+    B1 stayed green (evidence that cannot fail). The contract asserted here is
+    the STRUCTURE the product emits: `tick["request_sweep"]` is an object, the
+    project's receipt carries the counters (`resolved`/`skipped`/`residue`/
+    `unchanged`/`malformed_lines`), heads closed/skipped are named on it, and
+    the tick-level close counter agrees with it while the run-watch decisions
+    ran in the same tick. Pure function: the teeth leg feeds it mutated ticks."""
+    d: list[str] = []
+    rs = tick.get("request_sweep") if isinstance(tick, dict) else None
+    if not isinstance(rs, dict):
+        return ["tick.request_sweep is not an object (got %r)" % (type(rs).__name__,)]
+    receipt = rs.get(PROJ)
+    if not isinstance(receipt, dict):
+        return ["no receipt object for project %r (receipts: %r)"
+                % (PROJ, sorted(rs)[:5])]
+    if receipt.get("ok") is not True:
+        d.append("receipt.ok is not True: %r (error=%r)"
+                 % (receipt.get("ok"), receipt.get("error")))
+    for key in ("resolved", "skipped", "residue"):
+        if not isinstance(receipt.get(key), list):
+            d.append("receipt.%s is not a list: %r" % (key, receipt.get(key)))
+    for key in ("residue_buckets",):
+        if not isinstance(receipt.get(key), dict):
+            d.append("receipt.%s is not an object: %r" % (key, receipt.get(key)))
+    for key in ("unchanged", "malformed_lines"):
+        if not isinstance(receipt.get(key), int) or isinstance(receipt.get(key), bool):
+            d.append("receipt.%s is not an int counter: %r"
+                     % (key, receipt.get(key)))
+    # a head EVALUATED and CLOSED is named with the evidence that closed it
+    closed = [e for e in (receipt.get("resolved") or []) if isinstance(e, dict)]
+    if not any(e.get("id") == "sc07-b1-closable" and e.get("evidence")
+               for e in closed):
+        d.append("the closable head is not on receipt.resolved with evidence: %r"
+                 % (closed,))
+    # a head that could NOT be evaluated is a NAMED skip, never silence
+    skipped = [e for e in (receipt.get("skipped") or []) if isinstance(e, dict)]
+    if not any(e.get("id") == "sc07-b1-invalid-condition"
+               and "condition_invalid" in str(e.get("reason") or "")
+               for e in skipped):
+        d.append("the invalid-condition head is not a named skip: %r" % (skipped,))
+    # the broken ledger LINE is counted on the receipt, not dropped
+    if int(receipt.get("malformed_lines") or 0) < 1:
+        d.append("the malformed ledger line is not counted: %r"
+                 % (receipt.get("malformed_lines"),))
+    # the tick-level close counter summarises exactly these receipts
+    total = tick.get("request_sweep_closed_total")
+    closed_here = len(closed) + len([e for e in (receipt.get("residue") or [])
+                                     if isinstance(e, dict)
+                                     and e.get("bucket") == "closed"])
+    if not isinstance(total, int) or isinstance(total, bool) \
+            or total != closed_here or total < 1:
+        d.append("request_sweep_closed_total=%r disagrees with the receipt "
+                 "(%d closed)" % (total, closed_here))
+    # the run-watch DECISIONS ran in the same tick (the sweep rides the tick)
+    if not decisions_ran(tick):
+        d.append("the run-watch decision pass did not run: projects=%r"
+                 % ((tick.get("projects") or {}),))
+    return d
+
+
+def decisions_ran(tick: dict) -> bool:
+    """Did the tick's decision pass reach the fixture line (feeding leg B1/B2)?"""
+    projects = tick.get("projects") if isinstance(tick, dict) else None
+    proj = projects.get(PROJ) if isinstance(projects, dict) else None
+    lines = proj.get("lines") if isinstance(proj, dict) else None
+    return (isinstance(lines, list) and len(lines) == 1
+            and isinstance(lines[0], dict)
+            and isinstance(lines[0].get("decision"), dict))
+
+
+def b2_receipt_defects(tick: dict) -> list:
+    """Named defects of B2's contract — empty list means pass.
+
+    A sweep that cannot run is a NAMED, STRUCTURED per-project entry on the tick
+    (`ok:false` and an error/skip string naming the unreadable ledger) and the
+    run-watch decisions still ran. t261029-29 replaced the old bare `"sweep"`
+    substring (true for any tick) with this contract."""
+    d: list[str] = []
+    rs = tick.get("request_sweep") if isinstance(tick, dict) else None
+    if not isinstance(rs, dict):
+        return ["tick.request_sweep is not an object (got %r)" % (type(rs).__name__,)]
+    receipt = rs.get(PROJ)
+    if not isinstance(receipt, dict):
+        return ["no receipt object for project %r (receipts: %r)"
+                % (PROJ, sorted(rs)[:5])]
+    if receipt.get("ok") is not False:
+        d.append("receipt.ok is not False for an unreadable ledger: %r"
+                 % (receipt.get("ok"),))
+    named = str(receipt.get("error") or receipt.get("skipped_all") or "")
+    if not named:
+        d.append("the broken sweep carries no named error/skip entry: %r"
+                 % (receipt,))
+    else:
+        if not any(marker in named for marker in
+                   ("request_sweep_failed", "ledger_unreadable",
+                    "ledger_path_unresolvable")):
+            d.append("the named entry does not say which failure face: %r"
+                     % (named[:200],))
+        if "requests.jsonl" not in named and "ledger" not in named:
+            d.append("the named entry does not name the unreadable ledger: %r"
+                     % (named[:200],))
+    if not decisions_ran(tick):
+        d.append("a broken sweep killed the run-watch decisions: projects=%r"
+                 % ((tick.get("projects") or {}),))
+    return d
+
+
+def b1_tick_fixture(env: dict) -> None:
+    """B1's tick env: one declared line, one closable head (a round row after
+    it), one head whose condition is invalid, one malformed ledger line, and the
+    delivery-ledger certification that closes the first head."""
+    declare_line(env)
+    append_requests_line(env, PROJ, {
+        "type": "request", "id": "sc07-b1-closable", "kind": "run-silent",
+        "question": "run-silent on line develop-buffer: no run row",
+        "state": "open", "state_for": "sc07-b1-closable", "at": T0, "seq": T0,
+        "by": "executor:legacy",
+        "resolves_when": {"kind": "round_after", "line": "develop-buffer"}})
+    append_requests_line(env, PROJ, {
+        "type": "request", "id": "sc07-b1-invalid-condition", "kind": "run-silent",
+        "question": "run-silent on line develop-buffer: no run row",
+        "state": "open", "state_for": "sc07-b1-invalid-condition", "at": T0,
+        "seq": T0, "by": "executor:legacy",
+        "resolves_when": {"kind": "no_such_condition_kind"}})
+    with requests_path(env).open("a") as fh:
+        fh.write("{not json at all\n")
+    append_ledger_line(env, {
+        "kind": "certification", "id": "cert-sc07b1", "seq": 99,
+        "at": T0 + 10 * TICK, "line": "develop-buffer", "verdict": "green",
+        "run": "run-sc07b1", "repos": {PROJ: "0" * 40}})
+
+
+def unreadable_requests_ledger(env: dict) -> Path:
+    """B2's broken face: the requests ledger PATH is a directory, so the ledger
+    cannot be read or appended to at all (not merely unparsable)."""
+    path = requests_path(env)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.mkdir()
+    return path
+
+
 def sweep(env: dict, inject_ticket: dict | None = None) -> tuple[dict, str]:
     script = (
         "import sys, json, time; sys.path.insert(0, %r)\n"
@@ -253,36 +441,82 @@ def main() -> int:
           "rows before=%d after=%d" % (before_count, len(rows(env))))
 
     # --- B1/B2: the sweep runs INSIDE the watch tick with a receipt ---------
-    tick_script = (
-        "import sys, json, time; sys.path.insert(0, %r)\n"
-        "import run_watch\n"
-        "out = run_watch.run_watch_tick_engine(int(time.time() * 1000))\n"
-        "print(json.dumps(out, ensure_ascii=False))\n" % str(ENGINE)
-    )
-    rc, tout = run_py(env, tick_script)
-    try:
-        tick = json.loads(tout)
-    except Exception:
-        tick = {}
-    check("watch-tick-carries-sweep-receipt",
-          "request_sweep" in json.dumps(tick) or "sweep" in json.dumps(tick),
-          "tick keys: " + json.dumps(list(tick))[:200] + " out: " + tout[:200])
+    # t261029-29: the receipt is asserted as a STRUCTURE (counters, named heads,
+    # named skip/error), never as a word that happens to be in the tick — the old
+    # `"sweep" in json.dumps(tick)` was satisfied by the tick's own human summary
+    # for ANY tick, so the receipt could disappear with B1 still green.
+    tmp3 = Path(tempfile.mkdtemp(prefix="t261026-07-tick-"))
+    atexit.register(lambda: shutil.rmtree(tmp3, ignore_errors=True))
+    env_tick = base_env(tmp3)
+    register_session(env_tick)
+    b1_tick_fixture(env_tick)
+    _rc_t, tick, tout = tick_of(env_tick)
+    b1_defects = b1_receipt_defects(tick)
+    check("watch-tick-carries-sweep-receipt", not b1_defects,
+          "; ".join(b1_defects) + " | tick keys: " + json.dumps(list(tick))[:200]
+          + " | out: " + tout[:300])
 
-    # B2: a broken requests ledger is a NAMED skip, decisions still run
+    # B1 teeth (t261029-29): the SAME predicate must turn red when the receipt is
+    # dropped from the tick, and when it is replaced by the bare word the old form
+    # accepted. Fed mutated tick dicts only — the real tick above is untouched.
+    dropped = {k: v for k, v in tick.items() if k != "request_sweep"}
+    bare_word = dict(dropped, request_sweep="sweep")
+    old_form_green_on_dropped = ("request_sweep" in json.dumps(dropped)
+                                or "sweep" in json.dumps(dropped))
+    b1_teeth = (not b1_receipt_defects(dropped)
+                and not b1_receipt_defects(bare_word)
+                and old_form_green_on_dropped)
+    check("sweep-receipt-lock-has-teeth", not b1_teeth,
+          "dropped->%r bare-word->%r old-form-on-dropped=%r"
+          % (b1_receipt_defects(dropped)[:2],
+             b1_receipt_defects(bare_word)[:2], old_form_green_on_dropped))
+
+    # B2: a sweep that CANNOT run is a NAMED per-project entry, decisions still run
     tmp2 = Path(tempfile.mkdtemp(prefix="t261026-07-broken-"))
     atexit.register(lambda: shutil.rmtree(tmp2, ignore_errors=True))
     env2 = base_env(tmp2)
     register_session(env2)
-    (requests_path(env2)).write_text("{not json at all\n")
-    rc2, tout2 = run_py(env2, tick_script)
-    try:
-        tick2 = json.loads(tout2)
-    except Exception:
-        tick2 = {}
-    t2s = json.dumps(tick2, ensure_ascii=False)
-    check("broken-ledger-named-not-silent",
-          "request_sweep" in t2s or "sweep" in t2s,
-          "tick output: " + tout2[:300])
+    declare_line(env2)
+    unreadable_requests_ledger(env2)
+    rc2, tick2, tout2 = tick_of(env2)
+    b2_defects = b2_receipt_defects(tick2)
+    check("broken-ledger-named-not-silent", not b2_defects,
+          "; ".join(b2_defects) + " | tick keys: " + json.dumps(list(tick2))[:200]
+          + " | out: " + tout2[:300])
+
+    # B2 teeth (t261029-29): the predicate must turn red on a receipt that claims
+    # success while the ledger is unreadable, on a tick without the receipt, and on
+    # a tick whose decision pass never ran. Built around the REAL broken receipt so
+    # the teeth do not depend on the parse above succeeding.
+    real_receipt = ((tick2.get("request_sweep") or {}).get(PROJ)
+                    if isinstance(tick2.get("request_sweep"), dict) else None)
+    if not isinstance(real_receipt, dict):
+        real_receipt = {"ok": False, "project": PROJ,
+                        "error": "request_sweep_failed:requests ledger "
+                                 "unreadable (requests.jsonl)"}
+    good_projects = {PROJ: {"lines": [{"line": "develop-buffer",
+                                       "decision": {"action": "none"}}]}}
+    silent_success = {"projects": good_projects,
+                      "request_sweep": {PROJ: {"ok": True, "project": PROJ,
+                                               "resolved": [], "skipped": [],
+                                               "unchanged": 0, "residue": [],
+                                               "malformed_lines": 0,
+                                               "residue_buckets": {}}},
+                      "request_sweep_closed_total": 0,
+                      "summary": "run_watch: 1 projects, 1 lines, sweep closed 0"}
+    no_decisions = {"request_sweep": {PROJ: real_receipt},
+                    "request_sweep_closed_total": 0,
+                    "summary": "run_watch: 0 projects, 0 lines, sweep closed 0"}
+    receipt_dropped = {"projects": good_projects,
+                       "request_sweep_closed_total": 0,
+                       "summary": "run_watch: 1 projects, 1 lines, sweep closed 0"}
+    b2_mutants = (("faked-success", silent_success),
+                  ("decisions-gone", no_decisions),
+                  ("receipt-gone", receipt_dropped))
+    b2_teeth = any(not b2_receipt_defects(t) for _label, t in b2_mutants)
+    check("broken-ledger-lock-has-teeth", not b2_teeth,
+          "; ".join("%s->%r" % (label, b2_receipt_defects(t)[:2])
+                    for label, t in b2_mutants))
 
     print("SUMMARY ran=1 pass=%d fail=%d" % (0 if FAILS else 1, len(FAILS)))
     if FAILS:
