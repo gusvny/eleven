@@ -6335,6 +6335,260 @@ def _foreign_repair_check_item(tree: Path, branch: str, write_set: Any,
             "own_items": [], "record": None}
 
 
+# ── the in-lane code gate's wait budget (t261029-14) ─────────────────────────
+# The defect (measured three times on 261028, KI-401 family): the verify_lane
+# code spawn was wrapped in a bare 900s wait, while verify.yaml declared its
+# slowest check at 1000s. The outer wait was therefore SMALLER than the inner
+# budget by construction: on a shared host a green tree could never use the
+# budget it declares, the run was reaped, and the merge gate reported a bare
+# timeout naming no check — a could-not-run rendered as an unnamed red, which
+# the project's own rule forbids.
+#
+# The wait is now DERIVED from the same declaration verify_lane reads (the
+# tree's verify.yaml, lanes.code.checks) with a documented margin:
+#
+#   wait = max(declared check budgets, the documented default for checks that
+#          declare none) + the documented chain margin
+#
+# The model is the MAXIMUM, not the sum: verify_lane runs the declared checks in
+# parallel (one worker each, each bounded by its own declared budget), so the
+# slowest check is what the outer wait has to cover. A sum is only right for a
+# serial run, and it would push the wait past the merge_check activity's own
+# start_to_close (dev_lane.MERGE_CHECK_TO, 20 minutes) — the derived wait would
+# then be unreachable, which is exactly the inversion this derivation removes.
+#
+# Stays bounded: the wait is always finite (an unreadable/malformed declaration
+# falls back to the documented default), and a lane that declares enormous
+# budgets cannot hang the gate either — MERGE_CHECK_TO still kills the activity,
+# so the worst case is the activity timeout, never an unbounded wait. The
+# process group is reaped on expiry exactly as before.
+VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC = 600
+"""Budget for a declared check that carries none — the SAME default verify_lane
+applies (`server/tools/verify_lane.py`: `int(c.get('timeout') or 600)`), so the
+gate can never wait less than an undeclared check may run."""
+VERIFY_LANE_CODE_GATE_CHAIN_MARGIN_SEC = 120
+"""Chain margin (seconds) on top of the slowest declared check budget. It covers
+verify_lane's own start-up and bookkeeping (admin.py/verify_lane import, the
+write-set git diff, the pool-asset subprocess, the per-check `/bin/sh -c` spawn)
+plus this activity's JSON/receipt handling. None of that is charged to a check's
+declared budget, so none of it may come out of the check's budget either."""
+
+
+def _check_budget_sec(raw: Any) -> Tuple[int, bool]:
+    """(budget_seconds, declared). A declared positive whole-second budget is used
+    verbatim (verify_lane reads `int(c.get('timeout') or 600)`); a missing,
+    non-positive or unparseable value falls back to the documented default and
+    reports declared=False so the caller can NAME which checks were defaulted."""
+    if isinstance(raw, bool) or raw is None:
+        return VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC, False
+    if isinstance(raw, str) and not raw.strip():
+        return VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC, False
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC, False
+    if val <= 0:
+        return VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC, False
+    return val, True
+
+
+def verify_lane_code_gate_budget(checks: Any) -> Tuple[int, Dict[str, Any]]:
+    """Derive the code gate's outer wait from the declared check budgets.
+
+    Pure (no IO, no clock, no config): the caller hands in the parsed
+    `lanes.code.checks` declaration and gets back (wait_seconds, facts). The
+    facts are the receipt material — which check was slowest, what budget it
+    declares, which checks were defaulted, and the margin used.
+
+    Rules, each named and none silent:
+      - an absent/malformed declaration (not a list, no entries) => the documented
+        default budget + margin, with `no_declared_checks` set: bounded, never a
+        crash and never an unbounded wait;
+      - an entry that is not a mapping, or that declares no usable `timeout`, gets
+        the documented default and is listed in `defaulted_ids` (an empty id keeps
+        its position, named as `#<index>`);
+      - wait = slowest budget + margin (parallel execution model, see above).
+    """
+    facts: Dict[str, Any] = {
+        "default_budget_sec": VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC,
+        "margin_sec": VERIFY_LANE_CODE_GATE_CHAIN_MARGIN_SEC,
+        "model": "max declared check budget + chain margin (checks run in parallel)",
+        "declared_checks": 0,
+        "budgets": [],
+        "defaulted_ids": [],
+        "slowest_id": "",
+        "slowest_budget_sec": VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC,
+        "no_declared_checks": False,
+    }
+    entries = checks if isinstance(checks, list) else []
+    if not entries:
+        facts["no_declared_checks"] = True
+        wait = VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC + VERIFY_LANE_CODE_GATE_CHAIN_MARGIN_SEC
+        facts["wait_sec"] = int(wait)
+        return int(wait), facts
+    slowest_id, slowest_budget = "", 0
+    for i, entry in enumerate(entries):
+        if isinstance(entry, dict):
+            cid = str(entry.get("id") or "").strip() or "#%d" % i
+            budget, declared = _check_budget_sec(entry.get("timeout"))
+        else:
+            # A malformed entry cannot run as a check at all (verify_lane refuses
+            # the whole declaration), but the wait must stay bounded and honestly
+            # named — the same default applies and the entry is named.
+            cid, budget, declared = "#%d" % i, VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC, False
+        if not declared:
+            facts["defaulted_ids"].append(cid)
+        facts["budgets"].append({"id": cid, "budget_sec": int(budget),
+                                 "declared": bool(declared)})
+        if int(budget) > slowest_budget:
+            slowest_id, slowest_budget = cid, int(budget)
+    facts["declared_checks"] = len(entries)
+    facts["slowest_id"] = slowest_id
+    facts["slowest_budget_sec"] = int(slowest_budget)
+    wait = int(slowest_budget) + VERIFY_LANE_CODE_GATE_CHAIN_MARGIN_SEC
+    facts["wait_sec"] = int(wait)
+    return int(wait), facts
+
+
+def _read_verify_lane_check_budgets(tree: Any) -> Tuple[List[Any], str]:
+    """Read `lanes.code.checks` from <tree>/verify.yaml — the SAME declaration
+    verify_lane reads when the gate calls it with `path=<tree>`, so the gate can
+    never wait on numbers the runner does not use (one source of truth).
+
+    Returns (checks, diag). An absent, unreadable or malformed declaration returns
+    ([], named diag): the derivation then applies the documented default (bounded)
+    and the expiry receipt names WHY the wait was defaulted instead of inventing a
+    declaration."""
+    vy = Path(str(tree)) / "verify.yaml"
+    try:
+        if not vy.is_file():
+            return [], "no verify.yaml at %s" % vy
+        import yaml  # noqa: PLC0415 - engine venv carries PyYAML; local to this face
+        cfg = yaml.safe_load(vy.read_text(encoding="utf-8")) or {}
+        lane_cfg = (cfg.get("lanes") or {}).get("code") or {}
+        checks = lane_cfg.get("checks")
+    except Exception as e:  # noqa: BLE001 - fail-closed to the documented default
+        return [], ("verify.yaml unreadable (%s: %s)" % (type(e).__name__, str(e)[:160]))
+    if not isinstance(checks, list) or not checks:
+        return [], "verify.yaml declares no lanes.code.checks"
+    return checks, ""
+
+
+def _machine_loadavg() -> Optional[List[float]]:
+    """The host's 1/5/15-minute load average, or None where the platform has none.
+
+    Load visibility (t261029-14 ③): an expiry must let the next reader see whether
+    the machine was busy WITHOUT re-deriving the contention by hand (on 261028 the
+    host ran at load 20-60 for hours with several projects' suites in flight)."""
+    try:
+        return [round(float(x), 2) for x in os.getloadavg()]
+    except (AttributeError, OSError):
+        return None
+
+
+_LOADAVG_UNSET = object()
+
+
+def code_gate_expiry_receipt(wait_sec: int, facts: Dict[str, Any],
+                             elapsed_sec: float, read_diag: str = "",
+                             loadavg: Any = _LOADAVG_UNSET) -> Tuple[str, Dict[str, Any]]:
+    """(detail_text, structured_facts) for an outer-wait expiry of the code gate.
+
+    The text reads as an environment/budget fact on the ticket face and in the
+    receipt — never as a red check: it names the derived budget it used, the
+    slowest check (the one whose declared budget the wait was derived from), the
+    wall the gate actually spent, and the host load. The verdict stays blocking
+    (green=False at the call site); what changes is that "could not complete"
+    stops looking like "ran and failed".
+
+    No per-check elapsed is claimed: verify_lane reports per check only in its
+    final payload, so an outer expiry destroys the only place it would appear.
+    Naming the declared budget is the honest substitute — the reader sees which
+    check could have eaten the wall and the load it ran under.
+
+    `loadavg` defaults to an unset sentinel that reads the live host load; pass an
+    explicit 3-sequence (or None for "no load average on this platform") to keep a
+    fixture machine-independent."""
+    slowest = str(facts.get("slowest_id") or "")
+    slowest_budget = int(facts.get("slowest_budget_sec")
+                         or VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC)
+    margin = int(facts.get("margin_sec") or VERIFY_LANE_CODE_GATE_CHAIN_MARGIN_SEC)
+    if facts.get("no_declared_checks"):
+        head = ("gate could not complete within its derived budget (%ds = documented "
+                "default %ds + %ds chain margin; no declared check budget was read)"
+                % (int(wait_sec), VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC, margin))
+        slow_txt = "slowest check: none declared"
+    else:
+        head = ("gate could not complete within its derived budget (%ds = slowest "
+                "declared check '%s' %ds + %ds chain margin)"
+                % (int(wait_sec), slowest, slowest_budget, margin))
+        slow_txt = ("slowest check: %s (declared budget %ds, gate wall used %.1fs, "
+                    "still running when the wait expired)"
+                    % (slowest, slowest_budget, float(elapsed_sec)))
+    load_txt = ""
+    if loadavg is _LOADAVG_UNSET:
+        loadavg = _machine_loadavg()
+    try:
+        if loadavg and len(tuple(loadavg)) == 3:
+            load_txt = "; machine load %.2f %.2f %.2f (1m/5m/15m)" % tuple(
+                float(x) for x in tuple(loadavg))
+    except (TypeError, ValueError):
+        load_txt = ""
+    if not load_txt:
+        load_txt = "; machine load not available on this platform"
+    count_txt = ""
+    if not facts.get("no_declared_checks"):
+        count_txt = "; %d declared check(s)" % int(facts.get("declared_checks") or 0)
+        defaulted = [str(x) for x in (facts.get("defaulted_ids") or [])]
+        if defaulted:
+            count_txt += (" (no declared budget, documented default %ds applied: %s)"
+                          % (VERIFY_LANE_CHECK_DEFAULT_BUDGET_SEC, ", ".join(defaulted)))
+    diag_txt = ("; declaration: %s" % read_diag) if read_diag else ""
+    detail = ("%s; %s%s%s%s - environment/budget fact, not a red check "
+              "(process group reaped)" % (head, slow_txt, load_txt, count_txt, diag_txt))
+    structured: Dict[str, Any] = {
+        "budget_sec": int(wait_sec),
+        "gate_elapsed_sec": round(float(elapsed_sec), 1),
+        "margin_sec": margin,
+        "loadavg": ([float(x) for x in tuple(loadavg)]
+                    if loadavg and len(tuple(loadavg)) == 3 else None),
+        "verdict_kind": "could_not_complete",
+    }
+    if facts.get("no_declared_checks"):
+        structured["no_declared_checks"] = True
+    else:
+        structured["slowest_check"] = slowest
+        structured["slowest_check_budget_sec"] = slowest_budget
+    if read_diag:
+        structured["declaration_diag"] = str(read_diag)
+    return detail, structured
+
+
+def _verify_lane_code_expiry_row(detail: str, expiry: Dict[str, Any],
+                                 red_names: Optional[List[str]] = None) -> Dict[str, Any]:
+    """The "In-lane verify_lane code is green" row for the NEW terminal state of
+    t261029-14: an outer-wait expiry (the green/red rows are not built here — the
+    gate keeps its original literal for those, byte for byte, and only an expiry
+    overrides the row).
+
+    The row adds the budget facts as extra keys and replaces the reason_code, so
+    "could not run" is separable from "ran and failed" in the structured receipt
+    too — without loosening the verdict: green=False, an expiry always blocks."""
+    row: Dict[str, Any] = {"item": "In-lane verify_lane code is green",
+                           "green": False, "detail": str(detail),
+                           "id": "verify_lane_code",
+                           "reason_code": "gate_budget_exhausted",
+                           "next_action": ("environment/budget fact: re-run the gate "
+                                           "once the host load drops, or raise the "
+                                           "slowest check's declared budget in "
+                                           "verify.yaml — no failing check was "
+                                           "reported")}
+    for key, val in (expiry or {}).items():
+        row[key] = val
+    if red_names:
+        row["red_items"] = [{"name": n} for n in red_names]
+    return row
+
 
 async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                  lane_root: Path, multi: bool) -> Dict[str, Any]:
@@ -6627,6 +6881,22 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             # The note names the rule and the admitted prefixes so a green
             # whitelist that admitted a rebuilt output is never silent.
             eff_ws, bundle_note = _bundle_widened_write_set(sc["tree"], sc.get("write_set"))
+            # t261029-14: the outer wait is derived from the checks' own declared
+            # budgets (verify.yaml lanes.code.checks, read from the same tree
+            # verify_lane is called with) — the bare literal it replaced (900) was
+            # smaller than the slowest declared budget (1000), so the check could
+            # never use the budget it declares. Derived once per scope, logged so a
+            # green round also shows which budget the gate waited on.
+            _gate_checks, _gate_decl_diag = _read_verify_lane_check_budgets(sc["tree"])
+            _gate_wait_sec, _gate_facts = verify_lane_code_gate_budget(_gate_checks)
+            activity.logger.info(
+                "[%s] verify_lane code gate wait = %ds (%s; slowest check=%s/%ds, "
+                "margin=%ds%s)",
+                args.ticket_id, int(_gate_wait_sec), str(_gate_facts.get("model")),
+                str(_gate_facts.get("slowest_id") or "(none)"),
+                int(_gate_facts.get("slowest_budget_sec") or 0),
+                int(_gate_facts.get("margin_sec") or 0),
+                ("; declaration: %s" % _gate_decl_diag) if _gate_decl_diag else "")
             vp = await asyncio.create_subprocess_exec(  # async (ticket t260903-09: a blocking subprocess would freeze the event loop)
                 "python3", admin_bin, "call", "verify_lane",
                 json.dumps({"lane": "code", "path": str(sc["tree"]),
@@ -6661,8 +6931,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             register_owned_spawn(vp, tag="verify-lane-code")
             _v_wait_t0 = time.monotonic()
             _red_names: List[str] = []  # t261009-15 (1): exception paths default to no names (no exemption)
+            _gate_expiry: Optional[Dict[str, Any]] = None
             try:
-                vo_b, ve_b = await asyncio.wait_for(vp.communicate(), timeout=900)
+                vo_b, ve_b = await asyncio.wait_for(vp.communicate(), timeout=_gate_wait_sec)
                 v_stdout, v_stderr = vo_b.decode("utf-8", "replace"), ve_b.decode("utf-8", "replace")
                 payload = json.loads(v_stdout)
                 res = payload.get("result") or {}
@@ -6691,16 +6962,29 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                 # orphan the tree). py3.9 wait_for race: wall-clock disambiguation
                 # (run_handover_leg shape) — budget exhausted = the timeout leg.
                 await reap_spawn_group(vp, tag="verify-lane-code")
-                if not wait_budget_exhausted(_v_wait_t0, 900):
+                if not wait_budget_exhausted(_v_wait_t0, _gate_wait_sec):
                     raise
-                green, detail = False, "verify_lane timed out (>900s)"
+                # t261029-14: the expiry is named as a budget fact (never as an
+                # unnamed red); reaping above is unchanged — the process group is
+                # reclaimed on every terminal path exactly as before.
+                detail, _gate_expiry = code_gate_expiry_receipt(
+                    _gate_wait_sec, _gate_facts, time.monotonic() - _v_wait_t0,
+                    read_diag=_gate_decl_diag, loadavg=_machine_loadavg())
+                green = False
             except asyncio.TimeoutError:
                 await reap_spawn_group(vp, tag="verify-lane-code")
-                green, detail = False, "verify_lane timed out (>900s)"
+                detail, _gate_expiry = code_gate_expiry_receipt(
+                    _gate_wait_sec, _gate_facts, time.monotonic() - _v_wait_t0,
+                    read_diag=_gate_decl_diag, loadavg=_machine_loadavg())
+                green = False
             except json.JSONDecodeError:
                 green, detail = False, (v_stderr or v_stdout or "无输出").strip()[-300:]
             finally:
                 unregister_owned_spawn(vp)
+            # t261029-14: the green/red row below is the pre-ticket construction,
+            # byte for byte (an expiry overrides it after the fact, so no legacy
+            # path is rewritten). Nothing about the verdict changes: an expiry is
+            # green=False, never a silent green.
             checks.append({"item": "In-lane verify_lane code is green", "green": green, "detail": detail,
                            "id": "verify_lane_code",
                            # t261009-38: a whitelist green that admitted a declared
@@ -6717,6 +7001,13 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             # text keys untouched; no names parsed = no field, never invented).
             if not green and _red_names:
                 checks[-1]["red_items"] = [{"name": n} for n in _red_names]
+            # t261029-14: an outer-wait expiry replaces that code-red row with the
+            # named budget receipt (budget used, slowest check, host load) so
+            # "could not complete" no longer reads as "ran and failed". The row is
+            # still blocking: green stays False.
+            if _gate_expiry:
+                checks[-1] = _verify_lane_code_expiry_row(detail, _gate_expiry,
+                                                          red_names=_red_names)
     except Exception as e:
         checks.append({"item": "In-lane verify_lane code is green", "green": False,
                        "detail": "verify_lane error: %s" % e,
