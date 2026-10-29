@@ -4391,6 +4391,24 @@ def _is_git_repo_root(p: Path) -> bool:
         return False
 
 
+class LaneRootRefusal(RuntimeError):
+    """The lane-root resolver's NAMED refusal: it cannot place the path it was given
+    (ticket t261029-42, KI-414), so no repository is named and none is guessed.
+
+    It is a RuntimeError subclass on purpose, so that every existing
+    `except RuntimeError` keeps its old behavior. It is its own type because the call
+    sites disagree about what a refusal means for them (ticket t261029-47):
+
+      - a call site whose documented contract is warn/skip/receipt (teardown, the
+        settle ownership guard, dependency linking) catches THIS type and folds the
+        refusal text into its receipt — the strictness stays, the close-out is not
+        blocked by a path that never was a lane;
+      - a call site whose contract is to fail loudly re-raises it by name.
+
+    Matching on the message text in those call sites would drift with the wording;
+    the type does not."""
+
+
 def _lane_repo_root(cwd: Path) -> Path:
     """Repo root owning the lane (cross-project, ticket t260903-10): self-anchored by
     the path convention <repo>/.lane/<id> — for multi-project tickets (project root ≠
@@ -4403,7 +4421,7 @@ def _lane_repo_root(cwd: Path) -> Path:
       2. otherwise the passed path itself, when it IS a git repo root — the caller
          said where the lane is, so trust it (this is the only honest answer for a
          lane outside the convention);
-      3. otherwise a NAMED refusal (RuntimeError), never REPO_ROOT.
+      3. otherwise a NAMED refusal (LaneRootRefusal, a RuntimeError), never REPO_ROOT.
 
     Arm 3 replaces the old silent fallback to REPO_ROOT — the checkout this process
     happens to live in. That answer made a caller's git queries run against a
@@ -4418,7 +4436,7 @@ def _lane_repo_root(cwd: Path) -> Path:
         return cwd.parent.parent
     if _is_git_repo_root(cwd):
         return cwd
-    raise RuntimeError(
+    raise LaneRootRefusal(
         "worktree path %s is not under .lane/.worktrees and is not a git repo root"
         % cwd)
 
@@ -4727,7 +4745,14 @@ def _ensure_lane_deps(lane_path: Path) -> str:
     # registered worktree of it (a custom-path lane of the engine repo — the
     # resolver's second arm now answers with the lane itself instead of the old
     # silent REPO_ROOT, so equality alone would stop linking its dependencies).
-    if _lane_repo_root(lane_path) != REPO_ROOT and not _is_worktree_of(lane_path, REPO_ROOT):
+    # A refused path names no repo, so it certainly does not name the engine repo: the
+    # link step SKIPS (its documented skip arm — "a cross-project lane gets nothing
+    # linked out") instead of raising inside prepare_workspace (ticket t261029-47).
+    try:
+        owner = _lane_repo_root(lane_path)
+    except LaneRootRefusal:
+        return ""
+    if owner != REPO_ROOT and not _is_worktree_of(lane_path, REPO_ROOT):
         return ""
     linked = []
     for rel in LANE_DEP_SYMLINKS:
@@ -10001,6 +10026,14 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
         收口（既有取舍 d 承袭），但点名后残留可被巡检消费（时间线「泳道拆除告警」行
         原样透传 error，不再笼统一条）。裸 `_git` 对缺失 cwd 会抛 FileNotFoundError，
         故动手前判 `repo.is_dir()`——一个坏仓不得把可回收残留升级成卡票。
+    Third arm (ticket t261029-47): the lane-root resolver refuses a path it cannot place
+    (LaneRootRefusal, t261029-42). Teardown catches it, because its contract is a receipt
+    and never an exception, and because a refused path names no owner repo to clean in.
+    A directory that is gone is the target state already achieved: the receipt stays
+    silent (ok=True / action=teardown / empty error), exactly like a repeated teardown. A
+    directory that still exists is a leftover this activity could not remove, so its
+    error carries the refusal text and the sweeper sees what stayed and why. The refusal
+    is never turned into a REPO_ROOT guess.
     The cleanup recipe is idempotent in outcome (a repeated --quit is harmless). NB
     （260924 幂等重拆精确化，宿主直修令）：重拆已拆泳道时 git 仍 rc=128（not-a-working-
     tree / branch-not-found）——这两形态是「目标态已达成」不是失败，静默通过不谎报警；
@@ -10025,8 +10058,25 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
     # 盘上清单存在性走同一读侧（解析位优先＋老名镜像回落），与 _lane_scopes 不可能漂移
     if not shared.multi_manifest_path(wt, legacy_fallback=True).is_file() and args.repo_worktrees:
         entries = list(args.repo_worktrees)
+    # The resolver's named refusal is the warn-only arm here (ticket t261029-47): this
+    # activity's contract is "a failure returns a receipt, never raises, and restoreable
+    # leftovers never block a close-out". A path the resolver cannot place has no owner
+    # repo to run the worktree/branch cleanup against, and guessing one is exactly the
+    # KI-414 fault — so nothing is cleaned, and the reason travels in the receipt:
+    #   - the path is GONE: the target state is already achieved (the same silent pass a
+    #     repeated teardown gets) — error stays empty, the refusal is only logged, no
+    #     false alarm over a tree that does not exist;
+    #   - the path still EXISTS: a real directory that could not be torn down — named in
+    #     error so a sweeper sees what was left behind and why.
+    # A corrupt/malformed manifest is NOT this arm: it stays fail-closed below.
+    root_refusal = ""
     try:
-        scopes = _lane_scopes(wt, branch, entries=entries)
+        scopes: List[Dict[str, Any]] = _lane_scopes(wt, branch, entries=entries)
+    except LaneRootRefusal as e:
+        root_refusal = str(e)[:400]
+        scopes = []
+        activity.logger.info("[%s] teardown: lane root refused (warn-only, not raised): %s",
+                             args.ticket_id, root_refusal)
     except RuntimeError as e:
         # 与 merge/merge_check 同语义：损坏=人工处置，绝不静默回落单仓锚（那会去清错仓）
         return MergeResult(ok=False, action="failed", error=str(e)[:400])
@@ -10050,9 +10100,13 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
     # （人工处置，绝不静默），与「git 清理失败→ok+点名」不同分支（残留=可回收垃圾；
     # 嵌套仓对象库=不可回收）。守卫自身 IO 故障 → 同样 failed 点名（守卫失效=放大
     # 面，绝不静默放拆）；容器已不在盘上 → 空清单放行（幂等重跑语义维持）。
+    # The refusal arm has no registered tree to scan and touches no directory, so the
+    # guard takes no part in it (nothing it protects can be destroyed on that arm).
     registered_trees = [Path(str(sc["tree"])) for sc in scopes]
+    hazards: List[Dict[str, Any]] = []
     try:
-        hazards = unregistered_nested_repos(wt, registered_trees)
+        if not root_refusal:
+            hazards = unregistered_nested_repos(wt, registered_trees)
     except RuntimeError as e:
         return MergeResult(ok=False, action="failed",
                            error="拆除守卫自身故障（t260916-20，fail-closed 不放拆）：%s"
@@ -10066,7 +10120,11 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
                                  "嵌套仓 %s——不在 repo_worktrees 在册清单，强拆将连带销毁其"
                                  "对象库。%s" % (detail, _gitlink_refusal_note(
                                      [h["path"] for h in hazards])))
-    warns: List[str] = []
+    # Warn contract (ticket t261029-47): a refused root with the directory still on disk
+    # is a real leftover — named in error. A directory that is gone is the target state
+    # already achieved, so error stays empty (the refusal text is already in the log and
+    # a false alarm over a tree that does not exist would be a lie).
+    warns: List[str] = [root_refusal] if (root_refusal and wt.exists()) else []
     # 在容器里）。实测 git 2.x 对「目录已不在但注册还在」的 worktree remove 仍 rc=0
     # （草拟补丁担心的注册残留不成立），此处保持成员先行的确定性序：每次 remove 都锚
     # 在活目录上，不依赖 dangling 注册那条路径。
@@ -10704,6 +10762,23 @@ make_stage_activity = _make_stage_activity
 
 # ---- Integration-test machinery (follow-on to t260829-07): the mechanical test step / unified settling / arbitration / acceptance walkthrough ----
 
+def _settle_refusal_text(worktree: Any, tree: Any, repo: Any) -> str:
+    """The settle refusal sentence — one fault class, one sentence.
+
+    Moved verbatim out of settle_lane (ticket t261029-47) so the two arms that refuse a
+    join-point settle raise the SAME text instead of two drifting copies:
+      - the ownership guard (the tree is not a registered worktree of its repo);
+      - the lane-root resolver's refusal (no owner repo can be named at all — t261029-42);
+        there the `repo` slot carries the resolver's named reason, so the reader sees
+        WHICH check failed.
+    The sentence is surviving product copy (integration/t260901-16 keys on it), so it is
+    carried byte for byte."""
+    # copy-lang-allow:t261029-47-settle-refusal — surviving product copy, moved verbatim
+    return ("settle_lane: worktree %r（解析为 %s）不是其归属仓（%s）的已注册 worktree，"
+            "拒绝回退主树代落盘（静默回退=该落盘的泳道什么都不落还报干净，t260901-16 实锤）"  # copy-lang-allow:t261029-47-settle-refusal
+            % (worktree, tree, repo))
+
+
 @activity.defn
 async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
     """Unified worker-side settle at the join point (during the parallel fork both
@@ -10728,16 +10803,24 @@ async def settle_lane(args: SettleLaneArgs) -> SettleLaneResult:
     # verify ownership per tree and settle per tree. Every tree refuses to fall back to
     # the main tree (a silent fallback = the lane with something to settle lands
     # nothing and reports clean; proven in t260901-16).
-    scopes = _lane_scopes(wt, base_ref=str(args.base_ref or ""),
-                          write_set=list(args.write_set or []))
+    # t261029-47: this activity's contract IS to fail loudly (Fix ② above), so the
+    # resolver's named refusal is NOT folded into a note here — it is re-raised as the
+    # settle refusal, and the text carries the resolver's own reason (the reader must see
+    # WHICH check failed: the path is neither under the lane convention nor a git repo
+    # root — not only "not a registered worktree").
+    try:
+        scopes = _lane_scopes(wt, base_ref=str(args.base_ref or ""),
+                              write_set=list(args.write_set or []))
+    except LaneRootRefusal as e:
+        # No owner repo can be named at all, so the ownership guard's sentence is raised
+        # with the resolver's reason in the repo slot (one refusal per fault class, and
+        # the t260901-16 scenario keys on that sentence).
+        raise RuntimeError(_settle_refusal_text(args.worktree, wt, e))
     notes: List[str] = []
     commits = -1
     for sc in scopes:
         if not _is_worktree_of(sc["tree"], sc["repo"]):
-            raise RuntimeError(
-                "settle_lane: worktree %r（解析为 %s）不是其归属仓（%s）的已注册 worktree，"
-                "拒绝回退主树代落盘（静默回退=该落盘的泳道什么都不落还报干净，t260901-16 实锤）"
-                % (args.worktree, sc["tree"], sc["repo"]))
+            raise RuntimeError(_settle_refusal_text(args.worktree, sc["tree"], sc["repo"]))
         sc_refusal: Dict[str, Any] = {}          # t260915-01 ②：闸拒绝结构化收集口
         sc_note = _settle_worktree_lane(sc["tree"], args.ticket_id, args.stage_id,
                                         args.gen, repo=sc["repo"],

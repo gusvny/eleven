@@ -1780,6 +1780,11 @@
       "anchor": "behaviour",
       "note": "t261029-42 KI-414: the lane repo resolver never substitutes a repository the caller did not name. A worktree under <repo>/.lane/<id> (and the old .worktrees name) still answers that repo, and the convention wins over the lane being a repo root itself; a DIFFERENT git repository outside the convention (plain repo, linked worktree, and the single-scope list _lane_scopes builds - the join point the incident ran through) answers as ITSELF and is carried to a real rev-parse in the named repo, never REPO_ROOT; a path outside the convention that is not a git repo root (plain dir, missing path, subdirectory of a real repo) is a NAMED refusal carrying the path and both checks, never REPO_ROOT; a source lock parses the production function and proves no return path yields REPO_ROOT while the no-answer arm raises, plus a behavioural sentinel with REPO_ROOT pointed at a live repo; and the dependency-symlink call site keeps linking a lane of the ENGINE repo wherever that lane lives while a foreign lane gets nothing.",
       "sync_path": "server/engine/agent_activities.py"
+    },
+    "server/engine/tests/test_t261029_47_warn_contracts_carry_the_refusal.py": {
+      "anchor": "behaviour",
+      "note": "t261029-47 KI-415 fallout of t261029-42: the strict resolver keeps refusing and the warn-only call sites fold that refusal into their receipts. A direct resolver call still raises the NAMED refusal (a RuntimeError subclass carrying the path and both checks) and the scope list merge/merge_check build on refuses the same way (nothing blanket-caught); teardown of a tree that no longer exists answers the silent target-state receipt (ok=True / action=teardown / empty error) while the resolver would still refuse that same path directly, teardown of a tree that still exists answers ok=True with the refusal text in error and leaves the directory untouched, the per-stage settle guard returns its documented empty note, dependency linking skips a lane it cannot place, and settle_lane (whose contract is to fail loudly) re-raises the settle refusal with the resolver's own reason carried in the message.",
+      "sync_path": "server/engine/agent_activities.py"
     }
   },
   "scenarios": {
