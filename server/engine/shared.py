@@ -747,6 +747,12 @@ class ChangedFilesResult:
     # t260925-12 闸段分相计时（additive）：活动自报墙钟秒（执行面，不含 Temporal
     # 调度等待）。0.0=未计时（老回放/旧 dict 回退重建点缺键=缺省值，零行为变化）。
     wall_s: float = 0.0
+    # t261029-18 (additive): the branch name each lane scope actually resolved to,
+    # ``"<scope name>:<branch>"`` in scope order. Empty = an old payload or no scope ran;
+    # a dict-rebuild point that predates this key must keep the default. The gate
+    # projects this onto the ticket face so a resolve/degrade leaves a record after the
+    # worker log rolls over.
+    resolved: List[str] = field(default_factory=list)
 
 
 def gate_phase_timings(phases, wall_s):
@@ -1835,6 +1841,16 @@ def changed_files_blast_radius(changed_files, diff_error: str = "") -> str:
         if n.endswith("/"):
             return "shared"  # 目录折叠条目=范围未知，宁宽勿窄（缺陷②纵深）
         if n.startswith(_SHARED_BASE_PREFIXES):
+            return "shared"
+        # t261029-18 (review C5): a multi-repo lane reports a member-tree path with the
+        # repo directory in front (`<repo>/integration/run_scenarios.py`). A member tree
+        # can carry a shared face itself — the gate resolves verify.yaml over candidate
+        # trees, member trees included (t261019-45). This pure function cannot know the
+        # project's repo names, so it also tests the tail after ONE leading segment.
+        # Matching too much = a full run (slow, safe). Matching too little = a narrowed
+        # round, the unsafe direction this rail exists to close.
+        tail = n.split("/", 1)[1] if "/" in n else ""
+        if tail and tail.startswith(_SHARED_BASE_PREFIXES):
             return "shared"
     return "localized" if seen else "shared"
 
@@ -3882,6 +3898,62 @@ def flatten_branch_suffix(repo_rel: str) -> str:
     return sanitize_branch_segment(str(repo_rel).replace("/", "-"))
 
 
+#: The root-repo tree's name inside a multi-repo lane (that tree's path IS the lane
+#: container). This constant is the ONE source of the `-root` branch suffix
+#: (t261029-18): the mint (`build_repo_worktrees`) and the resolution
+#: (`lane_branch_candidates`) both read it, so the name cannot drift between the two
+#: sides. A literal copied into a second module is the trap this ticket is about.
+ROOT_TREE_NAME = "root"
+
+
+def lane_branch(lane_dir_name: str, tree_name: str = "") -> str:
+    """The lane branch name for ONE tree (the single naming source, t261029-18).
+
+    Empty ``tree_name`` = a single-repo lane: ``lane/<lane dir>``.
+    A tree name (the root tree's ``ROOT_TREE_NAME``, or a member repo's flattened
+    segment) = ``lane/<lane dir>-<tree name>``.
+
+    The mint is `build_repo_worktrees`; the read side is `lane_branch_candidates`.
+    """
+    base = sanitize_branch_segment(lane_dir_name)
+    return ("lane/%s-%s" % (base, tree_name)) if tree_name else ("lane/" + base)
+
+
+def lane_branch_candidates(branch: Any, allow_root_twin: bool = True) -> List[str]:
+    """The branch names to try for a lane, in order (pure function, t261029-18).
+
+    A ``meta.branch`` value can be the multi-repo placeholder ``lane/<id>``
+    (`derive_lane_workspace`) while the root tree's real branch is
+    ``lane/<id>-<ROOT_TREE_NAME>``. The candidate list is therefore: the name as given,
+    then its root-tree twin (built by `lane_branch`, never by a second copy of the
+    suffix).
+
+    ``allow_root_twin=False`` is for a member-repo scope: its twin cannot exist there,
+    so asking for it would only add noise to a failure message.
+
+    Malformed input (non-string / blank) returns an empty list: the caller treats that
+    as "no candidate resolvable" (fail-closed), never as "no change". A name that
+    already ends with ``-<ROOT_TREE_NAME>`` gets no second suffix, so ``-root-root`` is
+    unrepresentable. A name whose lane segment is not already refname-safe gets no twin
+    either (the engine never mints such a name, and inventing one would be a guess).
+    """
+    if not isinstance(branch, str):
+        return []
+    s = branch.strip()
+    if not s:
+        return []
+    suffix = "-" + ROOT_TREE_NAME
+    if not allow_root_twin or s.endswith(suffix):
+        return [s]
+    if not s.startswith("lane/"):
+        return [s]
+    lane_dir = s[len("lane/"):]
+    if not lane_dir or sanitize_branch_segment(lane_dir) != lane_dir:
+        return [s]
+    twin = lane_branch(lane_dir, ROOT_TREE_NAME)
+    return [s] if twin == s else [s, twin]
+
+
 def repos_under(project_root) -> List[pathlib.Path]:
     """The git repos under the project root that a lane can attach to (this section's
     only scanning source of truth).
@@ -4079,18 +4151,19 @@ def build_repo_worktrees(project_root, write_set, lane_dir_name: str) -> List[Di
         raise ValueError("multi-repo lane derivation needs a non-empty write_set "
                          "(write_set is the only input of the ownership derivation)")
     root = pathlib.Path(project_root).resolve()  # macOS /var → /private/var normalization
-    base = sanitize_branch_segment(lane_dir_name)
     entries: List[Dict[str, str]] = []
     seen_branch = set()
     for repo_abs, _paths in resolve_repos_for_paths(project_root, write_set).items():
         repo_rel = pathlib.Path(repo_abs).relative_to(root).as_posix()
         if repo_rel == ".":
             repo_rel = ""  # the root-repo tree (the mixed shape): rel normalized to the empty string
-        # repo_rel="" (the root-repo tree) → name explicitly "root" (the tree path = the
-        # lane container itself); the theoretical collision of a child repo literally
-        # named root is caught by seen_branch fail-closed.
-        name = flatten_branch_suffix(repo_rel) if repo_rel else "root"
-        branch = "lane/%s-%s" % (base, name)
+        # repo_rel="" (the root-repo tree) → name explicitly ROOT_TREE_NAME (the tree
+        # path = the lane container itself); the theoretical collision of a child repo
+        # literally named root is caught by seen_branch fail-closed. The branch name
+        # comes from `lane_branch` — the one naming source the resolution side also
+        # reads (t261029-18).
+        name = flatten_branch_suffix(repo_rel) if repo_rel else ROOT_TREE_NAME
+        branch = lane_branch(lane_dir_name, name)
         if branch in seen_branch:
             raise ValueError("multi-repo branch name collision: %s (repo paths still colliding "
                              "after flattening need a manual rename)" % branch)

@@ -932,6 +932,15 @@ TARGETED_RERUN_PATCH_ID = "dev-lane-targeted-rerun-v1"
 # 空/畸形）→ fail-closed 恒全跑。同构布尔门：旧历史（无本 marker）走 v1 判据逐字
 # 旧行为，在途票不追溯。
 TARGETED_RERUN_FILE_RADIUS_PATCH_ID = "dev-lane-targeted-rerun-file-radius-v1"
+# t261029-18: the branch name of EVERY lane scope goes onto the ticket face (an
+# additive key). The collector now resolves one name per scope (a multi-repo lane's
+# meta.branch is the placeholder `lane/<id>`, while the root tree is on
+# `lane/<id>-root`). The resolve result lands in
+# meta["file_blast_radius_trace"]["resolved_branches"], so "which name was measured"
+# stays readable after the log rolls over (the ticket asks the degrade to reach the gate
+# log; the log face is the activity logger, the ticket face is this key). Same boolean
+# gate as the family: an old history writes no such key and keeps the old behavior.
+CHANGED_FILES_BRANCH_TRACE_PATCH_ID = "dev-lane-changed-files-branches-v1"
 # t260930-02（宿主裁 260930「先 B」）：面计划——快反馈面从「只有上轮红名」扩成
 # 「本次改动面 ∪ 上轮红名」。旧判据的缺口是实打实的：定点轮只跑上轮红名，于是**这次
 # 改动新碰坏了什么**在快反馈里看不见，只能等收口全量跑才发现（白烧一轮）。判定面
@@ -2657,10 +2666,37 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
 
     # ---------- t260923 D：收口全量跑（串行/平行两分支共用） ----------
     def _integ_run_args(self, only_names=(), own_names=()):
-        """集成跑入参构造（t260913-03 唯一真站锁的单写者收拢，260923 D）：
-        apply_skip_pools 策略值只此一处显式置位（语句字面量唯一命中=锁的判据）；
-        主跑传定点面（可空），收口跑传空=全量。attempt=本代数口径与既有调用点
-        逐元素等值。"""
+        """Build the integration-run arguments (the single writer collected by the
+        t260913-03 single-station lock, 260923 D): the apply_skip_pools policy value is
+        set explicitly here only (the literal statement is the lock's criterion); the
+        main run passes the pointed face (may be empty), the closing run passes empty =
+        full run. attempt = this generation's caliber, equal element-wise to the
+        existing call sites.
+
+        t261029-18 (arbitration round 4): a pointed face MUST carry the ticket's
+        declared own scenario names. The runner executes exactly the pointed list; an
+        own name only gets an exemption from pool/roster drops and is never injected
+        (integration/run_scenarios.py own_kept). So "declared own, not in the pointed
+        list" always trips the own-coverage guard
+        (agent_activities.own_coverage_error) with a startup-level error, and that
+        round's pass verdict is voided. The own proof obligation belongs in the run list
+        itself. The union lives in this single writer, so the main run, the closing arm
+        and the quick gate cannot drift apart. An empty only list = the full run, where
+        own names run anyway."""
+        only_names = list(only_names or [])
+        if only_names:
+            # t261029-18 (arbitration round 4): the runner runs EXACTLY the pointed
+            # list and only EXEMPTS own names from pool/roster drops; it never injects
+            # one that the caller left out (integration/run_scenarios.py own_kept).
+            # A pointed round that omits the ticket's own scenario therefore trips the
+            # own-coverage guard (agent_activities own_coverage_error) with a
+            # startup-level error, and every pass of that round is voided. The own proof
+            # obligation belongs IN the run list. The union lives in this one writer, so
+            # the main run, the closing arm and the quick gate cannot drift apart. An
+            # empty only list = the full run, where own names run anyway.
+            for _n in (own_names or ()):
+                if _n not in only_names:
+                    only_names.append(_n)
         return IntegrationRunArgs(
             ticket_id=self.ticket_id,
             worktree=str(self.meta.get("worktree") or ""),
@@ -5649,6 +5685,17 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                         _cf_err = str(getattr(_cf, "error", "") or "")
                         self.meta["file_blast_radius_trace"] = {
                             "changed_files": _cf_files, "error": _cf_err}
+                        if workflow.patched(CHANGED_FILES_BRANCH_TRACE_PATCH_ID):
+                            # t261029-18: which branch each scope was measured on. A
+                            # placeholder that had to fall back to the root-tree name is
+                            # then readable on the ticket face after the worker log rolls.
+                            _cf_resolved = [str(x) for x in
+                                            (getattr(_cf, "resolved", None) or [])]
+                            self.meta["file_blast_radius_trace"]["resolved_branches"] = \
+                                _cf_resolved
+                            if _cf_resolved:
+                                self._log("changed-files resolved branches: %s"
+                                          % ", ".join(_cf_resolved))
                         if _cf_err:
                             # fail-closed 留痕：清单不可得 ≠ 无改动，恒全跑
                             self._log("文件级爆炸半径：改动清单不可得（%s）——恒全跑"

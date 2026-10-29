@@ -127,6 +127,10 @@ import threading
 import time
 
 SCENARIOS = [
+    # ---- t261029-18: a multi-repo lane root tree is on lane/<id>-root ----
+    ("t261029-18-lane-branch-root",
+     "A multi-repo lane's ROOT tree is on lane/<id>-root while the gate hands the placeholder lane/<id>: the file-level blast radius must stop degrading to a full run and the degrade must be readable (ticket t261029-18; incident = project-vision multi-repo tickets timed out in merge_check/verify_lane because git merge-base main lane/<ticket> could not resolve the placeholder, changed_files returned an error, and every round ran the whole suite; grey-box L2, the REAL agent_activities.changed_files and lane_head_sha activities plus the REAL shared.changed_files_blast_radius and shared.targeted_rerun_plan decision faces over REAL git multi-repo lane fixtures - a root worktree on lane/<id>-root, a member worktree on lane/<id>-<member>, and the on-disk repo_worktrees.json the engine writes - offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A the incident shape returns the committed and dirty files of every tree (member paths repo-prefixed) with no error, and the decision narrows instead of the full-run sentinel; B non-vacuity - the placeholder really does not resolve on that lane while the root-tree twin does, and the pre-fix failure input still rides the sentinel; C a multi-repo lane whose manifest is gone must FAIL CLOSED - the resolved root-tree twin is itself the evidence that the lane's root branch is lane/<id>-root, so the root list alone is not the lane's change set (a manifest-free single-repo lane keeps returning its own list, as the control) - and the ordinary path emits one scope line per tree naming the scope and the resolved branch (the ticket's gate-log requirement); D an unresolvable name, a corrupt manifest and a missing member tree each give files=[] plus a named error and the sentinel, and never raise (accepted plan A4); E a member path whose tail is a shared face (a member-repo verify.yaml) reads shared, so a prefixed member path cannot silently narrow the round; F lane_head_sha resolves the root-tree tip on the same real lane (the merge gate's green-run face can be recorded again) and keeps its fail-closed shape for an unresolvable name. tier: the real-git multi-repo lane shape and the composed collect-then-decide seam, which no single component's stub contract can express (the unit tier bans real git). cost: seconds. Why L1 cannot carry it: the unit tier bans real git (server/engine/tests/conftest.py) and this property IS git ref resolution over the assembled lane shape. Why not L3: the workflow arm needs a real worker and Temporal (minutes) and would re-run the same activity; the one link only the assembly holds (the gate handing meta.branch down) is pinned by an engine unit leg. The fixture builder is the shared integration/t260921-09/lib_lane_fixture.py, extended in place for the root-tree entry (no third builder). Intent split: the candidate truth tables, the failure-message matrix, the wall-clock leg and the naming lock belong to developer L1 (server/engine/tests/test_t261029_18_lane_branch_root.py); THIS entry uniquely owns the real-git lane shapes and the composed decision. Anchor: behaviour in integration/test_anchors.json. Accepted plan rev2 contract: ChangedFilesResult.resolved carries '<scope>:<branch>'. Any future red on this face fails the round; git or the engine venv missing = ENV_FAIL exit 2",
+     "sh integration/py_interp.sh integration/t261029-18/sc_t261029_18_lane_branch_root.py", "ro"),
     # ---- t261026-11: the degrade matrix on every read face ----
     ("t261026-11-inspection-coverage-degrade",
      "The inspection-coverage read face must SPEAK on bad data and must render the producer's own payload (ticket t261026-11, host ruling 261026: feed a read face the five payload shapes - missing / unreadable / empty / garbage / the producer's REAL payload - and one rule: a placeholder is allowed only with a reason a person can act on, and the real payload must render what the face promises; grey-box L3, the REAL buildCoverageCore + recordsToAttempts over the archive payload chain, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): the degrade matrix (integration/lib_degrade_matrix.mjs) runs all five shapes - each broken shape must no-throw AND name a reason (the copy words, not a dash), and the real archive payload must render period-x-instance rows with their produced and unreadable copy words. Registered GREEN before the line (ran=12 pass=12); any future red on this face fails the round. Intent split: this entry uniquely owns the coverage face's degrade contract; the five-state copy truth table belongs to t261009-49 (L1/L3 precedent); the funnel/union migration of this face belongs to this ticket's implement stage and may not change the rendered words. matrix lib missing or face module unimportable = FAIL named; node missing = ENV_FAIL exit 2. fast-catch: the coverage read face degrading to a dash or a silent zero on bad archive data (the 261026 host-report class: READER disagrees with WRITER) is caught here in offline seconds instead of at the next human look at the panel",
@@ -8132,6 +8136,33 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
                 {"ran": 0, "missing": missing_only,
                  "error": "点名名单含不在册条目"}, ensure_ascii=False), flush=True)
             return 2
+        # t261029-18 (arbitration rounds 8-16): the documented rule is "a
+        # ticket's own declared scenarios are always in its gate run, whatever
+        # pool they live in". The engine's caliber also unions them
+        # (dev_lane 54308d93+), but a lane's serving worker may still be running
+        # pre-union code, so the executor guarantees the rule itself: append
+        # every declared own name the pointer omitted (dedupe, order kept). A
+        # round that already lists its own names is unaffected (no-op), and a
+        # declared own name absent from the registry keeps the fail-closed
+        # refusal family (named, nothing runs, no side effects).
+        if own_set:
+            _reg_names = {e[0] for e in SCENARIOS}
+            _own_absent = [n for n in own_names if n not in _reg_names]
+            if _own_absent:
+                print("REFUSED [__own_set__] declared own scenario(s) absent from "
+                      "the registry: %s - nothing ran (the own proof is this "
+                      "ticket's obligation; absence = supply bug, fail-closed)"
+                      % ",".join(_own_absent), flush=True)
+                print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)",
+                      flush=True)
+                return 2
+            _own_injected = [n for n in own_names if n not in only_names]
+            if _own_injected:
+                only_names = list(only_names) + _own_injected
+                print("INTEG_OWN_INJECT own scenario(s) joined the pointed face: "
+                      "%d (%s) - the executor guarantees the own proof runs "
+                      "(t261029-18)" % (len(_own_injected),
+                                        ",".join(_own_injected)), flush=True)
         # t261024-40：点名面的池排除逐条归因；自有场景（OWN）**不摘**——在被排除
         # 池里也照排进它自己的池（便宜的池=调度属性，不是少跑理由），并具名
         # own_kept。非自有点名名保持逐字旧语义（落被排除池=不跑，只记归因面）。

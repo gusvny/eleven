@@ -112,20 +112,28 @@ class TempProject:
     def base_ref(self, repo):
         return git_ok("rev-parse", "main", cwd=repo)
 
-    def build_lane(self, tid, repo_specs, write_set):
+    def build_lane(self, tid, repo_specs, write_set, with_manifest=True):
         """多仓泳道：逐仓 worktree add + 清单落盘 + 按仓施加泳道态。
 
         repo_specs: {仓相对路径: {"commit": 写集内改动并提交（泳道得 commit）,
                                    "out_dirty": 写集外未提交脏文件,
                                    "behind": 泳道分支 reset 到 base~1（0 commit 但树≠base）,
-                                   "base_ref": 覆盖清单里的 base_ref（造查询失败形态）}}
-        返回 (lane 目录, manifest 同构列表)。
+                                   "base_ref": 覆盖清单里的 base_ref（造查询失败形态）}}。
+        **键 "" = 根本体树的根树条目**（t261029-18：该树的真分支是 `lane/<id>-root`，
+        即 meta.branch 占位名解析不出来的那个名字；分支名经 shared.lane_branch 单一真源
+        铸造）。根树条目必须先建（它的 worktree 就是泳道目录本身，先建成员仓会让 lane
+        目录非空、worktree add 拒收）。with_manifest=False = 不落清单（造「无清单→单仓
+        回落 / 候选名解析」形态）。返回 (lane 目录, manifest 同构列表)。
         """
         lane = self.root / ".lane" / tid
         entries = []
         for rel, spec in repo_specs.items():
             repo = self.root / rel
-            branch = "lane/%s-%s" % (tid, rel)
+            # t261029-18: the branch name comes from the engine's ONE naming source
+            # (shared.lane_branch). rel="" is the root-repo tree: its real branch is
+            # `lane/<id>-root` — the shape the placeholder meta.branch cannot resolve.
+            import shared as _sh
+            branch = _sh.lane_branch(tid, rel or _sh.ROOT_TREE_NAME)
             git_ok("worktree", "add", "-b", branch, str(lane / rel), cwd=repo)
             tree = lane / rel
             if spec.get("commit"):
@@ -138,12 +146,17 @@ class TempProject:
                 (tree / spec["out_dirty"]).write_text("dirty\n", encoding="utf-8")
             if spec.get("behind"):
                 git_ok("reset", "--hard", "HEAD~1", cwd=tree)
-            entries.append({"repo": rel, "name": rel, "branch": branch,
+            entries.append({"repo": rel,
+                            "name": rel or _sh.ROOT_TREE_NAME, "branch": branch,
                             "base_ref": str(spec.get("base_ref") or self.base_ref(repo))})
-        import agent_activities as _aa  # 清单路径单一真源常量
-        mf = lane / _aa.MULTI_MANIFEST_REL
-        mf.parent.mkdir(parents=True, exist_ok=True)
-        mf.write_text(json.dumps(entries, ensure_ascii=False), "utf-8")
+        if with_manifest:
+            # 清单顺序=实测产物顺序：成员仓在前、根树条目（repo=""）在后。创建顺序
+            # 另说（根树先建），两件事分开；无根树条目的老夹具=稳定排序空操作。
+            entries.sort(key=lambda e: 1 if not e.get("repo") else 0)
+            import agent_activities as _aa  # 清单路径单一真源常量
+            mf = lane / _aa.MULTI_MANIFEST_REL
+            mf.parent.mkdir(parents=True, exist_ok=True)
+            mf.write_text(json.dumps(entries, ensure_ascii=False), "utf-8")
         self.write_set = list(write_set)
         return lane
 

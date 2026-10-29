@@ -5193,6 +5193,47 @@ def _merge_base_ref(branch: str, repo: Path, other: str = "main") -> Tuple[str, 
     return ref, ""
 
 
+def _lane_branch_resolve(branch: str, repo: Path,
+                         allow_root_twin: bool = True) -> Tuple[str, str]:
+    """Resolve a lane branch name in ``repo``, returning ``(resolved, trace)``.
+
+    Why this exists (ticket t261029-18): a multi-repo lane's ``meta.branch`` is the
+    placeholder ``lane/<id>`` (`shared.derive_lane_workspace`), while the root tree's
+    real branch is ``lane/<id>-root`` (`shared.build_repo_worktrees`). Git cannot see
+    the placeholder, so every consumer that hands ``meta.branch`` to git fails closed
+    and the file-level blast radius degrades to "run the whole suite".
+
+    The candidate list comes from `shared.lane_branch_candidates` — the SAME naming
+    source the mint reads, so the suffix cannot drift between the two sides.
+    ``allow_root_twin`` is False for a member-repo scope: its twin cannot exist there.
+
+    The probe is ``rev-parse --verify --quiet <candidate>^{commit}`` (existence of a
+    name only). The baseline stays `_merge_base_ref`'s job, so its failure stance comes
+    along unchanged.
+
+    Empty resolved = resolution failed, and the trace is the detail text for a
+    fail-closed red: it names the refs it tried and the last git error. The caller adds
+    the check it blocks (changed-file list / lane head / ...). No fallback to any other
+    ref, never to the literal main. Never raises.
+    """
+    candidates = shared.lane_branch_candidates(branch, allow_root_twin=allow_root_twin)
+    if not candidates:
+        return "", ("lane branch name is missing or malformed (%r) — nothing to resolve "
+                    "in repo %s" % (branch, repo))
+    last = ""
+    for cand in candidates:
+        p = _git(["rev-parse", "--verify", "--quiet", "%s^{commit}" % cand], repo)
+        if p.returncode == 0 and (p.stdout or "").strip():
+            if cand == candidates[0]:
+                return cand, ""
+            return cand, ("lane branch %r resolved as %r (root-tree name)"
+                          % (branch, cand))
+        last = ((p.stderr or p.stdout or "").strip())[-200:]
+    return "", ("lane branch %r is not resolvable in repo %s (tried %s); git: %s"
+                % (branch, repo, ", ".join(repr(c) for c in candidates),
+                   last or "rev-parse returned nothing"))
+
+
 def _ui_diff_paths(lane_repo: Path, wl_base: str, branch: str,
                    prefixes: Any = None) -> Tuple[List[str], str]:
     """The diff-side shared predicate for UI-ticket detection (KI-044 root fix,
@@ -7568,11 +7609,24 @@ async def lane_head_sha(args: LaneHeadShaArgs) -> LaneHeadShaResult:
     """Resolve the lane branch HEAD sha (read-only, KI-220). Failures do not raise:
     `ok=False` + named error — the caller simply skips recording the green-run face
     for that round (the merge gate then stays red zero-run, fail-closed; a missing
-    face never mints a green)."""
+    face never mints a green).
+
+    t261029-18: the branch name goes through `_lane_branch_resolve` first. The gate
+    hands `meta.branch`, which on a multi-repo lane is the placeholder `lane/<id>` while
+    the worktree here is the root tree on `lane/<id>-root`. Without the resolve this
+    activity failed every round on such a lane, so no green-run face was ever recorded
+    and the merge gate stayed red zero-run. An unresolvable name still returns
+    `ok=False` with a named error (fail-closed face kept).
+    """
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    ref = args.branch or "HEAD"
+    ref, res_trace = _lane_branch_resolve(args.branch or "HEAD", wt,
+                                          allow_root_twin=True)
+    if not ref:
+        return LaneHeadShaResult(ok=False, error=res_trace)
+    if res_trace:
+        activity.logger.info("[%s] lane_head_sha: %s", args.ticket_id, res_trace)
     p = _git(["rev-parse", "--verify", ref], wt)
     if p.returncode != 0:
         return LaneHeadShaResult(
@@ -12114,25 +12168,57 @@ async def bundle_out_ws_prefixes(args: shared.BundleOutWsArgs) -> shared.BundleO
 
 @activity.defn
 async def changed_files(args: shared.ChangedFilesArgs) -> shared.ChangedFilesResult:
-    """t260925-04 实际改动文件清单收集（文件级爆炸半径的输入面）：
-    `git diff --name-only <merge-base>...<branch>` ∪ `git status --porcelain -z`
-    脏文件，去重返回（仓库根相对路径）。
+    """Collect the actual changed files of a lane (the input face of the file-level
+    blast radius, t260925-04; per-scope since t261029-18).
 
-    **整函数复用既有家族件，故障模式全带**（review 意见 2 落账）：
-    - 基线= `_merge_base_ref`（merge-base(main, branch) 锚泳道仓）：多行畸形取首行
-      留痕、**绝不回退字面 main**（回退钉死基线复活 KI-010；泳道落后 main 时两点差
-      会误判）、解析失败=空 ref=fail-closed 红项文案；
-    - diff 姿态= `_ui_diff_paths` 同款三点差（base...branch）、git 失败 fail-closed
-      返回 error、subprocess 走 `_git` 族（同步有界超时，超时异常由调用方转红；
-      取消即时性是 `_git` 家族既有欠账，本活动沿用同姿态不另立口径）；
-    - 脏文件解析=`_dirty_files_from_status_z`（-z 免 quotePath 歧义、畸形条目丢弃
-      不猜、rename/copy 只取 new；status 带 `-uall` 展开——t260925-04 rework 缺陷②
-      根修：未跟踪目录不折叠成 `dir/`，共享面新文件按真实路径命中前缀表）。
+    Per lane scope (`_lane_scopes`, the single scope source):
+    `git diff --name-only <merge-base>...<branch>` union `git status --porcelain -z`
+    dirty files, deduped, as project-root-relative paths (a member-tree path keeps its
+    repo prefix).
 
-    **fail-closed 方向恒全跑**：branch 空 / merge-base 失败 / diff 失败 / 超时 /
-    status 失败 → error 非空、files=[]；调用方（dev_lane 定点决策）拿到非空 error
-    必须判 shared 恒全跑，**绝不因 files 空收窄**。本活动只收集不决策——爆炸半径
-    判定单写者=shared.changed_files_blast_radius（经 targeted_rerun_plan）。"""
+    The branch name per scope: ``sc["branch"]`` first — on a multi-repo lane that is
+    already the real name from ``meta.repo_worktrees`` / the on-disk manifest. When that
+    name does not resolve, `_lane_branch_resolve` tries the root-tree twin, but only for
+    the root scope (``len(scopes) == 1`` or an empty ``repo_rel``): a member scope has
+    no twin. This closes the t261029-18 defect: the gate hands ``meta.branch`` (the
+    placeholder ``lane/<id>``) and the root tree is on ``lane/<id>-root``.
+
+    One refusal sits on top of the twin: when the twin was needed AND no lane manifest
+    exists, the call fails closed by name. Only a multi-repo root gets the
+    ``lane/<id>-root`` name, and a multi-repo lane's member trees are enumerable only
+    through the manifest, so the root tree's files alone are NOT the lane's change set.
+    Returning them would read ``localized`` and narrow the round while member work stays
+    unseen (the unsafe direction; the pre-fix code failed closed on this shape too). A
+    manifest-free SINGLE-repo lane resolves its own ``lane/<id>`` first and is untouched
+    by the guard.
+
+    Fault modes of the reused family, all carried (review C1):
+    - baseline = `_merge_base_ref` (multi-line malformed keeps the first line and leaves
+      a trace; never falls back to the literal ``main``; an empty ref is a fail-closed
+      named error);
+    - the diff keeps the three-dot stance and is anchored on ``sc["repo"]``;
+    - the dirty-file face keeps ``--porcelain -z`` (no quotePath / rename-arrow
+      ambiguity), `_dirty_files_from_status_z` (rename/copy takes the new side only,
+      malformed entries are dropped, never guessed) and ``--untracked-files=all`` (an
+      untracked directory is not collapsed, t260925-04 rework defect 2);
+    - every rc failure returns ``files=[]`` plus a named error; a git timeout raises out
+      of `_git` as before (the caller turns it into a full run, and the existing unit
+      test pins the propagation).
+
+    New since t261029-18: candidate order and dedupe (`shared.lane_branch_candidates`,
+    no ``-root-root``), and the per-scope union (manifest order, dedupe, repo-prefixed
+    member paths). One failing scope fails the WHOLE call — a partial list must never
+    reach the radius decision.
+
+    Fail-closed direction is always "run the full suite": an empty branch / an
+    unresolvable name / a corrupt manifest / a failed merge-base, diff or status gives a
+    non-empty error and ``files=[]``. The caller (the dev_lane targeted decision) must
+    read a non-empty error as shared. This activity only collects; the radius verdict
+    has one writer, `shared.changed_files_blast_radius` (through `targeted_rerun_plan`).
+
+    ``resolved`` carries ``"<scope name>:<branch>"`` per scope so the gate can project
+    it onto the ticket face (the degrade survives log rotation).
+    """
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
@@ -12141,36 +12227,115 @@ async def changed_files(args: shared.ChangedFilesArgs) -> shared.ChangedFilesRes
         return shared.ChangedFilesResult(
             files=[], error="branch 缺失，改动清单不可得，fail-closed 恒全跑",
             wall_s=time.monotonic() - _t0)
-    base, base_err = _merge_base_ref(args.branch, wt)
-    if not base:
+    # A manifest on disk is what makes a multi-repo lane's member trees enumerable. Read
+    # this BEFORE the scope list: the guard below needs the fact, not a re-derivation.
+    manifest_present = shared.multi_manifest_path(wt, legacy_fallback=True).is_file()
+    try:
+        scopes = _lane_scopes(wt, args.branch, base_ref="", write_set=None)
+    except Exception as e:  # noqa: BLE001 — a corrupt manifest is a named fail-closed red
         return shared.ChangedFilesResult(
-            files=[], error="merge-base 解析失败：%s" % (base_err or "空 ref")[-300:],
-                                      wall_s=time.monotonic() - _t0)
-    p = _git(["diff", "--name-only", "%s...%s" % (base, args.branch)], wt)
-    if p.returncode != 0:
-        return shared.ChangedFilesResult(
-            files=[], error="git diff %s...%s 失败 rc=%s：%s" % (
-                base, args.branch, p.returncode,
-                ((p.stderr or p.stdout or "").strip())[-300:]),
+            files=[],
+            error=("lane manifest unreadable (fail-closed), changed-file list not "
+                   "available: %s: %s" % (type(e).__name__, str(e)[:300])),
             wall_s=time.monotonic() - _t0)
-    diff_files = [ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()]
-    # -uall（t260925-04 rework 缺陷②根修）：porcelain 缺省把未跟踪目录折叠成
-    # `dir/` 一条，折叠条目命中不了 integration/tests/ 等文件级前缀表项 → 共享面
-    # 新文件可漏判。展开到逐文件后前缀表按真实路径判定；changed_files_blast_radius
-    # 侧另留「尾 / 条目=shared」纵深，兜非 -uall 形态的来历不明清单。
-    st = _git(["status", "--porcelain", "-z", "--untracked-files=all"], wt)
-    if st.returncode != 0:
-        return shared.ChangedFilesResult(
-            files=[], error="git status 失败 rc=%s：%s" % (
-                st.returncode, ((st.stderr or st.stdout or "").strip())[-300:]),
-            wall_s=time.monotonic() - _t0)
-    dirty = _dirty_files_from_status_z(st.stdout or "")
+    multi = len(scopes) > 1
     out: List[str] = []
-    for f in list(diff_files) + list(dirty):
-        n = (f or "").strip()
-        if n and n not in out:
-            out.append(n)
-    return shared.ChangedFilesResult(files=out, error="",
+    resolved: List[str] = []
+    for sc in scopes:
+        tag = _scope_tag(sc)
+        name = tag or "root"
+        allow_twin = (not multi) or not str(sc.get("repo_rel") or "")
+        # A tree that is not on disk (or not readable) is a named fail-closed red, not an
+        # exception: `_git` raises OSError from a missing cwd, and a raise is a retry
+        # storm, not a verdict (t261029-18 A4). A git TIMEOUT is not an OSError, so it
+        # still propagates to the caller unchanged.
+        try:
+            branch, br_trace = _lane_branch_resolve(
+                sc["branch"], sc["repo"], allow_root_twin=allow_twin)
+            if not branch:
+                # The check this blocks is named here, not in the shared resolver: that
+                # resolver also serves lane_head_sha, whose red is about the head.
+                return shared.ChangedFilesResult(
+                    files=[],
+                    error=_tagged(tag, "changed-file list unavailable (the merge-base "
+                                       "baseline needs a resolvable branch): %s"
+                                  % br_trace),
+                    wall_s=time.monotonic() - _t0)
+            if br_trace and not manifest_present:
+                # The root-tree twin was needed, and no lane manifest exists. Only a
+                # MULTI-REPO root gets the `lane/<id>-root` name, and a multi-repo lane's
+                # member trees are enumerable ONLY through the manifest. Returning the
+                # root tree's files here would report "localized" and narrow the round
+                # while member work stays unseen (the unsafe direction, measured on a
+                # manifest-absent multi-repo fixture). Fail closed instead: the pre-fix
+                # code also failed closed on this shape, through the merge-base.
+                # A manifest-free SINGLE-repo lane resolves its own `lane/<id>` first, so
+                # this guard never touches it (that control stays green).
+                return shared.ChangedFilesResult(
+                    files=[],
+                    error=_tagged(tag, "changed-file list unavailable: the lane root "
+                                       "branch resolves through the root-tree name %r and "
+                                       "no lane manifest exists — a multi-repo lane's "
+                                       "member trees cannot be enumerated, so the round "
+                                       "must not narrow (fail-closed full run)" % branch),
+                    wall_s=time.monotonic() - _t0)
+            base, base_err = _merge_base_ref(branch, sc["repo"])
+            if not base:
+                return shared.ChangedFilesResult(
+                    files=[],
+                    error=_tagged(tag, "merge-base failed for branch %r in repo %s: %s" % (
+                        branch, sc["repo"], (base_err or "empty ref")[-300:])),
+                    wall_s=time.monotonic() - _t0)
+            p = _git(["diff", "--name-only", "%s...%s" % (base, branch)], sc["repo"])
+            if p.returncode != 0:
+                return shared.ChangedFilesResult(
+                    files=[],
+                    error=_tagged(tag, "git diff %s...%s failed in repo %s (rc=%s): %s" % (
+                        base, branch, sc["repo"], p.returncode,
+                        ((p.stderr or p.stdout or "").strip())[-300:])),
+                    wall_s=time.monotonic() - _t0)
+            # -uall (t260925-04 rework defect 2 root fix): plain porcelain folds an
+            # untracked directory into one `dir/` entry, and that entry cannot hit a
+            # file-level prefix such as integration/tests/, so a new file on a shared
+            # face could be missed. Expand to one path per file, then let the prefix
+            # table judge the real path. changed_files_blast_radius keeps the second
+            # line of defense (a trailing-slash entry is shared) for a list that did not
+            # come from this -uall shape.
+            st = _git(["status", "--porcelain", "-z", "--untracked-files=all"], sc["tree"])
+            if st.returncode != 0:
+                return shared.ChangedFilesResult(
+                    files=[],
+                    error=_tagged(tag, "git status failed in tree %s (rc=%s): %s" % (
+                        sc["tree"], st.returncode,
+                        ((st.stderr or st.stdout or "").strip())[-300:])),
+                    wall_s=time.monotonic() - _t0)
+        except OSError as e:
+            return shared.ChangedFilesResult(
+                files=[],
+                error=_tagged(tag, "lane tree unreadable for scope %r (changed-file list "
+                                   "not available, fail-closed): %s: %s"
+                              % (name, type(e).__name__, str(e)[:200])),
+                wall_s=time.monotonic() - _t0)
+        prefix = ("%s/" % sc["repo_rel"]) if sc.get("repo_rel") else ""
+        scope_files = ([ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip()]
+                       + _dirty_files_from_status_z(st.stdout or ""))
+        added = 0
+        for f in scope_files:
+            n = (f or "").strip()
+            if not n:
+                continue
+            path = prefix + n
+            if path not in out:
+                out.append(path)
+                added += 1
+        resolved.append("%s:%s" % (name, branch))
+        # t261029-18 (review C6): the resolve/degrade must be readable on the gate log
+        # face (server/engine/data/worker-<tid>.log), not only in the receipt.
+        activity.logger.info(
+            "[%s] changed_files: scope=%s branch=%s base=%s files=%d%s",
+            args.ticket_id, name, branch, (base or "?")[:7], added,
+            ("; " + br_trace) if br_trace else "")
+    return shared.ChangedFilesResult(files=out, error="", resolved=resolved,
                                      wall_s=time.monotonic() - _t0)
 
 

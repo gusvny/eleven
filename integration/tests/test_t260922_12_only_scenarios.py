@@ -356,3 +356,40 @@ def test_own5_own_in_nonexcluded_pool_is_plain_pointed_run(h):
     assert "INTEG_OWN_KEPT" not in out
     s = summary_of(out)
     assert s and s["ran"] == 1 and s["expected"] == 1, s
+
+
+# ---------------- t261029-18: the executor guarantees the own proof ----------
+# Doc rule (t261024-60 user words): "a ticket's OWN declared scenarios are always
+# in its gate run, whatever pool they live in." The engine's caliber also unions
+# them (dev_lane, round 5), but a lane's serving worker may still run pre-union
+# code, so the executor itself injects a declared own name that a pointed round
+# omitted. These legs pin the injection, its no-op control and its refusal.
+
+def test_own6_pointed_round_injects_the_omitted_own_name(h):
+    """t261029-18: a pointed round whose list omits a declared own name still RUNS
+    it (executor guarantee), and the join is named on the round."""
+    rc, out, ran = h.drive(TRIO, only_env="t922-a", own_env="t922-b")
+    assert rc == 0, out[-400:]
+    assert ran == ["t922-a", "t922-b"], "自有场景必须起跑（实得 %r）" % ran
+    assert "INTEG_OWN_INJECT" in out, "并入必须具名（不是静默加跑）"
+    s = summary_of(out)
+    assert s and s["ran"] == 2 and s["expected"] == 2, s
+
+
+def test_own7_no_injection_when_the_pointer_already_lists_the_own_name(h):
+    """Control: a round that already lists its own name is byte-stable (no join
+    line, unchanged counts) — the pinned t261024-40 expectations rest on this."""
+    rc, out, ran = h.drive(TRIO, only_env="t922-a,t922-b", own_env="t922-b")
+    assert rc == 0 and ran == ["t922-a", "t922-b"], ran
+    assert "INTEG_OWN_INJECT" not in out
+    s = summary_of(out)
+    assert s and s["ran"] == 2 and s["expected"] == 2, s
+
+
+def test_own8_omitted_own_name_absent_from_the_registry_refuses_by_name(h):
+    """Fail-closed: a declared own name that the pointer omitted AND the registry
+    does not hold refuses before anything runs (a refused start is a gate error)."""
+    rc, out, ran = h.drive(TRIO, only_env="t922-a", own_env="ghost-own")
+    assert rc == 2 and ran == [], (rc, ran)
+    assert "REFUSED [__own_set__]" in out and "ghost-own" in out
+    assert "SCENARIOS ran=0" in out
