@@ -33,9 +33,18 @@ REPO = os.path.dirname(INTEG)
 sys.path.insert(0, INTEG)
 import lib_naming  # noqa: E402
 
+#: Whole-token start (t261030-05). A name character before the retired name means the
+#: text belongs to some OTHER identifier: `project-content-integ-run-x.lock` is the SISTER
+#: project's literal in ticket t261029-38's receipts, and matching it made this
+#: guard's verdict depend on unrelated tree content — six such lines reddened the
+#: whole develop line while the same tree judged green once they were absent. The
+#: retired name is what comes back, not every string that ends with it. `.suyou`
+#: stays outside the boundary because it is a directory name, not an identifier.
+_TOKEN_START = r"(?<![A-Za-z0-9])"
 OLD_RE = re.compile(
-    r"SUYOU_[A-Za-z0-9_]+|suyou-poc|suyou-ticket|suyou-dispatcher|\.suyou"
-    r"|suyou-ws|suyou-selfcheck|suyou-integ|suyou-settle|suyou-session|suyou-test")
+    _TOKEN_START + r"(?:SUYOU_[A-Za-z0-9_]+|suyou-poc|suyou-ticket|suyou-dispatcher"
+    r"|suyou-ws|suyou-selfcheck|suyou-integ|suyou-settle|suyou-session|suyou-test)"
+    r"|\.suyou")
 PLUGIN_REF_RE = re.compile(
     r"project-registry\.ts|suyou-temporal-tools|suyou-knowledge|suyou-workbench")
 
@@ -160,6 +169,16 @@ def main():
             "naming-compat fixture 行豁免")
     r.check(not allowed("x.py", 'os.environ["SUYOU_AGENT_CMD"]'),
             "无标记旧名读点不豁免")
+    # Precision controls (t261030-05): the guard must bite the retired name and only
+    # the retired name. The sister project's literal is the measured false positive.
+    r.check(not scan_text('(root / "project-content-integ-run-x.lock").write_text("lock")'),
+            "sister-project literal (project-content) is not the retired name")
+    r.check(scan_text('(root / "suyou-integ-run-x.lock").write_text("lock")'),
+            "the same line with the retired name still fires (teeth kept)")
+    r.check(scan_text("SANDBAR_SUYOU_QUEUE = 1"),
+            "an underscore-prefixed name still fires (boundary is alphanumeric-only)")
+    r.check(scan_text('mkdir(base / ".suyou")'),
+            ".suyou directory name keeps its own shape")
 
     r.finish()
 
