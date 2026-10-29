@@ -12,7 +12,11 @@ stage_state=running，用户看到一张永远在跑、永不动弹的票）；(
      标题诚实——绝不出现「查询超时，刷新重试」占位符（KI-018① 家族：错误文案不得
      顶替数据字段）；巡检行票身份（实例/期号）不因失败丢失；
   B. dev-lane 形失败行同口径（极简行不再 status=""/awaiting 被 UI 缺省推成在跑），
-     行键集 parity（不加新键，t260915-08 R9 口径）；
+     行键集 parity（除唯一加键 identity_note 外不加新键，t260915-08 R9 口径）。
+     260929 re-point (t261029-32; contract from t261028-17 / KI-391): the row family
+     has ONE documented additive key, `identity_note` — diagnostics ride there and
+     `title` stays clean. The pin allows the family keys plus `identity_note`, and
+     still fails on any OTHER new key;
   C. 终态失败票详情：回执 kind=terminal（KI-025 分级不变）、文案仍明说「刷新无效」
      （绝不诱导刷新/绝不谎报瞬时/绝不谎报不存在），并带可渲染失败面 face：
      执行状态、失败原因串、终态时刻、票身份（巡检含实例与期号）、「无快照及为何无」
@@ -358,6 +362,15 @@ DEV_ROW_KEYS = {"id", "project", "epic", "role", "status", "title", "workflow", 
                 # 引擎 UT DEVLANE_ROW_KEYS、t260915-08 场景 pinned 钉同一键集）。
                 "lane_version", "develop_line"}
 
+# t261028-17 (KI-391) — the row family's ONE documented additive key. That ticket
+# moved the diagnostics (timeout/no-poller cause, durable-stage label, archive
+# identity note, reconciliation label) OUT of `title` and into `identity_note`, on
+# every dev-lane shape (empty string when there is nothing to report), and stated
+# that keyset parity is preserved for every OTHER key. The failed-row parity pin
+# therefore allows exactly DEV_ROW_KEYS plus this note slot: the note slot stays an
+# intentional addition, and any other new key still fails.
+IDENTITY_NOTE_KEY = "identity_note"
+DEV_ROW_ALLOWED_KEYS = DEV_ROW_KEYS | {IDENTITY_NOTE_KEY}
 
 
 # ---------------------------------------------------------------- face 宽容读取（灰盒浅绑定）
@@ -448,9 +461,30 @@ def main() -> int:
             check_failed_row_shape(row, "B dev 失败行")
             ok(row.get("project") == "sandbar",
                "行 project 不丢（SA 真源；got %r）" % row.get("project"))
-            ok(set(row.keys()) == DEV_ROW_KEYS,
-               "dev 失败行键集 parity（不加新键，t260915-08 R9 口径；diff=%r）"
-               % (set(row.keys()) ^ DEV_ROW_KEYS))
+            # t261028-17/KI-391 re-point: the allowed set is the row family's keys
+            # plus the ONE documented additive note slot. Teeth unchanged — every
+            # family key must be present, the note slot must be present (the failed
+            # shape always carries it, empty when silent), and any OTHER key fails
+            # with its name in the message.
+            row_keys = set(row.keys())
+            _missing = DEV_ROW_ALLOWED_KEYS - row_keys
+            _extra = row_keys - DEV_ROW_ALLOWED_KEYS
+            ok(not _missing and not _extra,
+               "dev 失败行键集 parity（家族键齐全 + 唯一加键 identity_note，"
+               "t260915-08 R9 口径；missing=%r extra=%r）"
+               % (sorted(_missing), sorted(_extra)))
+            # TEETH (this case has no self-test leg, so the mutation recipe lives
+            # here as a runnable proof). A scratch copy keeps its own path roots
+            # wrong, so point HERE/REPO in the copy at the real case dir and repo
+            # root, then mutate the fixture row. Verified 261029:
+            #   cp integration/t260919-02/sc_terminal_face_board.py /tmp/mut.py
+            #   in /tmp/mut.py: HERE = Path('<repo>/integration/t260919-02'),
+            #                    REPO = Path('<repo>')
+            #   insert  row["bogus_extra_key"] = 1  after
+            #           row = row_of(res, "t-dev-failed")
+            #   python3 /tmp/mut.py -> FAIL ... extra=['bogus_extra_key'] (pass=55 fail=1)
+            #   row.pop("identity_note")            -> FAIL ... missing=['identity_note']
+            # The same copy without any mutation stays pass=56 fail=0.
 
         # ---- C 组：终态详情失败面（验收②）----
         print("== C 组：FAILED 巡检票详情=诚实错误+可渲染失败面 ==")
