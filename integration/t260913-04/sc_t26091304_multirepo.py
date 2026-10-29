@@ -73,7 +73,9 @@ def run_slice(aa, lane, mode_env):
 
 
 def main():
-    F.require_docker(C)
+    # Premise gate (t261029-30 / KI-373): daemon + agent image are premises,
+    # so a miss is a NAMED ENV_FAIL (exit 2), never a content red.
+    F.require_premises(C)
     tag = F.agent_image_tag(C)
     aa = F.load_engine(C)
 

@@ -47,7 +47,9 @@ def wait_file(container, path, timeout=15):
 
 
 def main():
-    F.require_docker(C)
+    # Premise gate (t261029-30 / KI-373): daemon + agent image are premises,
+    # so a miss is a NAMED ENV_FAIL (exit 2), never a content red.
+    F.require_premises(C)
     tag = F.agent_image_tag(C)   # 镜像缺席=ENV_FAIL 点名构建；声明面缺席=FAIL 棒
 
     print("\n== 镜像依赖面（agent 一进去就能干活）==")

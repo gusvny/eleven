@@ -42,7 +42,7 @@ from lib_lifecycle_case import (  # noqa: E402
     compose_containers,
     compose_networks,
     compose_volumes,
-    docker_present,
+    
     env_guard,
     envfail,
     finish,
@@ -59,6 +59,8 @@ from lib_lifecycle_case import (  # noqa: E402
     stage_tag,
     tcp_open,
 )
+
+from lib_lifecycle_case import require_stage_rig  # noqa: E402  (the ONE stage-premise gate, t261029-30)
 
 TAG = stage_tag("t26091202-burst")
 ROOT = iso_root("burst")
@@ -119,9 +121,10 @@ def assert_subnet_face(projects, table, manual_default, leg):
 
 
 def main():
-    if not docker_present():
-        envfail("docker 缺席——爆发起台面不可验（启动 Docker/OrbStack 后重试）")
-        finish()
+    # Premise gate (t261029-30 / KI-373): the stage rig is a PREMISE, so a
+    # miss is a NAMED ENV_FAIL (exit 2) that names what was probed - never a
+    # content red from an assertion the machine cannot satisfy.
+    require_stage_rig()
 
     table = net_table()
     if not check(len(table) == 256,

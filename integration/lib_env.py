@@ -26,7 +26,10 @@ exit-code priority).
 """
 import os
 import re
+import shutil
+import subprocess
 import sys
+from pathlib import Path
 
 EXIT_PASS = 0
 EXIT_FAIL = 1
@@ -291,3 +294,325 @@ def narrowing_lock_report(py_src: str, mjs_src: str) -> list:
             if p != m:
                 report.append("names[%d] drift: py=%r mjs=%r" % (i, p, m))
     return report
+
+
+# ======================================================================================
+# t261029-30 / KI-373: stage premises are a first-class, NAMED result.
+#
+# A case whose ASSERTION depends on a stage premise that the machine does not
+# provide (a container stage, a uid boundary, a network rig) must not report a
+# content red: the assertion can never hold there, so a red blames the product
+# for an environment that is absent. Such a case reports an ENVIRONMENT failure
+# instead: exit 2, with `ENV_FAIL: <premise> missing (<what was probed>)`.
+#
+# One shared probe, no per-case invention. A case asks this module, and may
+# override only the PROBE FACE (for example: judge the uid boundary inside the
+# container instead of on the host) - never the premise vocabulary and never
+# the miss shape.
+#
+# Injection (`SANDBAR_STAGE_PREMISE_INJECT`) exists for batteries and for a
+# two-direction run without the real stage: `docker-daemon=ready` or
+# `stage-uid-boundary=miss:<observed text>`, comma separated. An injected run
+# prints a PREMISE_INJECT receipt line, so it never passes silently for a real
+# probe. The seam fakes the PREMISE only; the case's assertions still run.
+# ======================================================================================
+
+#: The one "the premise is here" answer. A miss is a PremiseMiss (never None,
+#: never ""), so a caller can never mistake it for success.
+PREMISE_READY = "ready"
+
+#: Closed premise vocabulary. A case that needs a new premise adds it HERE.
+PREM_DOCKER_DAEMON = "docker-daemon"
+PREM_AGENT_IMAGE = "agent-image"
+PREM_MODEL_CREDENTIALS = "model-credentials"
+PREM_STAGE_UID_BOUNDARY = "stage-uid-boundary"
+PREM_STAGE_NETWORK_RIG = "stage-network-rig"
+
+PREMISE_NAMES = (
+    PREM_DOCKER_DAEMON,
+    PREM_AGENT_IMAGE,
+    PREM_MODEL_CREDENTIALS,
+    PREM_STAGE_UID_BOUNDARY,
+    PREM_STAGE_NETWORK_RIG,
+)
+
+#: Environment seam that injects a probe result (battery / two-direction run).
+PREMISE_INJECT_ENV = "SANDBAR_STAGE_PREMISE_INJECT"
+
+#: Stable probe names. A miss names the probe that failed, so a reader knows
+#: which check to look at (not just which premise).
+PROBE_DOCKER_INFO = "docker-info"
+PROBE_DOCKER_IMAGE_LS = "docker-image-ls"
+PROBE_CREDENTIALS_FILE = "credentials-file"
+PROBE_UID_BOUNDARY = "uid-boundary"
+PROBE_NETWORK_RIG = "docker-network-rig"
+
+PREMISE_PROBE = {
+    PREM_DOCKER_DAEMON: PROBE_DOCKER_INFO,
+    PREM_AGENT_IMAGE: PROBE_DOCKER_IMAGE_LS,
+    PREM_MODEL_CREDENTIALS: PROBE_CREDENTIALS_FILE,
+    PREM_STAGE_UID_BOUNDARY: PROBE_UID_BOUNDARY,
+    PREM_STAGE_NETWORK_RIG: PROBE_NETWORK_RIG,
+}
+
+#: What each probe LOOKS FOR. This text is the second half of a miss, so the
+#: reader learns the expected condition, not only the observed one.
+PREMISE_LOOKED_FOR = {
+    PREM_DOCKER_DAEMON:
+        "a reachable docker daemon answering `docker info --format "
+        "{{.ServerVersion}}`",
+    PREM_AGENT_IMAGE:
+        "an image of repository sandbar-agent present in the local image store",
+    PREM_MODEL_CREDENTIALS:
+        "the model credentials file ~/.dsh/.credentials.yaml, present and non-empty",
+    PREM_STAGE_UID_BOUNDARY:
+        "a non-root uid on the execution face whose write to /usr/local is "
+        "refused by the OS",
+    PREM_STAGE_NETWORK_RIG:
+        "a docker rig that lists networks and renders compose files "
+        "(`docker network ls`, `docker compose version`)",
+}
+
+
+class PremiseMiss(object):
+    """A named premise miss: which premise, which probe, what it looked for and
+    what it observed. `reason()` is the text the ENV_FAIL line carries."""
+
+    __slots__ = ("premise", "probe", "looked_for", "observed")
+
+    def __init__(self, premise, probe, looked_for, observed):
+        self.premise = str(premise)
+        self.probe = str(probe)
+        self.looked_for = str(looked_for)
+        self.observed = str(observed)
+
+    def reason(self):
+        return "%s missing (probe %s: looked for %s; observed %s)" % (
+            self.premise, self.probe, self.looked_for, self.observed)
+
+    def __str__(self):
+        return self.reason()
+
+    def __repr__(self):
+        return "PremiseMiss(%r, probe=%r, observed=%r)" % (
+            self.premise, self.probe, self.observed)
+
+    def __eq__(self, other):
+        return (isinstance(other, PremiseMiss)
+                and (self.premise, self.probe) == (other.premise, other.probe))
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return hash((self.premise, self.probe))
+
+
+def _run_bounded(cmd, timeout=20):
+    """One bounded call, one answer, never a hard wait. Returns
+    (rc, stdout, stderr); rc is None when the call could not start at all
+    (absent binary / OSError), which is a different fact from a failing rc."""
+    try:
+        p = subprocess.run([str(c) for c in cmd], capture_output=True, text=True,
+                           timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, "", "%s: %s" % (type(e).__name__, str(e)[:120])
+    return p.returncode, p.stdout or "", p.stderr or ""
+
+
+def _observed_call(rc, out, err):
+    """Compact observed-value text for a bounded call (miss evidence)."""
+    left = ("stdout=%r" % (out or "").strip()[:80]) if (out or "").strip() else ""
+    right = ("stderr=%r" % (err or "").strip()[:120]) if (err or "").strip() else ""
+    if rc is None:
+        return "the call did not start (%s)" % ((err or "").strip()[:120] or "no error text")
+    return "rc=%s %s" % (rc, " ".join(x for x in (left, right) if x) or "no output")
+
+
+# ---------------------------------------------------------------- the probes
+def probe_docker_daemon():
+    """The docker daemon probe. Same one-call bounded shape as run_scenarios'
+    batch_preboot prelude probe: `docker info`, one answer, no retry loop."""
+    if shutil.which("docker") is None:
+        return False, "no docker CLI on PATH"
+    rc, out, err = _run_bounded(["docker", "info", "--format", "{{.ServerVersion}}"])
+    if rc == 0 and (out or "").strip():
+        return True, "server %s" % (out or "").strip()[:40]
+    return False, _observed_call(rc, out, err)
+
+
+def probe_agent_image():
+    """The agent image must be in the local store (this project builds it; there
+    is no registry to pull from)."""
+    if shutil.which("docker") is None:
+        return False, "no docker CLI on PATH"
+    rc, out, err = _run_bounded(
+        ["docker", "image", "ls", "--format", "{{.Repository}}:{{.Tag}}",
+         "sandbar-agent"])
+    if rc != 0:
+        return False, _observed_call(rc, out, err)
+    tags = [ln.strip() for ln in (out or "").splitlines() if ln.strip()]
+    if not tags:
+        return False, "the image store holds no image of repository sandbar-agent"
+    return True, "image %s" % tags[0]
+
+
+def probe_model_credentials():
+    """A real agent round needs real model credentials."""
+    p = Path(os.path.expanduser("~")) / ".dsh" / ".credentials.yaml"
+    try:
+        size = p.stat().st_size
+    except OSError:
+        return False, "absent: %s" % p
+    if size <= 0:
+        return False, "empty file: %s" % p
+    return True, "present: %s (%d bytes)" % (p, size)
+
+
+def uid_boundary_check(run=None):
+    """The ONE uid-boundary check, over any execution face.
+
+    `run(cmd_list)` returns (rc, stdout, stderr) for a command list on the stage
+    face; run=None judges the host process face. The premise holds only when the
+    face runs as a NON-root uid AND /usr/local is NOT writable by it: then, and
+    only then, the OS refuses an out-of-bounds write. On a root face the write
+    succeeds whatever the product does, so the assertion can never hold there
+    (KI-373, measured: image runs as uid=0, /usr/local writable).
+    """
+    if run is None:
+        uid = os.getuid()
+        writable = os.path.isdir("/usr/local") and os.access("/usr/local", os.W_OK)
+        observed = "host uid=%d, /usr/local writable=%s" % (uid, writable)
+    else:
+        rc, out, err = run(["id", "-u"])
+        first = (out or "").strip().splitlines()[0].strip() if (out or "").strip() else ""
+        if rc != 0 or not first.isdigit():
+            return False, ("the stage face did not report a uid (%s)"
+                           % _observed_call(rc, out, err))
+        uid = int(first)
+        rc2, out2, err2 = run(["test", "-w", "/usr/local"])
+        if rc2 not in (0, 1):
+            return False, ("/usr/local writability is not judgeable on the stage face (%s)"
+                           % _observed_call(rc2, out2, err2))
+        writable = rc2 == 0
+        observed = "stage uid=%d, /usr/local writable=%s" % (uid, writable)
+    if uid == 0:
+        return False, observed + " (uid 0: no boundary, the OS refuses no write)"
+    if writable:
+        return False, observed + " (/usr/local writable: the OS refuses no write)"
+    return True, observed
+
+
+def uid_boundary_probe(run=None, face=""):
+    """Probe callable for the `stage-uid-boundary` premise on the given face.
+
+    `face` only labels the miss (for example "docker-exec"), so the reader sees
+    which face was judged without reading the case."""
+    def _probe():
+        return uid_boundary_check(run)
+    _probe.probe_name = PROBE_UID_BOUNDARY + (("@%s" % face) if face else "")
+    return _probe
+
+
+def probe_stage_network_rig():
+    """A stage rig needs the daemon's network face and the compose renderer."""
+    if shutil.which("docker") is None:
+        return False, "no docker CLI on PATH"
+    rc, out, err = _run_bounded(["docker", "network", "ls", "-q"])
+    if rc != 0:
+        return False, "`docker network ls` failed: " + _observed_call(rc, out, err)
+    names = [x for x in (out or "").split() if x.strip()]
+    rc2, out2, err2 = _run_bounded(["docker", "compose", "version"])
+    if rc2 != 0:
+        return False, "`docker compose version` failed: " + _observed_call(rc2, out2, err2)
+    first = (out2 or "").strip().splitlines()[0].strip() if (out2 or "").strip() else "?"
+    return True, "networks=%d compose=%s" % (len(names), first[:60])
+
+
+DEFAULT_PREMISE_PROBES = {
+    PREM_DOCKER_DAEMON: probe_docker_daemon,
+    PREM_AGENT_IMAGE: probe_agent_image,
+    PREM_MODEL_CREDENTIALS: probe_model_credentials,
+    PREM_STAGE_UID_BOUNDARY: uid_boundary_probe(None, face="host"),
+    PREM_STAGE_NETWORK_RIG: probe_stage_network_rig,
+}
+
+
+# ---------------------------------------------------------------- injection seam
+def premise_injections(env=None):
+    """Parse PREMISE_INJECT_ENV into {premise: raw value}. Malformed parts
+    (no `=`) are ignored here: the seam is a battery aid, not user input."""
+    raw = (os.environ if env is None else env).get(PREMISE_INJECT_ENV, "")
+    out = {}
+    for part in str(raw).split(","):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        name, value = part.split("=", 1)
+        if not name.strip():
+            continue          # malformed: a value without a premise name
+        out[name.strip()] = value.strip()
+    return out
+
+
+def _injected_result(premise, env=None):
+    """Injected answer for `premise`, or None when the seam does not cover it."""
+    injected = premise_injections(env)
+    if premise not in injected:
+        return None
+    value = injected[premise]
+    if value == PREMISE_READY:
+        print("PREMISE_INJECT: %s -> ready (injected; the real probe did NOT run; %s)"
+              % (premise, PREMISE_INJECT_ENV), flush=True)
+        return PREMISE_READY
+    observed = value.split(":", 1)[1].strip() if value.startswith("miss:") else value
+    print("PREMISE_INJECT: %s -> miss (injected; the real probe did NOT run; %s)"
+          % (premise, PREMISE_INJECT_ENV), flush=True)
+    return PremiseMiss(premise, PREMISE_PROBE[premise] + "@injected",
+                       PREMISE_LOOKED_FOR[premise], observed or "injected miss")
+
+
+# ---------------------------------------------------------------- the entry points
+def probe_stage_premise(premise, probes=None, env=None):
+    """Ask one premise. Returns PREMISE_READY or a PremiseMiss.
+
+    `probes` injects probe callables ({premise: callable() -> (ok, observed)});
+    an unknown premise name is refused loudly (no per-case inventions). A probe
+    that raises is a MISS, never a pass."""
+    if premise not in PREMISE_NAMES:
+        raise ValueError("unknown stage premise %r (vocabulary: %s)"
+                         % (premise, ", ".join(PREMISE_NAMES)))
+    injected = _injected_result(premise, env)
+    if injected is not None:
+        return injected
+    probe = (probes or {}).get(premise) or DEFAULT_PREMISE_PROBES[premise]
+    try:
+        ok, observed = probe()
+    except Exception as e:  # noqa: BLE001 - a broken probe must not pass
+        ok, observed = False, "the probe raised %s: %s" % (type(e).__name__, str(e)[:120])
+    if ok:
+        return PREMISE_READY
+    name = getattr(probe, "probe_name", PREMISE_PROBE[premise])
+    return PremiseMiss(premise, name, PREMISE_LOOKED_FOR[premise], observed)
+
+
+def stage_premise_miss(premises=None, probes=None, env=None):
+    """First NAMED miss in the given order, or None when every premise is ready.
+
+    Use this form when the case must keep judging its other legs. Use
+    require_stage_premise() for a case whose whole round is void without the
+    premise."""
+    for premise in (PREMISE_NAMES if premises is None else premises):
+        result = probe_stage_premise(premise, probes=probes, env=env)
+        if result != PREMISE_READY:
+            return result
+    return None
+
+
+def require_stage_premise(premises=None, probes=None, env=None):
+    """Gate a whole case on a premise set: a miss prints the named ENV_FAIL and
+    exits 2 (the suite's environment-failure code), never 1 (content red)."""
+    miss = stage_premise_miss(premises, probes=probes, env=env)
+    if miss is not None:
+        env_fail(miss.reason())
+    return PREMISE_READY

@@ -19,11 +19,13 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "integration", "t260910-12"))
 from lib_herd_case import (  # noqa: E402
-    check, cli, compose_containers, docker_present, envfail, finish,
+    check, cli, compose_containers, envfail, finish,
     guarded_down, stage_tag,
 )
 sys.path.insert(0, os.path.join(REPO, "integration"))
 import stage_docker as sd  # noqa: E402
+
+from lib_lifecycle_case import require_stage_rig  # noqa: E402  (the ONE stage-premise gate, t261029-30)
 
 TAG = stage_tag("t26091202-e")
 ROOT = "/tmp/sandbar-t26091202-e"
@@ -45,9 +47,10 @@ def main():
     check(probe.returncode == 0 and "DEFAULT=100" in probe.stdout,
           "C7 缺省保险丝=100（显式断言，非输出观察）")
 
-    if not docker_present():
-        envfail("docker 缺席——失控循环样本不可验")
-        finish()
+    # Premise gate (t261029-30 / KI-373): the stage rig is a PREMISE, so a
+    # miss is a NAMED ENV_FAIL (exit 2) that names what was probed - never a
+    # content red from an assertion the machine cannot satisfy.
+    require_stage_rig()
     os.makedirs(ROOT, exist_ok=True)
     os.makedirs(OUT, exist_ok=True)
     winners, losers = [], []

@@ -37,6 +37,18 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 CLI = os.path.join(REPO, "integration", "stage_docker.py")
 COMPOSE = os.path.join(REPO, "server", "docker-compose.test.yml")
 
+sys.path.insert(0, os.path.join(REPO, "integration"))
+import lib_env  # noqa: E402  (the ONE stage-premise probe, t261029-30 / KI-373)
+
+# Premise vocabulary re-exported for this ticket's cases: ONE definition lives in
+# integration/lib_env.py, a case only picks its premise set.
+PREM_DOCKER_DAEMON = lib_env.PREM_DOCKER_DAEMON
+PREM_STAGE_NETWORK_RIG = lib_env.PREM_STAGE_NETWORK_RIG
+
+#: Every stage case of this ticket needs a daemon to run on AND a rig that lists
+#: networks and renders compose files (the stage CLI builds compose projects).
+STAGE_RIG_PREMISES = (PREM_DOCKER_DAEMON, PREM_STAGE_NETWORK_RIG)
+
 # 与 stage_docker 头注声明的缺省一致（场景不设该 env，即测缺省路径）。
 NET_BASE_DEFAULT = "10.213.0.0/16"
 
@@ -119,6 +131,30 @@ def finish():
 
 
 EXIT_ENV, EXIT_CONFLICT = 2, 3   # stage_docker 档位：EXIT_OK,EXIT_ENV,EXIT_CONFLICT,EXIT_FAIL,EXIT_USAGE = 0,2,3,1,64
+
+
+def require_stage(premises=None, probes=None):
+    """Gate a stage case on its machine premises (t261029-30 / KI-373).
+
+    A miss prints `ENV_FAIL: <premise> missing (<what was probed>)` and exits 2
+    (environment red), never 1 (content red): the case's assertions could not
+    hold on this machine, so a red would blame the product for an absent stage.
+    When every premise is ready the case runs its assertions unchanged.
+    "No docker daemon" is the SAME failure class as "a rig that cannot build a
+    network" - both are premises, both are named, neither is a product red."""
+    global _env_failed
+    miss = lib_env.stage_premise_miss(
+        STAGE_RIG_PREMISES if premises is None else premises, probes=probes)
+    if miss is not None:
+        _env_failed += 1
+        print("ENV_FAIL: %s" % miss.reason(), flush=True)
+        finish()
+    return lib_env.PREMISE_READY
+
+
+def require_stage_rig(probes=None):
+    """The family gate for this ticket's cases: daemon plus network/compose rig."""
+    return require_stage(STAGE_RIG_PREMISES, probes=probes)
 
 
 def up_ok(proc, label):

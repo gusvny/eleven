@@ -14,11 +14,13 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "integration", "t260910-12"))
 from lib_herd_case import (  # noqa: E402
-    FORBIDDEN_PORTS, check, cli, compose_containers, docker_present, env_guard,
+    FORBIDDEN_PORTS, check, cli, compose_containers, env_guard,
     envfail, finish, guarded_down, stage_tag,
 )
 sys.path.insert(0, os.path.join(REPO, "integration"))
 import stage_docker as sd  # noqa: E402
+
+from lib_lifecycle_case import require_stage_rig  # noqa: E402  (the ONE stage-premise gate, t261029-30)
 
 TAG = stage_tag("t26091202-g")
 ROOT = "/tmp/sandbar-t26091202-g"
@@ -37,9 +39,10 @@ def pid_of(port):
 
 
 def main():
-    if not docker_present():
-        envfail("docker 缺席——清场对账不可验")
-        finish()
+    # Premise gate (t261029-30 / KI-373): the stage rig is a PREMISE, so a
+    # miss is a NAMED ENV_FAIL (exit 2) that names what was probed - never a
+    # content red from an assertion the machine cannot satisfy.
+    require_stage_rig()
     os.makedirs(ROOT, exist_ok=True)
     env = {"SANDBAR_STAGE_LOCK_DIR": ROOT}
     base_net = net_count()

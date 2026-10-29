@@ -24,6 +24,7 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "integration", "t260910-12"))
 from lib_herd_case import check, cli, docker_present, envfail, finish, stage_tag  # noqa: E402
+from lib_lifecycle_case import require_stage_rig  # noqa: E402  (the ONE stage-premise gate, t261029-30)
 
 sys.path.insert(0, os.path.join(REPO, "integration"))
 import stage_docker as sd  # noqa: E402
@@ -32,8 +33,13 @@ TAG = stage_tag("t26091202-d")
 
 
 def main():
-    if not docker_present():
-        envfail("docker 缺席——清扫计时/失败可见子用例不可验（C4a 证据子用例仍可跑）")
+    # Premise gate (t261029-30 / KI-373): every leg below drives the stage CLI,
+    # so the stage rig is a PREMISE. Its absence is a NAMED ENV_FAIL (exit 2,
+    # `ENV_FAIL: <premise> missing (...)`) and never a content red: on a host
+    # without a rig this case used to report a red on a lease leg that can only
+    # be judged through the rig. A green here would be a lie as well, so the
+    # round stops at the gate.
+    require_stage_rig()
     root = tempfile.mkdtemp(prefix="t26091202-d-")
     ENV = {"SANDBAR_STAGE_LOCK_DIR": root}
     try:

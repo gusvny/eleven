@@ -35,7 +35,7 @@ from lib_lifecycle_case import (  # noqa: E402
     check,
     cli_async,
     craft_lease,
-    docker_present,
+    
     env_guard,
     envfail,
     extract_json,
@@ -49,6 +49,8 @@ from lib_lifecycle_case import (  # noqa: E402
     up_batch_env_only,
 )
 
+from lib_lifecycle_case import require_stage_rig  # noqa: E402  (the ONE stage-premise gate, t261029-30)
+
 TAG = stage_tag("t26091202-headroom")
 ROOT = iso_root("headroom")
 N_RESIDENT = 6
@@ -59,9 +61,10 @@ ALL = RESIDENTS + BURST
 
 
 def main():
-    if not docker_present():
-        envfail("docker 缺席——名额不挤压面不可验（启动 Docker/OrbStack 后重试）")
-        finish()
+    # Premise gate (t261029-30 / KI-373): the stage rig is a PREMISE, so a
+    # miss is a NAMED ENV_FAIL (exit 2) that names what was probed - never a
+    # content red from an assertion the machine cannot satisfy.
+    require_stage_rig()
 
     holders = []
     keeper = None

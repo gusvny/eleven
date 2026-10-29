@@ -51,7 +51,7 @@ from lib_lifecycle_case import (  # noqa: E402
     compose_networks,
     compose_volumes,
     craft_lease,
-    docker_present,
+    
     edit_lease,
     envfail,
     finish,
@@ -70,6 +70,8 @@ from lib_lifecycle_case import (  # noqa: E402
     up_ok,
     up_stage,
 )
+
+from lib_lifecycle_case import require_stage_rig  # noqa: E402  (the ONE stage-premise gate, t261029-30)
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 TAG = stage_tag("t26091202-sweep")
@@ -136,9 +138,10 @@ def assert_intact(root, proj, ports, leg, want_state=None, want_hold=False):
 
 
 def main():
-    if not docker_present():
-        envfail("docker 缺席——残台清扫面不可验（启动 Docker/OrbStack 后重试）")
-        finish()
+    # Premise gate (t261029-30 / KI-373): the stage rig is a PREMISE, so a
+    # miss is a NAMED ENV_FAIL (exit 2) that names what was probed - never a
+    # content red from an assertion the machine cannot satisfy.
+    require_stage_rig()
 
     gone_i = make_gone_dir()            # 已删目录（(i)/(i-a) 用）
     gone_v = make_gone_dir()            # 已删目录（(v) 用）

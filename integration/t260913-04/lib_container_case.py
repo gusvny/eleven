@@ -19,7 +19,6 @@
 """
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -34,6 +33,17 @@ sys.path.insert(0, str(HERE))                        # 本票目录
 import lib_env  # noqa: E402
 
 EXIT_PASS, EXIT_FAIL, EXIT_ENV_FAIL = lib_env.EXIT_PASS, lib_env.EXIT_FAIL, lib_env.EXIT_ENV_FAIL
+
+# Premise vocabulary re-exported for this ticket's cases: ONE definition lives in
+# integration/lib_env.py (t261029-30 / KI-373), a case only picks its premise set.
+PREM_DOCKER_DAEMON = lib_env.PREM_DOCKER_DAEMON
+PREM_AGENT_IMAGE = lib_env.PREM_AGENT_IMAGE
+PREM_MODEL_CREDENTIALS = lib_env.PREM_MODEL_CREDENTIALS
+PREM_STAGE_UID_BOUNDARY = lib_env.PREM_STAGE_UID_BOUNDARY
+
+#: The premises every container case of this ticket needs before it can judge
+#: anything: a daemon to run on and the agent image to run.
+CONTAINER_STAGE_PREMISES = (PREM_DOCKER_DAEMON, PREM_AGENT_IMAGE)
 
 # ---- 声明契约常量（实现必须兑现；改名=契约变更须过 review）----
 RUNTIME_ENV = "SANDBAR_AGENT_RUNTIME"
@@ -68,7 +78,7 @@ class Checker:
 
     def env(self, reason):
         self.c["env_fail"] += 1
-        print("  ENV_FAIL  %s" % reason, flush=True)
+        print("  ENV_FAIL: %s" % reason, flush=True)
 
     def na(self, reason):
         self.c["na"] += 1
@@ -101,14 +111,43 @@ def sh(*cmd, cwd=None, timeout=120, env=None):
 
 
 def require_docker(C):
-    if shutil.which("docker") is None:
-        C.env("docker 不可用（无 docker 命令）——本票容器面场景一律走 docker，"
-              "启动 Docker/OrbStack 后重试")
+    """Docker availability, expressed through the ONE shared premise probe
+    (t261029-30): a miss is a named ENV_FAIL, never an unnamed message. Kept as
+    the narrow entry for a caller that needs nothing but the daemon."""
+    return require_premises(C, [PREM_DOCKER_DAEMON])
+
+
+def container_exec_run(name, timeout=30):
+    """Execution face for the shared premise probes: run one command list inside
+    the container and answer (rc, stdout, stderr)."""
+    def run(cmd):
+        p = sh("docker", "exec", name, *cmd, timeout=timeout)
+        return p.returncode, p.stdout or "", p.stderr or ""
+    return run
+
+
+def require_premises(C, premises=None, probes=None):
+    """The shared stage-premise gate for this ticket's cases (t261029-30 / KI-373).
+
+    A missing premise is a NAMED environment failure: the case exits 2 with
+    `ENV_FAIL: <premise> missing (...)` and never reports a content red from an
+    assertion the machine cannot satisfy. When every premise is ready the case
+    runs its assertions unchanged."""
+    miss = lib_env.stage_premise_miss(
+        CONTAINER_STAGE_PREMISES if premises is None else premises, probes=probes)
+    if miss is not None:
+        C.env(miss.reason())
         C.finish()
-    p = sh("docker", "info", timeout=30)
-    if p.returncode != 0:
-        C.env("docker daemon 不可用（docker info 失败）：%s" % (p.stderr or "").strip()[:160])
-        C.finish()
+    return lib_env.PREMISE_READY
+
+
+def require_uid_boundary(name):
+    """Gate one premise-dependent leg on the stage uid boundary, judged ON THE
+    STAGE FACE (inside the running container `name`). Returns the named miss, or
+    None when the premise holds and the caller may assert."""
+    probes = {PREM_STAGE_UID_BOUNDARY:
+              lib_env.uid_boundary_probe(container_exec_run(name), face="docker-exec")}
+    return lib_env.stage_premise_miss([PREM_STAGE_UID_BOUNDARY], probes=probes)
 
 
 def agent_image_tag(C):

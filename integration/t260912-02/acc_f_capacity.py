@@ -21,10 +21,12 @@ REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "integration", "t260910-12"))
 from lib_herd_case import (  # noqa: E402
-    check, compose_containers, docker_present, envfail, finish, stage_tag,
+    check, compose_containers, envfail, finish, stage_tag,
 )
 sys.path.insert(0, os.path.join(REPO, "integration"))
 import stage_docker as sd  # noqa: E402
+
+from lib_lifecycle_case import require_stage_rig  # noqa: E402  (the ONE stage-premise gate, t261029-30)
 
 TAG = stage_tag("t26091202-f")
 ROOT = "/tmp/sandbar-t26091202-f"
@@ -33,9 +35,10 @@ BURST = 16
 
 
 def main():
-    if not docker_present():
-        envfail("docker 缺席——并发 16 台不可验")
-        finish()
+    # Premise gate (t261029-30 / KI-373): the stage rig is a PREMISE, so a
+    # miss is a NAMED ENV_FAIL (exit 2) that names what was probed - never a
+    # content red from an assertion the machine cannot satisfy.
+    require_stage_rig()
     os.makedirs(ROOT, exist_ok=True)
     # 锁根纪律（acc_c/acc_d 同款教训）：sd 原语按**进程 env**解析锁根——常驻
     # 租约必须真落在注入面，否则写进生产降级根（泄漏+本场景空转假绿）。

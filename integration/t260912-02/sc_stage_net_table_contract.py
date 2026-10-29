@@ -18,7 +18,9 @@ intent（登记于 run_scenarios.py SCENARIOS，本文件为其执行体）：
 与既有场景 intent 分工：t260912-02-burst-managed-subnets 锚爆发规模下地址池
 零复发（系统行为），本条锚分配器对外契约缝（单台粒度：表内/互异/不漂移/
 还槽/渲染/拒收）；畸形网段底座的真值表归 developer L1（NetAllocTest），
-本条只守 CLI 进程级拒收缝。docker 缺席=ENV_FAIL exit 2。实现段落地前红属
+本条只守 CLI 进程级拒收缝。Premise gate (t261029-30 / KI-373): every leg
+builds a real stage, so a missing stage rig is an ENV_FAIL exit 2 that names the
+premise and what was probed - never a content red. 实现段落地前红属
 预期（TDD 信号），arbitrate/merge 期必须绿。
 """
 import json
@@ -34,14 +36,13 @@ from lib_lifecycle_case import (  # noqa: E402
     cli as _cli,
     compose_containers,
     compose_networks,
-    docker_present,
-    envfail,
     finish,
     guarded_down,
     iso_root,
     last_json,
     net_table,
     network_subnets,
+    require_stage_rig,
     stage_tag,
     tcp_open,
     up_ok,
@@ -114,9 +115,11 @@ def subnets_of(project):
 
 
 def main():
-    if not docker_present():
-        envfail("docker 缺席——网段契约缝不可验（启动 Docker/OrbStack 后重试）")
-        finish()
+    # Premise gate (t261029-30 / KI-373): every leg below builds a real stage,
+    # so the stage rig is a PREMISE, not something the case can work around.
+    # A missing premise is a named ENV_FAIL (exit 2, `ENV_FAIL: <premise>
+    # missing (...)`), never a content red from an assertion that cannot hold.
+    require_stage_rig()
 
     table = set(net_table())
     if not check(len(table) == 256, "受管网段表=256 槽（实得 %d）" % len(table)):

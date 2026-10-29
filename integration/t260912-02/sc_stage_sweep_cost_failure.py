@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib_lifecycle_case import (  # noqa: E402
     check,
     craft_lease,
-    docker_present,
+    
     docker_shim_dir,
     envfail,
     finish,
@@ -41,6 +41,8 @@ from lib_lifecycle_case import (  # noqa: E402
     stage_tag,
     sweep,
 )
+
+from lib_lifecycle_case import require_stage_rig  # noqa: E402  (the ONE stage-premise gate, t261029-30)
 
 TAG = stage_tag("t26091202-sweepcost")
 ROOT = iso_root("sweepcost")
@@ -55,9 +57,10 @@ def timed_sweep(*args, **kw):
 
 
 def main():
-    if not docker_present():
-        envfail("docker 缺席——清扫成本面不可验（启动 Docker/OrbStack 后重试）")
-        finish()
+    # Premise gate (t261029-30 / KI-373): the stage rig is a PREMISE, so a
+    # miss is a NAMED ENV_FAIL (exit 2) that names what was probed - never a
+    # content red from an assertion the machine cannot satisfy.
+    require_stage_rig()
 
     holder = None
     gone = None

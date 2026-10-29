@@ -28,6 +28,16 @@ high-level steps：docker+镜像+凭据三道供给门（缺任一=ENV_FAIL 点�
 真 dsh headless 一轮（工作区内写 + 工作区外写尝试 + git status）→ 机械断言 ①②③④；
 SANDBAR_E2E_REAL=1 时追加长命令子用例与 env 泄漏轮、profile 注入轮（断言 ⑤）。
 
+Premise gate (t261029-30 / KI-373): the cross-boundary legs assert that the OS
+REFUSES the write (② and the "Permission denied" evidence needle). That needs a
+uid boundary on the stage face. When the stage runs as uid 0 with a writable
+/usr/local, nothing refuses the write, so the assertion cannot hold there. The
+case then reports a NAMED ENV_FAIL for the `stage-uid-boundary` premise (one
+shared probe, integration/lib_env.py) and judges neither leg. Docker/image/
+credential supply goes through the same probe: `ENV_FAIL: <premise> missing
+(<what was probed>)`, exit 2 - never a content red (exit 1) from an assertion the
+machine cannot satisfy. When the premises hold, every assertion runs unchanged.
+
 三态：PASS 0 / FAIL 1 / ENV_FAIL 2。settings.yaml 层注入键名待实现段 config 回读证据
 落地后补子用例（本条不猜 dsh 内部键——env 面+profile patch 面先行，已覆盖 D5 的两条主线）。
 engine 池（宽 1；默认 1 轮 ≈ 分钟级，深跑 3 轮）。
@@ -51,14 +61,26 @@ LONG_SEC = 65
 
 
 def require_supply():
-    """供给门：docker / agent 镜像 / 真凭据——缺任一=ENV_FAIL 点名（环境红非产品红）。
-    深跑开关 SANDBAR_E2E_REAL=1 不再参与门禁：缺省也跑单轮基线（闸内真验 B/C）。"""
-    F.require_docker(C)
-    tag = F.agent_image_tag(C)
-    if not (HOME_DSH / ".credentials.yaml").exists():
-        C.env("凭据缺席（%s）——真 agent 子用例无法认证" % (HOME_DSH / ".credentials.yaml"))
-        C.finish()
-    return tag
+    """Premise gate (t261029-30 / KI-373): ONE shared probe, first named miss wins.
+
+    docker / agent image / model credentials are PREMISES here: without them no
+    assertion of this case can hold, so their absence is an environment failure
+    (exit 2, `ENV_FAIL: <premise> missing (...)`) and never a content red. The
+    deep-run switch SANDBAR_E2E_REAL=1 does not take part in the gate: the default
+    path runs one real round too (B/C is judged inside the gate)."""
+    F.require_premises(C, [F.PREM_DOCKER_DAEMON, F.PREM_AGENT_IMAGE,
+                           F.PREM_MODEL_CREDENTIALS])
+    return F.agent_image_tag(C)
+
+
+def uid_boundary_miss():
+    """Ask the SHARED probe for the uid boundary on this round's stage face.
+
+    The outside-write legs assert that the OS REFUSES the write. On a stage that
+    runs as uid 0 with a writable /usr/local nothing refuses it, so the assertion
+    can never hold there (KI-373: measured uid=0, /usr/local writable). A miss is
+    a named ENV_FAIL, never a content red. Returns None when the premise holds."""
+    return F.require_uid_boundary(NAME)
 
 
 def build_lane(tmp):
@@ -230,9 +252,18 @@ def one_round(tag, main_repo, lane, round_tag, extra_env=None, git_probe=False,
     else:
         C.check(inside_ok, "[%s] 正锁：工作区内写成功（沙箱在生效，不是全拒）" % round_tag,
                 "rc=%s tail=%s" % (rc, tail[:200]))
-    C.check(outside_absent(lane, main_repo),
-            "[%s] 负锁：宿主边界不可达（宿主主树/他票路径在容器里不存在；/usr/local "
-            "uid OS 权限拒）零落盘" % round_tag)
+    # Premise (t261029-30 / KI-373): both legs below assert that the OS REFUSES
+    # the out-of-bounds write. That needs a uid boundary on the stage face. When
+    # it is absent the assertions cannot hold, so the round reports ONE named
+    # ENV_FAIL for this premise and judges neither leg - a content red here would
+    # blame the product for a stage the machine does not provide.
+    uid_miss = uid_boundary_miss()
+    if uid_miss is not None:
+        C.env(uid_miss.reason())
+    else:
+        C.check(outside_absent(lane, main_repo),
+                "[%s] 负锁：宿主边界不可达（宿主主树/他票路径在容器里不存在；/usr/local "
+                "uid OS 权限拒）零落盘" % round_tag)
     # 宿主 260914 A 案正用例：容器本地路径（/tmp）可写——容器内已无 dsh 沙箱拦截，
     # 「隔离靠挂载面」不误伤容器内正常干活。首选 agent 亲手写（强证明）；agent 漏步时
     # 以 exec 直写兜底判定（判定对象=容器执行面，不是 agent 服从性），并如实登记走哪条。
@@ -270,9 +301,12 @@ def one_round(tag, main_repo, lane, round_tag, extra_env=None, git_probe=False,
         C.check(hits.get("danger-full-access", False),
                 "[%s] 证据面记录 sandbox mode=danger-full-access（宿主 A 案口径）" % round_tag,
                 "hits=%s" % hits)
-        C.check(hits.get("Permission denied", False),
-                "[%s] 证据面有真实拒绝记录（越界写被拒，非静默）" % round_tag,
-                "hits=%s" % hits)
+        if uid_miss is None:
+            C.check(hits.get("Permission denied", False),
+                    "[%s] 证据面有真实拒绝记录（越界写被拒，非静默）" % round_tag,
+                    "hits=%s" % hits)
+        # uid_miss != None: the "real refusal" needle needs the same uid boundary
+        # premise and the named ENV_FAIL above already covers it - never a red.
 
 
 def main():

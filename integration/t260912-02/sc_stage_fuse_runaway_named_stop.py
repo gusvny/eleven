@@ -34,7 +34,7 @@ from lib_lifecycle_case import (  # noqa: E402
     check,
     cli_async,
     compose_containers,
-    docker_present,
+    
     envfail,
     finish,
     guarded_down,
@@ -43,6 +43,8 @@ from lib_lifecycle_case import (  # noqa: E402
     stage_tag,
     up_batch_env_only,
 )
+
+from lib_lifecycle_case import require_stage_rig  # noqa: E402  (the ONE stage-premise gate, t261029-30)
 
 TAG = stage_tag("t26091202-runaway")
 ROOT = iso_root("runaway")
@@ -54,9 +56,10 @@ WORKERS = 16   # 失控循环的并发形态（16 路循环 200 次，非 200 �
 
 
 def main():
-    if not docker_present():
-        envfail("docker 缺席——保险丝刹停面不可验（启动 Docker/OrbStack 后重试）")
-        finish()
+    # Premise gate (t261029-30 / KI-373): the stage rig is a PREMISE, so a
+    # miss is a NAMED ENV_FAIL (exit 2) that names what was probed - never a
+    # content red from an assertion the machine cannot satisfy.
+    require_stage_rig()
 
     t0 = time.time()
     results = []
