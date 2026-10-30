@@ -27,6 +27,18 @@
 // surfacing, and the twin bundles DRIFTING (KI-052). No known-red booking, no
 // skip, no weakened assertion.
 //
+// S3d condition wait (t261030-50, KI-431 family). The refusal-notice leg used
+// to wait a FIXED settle budget for a DOM condition, so a loaded machine read
+// "not yet" as "never" and reddened a full round twice. It now polls the
+// condition - the engine's named refusal attached to the clicked row's face -
+// and returns the instant it holds, so a healthy machine pays the render, not
+// the ceiling. The ceiling only bounds how long a genuinely missing notice is
+// awaited; it is injectable through SANDBAR_T26101115_REFUSAL_NOTICE_SECS
+// (malformed/non-positive value named and defaulted), and its expiry fails BY
+// NAME with the t261030-46 state fields intact. The assertion is not
+// weakened: a non-empty notice that does not carry the engine's own refusal
+// still reds, because that is the refusal being swallowed or replaced.
+//
 // intent 分界（防 intent 级重复）：
 //   - 行两行组成/悬停/项目块边框/排序控件 → t261008-08 与 t261006-18（本条零重叠）。
 //   - dismiss 的 **答案面**（路由→真 ticket.py→journal 落盘→行离板）与 who/reason
@@ -261,6 +273,82 @@ async function waitFor(cond, ms) {
   try { return await cond() } catch { return false }
 }
 
+// ---------------------------------------------------------------- S3d condition wait (KI-431 family)
+// The refusal notice on the row's face is a CONDITION, not a duration. S3c has
+// already proved the POST reached the engine channel, so the only thing left to
+// observe is the panel rendering the engine's refusal. A FIXED settle budget
+// read "not yet" as "never": on a loaded machine the same path takes ~4x longer
+// (two full rounds measured 116.8s / 117.3s against ~30s standalone) and the leg
+// went red although nothing was swallowed. The wait below therefore polls the
+// condition and returns the instant it holds - its cost on a healthy machine is
+// the render, not a window - and the ceiling only bounds how long a genuinely
+// missing notice is awaited.
+//
+// The ceiling is INJECTABLE through the project's `SANDBAR_*_SECS` convention
+// (same shape as SANDBAR_D2B_PYTEST_BUDGET_SECS / SANDBAR_T26100503_CHILD_READY_SECS):
+// `SANDBAR_T26101115_REFUSAL_NOTICE_SECS`. A malformed or non-positive value is
+// NAMED and falls back to the default - an unreadable knob must never shorten
+// the wait into a false red.
+const NOTICE_SECS_ENV = 'SANDBAR_T26101115_REFUSAL_NOTICE_SECS'
+const DEFAULT_NOTICE_CEILING_S = 180
+const NOTICE_POLL_MS = 200
+const NOTICE_SELECTOR = '[data-wb-dismiss-notice]'
+
+function noticeCeiling() {
+  // (effective ceiling in ms, provenance string) - never silent: the provenance
+  // rides in the pass receipt and in the failing leg's text.
+  const raw = String(process.env[NOTICE_SECS_ENV] ?? '').trim()
+  const fallback = { ms: DEFAULT_NOTICE_CEILING_S * 1000, provenance: 'default' }
+  if (raw === '') return fallback
+  const secs = Number(raw)
+  if (!Number.isFinite(secs)) {
+    return { ms: fallback.ms, provenance: `malformed ${JSON.stringify(raw)} -> default` }
+  }
+  if (!(secs > 0)) {
+    return { ms: fallback.ms, provenance: `non-positive ${JSON.stringify(raw)} -> default` }
+  }
+  return { ms: Math.round(secs * 1000), provenance: `env ${JSON.stringify(raw)}` }
+}
+
+// One probe is one evaluate round with NO Playwright auto-wait: locator
+// text-content waits for attachment up to the action timeout, which would hide
+// the budget from the poll. Errors are data here (the poll keeps trying).
+async function probeNotice() {
+  try {
+    const got = await page.evaluate((sel) => {
+      const el = document.querySelector(sel)
+      return { attached: el !== null, text: el ? String(el.textContent || '').trim() : '' }
+    }, NOTICE_SELECTOR)
+    return { attached: got?.attached === true, text: String(got?.text || ''), error: '' }
+  } catch (e) {
+    return { attached: false, text: '', error: String(e && e.message ? e.message : e).slice(0, 140) }
+  }
+}
+
+// Poll for the refusal notice to attach with non-empty text. Returns
+// { shown, rounds, waitedMs, last, provenance, ceilingMs? } - the verdict and
+// the whole receipt come from here, so "never appeared" is always named.
+async function waitForNotice(ceiling) {
+  const started = Date.now()
+  let rounds = 0
+  let last = { attached: false, text: '', error: '' }
+  for (;;) {
+    rounds += 1
+    last = await probeNotice()
+    if (last.attached && last.text !== '') {
+      return { shown: true, rounds, waitedMs: Date.now() - started, last, provenance: ceiling.provenance }
+    }
+    const elapsed = Date.now() - started
+    if (elapsed >= ceiling.ms) {
+      return {
+        shown: false, rounds, waitedMs: elapsed, last,
+        provenance: ceiling.provenance, ceilingMs: ceiling.ms,
+      }
+    }
+    await new Promise(r => setTimeout(r, Math.min(NOTICE_POLL_MS, Math.max(0, ceiling.ms - elapsed))))
+  }
+}
+
 // 断言绑公开行为（viewport 相交 + DOM 锚 data-*），不绑内部布局/类名主体。
 STEP = 'playwright'
 const pw = await loadPlaywright()
@@ -377,17 +465,32 @@ rec('S3b body carries who+reason only (engine contract unchanged)', bodyOk,
 const traced = stub.readTrace().some(t => t.op === 'ticket:dismiss' && t.id === TARGET)
 rec('S3c request reached the engine channel', traced)
 
-// 拒收原文上脸（桩对该 op 具名拒收；面板必须逐字呈现，绝不吞）。
-const noticeShown = await waitFor(async () =>
-  (await page.locator('[data-wb-dismiss-notice]').textContent().catch(() => ''))?.trim() !== '', 8000)
-if (noticeShown) {
-  rec('S3d refusal surfaces verbatim on the face (never swallowed)', true)
+// S3d: the engine's named refusal must surface VERBATIM on the row's face and
+// must never be swallowed. The engine channel refuses this op with a NAMED
+// text, so the panel has exactly one lawful rendering: that text, on the
+// notice of the ticket whose prompt is open. The wait polls that condition
+// (see waitForNotice above); the assertion keeps its old strength (a non-empty
+// notice could never pass as "swallowed") and reads the engine's own word, so
+// a locally invented message or an emptied refusal cannot pass as the
+// engine's refusal either.
+const ENGINE_REFUSAL_MARK = 'fix17'   // the isolated bench's named dismissal refusal
+const NOTICE_CEILING = noticeCeiling()
+console.log(`[note] S3d condition wait: polling ${NOTICE_SELECTOR} on the ${TARGET} row's`
+  + ` face every ${NOTICE_POLL_MS}ms, ceiling ${NOTICE_CEILING.ms}ms (wait=${NOTICE_CEILING.provenance})`)
+const noticeWait = await waitForNotice(NOTICE_CEILING)
+const noticeCarriesEngineRefusal = noticeWait.shown && noticeWait.last.text.includes(ENGINE_REFUSAL_MARK)
+if (noticeCarriesEngineRefusal) {
+  rec('S3d refusal surfaces verbatim on the face (never swallowed)', true,
+    `the engine refusal attached to the ${TARGET} row's face after ${noticeWait.waitedMs}ms`
+    + ` (${noticeWait.rounds} poll rounds; ceiling ${NOTICE_CEILING.ms}ms,`
+    + ` wait=${noticeWait.provenance}); notice=${JSON.stringify(noticeWait.last.text.slice(0, 120))}`)
 } else {
   // A working bench that swallowed the refusal IS the product claim this leg
   // guards, so the verdict stays a content red - but the receipt must name
-  // what was observed (t261030-46: the historical round booked this leg red
-  // and the record carried nothing but the word 'fail').
-  const diag = await page.evaluate(() => {
+  // what was observed and WHICH condition never held (t261030-46: the
+  // historical round booked this leg red and the record carried nothing but
+  // the word 'fail'; t261030-50: it must also name the ceiling it waited).
+  const diag = await page.evaluate((mark) => {
     const notice = document.querySelector('[data-wb-dismiss-notice]')
     const sb = document.querySelector('.wb-sb') || document.body
     const text = String((sb)?.innerText || '').replace(/\s+/g, ' ')
@@ -395,12 +498,22 @@ if (noticeShown) {
       promptOpen: document.querySelector('[data-wb-dismiss-prompt]') !== null,
       noticeAttached: notice !== null,
       noticeText: notice ? String(notice.textContent || '').slice(0, 120) : '',
-      stubRefusalOnFace: text.includes('fix17'),
+      stubRefusalOnFace: text.includes(mark),
       sidebarText: text.slice(0, 200),
     }
-  }).catch((e) => ({ probeError: String(e).slice(0, 140) }))
+  }, ENGINE_REFUSAL_MARK).catch((e) => ({ probeError: String(e).slice(0, 140) }))
+  const what = noticeWait.shown
+    ? `the notice attached but never carried the engine's named refusal`
+      + ` (${JSON.stringify(ENGINE_REFUSAL_MARK)}); it read`
+      + ` ${JSON.stringify(noticeWait.last.text.slice(0, 120))}`
+    : `the engine refusal notice (${NOTICE_SELECTOR} with non-empty text on the`
+      + ` ${TARGET} row's face) never attached within the ${noticeWait.ceilingMs}ms`
+      + ` ceiling (wait=${noticeWait.provenance}; ${noticeWait.rounds} poll rounds;`
+      + ` last probe: attached=${noticeWait.last.attached}`
+      + ` text=${JSON.stringify(noticeWait.last.text.slice(0, 60))}`
+      + ` error=${JSON.stringify(noticeWait.last.error)})`
   record('S3d refusal surfaces verbatim on the face (never swallowed)', 'fail',
-    `the engine refusal never reached the face within the settle budget: ${JSON.stringify(diag)}`)
+    `${what}: ${JSON.stringify(diag)}`)
 }
 
 // 收掉本框，进 restore 子用例。
