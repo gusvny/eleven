@@ -55,6 +55,23 @@
 // weakened: a non-empty notice that does not carry the engine's own refusal
 // still reds, because that is the refusal being swallowed or replaced.
 //
+// The two directions of the disposition (t261031-05). The 261031 round recorded a
+// refused POST (200 + ok:false) with the prompt gone and no notice. The refusal
+// branch itself never closes the prompt (sidebar.tsx closes it only when the
+// answer carries ok:true), so what the round measured is a STATE LOSS of the
+// sidebar subtree, and the case could not tell it apart because it owned ONE
+// direction only. What it owes and now proves:
+//   1. S3d asserts the prompt face explicitly - the notice renders INSIDE the
+//      prompt, so "the engine refusal surfaced" and "the prompt stayed open" are
+//      ONE claim, and the receipt carries promptOpen: a closed prompt can no
+//      longer pass as a surfaced refusal;
+//   2. S5 drives the ACCEPTED direction on the same bench and the same row: the
+//      stub's channel property is flipped to the engine's acceptance face
+//      (ctrl.accept.dismiss - opt-in, see t260904-17/lib_fix17.mjs), the person's
+//      retry is answered ok:true, and the face must close the prompt AND take the
+//      row off the board, with the project's dismissed count naming where it
+//      went. The legitimate close path is pinned, not assumed.
+//
 // intent 分界（防 intent 级重复）：
 //   - 行两行组成/悬停/项目块边框/排序控件 → t261008-08 与 t261006-18（本条零重叠）。
 //   - dismiss 的 **答案面**（路由→真 ticket.py→journal 落盘→行离板）与 who/reason
@@ -441,6 +458,17 @@ function fixtureRowFacts(stubRef) {
   }
 }
 
+// t261031-05: flip the stub's disposition answer face (S5, the accepted
+// direction). Read-modify-write the ctrl file - the stub itself rewrites it when
+// it accepts, so the served rows are exactly the ones this journey has produced
+// so far. The knob is opt-in: without it the channel keeps refusing by name,
+// which is the property S3p1-S3p3 establish.
+function setAcceptKnob(on) {
+  const cur = JSON.parse(readFileSync(stub.ctrlPath, 'utf8'))
+  cur.accept = on ? { dismiss: true, restore: true } : {}
+  stub.setCtrl(cur)
+}
+
 // One probe of the engine channel the dismiss route spawns. Returns the answer
 // verbatim plus the stub trace rows it produced, so "the channel refused" is
 // observed rather than assumed.
@@ -697,12 +725,21 @@ const noticeWait = await waitForNotice(NOTICE_CEILING)
 // read on both verdict paths: the answer is the fact the 261031 receipt lacked.
 const answerFacts = await wireAnswerFacts()
 const predicateView = stubPredicateView(stub, traceSizeBefore)
+// t261031-05: the notice renders INSIDE the prompt, so "the refusal surfaced" and
+// "the prompt is still on the face" are ONE claim, and the leg asserts both. A
+// refused dismissal that leaves the user with a closed prompt is exactly the
+// 261031 incident; it must never pass as "the refusal surfaced" because some
+// future edit moved the notice out of the prompt, or lost the prompt while the
+// notice survived. The receipt carries promptOpen, so the state is readable
+// without a rerun.
 const noticeCarriesEngineRefusal = noticeWait.shown && noticeWait.last.text.includes(ENGINE_REFUSAL_MARK)
-if (noticeCarriesEngineRefusal) {
+const promptKeptOpen = noticeWait.last.promptOpen === true
+if (noticeCarriesEngineRefusal && promptKeptOpen) {
   rec('S3d refusal surfaces verbatim on the face (never swallowed)', true,
     `the engine refusal attached to the ${TARGET} row's face after ${noticeWait.waitedMs}ms`
     + ` (${noticeWait.rounds} poll rounds; ceiling ${NOTICE_CEILING.ms}ms,`
     + ` wait=${noticeWait.provenance}); notice=${JSON.stringify(noticeWait.last.text.slice(0, 120))}`
+    + `; promptOpen=${noticeWait.last.promptOpen}`
     + `; postAnswer=${JSON.stringify(answerFacts)}`
     + `; firstNoticeProbe=${JSON.stringify(noticeWait.firstProbe)}`
     + `; stubPredicate=${JSON.stringify(predicateView)}`)
@@ -731,7 +768,12 @@ if (noticeCarriesEngineRefusal) {
       sidebarText: text.slice(0, 200),
     }
   }, { mark: ENGINE_REFUSAL_MARK, target: TARGET }).catch((e) => ({ probeError: String(e).slice(0, 140) }))
-  const what = noticeWait.shown
+  const what = noticeWait.shown && noticeWait.last.text.includes(ENGINE_REFUSAL_MARK)
+    ? `the notice carried the engine's named refusal but the prompt was GONE`
+      + ` (promptOpen=${JSON.stringify(noticeWait.last.promptOpen)};`
+      + ` closed after ${JSON.stringify(noticeWait.promptClosedAfterMs)}ms of the wait),`
+      + ` so the refusal had no prompt face to be read on - the 261031 shape`
+    : noticeWait.shown
     ? `the notice attached but never carried the engine's named refusal`
       + ` (${JSON.stringify(ENGINE_REFUSAL_MARK)}); it read`
       + ` ${JSON.stringify(noticeWait.last.text.slice(0, 120))}`
@@ -747,6 +789,7 @@ if (noticeCarriesEngineRefusal) {
   // never read like a refused one, and neither can read like a lost state.
   const state = {
     ...diag,
+    promptKeptOpen,
     postAnswer: answerFacts.last,
     postAnswers: answerFacts.count,
     postAnswersUnread: answerFacts.unread,
@@ -765,8 +808,97 @@ if (noticeCarriesEngineRefusal) {
     `${what}: ${JSON.stringify(state)}`)
 }
 
-// 收掉本框，进 restore 子用例。
-await page.locator('[data-dismiss-cancel]').click().catch(() => {})
+// ---------------------------------------------------------------- S5 the ACCEPTED direction (t261031-05)
+// The legitimate close path must stay exactly what it was: an ACCEPTED dismiss
+// closes the prompt and takes the row off the board. Without this leg the case
+// owned one direction only, so "the prompt closed" could never be told apart from
+// "the prompt was lost" - the hole the 261031 round fell into.
+//
+// The fixture flips its channel property to the engine's acceptance face
+// (ctrl.accept.dismiss: the stub writes the engine's dismissed:{at,who,reason}
+// voucher onto the served row and answers ok:true). The person's retry reuses the
+// prompt the refusal left open - if it is not open (the refusal leg found it
+// lost), the row's own Dismiss control opens it again, so this leg judges the
+// ACCEPTED answer and never the previous leg's outcome.
+STEP = 'dismissal-accept'
+setAcceptKnob(true)
+const acceptTraceSize = stub.traceSizeAt()
+const answersBeforeAccept = wireAnswers.length
+const promptOpenBeforeAccept = await page.evaluate(
+  () => document.querySelectorAll('[data-wb-dismiss-prompt]').length > 0).catch(() => false)
+if (!promptOpenBeforeAccept) {
+  await page.evaluate(`(${FIND_BTN})(${JSON.stringify(TARGET)}, 'Dismiss:').click()`)
+  await prompt.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
+}
+await page.locator('[data-wb-dismiss-reason]').click()
+await page.keyboard.type('retry: the engine accepts this disposition')
+await page.locator('[data-dismiss-confirm]').click()
+await waitFor(async () => wireAnswers.length > answersBeforeAccept
+  && wireAnswers.slice(answersBeforeAccept).every((a) => a.settled), 20000)
+const acceptAnswers = await wireAnswerFacts()
+const acceptAnswer = acceptAnswers.last
+let acceptOkBody = null
+let acceptParseError = ''
+try { acceptOkBody = JSON.parse(String(acceptAnswer?.body ?? '')) } catch (e) {
+  acceptParseError = String(e && e.message ? e.message : e).slice(0, 140)
+}
+const acceptFixtureRow = fixtureRowFacts(stub).row
+const acceptTraced = stub.traceSince(acceptTraceSize).some((t) => t.op === 'ticket:dismiss' && t.id === TARGET)
+rec('S5a the route answered the accepted dismiss with ok:true', acceptAnswer !== null
+  && acceptAnswer.status === 200 && acceptOkBody?.ok === true,
+  `postAnswer=${JSON.stringify(acceptAnswer)}${acceptParseError ? ` parse=${acceptParseError}` : ''}`
+  + `; reachedEngineChannel=${acceptTraced}`
+  + `; fixtureRowAfterAccept=${JSON.stringify(acceptFixtureRow)}`)
+
+// The face: the prompt is closed (and its notice with it - a stale refusal left
+// on a successful dismissal would be its own lie), and the row left the board
+// with the engine's payload as the only reason (the client never flips locally,
+// so the row leaving IS the re-read of ticket-list landing). Both are CONDITIONS:
+// the prompt closes on the answer, the row leaves one fresh list read later, so
+// each is polled with a ceiling instead of read once - a read at the wrong
+// instant must never be booked as "the row stayed".
+const acceptWaitClosed = await waitFor(async () => await page.evaluate(
+  () => document.querySelectorAll('[data-wb-dismiss-prompt]').length === 0), 30000)
+const acceptWaitRowGone = await waitFor(async () => {
+  const controlGone = await page.evaluate(
+    `(${FIND_BTN})(${JSON.stringify(TARGET)}, 'Dismiss:') === null`).catch(() => false)
+  const textGone = await page.evaluate(({ target }) => {
+    const sb = document.querySelector('.wb-sb') || document.body
+    return !String(sb?.innerText || '').includes(target)
+  }, { target: TARGET }).catch(() => false)
+  return controlGone === true && textGone === true
+}, 60000)
+const closedState = await page.evaluate(({ target }) => {
+  const sb = document.querySelector('.wb-sb') || document.body
+  const text = String((sb)?.innerText || '').replace(/\s+/g, ' ')
+  return {
+    promptSlots: document.querySelectorAll('[data-wb-dismiss-prompt]').length,
+    confirmButtons: document.querySelectorAll('[data-dismiss-confirm]').length,
+    noticeAttached: document.querySelector('[data-wb-dismiss-notice]') !== null,
+    targetRowOnFace: text.includes(target),
+    dismissedCounts: [...document.querySelectorAll('[data-wb-dismissed-fold]')]
+      .map((f) => [f.getAttribute('data-wb-dismissed-fold'), f.getAttribute('data-dismissed-count')]),
+    sidebarText: text.slice(0, 200),
+  }
+}, { target: TARGET }).catch((e) => ({ probeError: String(e).slice(0, 140) }))
+rec('S5b accepted dismiss closes the prompt (no stale refusal notice)', acceptWaitClosed
+  && closedState.promptSlots === 0 && closedState.confirmButtons === 0
+  && closedState.noticeAttached === false,
+  `promptClosedWithinCeiling=${acceptWaitClosed}; state=${JSON.stringify(closedState)}`)
+rec('S5c the accepted row leaves the board face (and the project names it dismissed)',
+  acceptWaitRowGone === true && closedState.targetRowOnFace !== true
+  && (closedState.dismissedCounts || []).some(([k, n]) => k === PROJ && n === '1'),
+  `rowLeftWithinCeiling=${acceptWaitRowGone}`
+  + `; rowTextGone=${closedState.targetRowOnFace !== true}`
+  + `; dismissedFolds=${JSON.stringify(closedState.dismissedCounts)}`
+  + `; sidebarText=${JSON.stringify(closedState.sidebarText)}`)
+
+// Leave the face as the next sub-case expects it: the refusal prompt is already
+// closed by the accepted dismissal; this only runs when it is still open (the
+// refusal leg's prompt), bounded so a missing control never costs a blind 30 s.
+const cancelPresent = await page.evaluate(
+  () => document.querySelectorAll('[data-dismiss-cancel]').length > 0).catch(() => false)
+if (cancelPresent) await page.locator('[data-dismiss-cancel]').click({ timeout: 5000 }).catch(() => {})
 
 // S4: restore 同一可见性规则 —— 打开 dismissed 折叠，点 Restore，理由框仍在视口内。
 await page.locator(`[data-wb-dismissed-fold="${PROJ2}"] [data-wb-dismissed-toggle]`).click().catch(() => {})

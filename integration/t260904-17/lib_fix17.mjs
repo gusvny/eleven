@@ -130,6 +130,15 @@ export function buildEngineRepo(stubDir) {
   return engineRepo;
 }
 
+/**
+ * The engine-channel stub. Serves `ticket:list` / `ticket:show` from the ctrl
+ * JSON and REFUSES every other ticket op by name (`fix17 桩不认识 ticket op=…`)
+ * unless the ctrl carries the opt-in acceptance knob added by t261031-05
+ * (`accept: {dismiss: true}` / `{restore: true}`): then dismiss/restore answer
+ * ok:true and write the dismissed voucher onto the served row, which is the
+ * engine's real answer face. Default = refusal, byte for byte, so existing
+ * cases that rely on the refusal predicate are untouched.
+ */
 export function makeTicketStub() {
   const dir = tmpRoot('fix17-shim-');
   const ctrlPath = path.join(dir, 'ctrl.json');
@@ -211,6 +220,38 @@ if tool == 'ticket':
         detail['timeline'] = spec.get('timeline', [])
         detail['pending'] = spec.get('pending', [])
         emit({'ok': True, 'result': detail})
+    # t261031-05: an OPT-IN acceptance face for the disposition ops. The default
+    # stays "every ticket op other than list/show is refused by name" - that
+    # refusal is a property of the CHANNEL and the refusal legs are built on it,
+    # so a ctrl written without the knob behaves byte for byte as before. With
+    # ctrl.accept.dismiss|restore set true the stub plays the engine's real
+    # answer face: it writes the journal voucher onto the served row (the same
+    # dismissed:{at,who,reason} key the engine's ticket-list carries) and
+    # answers ok:true, so the ACCEPTED direction (the row leaves the board)
+    # can be driven end to end on the same bench instead of only the refusal.
+    acc = ctrl.get('accept')
+    if not isinstance(acc, dict):
+        acc = {}
+    if op in ('dismiss', 'restore') and acc.get(op) is True:
+        who = str(payload.get('by', ''))
+        reason = str(payload.get('reason', ''))
+        erows = ctrl.get('tickets')
+        if not isinstance(erows, list):
+            erows = []
+        found = False
+        for t in erows:
+            if isinstance(t, dict) and str(t.get('id', '')) == tid:
+                found = True
+                if op == 'dismiss':
+                    t['dismissed'] = {'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                                      'who': who, 'reason': reason}
+                else:
+                    t.pop('dismissed', None)
+        if not found:
+            emit({'ok': False, 'error': 'fix17 桩：夹具无此票 ' + tid})
+        with open(ctrl_path, 'w') as f:
+            json.dump(ctrl, f)
+        emit({'ok': True, 'result': {'ticket': tid, 'op': op, 'by': who, 'reason': reason}})
     emit({'ok': False, 'error': 'fix17 桩不认识 ticket op=' + str(op)})
 emit({'ok': False, 'error': 'fix17 桩不可达'})
 `;
