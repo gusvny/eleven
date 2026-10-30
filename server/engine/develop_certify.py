@@ -86,6 +86,7 @@ import fcntl
 import json
 import os
 import re
+import signal
 import sys
 import secrets
 import time
@@ -735,52 +736,463 @@ def should_certify(trigger, rows, line, guard_held, now_ms=None,
 
 
 # ---- guard token (current state, not a fact) -------------------------------
+#
+# t261030-19 (KI-420): the guard used to be a bare boolean. A round killed
+# mid-flight (SIGTERM/SIGKILL/timeout/host cleanup) left it held for ever, so
+# every later tick answered ``joined``/``guard_held`` — indistinguishable from
+# "another round is really running" — and the line could never be certified
+# again without a human calling ``guard_release`` by hand.
+#
+# The record now carries the holder's IDENTITY (run id, pid, process group,
+# process start stamp) and the runners the holder spawned. An acquire whose
+# holder process is gone reclaims the guard BY NAME — whose record was stale,
+# which process adopted it, what happened to the orphaned runners — and never
+# silently. The record is also the reader's face: ``round_state`` projects the
+# three states a reader needs (a round is running now / the last round died
+# and was reclaimed / no round has run).
 
-def guard_acquire(path, held_by):
-    """Mark a certification in flight. Returns the guard dict or None when
-    already held (the caller skips the tick — at most one per tick). A
-    corrupt guard file is a loud failure, never read as 'free'."""
-    lock = _acquire_lock(Path(path))
+GUARD_RUNNING = "running"
+GUARD_DIED = "died"
+GUARD_RECLAIMED = "reclaimed"
+GUARD_IDLE = "idle"
+GUARD_NEVER_RAN = "never_ran"
+#: Why a held record was judged reclaimable.
+GUARD_REASON_HOLDER_GONE = "holder_gone"
+GUARD_REASON_PID_REUSED = "holder_pid_reused"
+GUARD_REASON_UNVERIFIABLE = "holder_unverifiable_no_pid"
+#: The runner-side env seams of the round's lifecycle (t261030-19):
+#: ``GUARD_ANCHOR_ENV`` is the anchor a spawned runner registers its own pid in,
+#: so a dead tick's orphan can be adopted and killed; ``OWNER_PID_ENV`` is the
+#: tick whose life the round's face belongs to (a face whose owner is gone
+#: stops writing, never flaps a live round's pointer).
+GUARD_ANCHOR_ENV = "SANDBAR_LINE_ROUND_GUARD"
+OWNER_PID_ENV = "SANDBAR_LINE_ROUND_OWNER_PID"
+#: Bounded waits of an orphaned runner group's adoption. Short on purpose: a
+#: TERM-reachable suite reclaims in seconds, and a KILL is the net.
+ORPHAN_TERM_WAIT_S = 10.0
+ORPHAN_KILL_WAIT_S = 5.0
+#: How often the adoption polls a signalled group (seconds).
+ORPHAN_POLL_S = 0.05
+
+
+def mint_guard_run_id():
+    """The identity a guard holder records: a run id for the ATTEMPT. The
+    certified run id is minted later by the runner; this one names the slot's
+    occupancy, so a reclaim can say whose record was stale."""
+    return "roundtick-%s-%d" % (time.strftime("%Y%m%dT%H%M%SZ",
+                                              time.gmtime()), os.getpid())
+
+
+def _proc_start_stamp(pid):
+    """The process start stamp of ``pid`` (best effort, for pid-reuse
+    detection), or None when it cannot be read. A None never proves death:
+    callers fall back to signal-0 liveness and name the weaker rule."""
+    import subprocess
     try:
-        gp = Path(path).parent / GUARD_NAME
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    try:
+        p = subprocess.run(["ps", "-p", str(pid), "-o", "lstart="],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if p.returncode != 0:
+        return None
+    stamp = (p.stdout or "").strip()
+    return stamp or None
+
+
+def _pid_alive(pid):
+    """Signal-0 liveness: False only when the OS says the pid is gone.
+    A pid we may not signal (another user) counts as alive; an unclassifiable
+    OS error counts as alive (never reclaim on a guess)."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def _holder_identity(state):
+    """The named identity of a guard holder (what a reclaim reports)."""
+    if not isinstance(state, dict):
+        return None
+    out = {}
+    for key in ("by", "run_id", "pid", "pgid", "started_at"):
+        if state.get(key) is not None:
+            out[key] = state[key]
+    return out or None
+
+
+def _holder_liveness(state):
+    """Is the recorded holder still a live process? Returns (alive, reason).
+    A record with no pid cannot prove itself dead (a pre-t261030-19 record, or
+    a truncated one), so it stays held and the reason names why."""
+    pid = state.get("pid") if isinstance(state, dict) else None
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return True, GUARD_REASON_UNVERIFIABLE
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False, GUARD_REASON_HOLDER_GONE
+    except PermissionError:
+        return True, "holder_alive_foreign_user"
+    except OSError:
+        return True, "holder_unverifiable_signal"
+    recorded = state.get("pid_started_stamp")
+    if isinstance(recorded, str) and recorded.strip():
+        now = _proc_start_stamp(pid)
+        if now is not None and now.strip() != recorded.strip():
+            # the pid is alive but it is NOT the process that held the guard
+            return False, GUARD_REASON_PID_REUSED
+    return True, "holder_alive"
+
+
+def _read_guard_state(gp):
+    """The guard record, or None when the file is absent. A corrupt record is
+    a LOUD failure, never read as 'free'."""
+    try:
+        with open(str(gp), encoding="utf-8") as fh:
+            state = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (ValueError, OSError) as e:
+        raise CertifyError("guard_unreadable:%s" % e)
+    if not isinstance(state, dict):
+        raise CertifyError("guard_unreadable:guard_not_object")
+    return state
+
+
+def _write_guard_state(gp, state):
+    """The one guard write face: tmp file in the same directory, fsync,
+    rename — a killed writer never leaves a torn record that would read as
+    'held' (or as 'free')."""
+    gp.parent.mkdir(parents=True, exist_ok=True)
+    tmp = gp.with_name(gp.name + ".tmp-%d" % os.getpid())
+    with open(str(tmp), "w", encoding="utf-8") as fh:
+        json.dump(state, fh, ensure_ascii=False, sort_keys=True)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(str(tmp), str(gp))
+
+
+def _terminate_process_group(pid, pgid=None, entry=None,
+                             term_wait_s=ORPHAN_TERM_WAIT_S,
+                             kill_wait_s=ORPHAN_KILL_WAIT_S):
+    """TERM the recorded group, bounded wait, KILL, bounded wait. Returns one
+    of ``gone`` (already dead before we signalled), ``terminated``,
+    ``killed``, ``still_alive`` (named, never silent), or ``pid_reused`` (the
+    pid now belongs to another process — signalled NOTHING)."""
+    import errno
+    if not _pid_alive(pid):
+        return "gone"
+    entry = entry or {}
+    recorded = entry.get("pid_started_stamp")
+    if isinstance(recorded, str) and recorded.strip():
+        now = _proc_start_stamp(pid)
+        if now is not None and now.strip() != recorded.strip():
+            return "pid_reused"
+    group = pgid if isinstance(pgid, int) and not isinstance(pgid, bool) \
+        and pgid > 0 else int(pid)
+
+    def _sig(sig_value):
         try:
-            with open(str(gp), encoding="utf-8") as fh:
-                state = json.load(fh)
-            if not isinstance(state, dict):
-                raise ValueError("guard_not_object")
-        except FileNotFoundError:
-            state = None
-        except (ValueError, OSError) as e:
-            raise CertifyError("guard_unreadable:%s" % e)
-        if state and state.get("held"):
-            return None
-        state = {"held": True, "by": held_by,
-                 "at": int(time.time() * 1000)}
-        gp.parent.mkdir(parents=True, exist_ok=True)
-        with open(str(gp), "w", encoding="utf-8") as fh:
-            json.dump(state, fh)
-            fh.flush()
-            os.fsync(fh.fileno())
-        return state
-    finally:
-        _release_lock(lock)
+            os.killpg(group, sig_value)
+            return True
+        except OSError as e:
+            if e.errno not in (errno.ESRCH, errno.EPERM):
+                raise
+            try:
+                os.kill(int(pid), sig_value)
+                return True
+            except (ProcessLookupError, OSError):
+                return False
+
+    def _wait_gone(budget_s):
+        deadline = time.monotonic() + budget_s
+        while time.monotonic() < deadline:
+            if not _pid_alive(pid):
+                return True
+            time.sleep(ORPHAN_POLL_S)
+        return not _pid_alive(pid)
+
+    _sig(signal.SIGTERM)
+    if _wait_gone(term_wait_s):
+        return "terminated"
+    _sig(signal.SIGKILL)
+    if _wait_gone(kill_wait_s):
+        return "killed"
+    return "still_alive"
 
 
-def guard_release(path):
-    """Release the guard (normal, error, timeout, cancel — every path that
-    stops a certification ends here; a guard left held would pin the tick)."""
+def _adopt_stale_runners(entries):
+    """Kill the runners a dead holder left behind (KI-421: the killed tick's
+    runner kept writing a round that no longer existed). Returns (results,
+    pending): a group that would not die stays PENDING for the next acquirer,
+    named — never assumed gone.
+
+    TERM comes first on purpose: the runner's own signal path reaps the suite
+    it started in ITS session (start_new_session), so a well-behaved runner
+    takes its whole round tree with it. KILL is the net for a runner that does
+    not answer; a suite that outlives a KILLed runner writes no round face
+    (the face belongs to the runner), and the repo-level sweep stays the net
+    for it (the t261011-21 disposition, unchanged). A pid that now belongs to
+    another process is never signalled (``pid_reused``)."""
+    results, pending = [], []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        pid = entry.get("pid")
+        result = _terminate_process_group(pid, entry.get("pgid"), entry)
+        record = dict(entry)
+        record["result"] = result
+        results.append(record)
+        if result == "still_alive":
+            pending.append({k: entry[k] for k in
+                            ("pid", "pgid", "at", "pid_started_stamp")
+                            if k in entry})
+    return results, pending
+
+
+def _guard_edit(path, mutate, holder_pid=None, run_id=None):
+    """Read-modify-write the guard record under the ledger lock. Returns the
+    new record, or None when the guard is absent/not held/held by somebody the
+    caller may not edit (a foreign holder's record is never rewritten)."""
     lock = _acquire_lock(Path(path))
     try:
         gp = Path(path).parent / GUARD_NAME
-        state = {"held": False, "released_at": int(time.time() * 1000)}
-        gp.parent.mkdir(parents=True, exist_ok=True)
-        with open(str(gp), "w", encoding="utf-8") as fh:
-            json.dump(state, fh)
-            fh.flush()
-            os.fsync(fh.fileno())
-        return state
+        state = _read_guard_state(gp)
+        if not state or not state.get("held"):
+            return None
+        if holder_pid is not None and state.get("pid") != holder_pid:
+            return None
+        if run_id is not None and state.get("run_id") != run_id:
+            return None
+        new = mutate(state)
+        if new is None:
+            return None
+        _write_guard_state(gp, new)
+        return new
     finally:
         _release_lock(lock)
+
+
+def guard_acquire(path, held_by, run_id=None, pid=None, pgid=None):
+    """Mark a certification attempt in flight. Returns the holder record, or
+    None when a LIVE holder already owns the guard (the caller joins, at most
+    one round per tick). A corrupt guard file is a loud failure, never read as
+    'free'.
+
+    A record whose holder process is GONE is reclaimed BY NAME (t261030-19,
+    KI-420): the new record carries ``reclaimed`` = {stale identity, reason,
+    who adopted it, when, what happened to the stale holder's runners}. The
+    stale holder's orphaned runner groups are signalled OUTSIDE the ledger
+    lock, so a dead tick's suite cannot keep writing beside the round that is
+    now starting; a group that survives is left ``adopt_pending`` and named
+    for the next acquirer."""
+    now = int(time.time() * 1000)
+    run_id = str(run_id or "").strip() or mint_guard_run_id()
+    holder_pid = os.getpid() if pid is None else int(pid)
+    if pgid is None:
+        try:
+            holder_pgid = os.getpgid(holder_pid)
+        except OSError:
+            holder_pgid = holder_pid if holder_pid == os.getpid() else None
+    else:
+        holder_pgid = int(pgid)
+    reclaim = None
+    lock = _acquire_lock(Path(path))
+    try:
+        gp = Path(path).parent / GUARD_NAME
+        state = _read_guard_state(gp)
+        if state and state.get("held"):
+            alive, why = _holder_liveness(state)
+            if alive:
+                return None
+            stale_runners = [dict(r) for r in (state.get("runners") or [])
+                             if isinstance(r, dict)]
+            reclaim = {"stale": _holder_identity(state),
+                       "reason": why,
+                       "at": now,
+                       "by": held_by,
+                       "run_id": run_id,
+                       "adopt_pending": stale_runners,
+                       "adopted": []}
+        new = {"held": True, "by": held_by, "run_id": run_id,
+               "pid": holder_pid, "pgid": holder_pgid,
+               "pid_started_stamp": _proc_start_stamp(holder_pid),
+               "started_at": now, "at": now, "runners": []}
+        if reclaim:
+            new["reclaimed"] = reclaim
+        _write_guard_state(gp, new)
+    finally:
+        _release_lock(lock)
+    if reclaim:
+        adopted, pending = _adopt_stale_runners(reclaim["adopt_pending"])
+
+        def _record(state):
+            stamp = dict(state.get("reclaimed") or {})
+            stamp["adopted"] = adopted
+            stamp["adopt_pending"] = pending
+            state["reclaimed"] = stamp
+            return state
+
+        try:
+            _guard_edit(path, _record, run_id=run_id)
+        except CertifyError as e:
+            sys.stderr.write("LINE_GUARD adopt record failed: %s\n" % e)
+        reclaim["adopted"] = adopted
+        reclaim["adopt_pending"] = pending
+        new["reclaimed"] = reclaim
+        sys.stderr.write(
+            "LINE_GUARD reclaimed: stale holder %r (%s) adopted by %r run=%s; "
+            "runners=%r pending=%r\n"
+            % (reclaim["stale"], reclaim["reason"], held_by, run_id,
+               adopted, pending))
+    return new
+
+
+def guard_attach_runner(path, pid, pgid=None):
+    """Record a runner this holder spawned in the guard (t261030-19). This is
+    what makes an orphan findable: a killed tick cannot clean up, so the next
+    acquirer reads the dead holder's runner list and adopts it. Only the
+    holder's own process edits the record; anything else is left untouched and
+    reported as None."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+
+    def _mutate(state):
+        runners = [r for r in (state.get("runners") or [])
+                   if isinstance(r, dict)]
+        entry = {"pid": pid, "at": int(time.time() * 1000)}
+        if isinstance(pgid, int) and not isinstance(pgid, bool) and pgid > 0:
+            entry["pgid"] = pgid
+        stamp = _proc_start_stamp(pid)
+        if stamp:
+            entry["pid_started_stamp"] = stamp
+        runners.append(entry)
+        state["runners"] = runners
+        return state
+
+    return _guard_edit(path, _mutate, holder_pid=os.getpid())
+
+
+def guard_detach_runner(path, pid):
+    """Forget a runner whose wait already ended (every terminal path)."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+
+    def _mutate(state):
+        state["runners"] = [r for r in (state.get("runners") or [])
+                            if isinstance(r, dict) and r.get("pid") != pid]
+        return state
+
+    return _guard_edit(path, _mutate, holder_pid=os.getpid())
+
+
+def guard_release(path, run_id=None):
+    """Release the guard (normal, error, timeout, cancel — every path that
+    stops a certification ends here; a guard left held would pin the tick).
+
+    The released record KEEPS the round's identity and the reclaim stamp, so
+    the receipt still says which round released the slot and whether a dead
+    predecessor was reclaimed before it (t261030-19: 'no round has run' and
+    'the last round died' must never read the same). A guard held by ANOTHER
+    LIVE process is left untouched and named — the loser of a race must never
+    release the winner's slot."""
+    now = int(time.time() * 1000)
+    lock = _acquire_lock(Path(path))
+    try:
+        gp = Path(path).parent / GUARD_NAME
+        state = _read_guard_state(gp)
+        holder = state if (state and state.get("held")) else {}
+        if holder:
+            alive, why = _holder_liveness(holder)
+            mine = holder.get("pid") == os.getpid()
+            named = run_id is not None and holder.get("run_id") == run_id
+            if alive and not (mine or named):
+                sys.stderr.write(
+                    "LINE_GUARD refuse: guard held by a live foreign holder "
+                    "%r — not released\n" % (_holder_identity(holder),))
+                return {"held": True, "released": False,
+                        "reason": "held_by_another_live_holder",
+                        "holder": _holder_identity(holder)}
+        released = {"held": False, "released_at": now,
+                    "released": True,
+                    "last_round": _holder_identity(holder)}
+        if holder.get("reclaimed"):
+            released["reclaimed"] = holder["reclaimed"]
+        _write_guard_state(gp, released)
+        return released
+    finally:
+        _release_lock(lock)
+
+
+def guard_holder(path):
+    """The identity of the LIVE holder of the guard right now, or None. This
+    is what turns 'joined' from a guess into a fact (t261030-19: the reason
+    used to read like another round was running even when nobody was)."""
+    state = _read_guard_state(Path(path).parent / GUARD_NAME)
+    if not state or not state.get("held"):
+        return None
+    alive, _why = _holder_liveness(state)
+    return _holder_identity(state) if alive else None
+
+
+def round_state(path):
+    """The round slot's reader face (t261030-19, KI-420). Distinguishes:
+
+    - ``running``   — a round is running NOW (the record's holder is alive);
+    - ``died``      — the last round's holder process is gone and nobody has
+      reclaimed the slot yet (the named liveness reason rides the answer);
+    - ``reclaimed`` — the last round died and a later round reclaimed the slot
+      BY NAME (the emitted record names the stale holder and the adopter);
+    - ``idle``      — the last round ended and released the slot itself;
+    - ``never_ran`` — no round has ever run here (no record at all).
+
+    ``reclaimed``/``adopted`` ride a ``running`` answer too, so a reader sees
+    both "a round runs now" and "its predecessor died". A record with no pid
+    cannot prove itself dead: it reads ``running`` with
+    ``liveness=holder_unverifiable_no_pid`` (honest, not a guess). A corrupt
+    record raises ``CertifyError`` — the same loud-failure discipline as
+    ``guard_held``, never read as "no round has run"."""
+    gp = Path(path).parent / GUARD_NAME
+    state = _read_guard_state(gp)
+    out = {"guard_path": str(gp)}
+    if state is None:
+        out["state"] = GUARD_NEVER_RAN
+        return out
+    if state.get("held"):
+        alive, why = _holder_liveness(state)
+        out["state"] = GUARD_RUNNING if alive else GUARD_DIED
+        out["liveness"] = why
+        out["holder"] = _holder_identity(state)
+        if (state.get("runners") or []):
+            out["runners"] = [dict(r) for r in state["runners"]
+                              if isinstance(r, dict)]
+    else:
+        out["state"] = GUARD_RECLAIMED if state.get("reclaimed") else GUARD_IDLE
+        out["last_round"] = state.get("last_round")
+    if state.get("reclaimed"):
+        out["reclaimed"] = state["reclaimed"]
+    return out
 
 
 # ---- certification ---------------------------------------------------------
@@ -2120,20 +2532,17 @@ END_CHAIN_LIMIT = "chain_limit_exceeded"
 
 
 def guard_held(path):
-    """Is a certification in flight? Reads the guard file's state; a corrupt
-    guard is a loud failure, never read as 'free' (same discipline as
-    guard_acquire). An absent guard file is simply not held."""
-    gp = Path(path).parent / GUARD_NAME
-    try:
-        with open(str(gp), encoding="utf-8") as fh:
-            state = json.load(fh)
-    except FileNotFoundError:
+    """Is a certification in flight RIGHT NOW? A held record whose holder
+    process is GONE is not an in-flight round (t261030-19, KI-420): it reads
+    as ``died`` in ``round_state`` and the next acquire reclaims it by name.
+    Reading it as "held" is exactly the hole that pinned the line for ever.
+    A corrupt guard is a loud failure, never read as 'free' (same discipline
+    as guard_acquire). An absent guard file is simply not held."""
+    state = _read_guard_state(Path(path).parent / GUARD_NAME)
+    if state is None or not state.get("held"):
         return False
-    except (ValueError, OSError) as e:
-        raise CertifyError("guard_unreadable:%s" % e)
-    if not isinstance(state, dict):
-        raise CertifyError("guard_unreadable:guard_not_object")
-    return bool(state.get("held"))
+    alive, _why = _holder_liveness(state)
+    return alive
 
 
 def candidate_set(covered_landings):
@@ -2255,6 +2664,15 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
             or chain_limit < 1:
         raise CertifyError("chain_limit_invalid:%r" % (chain_limit,))
     rounds = []
+    reclaim_note = None
+
+    def _note(obj):
+        """t261030-19: a round that reclaimed a dead predecessor's slot says
+        so on every receipt it produces — never silently."""
+        if reclaim_note:
+            obj["guard_reclaim"] = reclaim_note
+        return obj
+
     while True:
         rows, bad = read_rows()
         if bad:
@@ -2272,15 +2690,23 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                                  now_ms=now_ms, backstop_ms=backstop_ms)
         if not go:
             state = END_JOINED if why == "guard_held" else END_IDLE
-            return {"rounds": rounds, "end": {"state": state, "reason": why}}
+            # t261030-19: "joined" now MEANS a live holder: a held record
+            # whose holder process is gone reads as NOT held, so the stale
+            # case is reclaimed below instead of joining for ever (KI-420).
+            # The holder's identity is on the reader face (``round_state``).
+            return {"rounds": rounds,
+                    "end": _note({"state": state, "reason": why})}
         if len(rounds) >= chain_limit:
             return {"rounds": rounds,
-                    "end": {"state": END_CHAIN_LIMIT,
-                            "reason": "chain_limit:%d" % chain_limit}}
+                    "end": _note({"state": END_CHAIN_LIMIT,
+                                  "reason": "chain_limit:%d" % chain_limit})}
         guard = guard_acquire(guard_path, judged_by)
         if guard is None:  # raced between the read and the acquire: join
             return {"rounds": rounds,
-                    "end": {"state": END_JOINED, "reason": "guard_held"}}
+                    "end": _note({"state": END_JOINED,
+                                  "reason": "guard_held"})}
+        if guard.get("reclaimed"):
+            reclaim_note = guard["reclaimed"]
         try:
             # t261016-01: the round's wall clock (the ticket's fourth
             # evidence item) is owned by the round row — measured here, from
@@ -2427,11 +2853,12 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                 if res["written"] != len(batch):
                     raise CertifyError("round_append_rejected:%r"
                                        % (res["rejected"],))
-                entry = {"state": STATE_CERTIFIED if verdict == "green"
-                         else STATE_RED,
-                         "cert": cert["id"], "run": cert["run"],
-                         "verdict": verdict, "candidate": candidate,
-                         "duration_ms": int((time.monotonic() - _t0) * 1000)}
+                entry = _note(
+                    {"state": STATE_CERTIFIED if verdict == "green"
+                     else STATE_RED,
+                     "cert": cert["id"], "run": cert["run"],
+                     "verdict": verdict, "candidate": candidate,
+                     "duration_ms": int((time.monotonic() - _t0) * 1000)})
                 if rel is not None:
                     # the relative caliber's own account: which repo regressed
                     # (named), the carried main debt, the flaky hits — the
@@ -2545,9 +2972,9 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
             except CouldNotRun as e:
                 _append_settle_row(append_rows, line, str(e), now_ms,
                                    face_dir=face_dir)
-                rounds.append({"state": STATE_GREW, "reason": str(e),
-                               "duration_ms":
-                                   int((time.monotonic() - _t0) * 1000)})
+                rounds.append(_note({"state": STATE_GREW, "reason": str(e),
+                                     "duration_ms":
+                                         int((time.monotonic() - _t0) * 1000)}))
             except BaseException as e:
                 # t261024-30: a round that dies INSIDE the settle block (an
                 # append rejection, a ledger re-read failure, a cancellation)
@@ -2707,6 +3134,17 @@ def resolve_runner(line, env=None):
         # skip. If nothing was injected here, the runner's own-tree default
         # copy applies (run_scenarios reads its own tree when the variable is
         # unset).
+        # t261030-19: the round's lifecycle is BOUND to its tick through two
+        # seams. (1) OWNER_PID_ENV tells the runner whose life its face
+        # belongs to: a face whose owner is gone stops writing instead of
+        # flapping a dead round's counts beside the next round's. (2)
+        # GUARD_ANCHOR_ENV lets the spawned runner be REGISTERED in the guard's
+        # holder record below — a tick killed with SIGKILL cannot clean up, so
+        # the next tick reads that list and adopts (kills, by name) the orphan
+        # whose suite would otherwise keep writing a round that no longer
+        # exists (KI-421).
+        run_env[OWNER_PID_ENV] = str(os.getpid())
+        guard_anchor = str(env.get(GUARD_ANCHOR_ENV, "")).strip()
         try:
             proc = subprocess.Popen(
                 cmd, shell=True, stdout=subprocess.PIPE,
@@ -2718,6 +3156,12 @@ def resolve_runner(line, env=None):
         # never enters the registry (no leak between Popen and register)
         _INFLIGHT_RUNNERS[proc.pid] = {
             "proc": proc, "line": str(line), "at": time.time()}
+        if guard_anchor:
+            try:
+                guard_attach_runner(guard_anchor, proc.pid, proc.pid)
+            except Exception as e:  # noqa: BLE001 — named, never masks the run
+                sys.stderr.write("LINE_GUARD runner registration failed: "
+                                 "%s: %s\n" % (type(e).__name__, e))
         try:
             try:
                 out, err = proc.communicate(timeout=timeout_s)
@@ -2730,6 +3174,12 @@ def resolve_runner(line, env=None):
                 raise
         finally:
             _INFLIGHT_RUNNERS.pop(proc.pid, None)
+            if guard_anchor:
+                try:
+                    guard_detach_runner(guard_anchor, proc.pid)
+                except Exception as e:  # noqa: BLE001
+                    sys.stderr.write("LINE_GUARD runner detach failed: "
+                                     "%s: %s\n" % (type(e).__name__, e))
         if proc.returncode != 0:
             raise CouldNotRun("runner_failed_exit_%d:%s"
                               % (proc.returncode, (err or "").strip()[-200:]))
@@ -2978,6 +3428,9 @@ def line_round_tick(project_key, load_lines, read_rows, append_rows,
         # t261024-70: the env inherits the process environment (the runner
         # command is ambient) and the roster overlay wins on top of it.
         line_env = _line_env(env)
+        # t261030-19: the spawned runner registers itself in the guard's holder
+        # record, so a tick killed with SIGKILL leaves a findable orphan.
+        line_env[GUARD_ANCHOR_ENV] = str(guard_path)
         try:
             roster, wt_file, roster_note = _line_roster_for_round(
                 project_key, line)
@@ -3152,6 +3605,8 @@ def line_round_run_now(project_key):
         # scheduled tick (one source of truth for both trigger shapes).
         # t261024-70: same ambient env inheritance as the scheduled tick.
         line_env = _line_env()
+        # t261030-19: same guard anchor as the scheduled path (one lifecycle).
+        line_env[GUARD_ANCHOR_ENV] = str(guard_path)
         try:
             roster, wt_file, roster_note = _line_roster_for_round(
                 project_key, line)

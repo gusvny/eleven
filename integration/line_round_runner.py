@@ -622,9 +622,17 @@ def run(env=None):
     if fdir is not None:
         round_id = "round-%s-%d" % (time.strftime("%Y%m%dT%H%M%SZ",
                                                   time.gmtime()), os.getpid())
+        # t261030-19 (KI-421): the round's face belongs to the TICK that
+        # spawned this runner. A face whose owner is gone stops writing after
+        # one named owner_gone receipt instead of flapping a dead round's
+        # counts into the next round's live pointer. No declared owner
+        # (a hand-run runner) keeps the legacy behaviour.
+        owner_raw = str(env.get(lib_round_face.OWNER_PID_ENV, "")).strip()
+        owner_pid = int(owner_raw) if owner_raw.isdigit() else None
         face = lib_round_face.FaceWriter(
             fdir, round_id, line_id,
-            {c["repo"]: c["revision"] for c in candidates})
+            {c["repo"]: c["revision"] for c in candidates},
+            owner_pid=owner_pid)
         face.start()
     state = RunState(env, run_root)
     state.sweep_stale()
@@ -796,7 +804,10 @@ def run(env=None):
                     renamed = face.run_dir.with_name(run_id)
                     face.run_dir.rename(renamed)
                     face.run_dir = renamed
-                    face.face["run_id"] = run_id
+                    # t261030-19: the WRITER adopts the ledger run id too, not
+                    # just the face dict — otherwise the guarded finish cannot
+                    # recognise its own pointer and leaves it on disk for ever.
+                    face.set_run_id(run_id)
                 except OSError:
                     pass  # keep the provisional dir; the face still lands
             face.retain_log(log_path)

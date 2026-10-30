@@ -12,6 +12,14 @@ STABLE public face under the project's develop data dir, next to
   workbench ``certification-model.ts`` already declares for its
   ``roundState`` input: absent = idle, nothing invented). One writer =
   ``integration/line_round_runner.py``; no other process writes this file.
+  t261030-19 (KI-421) made the pointer's writes atomic and run-id keyed: the
+  read-decide-write runs inside one flock, the pointer carries ``owner_pid``
+  (so a round relabelled to its ledger run id is still judgeable), a pointer
+  whose owner is gone is taken over WITH a ``pointer_takeover`` record naming
+  the dead round, and a writer whose owner (the tick) is gone halts after ONE
+  ``state=failed`` receipt with reason ``owner_gone:<pid>`` — it never keeps
+  writing a dead round's counts beside the next round (the measured symptom:
+  one ``current.json`` flapping between revisions 8d38ece0 and 99c65939).
 - ``<develop_dir>/rounds/<run_id>/``     — the retained evidence of one
   round: ``face.json`` (the TERMINAL record: state done/failed plus the
   outcome — green / red / the named could-not-run reason — and the same
@@ -89,6 +97,14 @@ from pathlib import Path
 
 FACE_DIR_ENV = "SANDBAR_LINE_ROUND_FACE_DIR"
 PROJECTS_DIR_ENV = "SANDBAR_PROJECTS_DIR"
+#: The tick whose life this round belongs to (t261030-19, KI-421). The engine
+#: sets it when it spawns the runner; a writer whose owner is gone stops
+#: writing instead of keeping a dead round's counts alive beside the next one.
+OWNER_PID_ENV = "SANDBAR_LINE_ROUND_OWNER_PID"
+#: Serialises the live pointer's read-decide-write. Without it two writers can
+#: both read "no pointer", both write, and the file flaps between them - the
+#: measured KI-421 symptom (revision 8d38ece0 vs 99c65939 in one `current.json`).
+POINTER_LOCK_NAME = ".current.lock"
 #: How often the watcher re-reads the suite log (seconds). Cheap: one stat
 #: + read of a text file; never blocks the suite (daemon thread).
 FACE_POLL_S = 2.0
@@ -416,12 +432,87 @@ def _pointer_owner_alive(run_id):
 def _read_current_run_id(rounds_dir):
     """The run id the live pointer on disk currently names — the guard that
     keeps one round from deleting another's pointer (review condition 1)."""
+    pointer = _read_current_pointer(rounds_dir)
+    return pointer.get("run_id") if pointer else None
+
+
+def _read_current_pointer(rounds_dir):
+    """The live pointer's whole record, or None. A torn/absent pointer is
+    None (the caller may publish; the next write repairs it)."""
     try:
         obj = json.loads((Path(rounds_dir) / CURRENT_NAME)
                          .read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return obj.get("run_id") if isinstance(obj, dict) else None
+    return obj if isinstance(obj, dict) else None
+
+
+def _pid_alive(pid):
+    """Signal-0 liveness. False only when the OS says the pid is gone."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def _pointer_is_stale(pointer):
+    """Is the live pointer's owning round gone? (t261030-19)
+
+    The pointer carries the two pids whose life it depends on: ``writer_pid``
+    (the process that writes it — the runner) and ``owner_pid`` (the tick that
+    commissioned the round, when one is declared). Either being gone makes the
+    pointer stale, so a round relabelled to its ledger run id (which carries
+    no pid) stays judgeable: before this, a pointer naming a ``run-<ulid>``
+    could never prove itself dead and blocked every later round for ever.
+    Pointers written before t261030-19 (neither field) fall back to the id's
+    pid suffix, exactly as t261023 declared.
+    """
+    if not isinstance(pointer, dict):
+        return True
+    judged = False
+    for key in ("writer_pid", "owner_pid"):
+        pid = pointer.get(key)
+        if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+            judged = True
+            if not _pid_alive(pid):
+                return True
+    if judged:
+        return False
+    return not _pointer_owner_alive(pointer.get("run_id"))
+
+
+def _pointer_lock(rounds_dir):
+    """flock the pointer's read-decide-write window (t261030-19). Two writers
+    that both read "no pointer" both wrote; the file then flapped between two
+    live rounds' revisions. One critical section removes the race by
+    construction."""
+    import fcntl
+    d = Path(rounds_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(d / POINTER_LOCK_NAME), os.O_RDWR | os.O_CREAT, 0o644)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+
+def _pointer_unlock(fd):
+    import fcntl
+    if fd is None:
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 class FaceWriter:
@@ -430,13 +521,25 @@ class FaceWriter:
     round (stderr note), because the round's verdict belongs to the suite,
     not to its face."""
 
-    def __init__(self, develop_dir, run_id, line, revisions):
+    def __init__(self, develop_dir, run_id, line, revisions, owner_pid=None):
         self.rounds_dir = Path(develop_dir) / "rounds"
         self.run_id = run_id
         self.line = line
         self.revisions = dict(revisions or {})
         self.run_dir = self.rounds_dir / str(run_id)
         self._foreign_named = False
+        # t261030-19: the round has TWO identities — the provisional id it is
+        # born with and the ledger run id it adopts when the suite reports
+        # one. Both name THIS round, so both may refresh and retire its live
+        # pointer; the set is what "keyed by run id" means in practice.
+        self.ids = {str(run_id)}
+        self.owner_pid = None
+        if owner_pid is not None:
+            try:
+                self.owner_pid = int(owner_pid)
+            except (TypeError, ValueError):
+                self.owner_pid = None
+        self._halted = False
         self.face = {
             "run_id": run_id, "line": line, "revision": self.revisions,
             "started_at": _now_iso(), "updated_at": _now_iso(),
@@ -444,6 +547,36 @@ class FaceWriter:
             "counts": {"ran": 0, "pass": 0, "fail": 0, "env_fail": 0},
             "last_scenario": None, "outcome": None,
         }
+        # t261030-19: the pointer's liveness is judged from these two pids,
+        # never from the run id string (a ledger run id carries no pid).
+        self.face["writer_pid"] = os.getpid()
+        if self.owner_pid is not None:
+            self.face["owner_pid"] = self.owner_pid
+
+    def set_run_id(self, run_id):
+        """Adopt the ledger run id as a further identity of THIS round
+        (t261030-19). The relabel used to move the evidence dir and the face's
+        run_id but NOT the writer's own id, so ``finish`` could not recognise
+        its pointer and left it on disk for ever; a later round then refused to
+        publish against a "live" pointer nobody owned."""
+        rid = str(run_id or "").strip()
+        if not rid:
+            return
+        self.ids.add(rid)
+        self.run_id = rid
+        self.face["run_id"] = rid
+
+    def _names_me(self, pointer):
+        return isinstance(pointer, dict) and \
+            str(pointer.get("run_id") or "") in self.ids
+
+    def _owner_alive(self):
+        """A writer with no declared owner keeps the legacy behaviour. A
+        declared owner is the TICK: when it is gone, this round has no reader
+        left and must stop writing (KI-421)."""
+        if self.owner_pid is None:
+            return True
+        return _pid_alive(self.owner_pid)
 
     def start(self):
         try:
@@ -489,7 +622,13 @@ class FaceWriter:
         ``retired_premise_excluded`` (t261029-76): the round's declared
         exclusions (name + premise + retirement order + reason), published on
         the terminal receipt so the exclusion is readable from the evidence
-        alone — never inferable, never silent."""
+        alone — never inferable, never silent.
+
+        t261030-19: the retirement test keys on EVERY identity this round has
+        (provisional id and the adopted ledger run id). A halted writer — one
+        whose owner died — writes nothing more at all."""
+        if self._halted:
+            return
         self.face["state"] = state
         self.face["updated_at"] = _now_iso()
         outcome = {"verdict": verdict, "reason": reason or ""}
@@ -500,17 +639,15 @@ class FaceWriter:
         if retired_premise_excluded:
             self.face["retired_premise_excluded"] = [
                 dict(r) for r in retired_premise_excluded]
+        if not self._owner_alive():
+            self.face["owner_gone"] = {"pid": self.owner_pid,
+                                       "at": _now_iso()}
         try:
             atomic_write_json(self.run_dir / FACE_NAME, self.face)
         except OSError as e:
             sys.stderr.write("%s warn: terminal face write failed (%s)\n"
                              % (TAG, e))
-        try:
-            if _read_current_run_id(self.rounds_dir) == self.run_id:
-                (self.rounds_dir / CURRENT_NAME).unlink()
-        except OSError as e:
-            sys.stderr.write("%s warn: live pointer retire failed (%s)\n"
-                             % (TAG, e))
+        self._retire_pointer()
 
     def retain_log(self, src_path):
         """Copy the suite log into the run dir (retained evidence). The
@@ -528,23 +665,54 @@ class FaceWriter:
 
     def publish(self):
         """Write the live pointer — but NEVER take one over that still names
-        a DIFFERENT run (arbitration 261011 round 1, leg C1): an overlapping
-        round (two projects, or a straggler runner) owns the pointer until
-        it retires it; stealing it here would let this round's guarded
-        finish delete a stranger's live face. A foreign pointer is named ONCE
-        on stderr and this round publishes NO live face (its terminal record
-        still lands)."""
-        on_disk = _read_current_run_id(self.rounds_dir)
-        if on_disk is not None and on_disk != self.run_id \
-                and _pointer_owner_alive(on_disk):
-            if not self._foreign_named:
-                self._foreign_named = True
-                sys.stderr.write(
-                    "%s note: live pointer names another round (%s) — this "
-                    "round (%s) publishes no live face; its terminal record "
-                    "still lands\n" % (TAG, on_disk, self.run_id))
+        a LIVE different round (arbitration 261011 round 1, leg C1): an
+        overlapping round owns the pointer until it retires it; stealing it
+        would let this round's guarded finish delete a stranger's live face.
+
+        t261030-19 (KI-421) keys this on run id and makes it atomic:
+        - the read-decide-write runs inside one flock, so two writers can no
+          longer both "win" and flap the file between two revisions;
+        - a pointer naming an id of THIS round (provisional or ledger run id)
+          is refreshed, not treated as foreign;
+        - a pointer whose OWNER IS GONE is taken over AND the takeover is
+          written into this round's face (``pointer_takeover``), so a reader
+          can tell "a round is running now" from "the last round died";
+        - a writer whose OWNER (the tick) is gone writes nothing at all.
+        A live foreign pointer is named ONCE on stderr and this round
+        publishes no live face (its terminal record still lands)."""
+        if self._halted:
             return
-        self._write_current()
+        if not self._owner_alive():
+            self._halt_owner_gone()
+            return
+        lock = _pointer_lock(self.rounds_dir)
+        try:
+            pointer = _read_current_pointer(self.rounds_dir)
+            if pointer is not None and not self._names_me(pointer):
+                if not _pointer_is_stale(pointer):
+                    if not self._foreign_named:
+                        self._foreign_named = True
+                        sys.stderr.write(
+                            "%s note: live pointer names another round (%s) — "
+                            "this round (%s) publishes no live face; its "
+                            "terminal record still lands\n"
+                            % (TAG, pointer.get("run_id"), self.run_id))
+                    return
+                self.face["pointer_takeover"] = {
+                    "run_id": pointer.get("run_id"),
+                    "revision": pointer.get("revision"),
+                    "state": pointer.get("state"),
+                    "last_updated_at": pointer.get("updated_at"),
+                    "taken_over_at": _now_iso(),
+                    "reason": "owner_gone",
+                }
+                sys.stderr.write(
+                    "%s note: live pointer named a dead round (%s) — this "
+                    "round (%s) takes the pointer over\n"
+                    % (TAG, pointer.get("run_id"), self.run_id))
+            self._write_current()
+        finally:
+            _pointer_unlock(lock)
 
     def _write_current(self):
         try:
@@ -552,6 +720,49 @@ class FaceWriter:
         except OSError as e:
             sys.stderr.write("%s warn: live face write failed (%s)\n"
                              % (TAG, e))
+
+    def _retire_pointer(self):
+        """Delete the live pointer ONLY when it still names this round."""
+        lock = _pointer_lock(self.rounds_dir)
+        try:
+            pointer = _read_current_pointer(self.rounds_dir)
+            if pointer is None or not self._names_me(pointer):
+                return
+            try:
+                (self.rounds_dir / CURRENT_NAME).unlink()
+            except OSError as e:
+                sys.stderr.write("%s warn: live pointer retire failed (%s)\n"
+                                 % (TAG, e))
+        finally:
+            _pointer_unlock(lock)
+
+    def _halt_owner_gone(self):
+        """The tick that commissioned this round is gone (t261030-19, KI-421).
+
+        Measured: a killed tick left its runner writing a round that no longer
+        existed; when the next tick started a round, both wrote
+        ``rounds/current.json`` and its ``revision`` flapped between two
+        trees. This round therefore writes ONE terminal receipt naming why it
+        stopped (state=failed, reason owner_gone:<pid>) and then writes
+        nothing at all — no counts, no pointer refresh, no flapping."""
+        if self._halted:
+            return
+        self._halted = True
+        self.face["state"] = "failed"
+        self.face["updated_at"] = _now_iso()
+        self.face["outcome"] = {"verdict": "no_proof",
+                                "reason": "owner_gone:%s" % self.owner_pid}
+        self.face.pop("counts_note", None)
+        self.face["owner_gone"] = {"pid": self.owner_pid, "at": _now_iso()}
+        try:
+            atomic_write_json(self.run_dir / FACE_NAME, self.face)
+        except OSError as e:
+            sys.stderr.write("%s warn: owner-gone face write failed (%s)\n"
+                             % (TAG, e))
+        self._retire_pointer()
+        sys.stderr.write(
+            "%s note: round %s halted — its owner (tick pid %s) is gone; no "
+            "further face writes\n" % (TAG, self.run_id, self.owner_pid))
 
     def _prune(self):
         """Rolling retention keyed on the ROUND-DIR SHAPE, ordered by mtime

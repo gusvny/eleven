@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 359,
+      "engine_tests": 365,
       "scenarios": 855
     },
     "vocab": [
@@ -1798,6 +1798,11 @@
     "server/engine/tests/test_t261029_31_stage_premise_env_fail.py": {
       "anchor": "behaviour",
       "note": "t261029-30/t261029-50 KI-373: a case whose assertion depends on a stage premise the machine does not provide reports ENV_FAIL exit 2 naming the premise and what was probed (docker-daemon / agent-image / model-credentials / stage-uid-boundary / stage-network-rig), never a content red; the same case still runs its original assertions and still fails (rc 1) when the premise is present. Proven both directions over the REAL converted cases with a fake docker CLI: the KI-373 shape (container face uid 0) exits 2 named with no assertion judged, a healthy rig exits 0, a broken product leg exits 1, and the runner's own classifier puts exit 2 in the env-failed column."
+    },
+    "server/engine/tests/test_t261030_round_guard_lifecycle.py": {
+      "anchor": "behaviour",
+      "note": "t261030-19 KI-420/KI-421 L1: the round slot's lifecycle survives a kill, proven with REAL subprocesses - the guard records its holder (run id, pid, pgid, start stamp) and round_state distinguishes running/died/reclaimed/idle/never_ran; a SIGKILLed round's slot is reclaimed BY NAME (stale holder + reason + adopter named, no human) while a held record with no pid is never reclaimed on a guess; the killed tick's registered runner is adopted and killed (a survivor stays adopt_pending, named); six concurrent claimants -> exactly one grant; every terminal path releases the guard (normal, runner error, and a REAL runner timeout whose spawned pid is asserted dead); and no verdict rule changed (green certifies, red still opens its freeze).",
+      "sync_path": "server/engine/develop_certify.py"
     }
   },
   "scenarios": {
