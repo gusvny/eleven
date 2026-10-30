@@ -25,8 +25,11 @@ face on disk) is the only judge — writer receipts are not evidence.
 
 A  WITNESS REPLAY — a complete runner row (the witness shape: ran=702,
    failed=0, env_failed=12) present once, no ledger row citing the run id:
-   one tick heals it with exactly ONE certification row citing the run id;
-   replaying the tick writes nothing more (idempotent, never two).
+   one tick heals it with exactly ONE certification row citing the run id
+   and the witnessed revision; replaying the tick writes nothing more
+   (idempotent, never two). The witness cites a REAL commit of this
+   fixture's own line worktree, because the heal may certify only what the
+   repository can hand to a checkout (t261030-25, KI-429).
 B  UNJUDGABLE HEADER — a runner row whose header cannot be judged lands
    exactly ONE named range-growth row citing the run id (never zero, never
    a guessed cert), idempotent on replay.
@@ -42,6 +45,24 @@ F  SETTLE-ROW REJECTED (not raised) — an append face that answers
    written<len(batch) during the settle row must not leave silent zero
    rows: the failure is retried and/or lands loud on a named second face,
    and the original error still surfaces.
+G  REFUSAL PINNED (t261030-25 contract) — the same witness shape whose
+   revision the project's line trees cannot produce is REFUSED BY NAME and
+   writes NO certification row: G1 names an undeclared line tree
+   (certification_refused:repo_not_resolvable:<repo>@<rev>:caller=...), G2
+   names a fabricated revision inside a real tree
+   (certification_refused:revision_not_a_git_object:<repo>@<rev>:caller=...); each
+   records exactly ONE range-growth row carrying that refusal, and a replay
+   writes nothing more. The guard is a contract, not a convenience: this
+   leg reds when the refusal is bypassed (mutation-checked at delivery).
+   A and G share ONE fixture shape and differ only in whether the revision
+   resolves — remove the line tree from A and A must fail, remove the
+   refusal and G must fail.
+
+The scenario frees nothing to the machine: every tick runs against tmp
+ledgers and, for the reachability net, a tmp projects root
+(SANDBAR_PROJECTS_DIR pinned for this process) — the REAL projects root is
+never read or written (KI-429's fixture leak). Git is required by the net;
+git absent = ENV_FAIL.
 
 Pre-implementation tree: A/B/D/F red is the expected TDD signal (the
 healing path does not exist yet); green required at the integration gate /
@@ -51,8 +72,9 @@ merge. Engine tree missing = ENV_FAIL exit 2.
 import contextlib
 import io
 import json
+import os
+import shutil
 import sys
-import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -73,14 +95,40 @@ def ok(name):
 
 RUN_ID = "run-01M5RJ2MDAEX796E7MV0KE324X"
 REV = "dbb88cd5aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"[:40]
+#: The project keys the reachability net is asked about: one whose line tree
+#: this scenario builds, one whose line tree is real but whose witness cites
+#: a fabricated revision, and one that declares no line tree at all.
+PROJECT = "itg11"
+PROJECT_NO_TREE = "itg11-norepo"
+PROJECT_FAKE_REV = "itg11-fabrev"
+FAKE_REV = "f" * 40
 
 
-def runner_row(rid=RUN_ID, cases=None, verdict="green"):
+def runner_row(rid=RUN_ID, cases=None, verdict="green", rev=REV):
     return {"id": rid, "kind": "line-round",
             "source": "lane:line-round", "verdict": verdict,
             "cases": cases if cases is not None else
             {"ran": 702, "passed": 690, "failed": 0, "env_failed": 12},
-            "repos": fx.line_repos(REV)}
+            "repos": fx.line_repos(rev)}
+
+
+def refusal(why, rev, repo="sandbar", rid=RUN_ID):
+    """The ONE named refusal the ledger side must answer for a candidate
+    revision the repository cannot hand to a checkout (t261030-25). Written
+    out HERE on purpose: the scenario states the contract, it does not ask
+    the implementation what the contract is."""
+    return "certification_refused:%s:%s@%s:caller=reconciled:%s" % (
+        why, repo, rev, rid)
+
+
+def pin_projects_root(projects):
+    """Point the reachability net at THIS fixture's projects root.
+
+    ``perkey_projects_root`` reads SANDBAR_PROJECTS_DIR fresh on every call,
+    so one assignment covers the tick under test. Never the real projects
+    root: a fixture once wrote fabricated revisions into the REAL one and
+    the reconciliation booked them (KI-429)."""
+    os.environ["SANDBAR_PROJECTS_DIR"] = str(projects)
 
 
 def write_runs_store(path, rows):
@@ -108,10 +156,10 @@ class FakeLine:
 
 
 def tick(mod, root, ledger, guard, lines, now_ms=1700000000000,
-         runs_store=None):
+         runs_store=None, project=PROJECT):
     """One tick through the REAL call site with injected seams."""
     return mod.line_round_tick(
-        project_key="itg11", load_lines=lambda pk: lines,
+        project_key=project, load_lines=lambda pk: lines,
         read_rows=lambda: mod.read_rows(str(ledger)),
         append_rows=lambda batch: mod.append_rows(batch, str(ledger)),
         resolve_runner_fn=lambda line, env: None,  # no live round is asked
@@ -129,13 +177,27 @@ def main():
     if not hasattr(mod, "TICK_REFUSALS_NAME"):
         fail("engine", "TICK_REFUSALS_NAME missing — refusal-face contract "
                        "absent from this tree")
+    if shutil.which("git") is None:
+        fx.env_fail("git absent — the reachability net (t261030-25) is "
+                    "judged by a git subprocess")
+    # KI-429 discipline: the net resolves its line trees through
+    # SANDBAR_PROJECTS_DIR, read fresh on every call. Pin it to a tmp root
+    # this scenario owns BEFORE any leg, so no leg can reach the REAL
+    # projects root — a fixture once wrote fabricated revisions into it and
+    # the reconciliation booked them.
+    projects = fx.projects_root()
+    pin_projects_root(projects)
 
     # ---- A: witness replay -------------------------------------------------
+    # The witness cites a REAL commit object of this fixture's own line
+    # worktree: the heal may certify only what the repository can hand to a
+    # checkout (t261030-25, KI-429).
     root, ledger, guard = fx.round_fixture()
+    real_rev = fx.git_line_tree(projects, PROJECT, "sandbar")
     runs = root / "scenario-runs.jsonl"
-    write_runs_store(runs, [runner_row()])
+    write_runs_store(runs, [runner_row(rev=real_rev)])
     out = tick(mod, root, ledger, guard,
-               {"default": FakeLine("default", REV)}, runs_store=str(runs))
+               {"default": FakeLine("default", real_rev)}, runs_store=str(runs))
     rows, bad = read_ledger(mod, ledger)
     if bad:
         fail("A-witness-replay", "ledger grew malformed lines: %r" % bad)
@@ -147,8 +209,11 @@ def main():
     if citing[0].get("kind") != mod.KIND_CERT:
         fail("A-witness-replay", "healed row kind %r is not a certification "
              "for a green-shaped header" % citing[0].get("kind"))
+    if citing[0].get("repos") != fx.line_repos(real_rev):
+        fail("A-witness-replay", "healed certification cites %r, not the "
+             "witnessed revision %r" % (citing[0].get("repos"), real_rev))
     # replay: idempotent, never two
-    tick(mod, root, ledger, guard, {"default": FakeLine("default", REV)},
+    tick(mod, root, ledger, guard, {"default": FakeLine("default", real_rev)},
          now_ms=1700000001000, runs_store=str(runs))
     rows2, _ = read_ledger(mod, ledger)
     if len(rows_citing(rows2, RUN_ID)) != 1:
@@ -298,7 +363,66 @@ def main():
                  "rejection: %r" % original)
     ok("F-settle-row-rejected")
 
-    print("INTEG_T261025_11_OK all six faces green")
+    # ---- G: the reachability refusal is pinned (t261030-25 contract) --------
+    # The SAME witness shape as A, differing in ONE fact: the revision cannot
+    # be produced by the repository the line claims to judge. The heal must
+    # refuse BY NAME and write NO certification — a fabricated revision that
+    # becomes a certification is what froze the line once (KI-429).
+    #
+    # G1: the project declares no line tree at all  -> repo_not_resolvable
+    # G2: the tree is real, the revision is not     -> revision_not_a_git_object
+    fx.git_line_tree(projects, PROJECT_FAKE_REV, "sandbar")
+    for name, project, rev, why in (
+            ("G1-refusal-repo-not-resolvable", PROJECT_NO_TREE, "a" * 40,
+             "repo_not_resolvable"),
+            ("G2-refusal-not-a-git-object", PROJECT_FAKE_REV, FAKE_REV,
+             "revision_not_a_git_object")):
+        root, ledger, guard = fx.round_fixture()
+        runs = root / "scenario-runs.jsonl"
+        write_runs_store(runs, [runner_row(rev=rev)])
+        try:
+            out = tick(mod, root, ledger, guard,
+                       {"default": FakeLine("default", rev)},
+                       runs_store=str(runs), project=project)
+        except Exception as e:  # noqa: BLE001
+            fail(name, "the tick raised instead of refusing by name: %s: %s"
+                 % (type(e).__name__, e))
+        want = refusal(why, rev)
+        entries = [e for e in out.get("lines", []) if e.get("run") == RUN_ID]
+        if len(entries) != 1:
+            fail(name, "expected ONE named entry for the refused run, got %r "
+                 "(out=%r)" % (entries, out))
+        if entries[0].get("error") != want:
+            fail(name, "the refusal is not the named contract: got %r, want %r"
+                 % (entries[0].get("error"), want))
+        rows, bad = read_ledger(mod, ledger)
+        if bad:
+            fail(name, "ledger grew malformed lines: %r" % bad)
+        certs = [r for r in rows if r.get("kind") == mod.KIND_CERT]
+        if certs:
+            fail(name, "an unreachable revision was CERTIFIED: %r" % certs)
+        if any(r.get("kind") == mod.KIND_FREEZE for r in rows):
+            fail(name, "an unreachable revision opened a freeze: %r" % rows)
+        citing = rows_citing(rows, RUN_ID)
+        if len(citing) != 1:
+            fail(name, "expected exactly ONE refusal row citing the run id, "
+                 "got %d (rows=%r)" % (len(citing), citing))
+        if citing[0].get("kind") != mod.KIND_RANGE_GROWTH \
+                or want not in str(citing[0].get("reason") or ""):
+            fail(name, "the refusal must land as ONE named range-growth row, "
+                 "got %r" % citing[0])
+        # replay: the refusal row cites the run id, so nothing is written twice
+        out2 = tick(mod, root, ledger, guard,
+                    {"default": FakeLine("default", rev)},
+                    now_ms=1700000001000, runs_store=str(runs),
+                    project=project)
+        rows2, _ = read_ledger(mod, ledger)
+        if len(rows2) != len(rows) or rows_citing(rows2, RUN_ID) != citing:
+            fail(name, "the refusal was re-written on replay: %d rows before, "
+                 "%d after (out2=%r)" % (len(rows), len(rows2), out2))
+        ok(name)
+
+    print("INTEG_T261025_11_OK all seven faces green")
     sys.exit(0)
 
 

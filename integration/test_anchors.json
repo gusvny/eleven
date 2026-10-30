@@ -5941,7 +5941,7 @@
     },
     "integration/t261025-11/sc_t261025_11_unrecorded_round_healed.py": {
       "anchor": "behaviour",
-      "note": "t261025-11: the tick-level healing journey over real files on disk - witness replay (complete runner row, no citing row) heals into exactly ONE certification citing the run id, replay writes nothing; unjudgable header becomes exactly ONE range-growth row naming the run id; guard held heals nothing; line-ambiguous refuses by name on the tick-refusal face; garbage in either store is named, never guessed; a rejected settle append retries and names the face.",
+      "note": "t261025-11: the tick-level healing journey over real files on disk - witness replay (complete runner row citing a real commit of the fixture's own line worktree, no citing row) heals into exactly ONE certification citing the run id and that revision, replay writes nothing; unjudgable header becomes exactly ONE range-growth row naming the run id; guard held heals nothing; line-ambiguous refuses by name on the tick-refusal face; garbage in either store is named, never guessed; a rejected settle append retries and names the face; a witness citing an unreachable revision (undeclared line tree, or a fabricated sha inside a real tree) is refused by name (certification_refused:...:caller=reconciled:<run_id>) and writes ONE range-growth refusal row, never a certification (t261030-25, KI-429).",
       "sync_path": ""
     },
     "integration/t261026-10/sc_t261026_10_archive_declared_instances.mjs": {

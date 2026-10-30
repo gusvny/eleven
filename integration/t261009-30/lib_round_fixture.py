@@ -126,6 +126,50 @@ def append(mod, ledger, rows):
     return res
 
 
+def projects_root():
+    """An ISOLATED projects root for scenarios that exercise the reachability
+    net (t261030-25, KI-429).
+
+    ``develop_certify.unreachable_candidates`` resolves a line tree through
+    ``shared.develop_dir(project)``, i.e. ``$SANDBAR_PROJECTS_DIR`` read fresh
+    on every call. A scenario that wants the net to judge a real revision
+    points that variable at a tmp root it owns — never at the machine's
+    projects root: a fixture once wrote fabricated revisions into the REAL
+    one, and the reconciliation turned them into certifications that froze
+    the line. Reclaimed with the other fixture dirs (atexit)."""
+    tmp = tempfile.mkdtemp(prefix="sandbar-projects-")
+    _TMP_DIRS.append(tmp)
+    return Path(tmp)
+
+
+def git_line_tree(projects, project, repo):
+    """The line worktree the engine judges in, as a REAL git repository with
+    one commit: ``<projects>/<project>/data/develop/wt/<repo>`` (the exact
+    path ``develop_certify.line_repo_dir`` reads). Returns the commit sha, so
+    a witness row can cite a revision the guarded reconciliation may certify.
+
+    Raises on any git failure: a broken fixture must never look like an
+    engine verdict. Callers point ``SANDBAR_PROJECTS_DIR`` at ``projects``."""
+    import subprocess
+    tree = Path(projects) / project / "data" / "develop" / "wt" / repo
+    tree.mkdir(parents=True, exist_ok=True)
+    (tree / "README.md").write_text("fixture line tree\n", encoding="utf-8")
+    head = ""
+    for argv in (["init", "-q", "."],
+                 ["add", "-A"],
+                 ["-c", "user.email=itg@sandbar.invalid",
+                  "-c", "user.name=itg", "commit", "-q", "-m", "fixture"],
+                 ["rev-parse", "HEAD"]):
+        p = subprocess.run(["git", "-C", str(tree)] + argv,
+                           capture_output=True, text=True, timeout=60)
+        if p.returncode != 0:
+            raise RuntimeError("fixture git %r failed (rc=%d): %s"
+                               % (argv, p.returncode,
+                                  (p.stderr or "").strip()))
+        head = p.stdout
+    return head.strip()
+
+
 def round_call(mod, ledger, guard, runner, trigger="change", **kw):
     """One run_line_round invocation wired to the REAL ledger store on disk
     through its injected seams (the landed signature: injected read_rows /
