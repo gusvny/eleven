@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 366,
+      "engine_tests": 367,
       "scenarios": 855
     },
     "vocab": [
@@ -1807,6 +1807,10 @@
     "server/engine/tests/test_t261030_ledger_isolation_guard.py": {
       "anchor": "behaviour",
       "note": "t261030-25 KI-429: the ledger-side reachability net - a certification and a freeze may only cite revisions this repository can produce. Revision reachability (git cat-file -e <rev>^{commit}; blob, absent tree and garbage answer false), the named guard (revision_not_a_git_object / repo_not_resolvable / candidate_malformed, every member judged), the one refusal wording (check + repo@revision + caller), the reconciliation refusing a fabricated run with NO certification and NO freeze plus one idempotent range-growth refusal, the settle path refusing before it builds a batch, and the two behaviours that must not change: a real green round still certifies and a real red round still freezes. Temp git repos and temp ledgers only, no docker/Temporal/3099"
+    },
+    "server/engine/tests/test_t261030_31_evidence_creation_gate.py": {
+      "anchor": "behaviour",
+      "note": "t261030-31: the quickmanual evidence declaration is judged at the creation face, not at workflow start. Real client.cmd_ticket_start with a stubbed _connect: a malformed declaration (non-object, unknown kind, empty / repeated / blank / non-string / over-long name list) is refused before _connect() with the validator's named reason and no workflow starts; a valid declaration (one name or a list of names) travels verbatim into TicketInput and then decodes through the real temporalio data converter, so the workflow input can never be the failing layer (the t261030-30 unstartable-ticket shape); an absent declaration stays empty because the quickmanual open gate owns that block. Offline: no Temporal, no network, no git."
     }
   },
   "scenarios": {

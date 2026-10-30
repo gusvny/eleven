@@ -17,9 +17,11 @@ docs/design/quickmanual-lane-v1.md, host ruling 261019):
       fixture project ONLY - the production creation face stays fail-closed until
       the step-0 host amendment (workflows_v2 + generated yaml, outside this
       lane).
-  J2. EVIDENCE IS MANDATORY: a ticket created WITHOUT an evidence declaration (or
-      with a malformed one — unknown kind, empty name) is blocked at `open` with a
-      named remedy, never waved through.
+  J2. EVIDENCE IS MANDATORY: a ticket created WITHOUT an evidence declaration is
+      blocked at `open` with a named remedy, never waved through. A MALFORMED
+      declaration (unknown kind, empty name, or any shape the workflow input cannot
+      decode) is refused AT THE CREATE FACE instead (t261030-31), so the ticket never
+      enters the workflow and can never come out unstartable and uncancellable.
   J3. THE WORK STAGE IS A SESSION, NOT AN AGENT: the healthy ticket parks at
       `work`; while parked the timeline does not churn (no polling loop, no history
       burn — the failure mode that killed t261019-18: 'Workflow history count
@@ -101,6 +103,9 @@ LANE_MARKERS = ("SANDBAR_TASK_QUEUE", "SANDBAR_TASK_QUEUES", "SANDBAR_WATCH_WORK
 PROJECT_KEY = "quickmanual-e2e"
 TID = "quickmanual-%d" % os.getpid()                 # healthy journey ticket
 TID_NOEV = "quickmanual-noev-%d" % os.getpid()       # evidence-mandatory ticket
+# t261030-31: a MALFORMED declaration is refused at the create face, so this ticket
+# must never start. Its id proves the refusal never minted a workflow.
+TID_BADEV = "quickmanual-badev-%d" % os.getpid()
 # t261028-19 (KI-397): the full-registry leg. The evidence declaration is
 # mandatory (J2), so "declares nothing narrowed" is the reserved full-gate token
 # `integ` - the only accepted declaration that keeps the UNCHANGED full round.
@@ -504,6 +509,34 @@ def main():
         good2, why2 = accepted(out2, TID_NOEV)
         check(good2, "J2 evidence-less ticket accepted at creation (the gate lives "
                      "at open, not at the create face; %s)" % why2)
+
+        # ---------- J2b: a MALFORMED declaration never starts a ticket ----------
+        # t261030-31: the declaration must decode into the workflow input. A shape
+        # the input cannot decode used to surface only at workflow start and left
+        # the ticket unstartable AND uncancellable (t261030-30), so the create face
+        # refuses it up front. The assertion is the public refusal receipt plus the
+        # absence of a started workflow, never an implementation name.
+        _rc, outb = run_poc_client(py, "ticket-start", dict(
+            create, ticket_id=TID_BADEV,
+            title="[e2e] quickmanual with a malformed evidence declaration",
+            user_request="integration e2e: a malformed evidence declaration is "
+                         "refused at the create face",
+            evidence={"kind": "not-a-kind", "name": []},
+        # SANCTIONED-WAIT: bounded client call, not a state wait
+        ), env_for(stage), timeout=300)
+        goodb, whyb = accepted(outb, TID_BADEV)
+        check(not goodb, "J2b malformed evidence declaration refused at creation "
+                         "(got accepted=%r; %s)" % (goodb, whyb))
+        blob_b = json.dumps(parse_out_json(outb) or {}, ensure_ascii=False)
+        check("evidence" in blob_b.lower(),
+              "J2b the create-face refusal names the failed field: evidence "
+              "(got %r)" % blob_b[:200])
+        q_bad = cli(py, stage, "ticket-query", {"ticket_id": TID_BADEV},
+                    # SANCTIONED-WAIT: bounded client call, not a state wait
+                    timeout=300)
+        check(q_bad.get("ok") is not True,
+              "J2b the refused ticket has no workflow to query (it was never "
+              "started; %r)" % (json.dumps(q_bad, ensure_ascii=False)[:200],))
 
         # ---------- J2: the evidence gate blocks at open ----------
         if good2:

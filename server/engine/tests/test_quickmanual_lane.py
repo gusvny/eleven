@@ -267,6 +267,91 @@ def test_evidence_boundary_name_length_passes():
     assert ok and reason == ""
 
 
+# ---- C2. t261030-31: the creation face, and the type the input decodes with ----
+#
+# Incident: a list-valued evidence.name was accepted by the validator but the
+# workflow input was annotated Dict[str, str], so the Temporal converter could
+# not decode the input and the ticket came out unstartable and uncancellable.
+# The three faces that state this contract now agree: the validator
+# (quick_evidence_validate), the creation intake (quick_evidence_intake) and the
+# workflow input type (QuickEvidence).
+
+def test_evidence_intake_absent_stays_empty():
+    for raw in (None, {}):
+        ok, reason, carried = shared.quick_evidence_intake(raw)
+        assert ok and reason == "" and carried == {}
+
+
+def test_evidence_intake_carries_the_declaration_verbatim():
+    raw = {"kind": "scenario", "name": [" a ", "b"]}
+    ok, reason, carried = shared.quick_evidence_intake(raw)
+    assert ok and reason == ""
+    assert carried == raw, "verbatim: the open stage owns normalization"
+    assert carried["name"] == [" a ", "b"], "a list is never folded into one name"
+    assert carried is not raw, "a copy: the caller's dict is never aliased"
+
+
+@pytest.mark.parametrize("raw,frag", [
+    (["a", "b"], "must be an object"),
+    ("check", "must be an object"),
+    ({"kind": "not-a-kind", "name": "x"}, "not one of"),
+    ({"kind": "check"}, "name missing"),
+    ({"kind": "check", "name": None}, "name missing"),
+    ({"kind": "scenario", "name": []}, "empty"),
+    ({"kind": "scenario", "name": ["a", "a"]}, "repeats"),
+    ({"kind": "scenario", "name": ["a", 7]}, "non-empty string"),
+])
+def test_evidence_intake_refuses_malformed_shapes(raw, frag):
+    ok, reason, carried = shared.quick_evidence_intake(raw)
+    assert not ok and carried == {}
+    assert frag in reason
+
+
+def _decode_ticket_input(evidence):
+    """Decode a TicketInput exactly as the workflow input is decoded (real SDK
+    converter, no Temporal server)."""
+    from temporalio.converter import DataConverter
+    conv = DataConverter.default.payload_converter
+    inp = shared.TicketInput(ticket_id="t1", template_id="quickmanual-lane",
+                             project="p", title="x", evidence=evidence)
+    return conv.from_payloads(conv.to_payloads([inp]), [shared.TicketInput])[0]
+
+
+@pytest.mark.parametrize("raw", [
+    {"kind": "check", "name": "integ"},
+    {"kind": "scenario", "name": ["a", "b"]},
+    {"kind": "l1_battery", "name": "test_quickmanual_lane.py"},
+])
+def test_evidence_workflow_input_decodes_both_name_faces(raw):
+    assert _decode_ticket_input(raw).evidence == raw
+
+
+def test_evidence_workflow_input_type_states_the_validator_domain():
+    from typing import Dict, List, Union, get_type_hints
+    hint = get_type_hints(shared.TicketInput)["evidence"]
+    assert hint == Dict[str, Union[str, List[str]]]
+
+
+def test_evidence_old_narrow_annotation_is_the_incident_shape():
+    """The regression witness: the pre-t261030-31 annotation (Dict[str, str])
+    refuses the list face at decode time - the unstartable ticket."""
+    import dataclasses
+    from typing import Dict
+    from temporalio.converter import DataConverter
+
+    # make_dataclass pins REAL annotation objects (this module compiles under
+    # `from __future__ import annotations`, where a class body's annotation would
+    # stay a string and fail to resolve).
+    narrow = dataclasses.make_dataclass(
+        "Narrow", [("evidence", Dict[str, str],
+                    dataclasses.field(default_factory=dict))])
+    conv = DataConverter.default.payload_converter
+    payloads = conv.to_payloads(
+        [narrow(evidence={"kind": "scenario", "name": ["a", "b"]})])
+    with pytest.raises(TypeError):
+        conv.from_payloads(payloads, [narrow])
+
+
 # ======================================================================
 # D. work_done intake
 # ======================================================================

@@ -80,6 +80,7 @@ from shared import (
     lookup_project,
     multirepo_fuse_a_error,
     project_search_attributes,
+    quick_evidence_intake,
     ticket_data_dir,
     ticket_search_attributes,
     ticket_task_queue,
@@ -2172,6 +2173,15 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         return _err("背景文件闸故障（fail-closed）：%s: %s" % (type(e).__name__, e))
     if not ok_refs:
         return _err("ticket-start refused: %s" % refs_err)
+    # t261030-31: the evidence declaration is creation-time input that must decode
+    # into TicketInput.evidence; the workflow input type states the same contract
+    # the validator checks. A declaration the input cannot decode used to surface
+    # only at workflow start and left the ticket unstartable AND uncancellable
+    # (t261030-30). Refuse it here, before _connect(), so the refusal does not
+    # depend on Temporal being reachable (same discipline as the refs gate above).
+    ok_ev, ev_err, evidence = quick_evidence_intake(args.get("evidence"))
+    if not ok_ev:
+        return _err("ticket-start refused: %s" % ev_err)
     # t261009-76: the lane-version opt-in gate — named refusals BEFORE _connect()
     # (the refusal path must not depend on Temporal being reachable, same
     # discipline as the refs gate directly above).
@@ -2200,11 +2210,11 @@ async def cmd_ticket_start(args: Dict[str, Any]) -> Dict[str, Any]:
         no_file_changes=bool(ws_flags.get("no_file_changes")),
         acceptance_extra=[str(x) for x in (args.get("acceptance_extra") or [])],
         # t261019-32 (quickmanual lane): the mandatory evidence declaration travels
-        # with the creation input verbatim - the mechanical gate lives at the
-        # quickmanual `open` stage (a malformed declaration blocks THERE with a
-        # named remedy), so the create face passes it through without judging.
-        evidence=dict(args["evidence"]) if isinstance(args.get("evidence"), dict)
-        else {},
+        # with the creation input verbatim. t261030-31: it is now judged ABOVE
+        # (quick_evidence_intake, before _connect()) so a shape the workflow input
+        # cannot decode fails at creation; the quickmanual `open` stage still
+        # re-validates it and names the evidence-absent block.
+        evidence=evidence,
         deliverables=str(args.get("deliverables") or ""),
         # M16: body = the original user request (user_request kept verbatim, explicit
         # and preferred; falls back to body when absent); spec independent

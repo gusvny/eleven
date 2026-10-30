@@ -30,7 +30,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 # 注意：shared.py 会被单文件加载面消费（ticket.py spec_from_file_location、
 # 场景播种链 lib_stage_console.mjs）——仓库内兄弟模块（如 path_gates）不得
 # 顶层 import（t260917-01 仲裁 gen1 code-fault 实锤：ModuleNotFoundError 连累
@@ -4858,6 +4858,16 @@ class Stage:
         return "agent"
 
 
+#: The quickmanual evidence declaration as it travels in TicketInput (t261019-32 /
+#: t261022-09): `kind` is one of QUICK_EVIDENCE_KINDS and `name` is ONE string or a
+#: LIST of distinct strings. The alias states the whole contract on purpose — the
+#: Temporal data converter decodes the workflow input from this annotation, so a
+#: narrower type (Dict[str, str], the pre-t261030-31 shape) refused a list-valued
+#: name at workflow start and left the ticket unstartable and uncancellable.
+#: Validity is decided by quick_evidence_intake at creation, not by this alias.
+QuickEvidence = Dict[str, Union[str, List[str]]]
+
+
 @dataclass
 class TicketInput:
     """The v2 workflow input: every business attribute is pinned at creation
@@ -4907,10 +4917,14 @@ class TicketInput:
     # t261019-32 (quickmanual lane): the mandatory evidence declaration (guardrail 3
     # of docs/design/quickmanual-lane-v1.md) — shape {"kind": ..., "name": ...}, kind
     # ∈ QUICK_EVIDENCE_KINDS ("l1_battery" | "scenario" | "check"; "check" is the
-    # document-only form: the check that ran). Validated at the quickmanual `open`
-    # stage by quick_evidence_validate; defaulted empty = non-quickmanual templates
-    # never see it and old in-flight instances replay unchanged.
-    evidence: Dict[str, str] = field(default_factory=dict)
+    # document-only form: the check that ran). Checked at creation by
+    # quick_evidence_intake and validated again at the quickmanual `open` stage by
+    # quick_evidence_validate; defaulted empty = non-quickmanual templates never see
+    # it and old in-flight instances replay unchanged. The annotation IS the decode
+    # contract (see QuickEvidence): it must admit every shape the validator admits,
+    # or the workflow input cannot be decoded and the ticket never starts
+    # (t261030-31).
+    evidence: QuickEvidence = field(default_factory=dict)
     deliverables: str = ""
     # Body = the original user request (ticket t260822-m16: user_request kept verbatim,
     # taking precedence when present; the default falls back to body);
@@ -5247,6 +5261,37 @@ def quick_evidence_validate(raw: Any) -> Tuple[bool, str, Dict[str, Any]]:
         return (False, reason, {})
     return (True, "", {"kind": kind, "names": names,
                        "name": names[0] if len(names) == 1 else ", ".join(names)})
+
+
+def quick_evidence_intake(raw: Any) -> Tuple[bool, str, Dict[str, Any]]:
+    """Creation-face intake of the quickmanual evidence declaration (t261030-31,
+    pure function, UT truth table). Returns (ok, reason, carried).
+
+    The declaration is creation-time input: it travels into TicketInput.evidence
+    and the quickmanual `open` stage validates it there. Two refusals must happen
+    HERE instead, because after the workflow starts neither can be repaired:
+      * a shape that is not an object — the open stage would read it as a missing
+        declaration and name the wrong remedy;
+      * anything quick_evidence_validate refuses — above all a shape the workflow
+        input cannot decode (a list-valued name under the pre-t261030-31
+        Dict[str, str] hint left the ticket unstartable AND uncancellable,
+        t261030-30; the incident's own creation face).
+    `carried` is the declaration VERBATIM, never normalized: the open stage owns
+    normalization, and folding a list into its display form here would silently
+    collapse a multi-name declaration into one name. Absent (None) and {} pass as
+    empty — the evidence-absent block belongs to the quickmanual `open` gate
+    (design guardrail 3), not to this face."""
+    if raw is None:
+        return (True, "", {})
+    if not isinstance(raw, dict):
+        return (False, "evidence declaration must be an object {kind, name} (got %s)"
+                % type(raw).__name__, {})
+    if not raw:
+        return (True, "", {})
+    ok, reason, _norm = quick_evidence_validate(raw)
+    if not ok:
+        return (False, reason, {})
+    return (True, "", dict(raw))
 
 
 def quick_scope_plan(kind: str, names: list, registry_names,

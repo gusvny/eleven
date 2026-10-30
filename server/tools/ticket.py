@@ -20,7 +20,13 @@ stage_state（进度维度，与 status 正交）：running | awaiting | awaitin
 op:
   create {workflow, project, title, body?, user_request?, spec?, role?, lane?, write_set?,
           acceptance?, deliverables?, id?, worktree?, branch?, workspace?, proposal_id?, book_path?,
-          lane_version?, develop_line_id?}   （lane 两字段=t261009-76 逐票 opt-in，仅 dev-lane；
+          lane_version?, develop_line_id?, evidence?}
+      → evidence (quickmanual-lane only): {kind, name} where kind is one of
+        l1_battery | scenario | check and name is ONE string or a LIST of distinct
+        strings. The creation face judges it (client.py quick_evidence_intake), so a
+        malformed declaration is refused there — never left to fail later as an
+        undecodable workflow input (t261030-31; the declaration itself: t261019-32).
+      → （lane 两字段=t261009-76 逐票 opt-in，仅 dev-lane；
           缺省=legacy；未知/畸形版本、未声明 line id 在 client.py intake 具名拒收）
       → 转发 client.py ticket-start（模板 id→workflow 类）；dev-lane 自动登记
         .lane/t<id> + 分支 lane/t<id>（未创建，仅登记路径；旧名 .worktrees 兼容读）
@@ -836,8 +842,12 @@ def _create(a):
         'allow_empty_write_set': bool(a.get('allow_empty_write_set')),
         'acceptance_extra': extra,
         # t261019-32 (quickmanual lane): the evidence declaration rides verbatim —
-        # thin-shell discipline, the gate lives at the quickmanual open stage.
-        'evidence': dict(a['evidence']) if isinstance(a.get('evidence'), dict) else {},
+        # thin-shell discipline, the gate lives at the creation face (client.py
+        # quick_evidence_intake, t261030-31). No isinstance coercion here: a
+        # non-object shape is forwarded UNJUDGED so the gate refuses it BY NAME;
+        # silently turning it into {} would hide the malformed input and surface
+        # later as "no declaration at all".
+        'evidence': a.get('evidence'),
         'deliverables': a.get('deliverables') or '',
         # 正文=原始用户需求（user_request 逐字保留，显式优先；缺省回落 body）
         'user_request': a.get('user_request') or '',
