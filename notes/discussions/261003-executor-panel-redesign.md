@@ -6,7 +6,7 @@
 > 「needs you 的信息按 80% 的 ASD-STE100 标准来写作」「把 overview 和 requests 合并，两个竖排
 > 并列」「grants 可以开个 tab，让人选择」。
 >
-> 视觉基准（宿主已过目）：`notes/discussions/261003-executor-panel-redesign-mock.html`。
+> 视觉基准（宿主已过目）：`notes/epics/project-executor/261003-executor-panel-redesign-mock.html`。
 > 本文是草稿账本条目（notes 属草稿纸）；定稿迁 `docs/design/` 由宿主决定。
 
 ## 1. 为什么要改（现状的四个毛病）
@@ -132,7 +132,7 @@
 - 交互与 §3 一致：选项按钮、条目可展开且长内容内滚、两栏并列且窄屏叠放、收回授权只影响授权。
 - 文案全量符合 §4（Grants / Settings / Ledger / Alerts 逐页抽查）。
 - §5 三条各有回归：保存后点名仍在；读数报「6 of 6」；点名缺席时读出面显式区分三态。
-- 视觉以 mock 为基准：`notes/discussions/261003-executor-panel-redesign-mock.html`。
+- 视觉以 mock 为基准：`notes/epics/project-executor/261003-executor-panel-redesign-mock.html`。
 
 ## 8. 请求要能回（261004 宿主实报「这么写我能回吗」后定）
 
@@ -167,7 +167,7 @@
 - 显式给出「不答会怎样」（默认动作）与该条的等待时长。
 - 答案框支持**多行**；选项之外的自定义答复能落到**指定的那一问**上。
 
-验收以本节 1–6 与上面四条判据为准；基线 mock：`notes/discussions/261003-executor-panel-redesign-mock.html`
+验收以本节 1–6 与上面四条判据为准；基线 mock：`notes/epics/project-executor/261003-executor-panel-redesign-mock.html`
 （本次要补「请求卡」一屏：多问、选项常显、默认动作、多行答框）。
 
 ## 9. 请求的处置：Dismiss（261004 宿主裁定）

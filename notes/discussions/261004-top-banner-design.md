@@ -1,7 +1,7 @@
 # 261004 顶栏横幅：换成 sandbar（宿主 261004）
 
 > 状态：**草稿＋mock**（宿主令「先 mock，不要急着开票」）。视觉基准＝
-> `notes/discussions/261004-concurrency-limit-mock.html`（顶栏 26px 那条）。
+> `notes/epics/concurrency-limit/261004-concurrency-limit-mock.html`（顶栏 26px 那条）。
 
 ## 1. 现状（读 dsh 安装树，非推测）
 
@@ -97,7 +97,7 @@
 
 ## 5. 关联
 
-- mock：`notes/discussions/261004-concurrency-limit-mock.html`（顶栏）
+- mock：`notes/epics/concurrency-limit/261004-concurrency-limit-mock.html`（顶栏）
 - 平台侧事实：`@deepseek-ai/dsh-client-ui-layout/lib/client.js`（`productTitle`、`renderSlot` 名单、壳属性、`toggleSidebar`）
 - 已有先例：`server/plugins/workbench/src/client/sidebar.tsx`（改壳的 grid 轨道）、
   `chat-project-band.ts`（给平台元素加本插件自有属性 + 注入自有 style）

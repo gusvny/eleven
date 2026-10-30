@@ -289,7 +289,7 @@ providers / knowledge 现有 smoke 零回归；生产 7233/8233/3099 监听面�
   ①命令面=`sandbar project add|remove|list` 子命令族；②摘除默认全保留
   +`--purge-data`/`--purge-credentials` 双显式旗；③Temporal 不可达=fail-closed
   拒摘、无绕过旗。**⚑ 清零**；决策1/4 标记同步。下一步=UI mock 过稿后开工单
-  （mock 落 notes/discussions/260904-project-ui-mock.html，票③ UI 设计文档
+  （mock 落 notes/epics/project-lifecycle/260904-project-ui-mock.html，票③ UI 设计文档
   的底稿）。
 - 2026-09-04（修订8）：宿主裁定 UI 降级——「不需要单独一页，左栏已列项目，
   找个合适位置放创建按钮」。面D 重写为左栏内嵌三处新增（「＋接入项目」行 /

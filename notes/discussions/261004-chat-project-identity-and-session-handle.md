@@ -3,7 +3,7 @@
 > 状态：**草稿**（宿主 261004 提出三件事：①右栏 chat 的项目色装饰「不是很不明显」；
 > ②会话↔项目的映射原来存 localStorage，「localhost 换到 127.0.0.1 映射关系就没了」，
 > 觉得「存在 project 里更好」；③会话 id 用数字「有点怪」）。视觉基准＝
-> `notes/discussions/261004-concurrency-limit-mock.html`（右栏身份带 + 左栏会话行）。
+> `notes/epics/concurrency-limit/261004-concurrency-limit-mock.html`（右栏身份带 + 左栏会话行）。
 
 ## 1. 现状（读代码，非推测）
 
@@ -132,7 +132,7 @@
 
 ## 4. 关联
 
-- 视觉基准：`notes/discussions/261004-concurrency-limit-mock.html`（右栏身份带 + 左栏会话行 + 项目色随切换变）
+- 视觉基准：`notes/epics/concurrency-limit/261004-concurrency-limit-mock.html`（右栏身份带 + 左栏会话行 + 项目色随切换变）
 - 现行装饰器：`server/plugins/workbench/src/client/chat-project-band.ts`、`chat-project-tag.ts`
 - 现有设计真源（受保护，改动需人审）：`docs/design/sidebar-session-entry-and-hero-design.md`
 - 色板：`server/plugins/workbench/src/shared/project-color.ts`；账册：`src/shared/sessions.ts` + `session-ledger-store.ts`

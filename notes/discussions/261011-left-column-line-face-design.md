@@ -97,7 +97,7 @@
 
 ## 9 关联
 
-- 样子：`notes/discussions/261011-develop-buffer-faces-faithful-sample.html`
+- 样子：`notes/epics/develop-buffer/261011-develop-buffer-faces-faithful-sample.html`
 - 左栏组成的现行定稿与断言的来源票：`t261008-08`（左栏行组成）、`t261009-43`（dismiss 面）、`t261005-10`（UI-2 选项卡）
 - 线面相关 KI：`KI-01M4KJ022G8R0RRAZ03C7T9TZ4`（落地前置）、`KI-01M4MRB4Z62JGVHVNXPTDV0THS`（绿轮面可被收窄轮铸出）、`KI-01M4MVHTHHS52JXZ9C6JRE8KXM`（池口径 ⇒ 线轮红）
 

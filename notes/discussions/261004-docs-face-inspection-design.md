@@ -5,7 +5,7 @@
 > 本页只管**文档这一面**；四面共用的骨架（基点差分、分片封顶、报告与台账形态）
 > 见 `notes/discussions/261004-inspection-two-faces-tests-simplify.md`；
 > 面板（Inspection tab 的 Documents 面卡 + 滚动覆盖度）见同页 §7 与
-> `notes/discussions/261004-inspection-tab-mock.html`（当前 v8）。
+> `notes/epics/inspection/261004-inspection-tab-mock.html`（当前 v8）。
 
 ## 1. 为什么单开一面，以及今天它是什么状态（实测）
 
@@ -105,7 +105,7 @@
   三类篇数分述、分片数，以及**本面本期的报告入口**；本期没跑就如实写「本实例本期无报告 + 上次/下次」。
 - **覆盖度按滚动窗口看**（`this period / 7 days / 30 days / all`，默认 7 天），
   三行分写：代码（切片口径）、文档（全量口径）、队列（当前状态）。
-- 视觉基准：`notes/discussions/261004-inspection-tab-mock.html`。
+- 视觉基准：`notes/epics/inspection/261004-inspection-tab-mock.html`。
 
 ## 8. 未决（等宿主拍）
 

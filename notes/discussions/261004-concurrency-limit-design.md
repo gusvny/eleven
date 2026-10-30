@@ -1,6 +1,6 @@
 # 261004 并发上限（Running tickets）设计稿
 
-> 状态：**草稿，等宿主过 mock**（`notes/discussions/261004-concurrency-limit-mock.html`，v1）。
+> 状态：**草稿，等宿主过 mock**（`notes/epics/concurrency-limit/261004-concurrency-limit-mock.html`，v1）。
 > 宿主令原话：「今天你要『控制并发』，实际可用的手段只有人肉暂停 + 不再派新票。要不要开票把上限
 > 做成声明（例如「同时非终态泳道 ≤ N，超了排队」——这个我想做成 project 级别的，在 executor panel
 > 上可以配置。就在 overview 上加吧。做个 mock 我看看。」
@@ -376,7 +376,7 @@ t261004-18  development lane · 10 stages   ■agent ■gate ■you     elapsed 
 
 ## 8. 关联
 
-- 视觉基准：`notes/discussions/261004-concurrency-limit-mock.html`（v3＝左栏工单列表 + 右栏 Overview 同屏）
+- 视觉基准：`notes/epics/concurrency-limit/261004-concurrency-limit-mock.html`（v3＝左栏工单列表 + 右栏 Overview 同屏）
 - 面板改版稿（Overview 版面与文案口径）：`notes/discussions/261003-executor-panel-redesign.md`
 - 抖动与噪声证据：request -0006 / -0011 及其票 `t261004-22`
 - 引擎缺口登记：本页 §1（等宿主拍 §6 后开票）

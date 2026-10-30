@@ -18,14 +18,19 @@
 约定只对**新产物**强制。存量按"改到哪、搬到哪"迁移，不做一次性大搬家——因为存量里有 16 个 mock 被 `server/`、`integration/` 下 29 处代码/文档按路径引用，
 搬一个就要同时改引用者，不能凭记忆改。
 
-已登记的迁移欠账（谁搬谁负责改引用）：
+已迁移（261030，integration 在 main 直落，11 个 mock 进了各自目录）：
 
-1. `notes/discussions/261011-develop-buffer-faces-*.html`、`261011-line-round-ui-mock.html` → `notes/epics/develop-buffer/`
-2. `notes/discussions/261004-concurrency-limit-mock.html` → `notes/epics/concurrency-limit/`
-3. `notes/discussions/261004-inspection-tab-mock.html` → `notes/epics/inspection/`
-4. `notes/discussions/260927-project-executor-mock.html`、`261003-executor-panel-redesign-mock.html`、`261009-executor-*.html` → `notes/epics/project-executor/`
-5. `notes/discussions/260904-project-ui-mock.html` → `notes/epics/project-lifecycle/`
-6. 其余（`260904-notes-ui-mock.html`、`260910-docs-view-mock.html`、`260904-ticket-detail-ui-mock.html`、`260904-spec-card-mockup.html`、`261010-demo-ppt.html`）**没有单一立项可归**，留在原处，不搬。
+- `develop-buffer/`：`261011-develop-buffer-faces-faithful-sample.html`、`261011-develop-buffer-faces-mock.html`、`261011-line-round-ui-mock.html`
+- `project-executor/`：`260927-project-executor-mock.html`、`261003-executor-panel-redesign-mock.html`、`261009-executor-certification-tab-mock.html`、`261009-executor-overview-events-alerts-mock.html`、`261009-executor-panel-overview-mock.html`
+- `concurrency-limit/`：`261004-concurrency-limit-mock.html`
+- `inspection/`：`261004-inspection-tab-mock.html`
+- `project-lifecycle/`：`260904-project-ui-mock.html`
+
+留在 `notes/discussions/` 的 5 个——`260904-notes-ui-mock.html`、`260910-docs-view-mock.html`、`260904-ticket-detail-ui-mock.html`、
+`260904-spec-card-mockup.html`、`261010-demo-ppt.html`——**没有单一立项可归**，不搬。
+
+仍欠的引用更新（搬家只动 `notes/`，代码侧的注释指针另票处理）：`server/plugins/` 下 6 处、`integration/` 下 2 处；
+`docs/design/project-management-ui-design.md` 里 1 处属受保护路径，需宿主授权后随设计文档改动一起改。
 
 ## 边界
 
