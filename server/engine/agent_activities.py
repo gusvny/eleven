@@ -119,6 +119,8 @@ from shared import (
     load_ui_evidence,
     normalize_files_changed,
     normalize_handover_runs,
+    normalize_artifacts,
+    normalize_deliverables,
     env_note_for,
     UiChangedPathsArgs,
     UiChangedPathsResult,
@@ -194,7 +196,7 @@ async def _wait_for_agent_result(
     try:
         while True:
             if rfile.is_file():
-                res = _read_result(rfile)
+                res = _read_result(rfile, stage_label)
                 if res is not None:
                     return on_result(res)
             rc = proc.poll()
@@ -1519,7 +1521,7 @@ def _result_gone_detail(where: str, rc, rfile, log_file) -> str:
             % (where, rc, rfile, log_file))
 
 
-def _read_result(path: Path) -> Optional[StageResult]:
+def _read_result(path: Path, stage: str = "") -> Optional[StageResult]:
     try:
         raw = json.loads(path.read_text("utf-8"))
     except Exception:
@@ -1531,6 +1533,31 @@ def _read_result(path: Path) -> Optional[StageResult]:
     # (absent/ok/malformed) so consumers can go visibly red on that basis.
     fc, fc_shape = normalize_files_changed(raw.get("files_changed"))
     legs, leg_shape, leg_dropped = normalize_handover_runs(raw.get("handover_runs"))
+    # t261030-33 (the activity side of the artifact seam): this is the ONLY place that
+    # reads the receipt and normalizes the declaration. The workflow sites receive a dict
+    # of StageResult field names and copy the three keys (shared.copy_artifact_descriptors)
+    # — they must never normalize again, because the receipt key `artifacts` is not in
+    # that dict. `stage` names the owning stage so a descriptor without one still lands
+    # on the right stage row; the snapshot fills it when it is empty.
+    descriptors, descriptors_shape, descriptors_dropped = normalize_artifacts(
+        raw.get("artifacts"), stage)
+    deliverable_paths, deliverables_shape = normalize_deliverables(raw.get("deliverables"))
+    if deliverables_shape == "malformed":
+        # The legacy path list is the only other source of descriptors; a shape that
+        # cannot be read must be named here or the loss is silent (review gen2 B4).
+        descriptors_dropped.append(
+            "deliverables: not a list (%s) — no path entry was read"
+            % type(raw.get("deliverables")).__name__)
+    if descriptors_dropped:
+        # Review N5: a refused declaration must be visible, not only readable on a face
+        # that nothing renders yet. No activity context (unit tests, replay) → no log,
+        # the dropped list still travels with the receipt.
+        try:
+            activity.logger.warning(
+                "[%s] artifact declaration dropped: %s",
+                stage or path.name, "; ".join(descriptors_dropped))
+        except Exception:  # noqa: BLE001 - logging must never break receipt reading
+            pass
     # 260930（project-content N⑦／批次 B）：**入账前语法自检**。契约要求移交命令「可直接在泳道根
     # 执行」，而 t260929-38 实案里 18/18 带字面 `cd <lane_root> && …`（`<` 是重定向）⇒
     # 解析期即死、零执行，却因「单列计数、不进主口径」而**不拦票**（"一条都没跑"与"跑了但红"
@@ -1558,7 +1585,7 @@ def _read_result(path: Path) -> Optional[StageResult]:
         status=str(raw.get("status") or "ok"),
         summary=str(raw.get("summary") or ""),
         report=str(raw.get("report") or ""),
-        deliverables=[str(x) for x in (raw.get("deliverables") or [])],
+        deliverables=deliverable_paths,
         files_changed=fc,
         files_changed_shape=fc_shape,
         evidence=str(raw.get("evidence") or ""),
@@ -1570,6 +1597,10 @@ def _read_result(path: Path) -> Optional[StageResult]:
         handover_dropped=leg_dropped,
         integration_violations=integration_violations,
         integration_scan_note=str(raw.get("integration_scan_note") or ""),
+        # t261030-33: the declared artifact list and every refusal, named (review N5).
+        artifact_descriptors=descriptors,
+        artifact_descriptors_shape=descriptors_shape,
+        artifact_descriptors_dropped=descriptors_dropped,
     )
 
 
@@ -4073,7 +4104,7 @@ async def _run_agent_stage_impl(args: AgentStageArgs) -> StageResult:
     # Idempotent: the result file already exists → read it and return (safe across
     # Temporal retries / worker restarts)
     if rfile.is_file():
-        cached = _read_result(rfile)
+        cached = _read_result(rfile, args.stage_id)
         if cached is not None:
             activity.logger.info("[%s/%s] 结果文件已存在，幂等返回（gen%d）",
                                  args.ticket_id, args.stage_id, args.gen)
@@ -13296,7 +13327,7 @@ def _stub_stage_shortcut(args: AgentStageArgs, settle_on_cache: bool = False) ->
     """
     rfile = Path(args.result_file)
     if rfile.is_file():
-        cached = _read_result(rfile)
+        cached = _read_result(rfile, args.stage_id)
         if cached is not None:
             activity.logger.info("[%s/%s] 结果文件已存在，幂等返回（gen%d）",
                                  args.ticket_id, args.stage_id, args.gen)

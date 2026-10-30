@@ -75,6 +75,9 @@ with workflow.unsafe.imports_passed_through():
     gate_failure_note,
         normalize_files_changed,
         normalize_handover_runs,
+        normalize_deliverables,
+        copy_artifact_descriptors,
+        snapshot_artifact_descriptors,
         env_note_for,
         retry_once_on_worker_termination,
         WorkspacePrepResult,
@@ -975,18 +978,27 @@ class TicketWorkflowBase(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMi
             # docstring 自证的解析点纪律；缺省=老回执零改动）。generic 模板只透传
             # 上台面，不做债表簿记/文案路由——那是 dev-lane 的消费面。
             _legs, _hshape, _hdrop = normalize_handover_runs(raw.get("handover_runs"))
+            # t261030-33 (the workflow side of the artifact seam; review B1): COPY the
+            # three keys the activity produced. This dict carries StageResult field names,
+            # so re-normalizing here would read an absent receipt key `artifacts` and
+            # silently drop every declaration. An older worker's dict has no such keys →
+            # absent defaults, the ticket reads exactly as before.
+            _ad, _ad_shape, _ad_drop = copy_artifact_descriptors(raw)
             res = StageResult(
                 status=str(raw.get("status") or "ok"),
                 summary=str(raw.get("summary") or ""),
                 report=str(raw.get("report") or ""),
-                deliverables=[str(x) for x in (raw.get("deliverables") or [])],
+                deliverables=normalize_deliverables(raw.get("deliverables"))[0],
                 files_changed=_fc,
                 files_changed_shape=_fc_shape,
                 evidence=str(raw.get("evidence") or ""),
                 env_fail=bool(raw.get("env_fail") or False),
                 env_reason=str(raw.get("env_reason") or ""),
                 handover_runs=_legs,
-                handover_dropped=_hdrop)
+                handover_dropped=_hdrop,
+                artifact_descriptors=_ad,
+                artifact_descriptors_shape=_ad_shape,
+                artifact_descriptors_dropped=_ad_drop)
         self.results[st.id] = {
             "status": res.status, "summary": res.summary, "report": res.report,
             "deliverables": list(res.deliverables),
@@ -997,7 +1009,15 @@ class TicketWorkflowBase(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMi
             "env_fail": bool(res.env_fail), "env_reason": str(res.env_reason or ""),
             "env_note": env_note_for(res),
             "handover_runs": [dict(l) for l in (res.handover_runs or [])],
-            "handover_dropped": list(res.handover_dropped or [])}
+            "handover_dropped": list(res.handover_dropped or []),
+            # t261030-33: the declared artifact list rides the existing results face too
+            # (the stage card reads it); every refusal is named (review N5).
+            "artifact_descriptors": [dict(x) for x in (res.artifact_descriptors or [])],
+            "artifact_descriptors_shape": res.artifact_descriptors_shape,
+            "artifact_descriptors_dropped": list(res.artifact_descriptors_dropped or [])}
+        if res.artifact_descriptors_dropped:
+            self._log("%s artifact declaration dropped: %s"
+                      % (st.id, "; ".join(res.artifact_descriptors_dropped)))
         return res
 
     # ---------- Stage execution: script gate ----------
@@ -1074,10 +1094,20 @@ class TicketWorkflowBase(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMi
 
     def _handoff(self, st: Stage, summary: str,
                  artifacts: Optional[List[str]] = None, report: str = "") -> None:
-        self.meta.setdefault("handoffs", []).append({
+        entry: Dict[str, Any] = {
             "stage": st.id, "agent_id": "", "summary": summary, "report": report,
             "artifacts": list(artifacts or []), "ts": self._now_epoch(),
-            "engine_version": self.engine_version})
+            "engine_version": self.engine_version}
+        # t261030-33 (review B4/C3): the declaration is derived from the results entry of
+        # THIS stage (base keys results by the Stage object's id), so no handoff call site
+        # has to pass it and no site can forget it. Absent (a mechanical handoff, or a
+        # stage that declared nothing) → the key is not written at all, and the ticket
+        # entry keeps today's shape exactly.
+        _res = (getattr(self, "results", None) or {}).get(st.id)
+        _declared = _res.get("artifact_descriptors") if isinstance(_res, dict) else None
+        if isinstance(_declared, list) and _declared:
+            entry["artifact_descriptors"] = [dict(x) for x in _declared if isinstance(x, dict)]
+        self.meta.setdefault("handoffs", []).append(entry)
 
     # ---------- rework ----------
     def _apply_rework(self, cur_idx: int) -> int:
@@ -1414,6 +1444,11 @@ class TicketWorkflowBase(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMi
         stage = str(self.meta.get("stage") or "")
         idx = self._stage_idx(stage)
         sdef: Optional[Stage] = self.STAGES[idx] if idx >= 0 else None
+        # t261030-33: the normalized artifact list (an ADDITIVE key; every old key keeps
+        # its value). The base templates keep no round counter, so `round` stays None here
+        # (see shared._artifact_round). Pure function of the handoff history: no IO and no
+        # SDK gate call inside a @query.
+        _arts, _arts_dropped = snapshot_artifact_descriptors(self.meta.get("handoffs"))
         return {
             "engine": ENGINE_V2,
             "ticket_id": self.ticket_id,
@@ -1441,6 +1476,8 @@ class TicketWorkflowBase(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMi
             "results": self.results,
             "human_context": self.human_context,
             "retry_count": self._retry_token,
+            "artifact_descriptors": _arts,
+            "artifact_descriptors_dropped": _arts_dropped,
             "meta": dict(self.meta),
         }
 

@@ -5005,6 +5005,17 @@ class StageResult:
     # 会话流水得出：定点复跑豁免；口径漂移/口径含非法 token/全量超上限（每段
     # 非定点全套 ≤1 趟）=段红+票面点名。缺省 [] = 老回执重放安全。
     full_suite_violations: List[Dict[str, str]] = field(default_factory=list)
+    # t261030-33 (epic artifact-face, engine slice): the stage's structured artifact
+    # declaration. `artifact_descriptors` holds the descriptors the stage DECLARED (an
+    # object or a bare path string under the receipt key `artifacts`). The legacy
+    # deliverables paths are merged in only when the snapshot is built, so no face stores
+    # the same path twice. `artifact_descriptors_shape` is the receipt key's shape
+    # (absent | ok | malformed — the same three states as files_changed_shape).
+    # `artifact_descriptors_dropped` names every refused entry or value (never silent).
+    # Defaults keep historical activity results replaying without a key change.
+    artifact_descriptors: List[Dict[str, Any]] = field(default_factory=list)
+    artifact_descriptors_shape: str = "absent"
+    artifact_descriptors_dropped: List[str] = field(default_factory=list)
 
 
 # handover_runs 的形状上限（t260917-08：防御面非功能面——条数/长度上限在 normalize
@@ -5136,6 +5147,309 @@ def normalize_files_changed(raw: Any):
     if any(not isinstance(x, str) for x in raw):
         return [], "malformed"
     return [x.strip() for x in raw if x.strip()], "ok"
+
+
+# ---------------------------------------------------------------------------
+# t261030-33 (epic artifact-face, engine slice): the artifact declaration.
+#
+# A stage may declare what it produced in its result file, next to the legacy path list:
+#
+#     "artifacts": [{"id","title","kind","source","repo","stage","note","open","shape",
+#                    "optional"}, ...]
+#
+# The engine carries the declaration. It renders nothing, judges no gate and rewrites no
+# value the stage wrote: it only makes the shape usable (a stable id, a kind, a round) and
+# names every entry it cannot carry at all. Legacy path lists keep working and become
+# descriptors here, so old tickets read on the same face.
+# ---------------------------------------------------------------------------
+
+#: The console's built-in view kinds (epic artifact-face). A kind says what a human DOES
+#: with an artifact, not what it looks like. An unknown kind is carried verbatim with
+#: kind_known=False — the engine never invents a kind and never refuses one.
+ARTIFACT_KINDS = ("image", "text", "structure", "diff", "ledger", "external")
+
+#: Extension → kind, used only when a descriptor has no declared kind (a bare path entry or
+#: a descriptor without `kind`). `ledger` is never guessed: a ledger read needs a
+#: declaration, an extension cannot tell one from a plain structure file.
+ARTIFACT_KIND_BY_SUFFIX = {
+    ".png": "image", ".jpg": "image", ".jpeg": "image", ".webp": "image",
+    ".gif": "image", ".svg": "image", ".bmp": "image",
+    ".md": "text", ".txt": "text", ".rst": "text",
+    ".json": "structure", ".yaml": "structure", ".yml": "structure",
+    ".toml": "structure", ".csv": "structure",
+    ".patch": "diff", ".diff": "diff",
+}
+
+
+def _artifact_basename(path: str) -> str:
+    """The last path segment (no pathlib: this must stay a plain, deterministic string
+    operation for the workflow query and for old histories replaying)."""
+    return str(path).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+
+
+def _artifact_suffix(path: str) -> str:
+    name = _artifact_basename(path)
+    return ("." + name.rsplit(".", 1)[-1].lower()) if "." in name else ""
+
+
+def artifact_kind_from_path(path: Any) -> str:
+    """Guess the view kind from a path's extension (pure). Unknown → `external` (the
+    console's degrade card)."""
+    return ARTIFACT_KIND_BY_SUFFIX.get(_artifact_suffix(str(path or "")), "external")
+
+
+def artifact_id_from_path(path: Any) -> str:
+    """Derive a stable id from a path: lowercase, separators and punctuation folded to a
+    single "-". Deterministic, so the same path always yields the same id (the id is what
+    a round diff keys on). A declared `id` always wins over this guess."""
+    raw = str(path or "").replace("\\", "/").strip().lower()
+    out: List[str] = []
+    for ch in raw:
+        if ch.isalnum():
+            out.append(ch)
+        elif out and out[-1] != "-":
+            out.append("-")
+    return "".join(out).strip("-")
+
+
+def _artifact_entry(
+        source: str, stage: str = "", *, id: Any = None, title: Any = None,
+        kind: Any = None, repo: Any = None, note: Any = None, open_: Any = None,
+        shape: Any = None, optional: Any = None, legacy: Any = None,
+        kind_known: Any = None, stage_value: Any = None,
+        round_: Any = None) -> Dict[str, Any]:
+    """Build one descriptor. Declared values are carried verbatim; only an absent or
+    wrongly typed field falls back to a default (`stage_value` is the declaring stage, and
+    the owning `stage` is the fallback). Order of the keys is fixed so a round-trip
+    (normalize(normalize(x))) compares equal."""
+    d_id = id if isinstance(id, str) and id.strip() else artifact_id_from_path(source)
+    d_kind = kind if isinstance(kind, str) and kind.strip() else artifact_kind_from_path(source)
+    d_title = title if isinstance(title, str) and title.strip() else _artifact_basename(source)
+    # `kind_known` and `legacy` are engine outputs, but an already-normalized descriptor
+    # carries them: carrying them as stored is what keeps a second pass from flipping the
+    # labels (a guessed kind must not start to read as declared).
+    d_known = kind_known if isinstance(kind_known, bool) else (d_kind in ARTIFACT_KINDS)
+    return {
+        "id": d_id,
+        "title": d_title,
+        "kind": d_kind,
+        "kind_known": d_known,
+        "source": source,
+        "repo": repo if isinstance(repo, str) else "",
+        "stage": (stage_value if isinstance(stage_value, str) and stage_value.strip()
+                  else (stage if isinstance(stage, str) and stage.strip() else "")),
+        "note": note if isinstance(note, str) else "",
+        "open": open_ if isinstance(open_, str) else "",
+        "shape": shape if isinstance(shape, str) else "",
+        "optional": optional if isinstance(optional, bool) else False,
+        "legacy": legacy if isinstance(legacy, bool) else False,
+        "round": round_ if (round_ is None or isinstance(round_, int)) else None,
+    }
+
+
+def legacy_artifact_descriptor(path: Any, stage: str = "") -> Dict[str, Any]:
+    """One descriptor made from a bare path (a legacy `deliverables` entry or a string
+    element of the declared list). `legacy=True` marks every value the engine guessed
+    instead of the stage declaring it."""
+    src = str(path)
+    return _artifact_entry(src, stage, legacy=True)
+
+
+def normalize_deliverables(raw: Any):
+    """Shape-guard the legacy path list (`deliverables`) before it can feed artifacts
+    (t261030-33, review B4). Returns (paths, shape): shape ∈ "absent" | "ok" | "malformed".
+
+    The guard is deliberately minimal — `deliverables` feeds a DISPLAY list, not a gate:
+      - None → ([], "absent");
+      - a list → ([str(x) for x in raw], "ok"): today's coercion, verbatim, so every path a
+        receipt already yields keeps its exact value (padding, blanks, numbers included);
+      - anything else (a bare string, a dict, a number) → ([], "malformed"): the
+        shape-destroying form only, i.e. "out/x.png" must never be iterated into one fake
+        path per character (the KI-049 accident class).
+
+    Scope: this guard covers a receipt read by THIS engine version. A path list that
+    arrives inside an older worker's activity dict is copied as-is (nothing can tell a
+    real single-character path from a character of a string at that point)."""
+    if raw is None:
+        return [], "absent"
+    if not isinstance(raw, list):
+        return [], "malformed"
+    return [str(x) for x in raw], "ok"
+
+
+def normalize_artifacts(raw: Any, stage: str = ""):
+    """Normalize a stage's declared artifact list into descriptors (pure, t261030-33).
+
+    Returns (descriptors, shape, dropped):
+      - raw is None → ([], "absent", []): the receipt has no declaration (legacy paths are
+        merged in by `snapshot_artifact_descriptors`, not here);
+      - raw is a list → ("ok", ...): each element is judged on its own:
+          * an object → one descriptor (absent or wrongly typed optional fields fall back
+            to a default; the values the stage wrote are carried verbatim);
+          * a non-blank string → one legacy descriptor (kind guessed, id derived,
+            legacy=True) — the old `artifacts: string[]` face is accepted as-is;
+          * anything else, or an object without a usable `source` → refused by index and
+            named in the dropped list (the entry cannot become a descriptor at all);
+      - anything else → ([], "malformed", [one named line]): the declared list is refused
+        as a whole, never repaired (a bare string must not be iterated character by
+        character).
+
+    Idempotent by construction: a descriptor already carrying `kind_known` / `legacy` /
+    `round` keeps them as stored, so `normalize(normalize(x)) == normalize(x)` for both a
+    bare path and a declared object (that is what lets the snapshot pass over data that an
+    earlier pass produced without flipping its labels)."""
+    if raw is None:
+        return [], "absent", []
+    if not isinstance(raw, list):
+        return [], "malformed", [
+            "artifacts: not a list (%s) — the declared list was refused as a whole"
+            % type(raw).__name__]
+    out: List[Dict[str, Any]] = []
+    dropped: List[str] = []
+    for i, entry in enumerate(raw):
+        if isinstance(entry, str):
+            if not entry.strip():
+                dropped.append("%d: path entry is blank — refused" % i)
+                continue
+            out.append(legacy_artifact_descriptor(entry, stage))
+            continue
+        if not isinstance(entry, dict):
+            dropped.append("%d: entry is not an object or a path string (%s) — refused"
+                           % (i, type(entry).__name__))
+            continue
+        source = entry.get("source")
+        if not isinstance(source, str) or not source.strip():
+            dropped.append("%d: source missing, blank or not a string (%s) — refused"
+                           % (i, type(source).__name__))
+            continue
+        out.append(_artifact_entry(
+            source, stage,
+            id=entry.get("id"), title=entry.get("title"), kind=entry.get("kind"),
+            repo=entry.get("repo"), note=entry.get("note"), open_=entry.get("open"),
+            shape=entry.get("shape"), optional=entry.get("optional"),
+            legacy=entry.get("legacy"), kind_known=entry.get("kind_known"),
+            stage_value=entry.get("stage"), round_=entry.get("round")))
+    return out, "ok", dropped
+
+
+def copy_artifact_descriptors(raw: Any):
+    """Copy the artifact fields of an activity-returned dict (the workflow side of the
+    seam, t261030-33 review B1). Returns (descriptors, shape, dropped).
+
+    The workflow sites must NEVER re-normalize: the dict they receive carries
+    `StageResult` field names, so the receipt key `artifacts` is not there — reading it
+    would silently fall back to the legacy paths and lose every declaration. They copy
+    instead, with the absent default (an older worker's dict has no such keys, so the
+    ticket reads exactly as before)."""
+    if not isinstance(raw, dict):
+        return [], "absent", []
+    src = raw.get("artifact_descriptors")
+    descs: List[Dict[str, Any]] = []
+    dropped: List[str] = []
+    if isinstance(src, list):
+        for i, item in enumerate(src):
+            if isinstance(item, dict):
+                descs.append(dict(item))
+            else:
+                dropped.append("%d: descriptor from the activity is not an object (%s) — refused"
+                               % (i, type(item).__name__))
+    elif src is not None:
+        dropped.append("artifact_descriptors from the activity is not a list (%s) — refused"
+                       % type(src).__name__)
+    shape = raw.get("artifact_descriptors_shape")
+    shape = shape if shape in ("absent", "ok", "malformed") else "absent"
+    prior = raw.get("artifact_descriptors_dropped")
+    if isinstance(prior, list):
+        dropped = [str(x) for x in prior] + dropped
+    return descs, shape, dropped
+
+
+def _artifact_round(entry: Dict[str, Any], stage: str, rounds: Any, counts: Dict[str, int]):
+    """The round of one handoff entry (t261030-33, review B5).
+
+    Round is 1-BASED: a stage's first run is round 1. `_handoff` records `gen` after
+    `_enter` incremented the counter, so an entry's own `gen` is exact. Without it, the
+    stage's current counter labels the entry only when the stage has exactly ONE handoff
+    entry (then that counter IS the entry's round); several entries cannot be labelled
+    from one counter, so the answer is None (unknown) rather than a wrong number."""
+    gen = entry.get("gen")
+    if isinstance(gen, int) and not isinstance(gen, bool) and gen > 0:
+        return gen
+    if rounds is not None:
+        try:
+            if counts.get(stage) == 1:
+                cur = rounds.get(stage)
+                if isinstance(cur, int) and not isinstance(cur, bool) and cur > 0:
+                    return cur
+        except AttributeError:
+            return None
+    return None
+
+
+def snapshot_artifact_descriptors(handoffs: Any, rounds: Any = None):
+    """Build the snapshot's flat artifact list from the handoff history (pure, no IO, no
+    SDK call — safe inside a workflow query).
+
+    Rules (t261030-33, reviews B2/C1):
+      - a handoff that carries `artifact_descriptors` is TRUSTED: each descriptor is
+        copied unchanged; `stage` and `round` are filled only when absent. A declaring
+        stage's legacy paths are NOT mirrored in (they stay in `handoffs[].artifacts`), so
+        a stage that declares shows only what it declared;
+      - a handoff with no descriptor list (an old ticket, or a mechanical/conditional
+        handoff such as the light-lane ui_evidence entry) contributes one legacy
+        descriptor per path in `handoffs[].artifacts` (kind guessed, id derived,
+        legacy=True) — that is how a ticket that never declared anything still fills the
+        face;
+      - every refusal is named in the returned dropped list, prefixed with the stage.
+        This list is the AGGREGATOR's channel only: receipt-level refusals live in
+        `results[stage]["artifact_descriptors_dropped"]` and are never mixed in here.
+
+    Returns (descriptors, dropped)."""
+    out: List[Dict[str, Any]] = []
+    dropped: List[str] = []
+    entries = [h for h in (handoffs or []) if isinstance(h, dict)]
+    counts: Dict[str, int] = {}
+    for h in entries:
+        st = str(h.get("stage") or "")
+        counts[st] = counts.get(st, 0) + 1
+    for h in entries:
+        stage = str(h.get("stage") or "")
+        label = stage or "?"
+        declared = h.get("artifact_descriptors")
+        if isinstance(declared, list) and declared:
+            for i, item in enumerate(declared):
+                if not isinstance(item, dict):
+                    dropped.append("[%s] %d: descriptor is not an object (%s) — refused"
+                                   % (label, i, type(item).__name__))
+                    continue
+                d = dict(item)
+                if not str(d.get("stage") or ""):
+                    d["stage"] = stage
+                if d.get("round") is None:
+                    d["round"] = _artifact_round(h, stage, rounds, counts)
+                out.append(d)
+            continue
+        if declared is not None and not isinstance(declared, list):
+            dropped.append("[%s] artifact_descriptors is not a list (%s) — refused"
+                           % (label, type(declared).__name__))
+            continue
+        paths = h.get("artifacts")
+        if paths is None:
+            continue
+        if not isinstance(paths, list):
+            dropped.append("[%s] artifacts is not a list (%s) — no path descriptors read"
+                           % (label, type(paths).__name__))
+            continue
+        round_ = _artifact_round(h, stage, rounds, counts)
+        for i, p in enumerate(paths):
+            if not isinstance(p, str) or not p.strip():
+                dropped.append("[%s] %d: path entry is not a non-blank string (%s) — refused"
+                               % (label, i, type(p).__name__))
+                continue
+            d = legacy_artifact_descriptor(p, stage)
+            d["round"] = round_
+            out.append(d)
+    return out, dropped
 
 
 @dataclass
@@ -7365,6 +7679,12 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
         "%d. 交付契约（硬性）：干完把结果写到 %s，JSON 格式：" % (n + 1, result_file),
         '   {"status":"ok|failed","summary":"台面一句话","report":"人读进展报告",'
         '"deliverables":["产物路径…"],"files_changed":["改动文件…"],"evidence":"原始证据"}',
+        "   Optional artifact declaration (t261030-33, carried by the engine, nothing is "
+        'rendered): "artifacts":[{"id","title","kind","source","repo","stage","note",'
+        '"open","shape","optional"}]. "kind" is one of image|text|structure|diff|ledger|'
+        'external. A plain path string is accepted in the same list, and its kind is then '
+        "guessed from the extension. A refused entry is named on the ticket face, so keep "
+        "every entry formable (a non-blank string `source` is required).",
         "   环境不可用契约（t260917-08）：agent bash 沙箱不可用（命令工具报 sandbox_apply denied /"
         " no sandbox backend / SANDBOX_UNAVAILABLE）时：**文件面产物照常交付**，结果文件加"
         ' "env_fail":true 与 "env_reason":"<缺什么，日志原文摘录>"；没能亲自跑的验证逐条写'

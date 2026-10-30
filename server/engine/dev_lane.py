@@ -252,6 +252,10 @@ with workflow.unsafe.imports_passed_through():
         main_sync_note,
         normalize_files_changed,
         normalize_handover_runs,
+        # t261030-33: the engine-side artifact declaration (receipt → stage → snapshot)
+        normalize_deliverables,
+        copy_artifact_descriptors,
+        snapshot_artifact_descriptors,
         # t261009-58: the ONE effective write set (durable record + annex; the pure
         # faces are pinned by tests, the disk faces live in agent_activities)
         ANNEX_MAX_FILES,
@@ -2077,6 +2081,15 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         if getattr(self, "_detail_face_on", False):
             # t260915-01 ③：handoff 携带轮次（现状 0 条含 gen；详情页轮带消费）。
             entry["gen"] = self._gen(step_id)
+        # t261030-33 (review B4): the declaration is derived from THIS stage's results
+        # entry, so no handoff call site passes it and none can forget it (the light lane
+        # and the quickmanual lane inherit this method). Absent (a mechanical/conditional
+        # handoff, or a stage that declared nothing) → the key is not written at all and
+        # the entry keeps today's shape exactly.
+        _res = (getattr(self, "results", None) or {}).get(step_id)
+        _declared = _res.get("artifact_descriptors") if isinstance(_res, dict) else None
+        if isinstance(_declared, list) and _declared:
+            entry["artifact_descriptors"] = [dict(x) for x in _declared if isinstance(x, dict)]
         self.meta.setdefault("handoffs", []).append(entry)
 
     def _refresh_write_set_after_plan(self) -> Optional[str]:
@@ -3902,11 +3915,17 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         else:
             _fc, _fc_shape = normalize_files_changed(raw.get("files_changed"))
             _legs, _hshape, _hdrop = normalize_handover_runs(raw.get("handover_runs"))
+            # t261030-33 (the workflow side of the artifact seam; review B1): COPY the
+            # three keys the activity produced. This dict carries StageResult field names,
+            # so re-normalizing would read an absent receipt key `artifacts` and silently
+            # drop every declaration. An older worker's dict has no such keys → absent
+            # defaults, the ticket reads exactly as before.
+            _ad, _ad_shape, _ad_drop = copy_artifact_descriptors(raw)
             res = StageResult(
                 status=str(raw.get("status") or "ok"),
                 summary=str(raw.get("summary") or ""),
                 report=str(raw.get("report") or ""),
-                deliverables=[str(x) for x in (raw.get("deliverables") or [])],
+                deliverables=normalize_deliverables(raw.get("deliverables"))[0],
                 files_changed=_fc,
                 files_changed_shape=_fc_shape,
                 evidence=str(raw.get("evidence") or ""),
@@ -3916,7 +3935,10 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 env_fail=bool(raw.get("env_fail") or False),
                 env_reason=str(raw.get("env_reason") or ""),
                 handover_runs=_legs,
-                handover_dropped=_hdrop)
+                handover_dropped=_hdrop,
+                artifact_descriptors=_ad,
+                artifact_descriptors_shape=_ad_shape,
+                artifact_descriptors_dropped=_ad_drop)
         self.results[step_id] = {
             "status": res.status, "summary": res.summary, "report": res.report,
             "deliverables": list(res.deliverables),
@@ -3928,7 +3950,12 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             "env_fail": bool(res.env_fail), "env_reason": str(res.env_reason or ""),
             "env_note": env_note_for(res),
             "handover_runs": [dict(l) for l in (res.handover_runs or [])],
-            "handover_dropped": list(res.handover_dropped or [])}
+            "handover_dropped": list(res.handover_dropped or []),
+            # t261030-33: the declared artifact list on the existing results face (the
+            # stage card reads it); every refusal is named.
+            "artifact_descriptors": [dict(x) for x in (res.artifact_descriptors or [])],
+            "artifact_descriptors_shape": res.artifact_descriptors_shape,
+            "artifact_descriptors_dropped": list(res.artifact_descriptors_dropped or [])}
         # t260917-08（review C1 裁定①）：移交命令入 meta['env_handover_pending'] 债表
         # ——单源消费面（集测段拾取后销账，防重复执行）；put 内含同段回执重写替换
         # 与「本轮亲自完成验证→旧命令销账」两支（方法体见 _handover_debt_put）。
@@ -3938,6 +3965,12 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         if res.handover_dropped:
             self._log("%s 移交命令弃单（畸形记名不执行）：%s"
                       % (step_id, "; ".join(res.handover_dropped)))
+        if res.artifact_descriptors_dropped:
+            # t261030-33 (review N5): a refused artifact declaration is visible on the
+            # ticket face log as well as in the named list (the same stance as the
+            # handover-drop line above).
+            self._log("%s artifact declaration dropped: %s"
+                      % (step_id, "; ".join(res.artifact_descriptors_dropped)))
         # t260915-01 ②（A2）：闸拒绝的结构化明细随回执上台面——单点覆盖全部
         # 「agent 报失败」blocked 调用点（~15 处零改动）；清点=_blocked wake（①）+
         # _enter（②）双保险（R2 生命周期：非 blocked 期恒空）。
@@ -8150,6 +8183,13 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             if s.id == stage:
                 sdef = s
                 break
+        # t261030-33: the normalized artifact list (an ADDITIVE key; every old key keeps
+        # its value). `rounds` is the ungated per-stage entry counter (`_gens`, written on
+        # every _enter), so a ticket started before the detail-face patch still gets a
+        # round when the stage ran once; the entry's own `gen` wins when present. Pure
+        # function of meta/attributes: no IO and no SDK gate determination in a @query.
+        _arts, _arts_dropped = snapshot_artifact_descriptors(
+            self.meta.get("handoffs"), rounds=dict(getattr(self, "_gens", None) or {}))
         return {
             "engine": ENGINE_V2,
             "ticket_id": self.ticket_id,
@@ -8180,6 +8220,13 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             "results": self.results,
             "human_context": self.human_context,
             "retry_count": self._retry_token,
+            # t261030-33: the normalized artifact list (declared descriptors + the legacy
+            # paths of stages that declared nothing), handoff order, each entry carrying
+            # `stage` and 1-based `round`. Additive only; handoffs[].artifacts keeps the
+            # path list. `artifact_descriptors_dropped` is the AGGREGATOR's channel
+            # (receipt-level refusals live in results[stage]).
+            "artifact_descriptors": _arts,
+            "artifact_descriptors_dropped": _arts_dropped,
             # KI-048 (t260911-05): top-level blocked face — blocked_reason = the last
             # _blocked why (plain language, same _classify_main_dirty source), 
             # blocked_detail = the structured {reason_code, files, next_action} the
