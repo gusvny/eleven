@@ -29,8 +29,20 @@
 留在 `notes/discussions/` 的 5 个——`260904-notes-ui-mock.html`、`260910-docs-view-mock.html`、`260904-ticket-detail-ui-mock.html`、
 `260904-spec-card-mockup.html`、`261010-demo-ppt.html`——**没有单一立项可归**，不搬。
 
-仍欠的引用更新（搬家只动 `notes/`，代码侧的注释指针另票处理）：`server/plugins/` 下 6 处、`integration/` 下 2 处；
-`docs/design/project-management-ui-design.md` 里 1 处属受保护路径，需宿主授权后随设计文档改动一起改。
+引用更新已完成的部分（261030）：`server/plugins/executor-panel/src/host/certification-view.ts`、`integration/t261003-06/HANDOFF.md`、
+`integration/t261009-41/slice2-ticket-draft.md`，加上此前 5 个测试/补丁文件（t261030-11）。
+
+**仍欠的 6 处指针，各有具名原因，不要"顺手"改**：
+
+- `server/plugins/workbench/src/client/{lane-map.tsx, certification-model.ts, ticket-detail-column-model.ts, project-icons.tsx}`
+  与其内联产物 `server/plugins/workbench/lib/client.{js,cjs}` —— 这 6 个文件在 UI 前缀下，ui_evidence 闸在本环境不可满足
+  （capture.mjs 对 3099 一律 401，唯一能产出的是登录错误页）——见 KI-425。
+- `server/plugins/executor-panel/src/host/panel-page.ts` —— 一处注释引用就会触发活守卫
+  `ok(!PAGE.includes('notes/epics'))`（整文件子串判据把注释也算了）——见 KI-426。
+- `docs/design/project-management-ui-design.md` —— 受保护路径，需宿主授权后随设计文档改动一起改。
+
+这三类都要**先把闸/守卫的口径修对**才能改指针；在那之前保持旧路径是有意的悬空，不是遗漏。
+另有两笔与证据面相关的欠账：KI-428（`ui_evidence` 可被别的票的旧截图点亮）、KI-427（泳道 code 检查不含产品侧 node 测试面）。
 
 ## 边界
 
