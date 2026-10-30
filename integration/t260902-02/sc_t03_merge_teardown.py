@@ -118,6 +118,27 @@ def lane_intact(repo, lane_dir, branch):
         git(repo, "rev-parse", "--verify", "--quiet", branch).returncode == 0
 
 
+def call_teardown(aa, args, step):
+    """Invoke teardown_lane and turn any raise into a NAMED failure.
+
+    t261030-09 measured: the cleanup recipe removed the lane worktree and then ran a git
+    command with its cwd inside the removed directory, and the only diagnostic that
+    reached the receipt was a bare `FileNotFoundError: <path>` from Popen — nothing on
+    the red said which step it was or what it expected. This wrapper keeps the shape
+    diagnosable however the engine fails next: it names the step, the worktree and the
+    branch that were supposed to be torn down.
+    """
+    fn = getattr(aa.teardown_lane, "fn", aa.teardown_lane)
+    try:
+        return asyncio.run(fn(args))
+    except Exception as e:
+        raise AssertionError(
+            "teardown_lane raised during %s: %s: %s | expected worktree %s and branch %s "
+            "to be torn down from a repo directory that outlives the tree removal (the "
+            "spawn's cwd was inside the lane)"
+            % (step, type(e).__name__, e, args.worktree, args.branch))
+
+
 def main():
     # ---- 1) defer_teardown=False（旧语义）：内联拆泳道 ----
     repo, lane_dir, branch = make_repo_with_lane("old")
@@ -137,15 +158,19 @@ def main():
     saved_root = aa.REPO_ROOT
     aa.REPO_ROOT = repo2
     try:
-        tres = asyncio.run(getattr(aa.teardown_lane, "fn", aa.teardown_lane)(
-            MergeArgs(ticket_id="t03-defer", worktree=str(lane2), branch=branch2)))
+        tres = call_teardown(aa, MergeArgs(ticket_id="t03-defer", worktree=str(lane2),
+                                           branch=branch2), "the first teardown")
         ok(tres.ok and not lane_intact(repo2, lane2, branch2),
            "teardown_lane：拆除 defer 后的泳道")
-        tres2 = asyncio.run(getattr(aa.teardown_lane, "fn", aa.teardown_lane)(
-            MergeArgs(ticket_id="t03-defer", worktree=str(lane2), branch=branch2)))
+        # 260930（t261030-09）：分支单独断言——缺陷形态是 worktree 已拆、分支留存，而
+        # 旧断言只验复合的 lane_intact（目录没了就过），看不出 branch -D 是否真跑过。
+        ok(git(repo2, "rev-parse", "--verify", "--quiet", branch2).returncode != 0,
+           "teardown_lane：泳道分支已删（branch -D 真的跑了，不只拆了目录）")
+        tres2 = call_teardown(aa, MergeArgs(ticket_id="t03-defer", worktree=str(lane2),
+                                            branch=branch2), "the idempotent re-run")
         ok(tres2.ok, "teardown_lane 幂等重跑 ok（已拆再拆不炸）")
-        bad = asyncio.run(getattr(aa.teardown_lane, "fn", aa.teardown_lane)(
-            MergeArgs(ticket_id="t03-x", worktree="/tmp/none", branch="-bad")))
+        bad = call_teardown(aa, MergeArgs(ticket_id="t03-x", worktree="/tmp/none",
+                                          branch="-bad"), "the illegal-branch arm")
         ok((not bad.ok) and "非法" in (bad.error or ""), "非法 branch 回执 ok=False 点名（不抛）")
     finally:
         aa.REPO_ROOT = saved_root

@@ -9,6 +9,9 @@
   - `shared.MergeArgs.repo_worktrees` payload 兼容字段（缺键回落空列表 + 字段追加在末尾）；
   - dev_lane 接线源码锁定：teardown 调用点带 repo_worktrees；回执 ok=False → _blocked
     分支在「只记 warn」分支之前（防后人把 fail-closed 误读成静默）。
+  - the cleanup anchor's lifecycle (t261030-09 measured defect): the cwd of the teardown
+    git commands must outlive the worktree removal, and a vanished anchor is named in the
+    receipt instead of surfacing as a bare FileNotFoundError from Popen.
 
 畸形输入用例全走 tmp git 夹具/桩 `_git`，不靠外部源（工单惯例：消费外部输入的实现
 必带畸形输入用例）。
@@ -288,9 +291,14 @@ def test_teardown_member_remove_failure_named_per_repo_not_silent(mixed, monkeyp
     assert res.ok and res.action == "teardown"          # 既有取舍：残留不阻断收口
     assert "[repo_a] worktree remove 失败" in res.error, res.error
     assert "simulated member remove failure" in res.error
-    # 不短路：该仓 branch -D 照样执行（remove 失败后 worktree 仍在，branch 被占用→
-    # 删除被 git 拒，故两条 warn 都逐仓点名）；真残留如实留在盘上，可被巡检消费
-    assert "[repo_a] branch -D 失败" in res.error, res.error
+    # No short-circuit: that repo's branch -D still runs (the worktree is still there
+    # after the failed remove, so the branch is held and git refuses the delete, which is
+    # why both warns are named per repo); the real residue stays on disk for the sweeper.
+    # 260930 (t261030-09): the warn copy moved to English (a touched line follows the
+    # current writing standard); the named-check judgement is unchanged - the repo tag,
+    # the failed git action and the branch name are all still there.
+    assert "[repo_a] git branch -D lane/utt05i-repo_a" in res.error, res.error
+    assert "failed" in res.error, res.error
     assert _lane_branches(mixed / "repo_a") == ["+ lane/utt05i-repo_a"]
     assert any(str(lane) in p for p in _worktrees(mixed / "repo_a"))
     assert all(str(lane) not in p for p in _worktrees(mixed))   # 根仓照清
@@ -433,3 +441,65 @@ def test_teardown_docker模式_调用形状与失败容忍(mixed, fake_docker):
     assert res2.ok, (res2.ok, res2.error)
     assert "agent 容器回收" in res2.error, res2.error
     assert "已拆" not in res2.error, res2.error
+
+
+# ---------- teardown anchor lifecycle (the regression net for t261030-09) ----------
+
+def _make_outside_lane(base: Path, tag: str):
+    """A lane OUTSIDE the .lane/.worktrees convention: a sibling worktree of the repo.
+
+    This is the shape the defect was measured on: `_lane_repo_root` arm 2 answers the lane
+    tree itself (the caller said where the lane is, and the tree IS a git repo root), so
+    the teardown's repo anchor equals the very tree it is about to remove.
+    """
+    repo = base / (tag + "-repo")
+    _init_repo(repo, "f.txt")
+    lane = base / (tag + "-lane-wt")
+    br = "lane/" + tag
+    _git("worktree", "add", "-b", br, str(lane), cwd=repo)
+    (lane / "feat.txt").write_text("feat\n", encoding="utf-8")
+    _git("config", "user.email", "ut@example.com", cwd=lane)
+    _git("config", "user.name", "ut", cwd=lane)
+    _git("add", "-A", cwd=lane)
+    _git("commit", "-m", "feat", cwd=lane)
+    return repo, lane, br
+
+
+def test_teardown_anchor_keeps_the_conventional_repo(mixed, tmp_path):
+    """The anchor rule, both shapes: a conventional lane keeps the caller's repo
+    unchanged (byte-level zero regression), a lane that resolves to its own tree gets
+    that worktree's OWNER repo — the directory that survives the removal."""
+    lane, _entries = _make_mixed_lane(mixed, "utt09b")     # <root>/.lane/<ticket>
+    assert aa._teardown_git_cwd(mixed, lane).resolve() == mixed.resolve()
+    repo, lane2, _br = _make_outside_lane(tmp_path, "utt09b")
+    assert aa._teardown_git_cwd(lane2, lane2).resolve() == repo.resolve()
+
+
+def test_teardown_lane_outside_the_convention_removes_tree_and_branch(tmp_path, monkeypatch):
+    """t261030-09 measured defect: the anchor repo WAS the tree, so `worktree remove`
+    deleted the cwd of the following `branch -D` (bare FileNotFoundError from Popen) and
+    the lane branch survived — the lane was never torn down. The receipt must be clean
+    and both the tree and the branch must really be gone."""
+    repo, lane, br = _make_outside_lane(tmp_path, "utt09a")
+    monkeypatch.setattr(aa, "REPO_ROOT", repo)
+    res = _run(MergeArgs(ticket_id="utt09a", worktree=str(lane), branch=br))
+    assert res.ok and res.action == "teardown", (res.ok, res.action, res.error)
+    assert res.error == "", res.error
+    assert not lane.exists(), "the lane worktree must be gone"
+    assert _lane_branches(repo) == [], _lane_branches(repo)
+    assert all(str(lane) not in p for p in _worktrees(repo)), _worktrees(repo)
+
+
+def test_teardown_anchor_gone_is_named_never_a_bare_errno(mixed, tmp_path, monkeypatch):
+    """The anchor can still vanish (a race, a hand cleanup). Then the receipt must NAME
+    what was expected and where it looked - the failing git action and its branch, the
+    anchor repo it looked at, and the fact that the anchor must outlive the tree - instead
+    of letting Popen raise a bare `FileNotFoundError: <dir>`."""
+    lane, entries = _make_mixed_lane(mixed, "utt09c")
+    gone = tmp_path / "gone-repo"
+    monkeypatch.setattr(aa, "_teardown_git_cwd", lambda repo, tree: gone)
+    res = _run(MergeArgs(ticket_id="utt09c", worktree=str(lane),
+                         branch="lane/utt09c-root", repo_worktrees=entries))
+    assert res.ok and res.action == "teardown", (res.ok, res.action, res.error)
+    assert str(gone) in res.error, res.error                  # where it looked
+    assert "it must outlive the tree removal" in res.error, res.error   # what it expected
