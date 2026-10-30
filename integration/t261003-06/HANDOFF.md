@@ -1,6 +1,6 @@
 # Handoff — t261003-06 executor panel redesign (implement stage)
 
-Visual baseline: `notes/discussions/261003-executor-panel-redesign-mock.html`.
+Visual baseline: `notes/epics/project-executor/261003-executor-panel-redesign-mock.html`.
 Design truth: `notes/discussions/261003-executor-panel-redesign.md`.
 Screenshots: `.sandbar/screenshots/panel-before.png` / `panel-after.png` (harness-isolated capture, `.sandbar/capture-panel.mjs`).
 

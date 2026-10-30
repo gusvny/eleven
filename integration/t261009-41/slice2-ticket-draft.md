@@ -48,7 +48,7 @@ Scope (write set: `server/plugins/executor-panel/src/` + `server/plugins/executo
    the promotion write face is not landed).
 4. **The tab**: a `Certification` entry in `panel-page.ts`'s tab row rendering
    the face exactly as the approved mock
-   (`notes/discussions/261009-executor-certification-tab-mock.html`, v15)
+   (`notes/epics/project-executor/261009-executor-certification-tab-mock.html`, v15)
    draws it: one combobox line picker; the `.linebar` with the fixed 9px
    delivered cap and one boundary; counts inside segments only; `auto rounds`
    switch + `run now`; the waiting/certified tables (ticket id → ticket,

@@ -5,7 +5,7 @@
  * implementation (the page embeds this function's source via String()).
  *
  * Layout law (the approved mock v15,
- * notes/discussions/261009-executor-certification-tab-mock.html):
+ * notes/epics/project-executor/261009-executor-certification-tab-mock.html):
  *   - ONE bar, ONE boundary: segments sized by cert/wait counts; the delivered
  *     total is a running number beside a fixed cap, never in the segment scale.
  *   - counts appear once: inside the segments and on the Promote button. The
