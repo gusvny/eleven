@@ -48,7 +48,7 @@ EXCLUDE_VALUE = "engine,exclusive"
 # verify.yaml. Two consumers need it:
 #   1. a quickmanual `l1_battery` declaration resolves its OWNER CHECK from the
 #      DECLARED pytest-form checks of the lane's verify.yaml (verify_lane's own
-#      predicate: the command carries "pytest") and appends the battery as
+#      predicate: the command carries "pytest") and runs the battery as
 #      `pytest_node`; without a declared pytest-form check the declaration can
 #      only be refused, so the battery round is unreachable on this fixture;
 #   2. every merge_check runs `verify_lane lane=code` over the declared checks,
@@ -56,7 +56,10 @@ EXCLUDE_VALUE = "engine,exclusive"
 #      every fixture world - a bare `-m pytest` would collect the whole suite
 #      from the lane root.
 # The default target is the fixture's own green battery directory; a battery
-# declaration appends its pytest_node to the same command.
+# declaration runs its pytest_node through this command on the SINGLE-FILE route
+# (t261030-18/KI-423): the command's own positional targets are REPLACED by the
+# declared node, so the node is the only collected argument (appending it would
+# collect both roots and die on a non-top-level conftest).
 PYTEST_CHECK_ID = "test"
 BATTERY_DIR = "fixture_battery"
 # The lane worktree carries the engine venv as a symlinked dependency

@@ -932,15 +932,6 @@ TARGETED_RERUN_PATCH_ID = "dev-lane-targeted-rerun-v1"
 # 空/畸形）→ fail-closed 恒全跑。同构布尔门：旧历史（无本 marker）走 v1 判据逐字
 # 旧行为，在途票不追溯。
 TARGETED_RERUN_FILE_RADIUS_PATCH_ID = "dev-lane-targeted-rerun-file-radius-v1"
-# t261029-18: the branch name of EVERY lane scope goes onto the ticket face (an
-# additive key). The collector now resolves one name per scope (a multi-repo lane's
-# meta.branch is the placeholder `lane/<id>`, while the root tree is on
-# `lane/<id>-root`). The resolve result lands in
-# meta["file_blast_radius_trace"]["resolved_branches"], so "which name was measured"
-# stays readable after the log rolls over (the ticket asks the degrade to reach the gate
-# log; the log face is the activity logger, the ticket face is this key). Same boolean
-# gate as the family: an old history writes no such key and keeps the old behavior.
-CHANGED_FILES_BRANCH_TRACE_PATCH_ID = "dev-lane-changed-files-branches-v1"
 # t260930-02（宿主裁 260930「先 B」）：面计划——快反馈面从「只有上轮红名」扩成
 # 「本次改动面 ∪ 上轮红名」。旧判据的缺口是实打实的：定点轮只跑上轮红名，于是**这次
 # 改动新碰坏了什么**在快反馈里看不见，只能等收口全量跑才发现（白烧一轮）。判定面
@@ -2666,37 +2657,10 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
 
     # ---------- t260923 D：收口全量跑（串行/平行两分支共用） ----------
     def _integ_run_args(self, only_names=(), own_names=()):
-        """Build the integration-run arguments (the single writer collected by the
-        t260913-03 single-station lock, 260923 D): the apply_skip_pools policy value is
-        set explicitly here only (the literal statement is the lock's criterion); the
-        main run passes the pointed face (may be empty), the closing run passes empty =
-        full run. attempt = this generation's caliber, equal element-wise to the
-        existing call sites.
-
-        t261029-18 (arbitration round 4): a pointed face MUST carry the ticket's
-        declared own scenario names. The runner executes exactly the pointed list; an
-        own name only gets an exemption from pool/roster drops and is never injected
-        (integration/run_scenarios.py own_kept). So "declared own, not in the pointed
-        list" always trips the own-coverage guard
-        (agent_activities.own_coverage_error) with a startup-level error, and that
-        round's pass verdict is voided. The own proof obligation belongs in the run list
-        itself. The union lives in this single writer, so the main run, the closing arm
-        and the quick gate cannot drift apart. An empty only list = the full run, where
-        own names run anyway."""
-        only_names = list(only_names or [])
-        if only_names:
-            # t261029-18 (arbitration round 4): the runner runs EXACTLY the pointed
-            # list and only EXEMPTS own names from pool/roster drops; it never injects
-            # one that the caller left out (integration/run_scenarios.py own_kept).
-            # A pointed round that omits the ticket's own scenario therefore trips the
-            # own-coverage guard (agent_activities own_coverage_error) with a
-            # startup-level error, and every pass of that round is voided. The own proof
-            # obligation belongs IN the run list. The union lives in this one writer, so
-            # the main run, the closing arm and the quick gate cannot drift apart. An
-            # empty only list = the full run, where own names run anyway.
-            for _n in (own_names or ()):
-                if _n not in only_names:
-                    only_names.append(_n)
+        """集成跑入参构造（t260913-03 唯一真站锁的单写者收拢，260923 D）：
+        apply_skip_pools 策略值只此一处显式置位（语句字面量唯一命中=锁的判据）；
+        主跑传定点面（可空），收口跑传空=全量。attempt=本代数口径与既有调用点
+        逐元素等值。"""
         return IntegrationRunArgs(
             ticket_id=self.ticket_id,
             worktree=str(self.meta.get("worktree") or ""),
@@ -5685,17 +5649,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                         _cf_err = str(getattr(_cf, "error", "") or "")
                         self.meta["file_blast_radius_trace"] = {
                             "changed_files": _cf_files, "error": _cf_err}
-                        if workflow.patched(CHANGED_FILES_BRANCH_TRACE_PATCH_ID):
-                            # t261029-18: which branch each scope was measured on. A
-                            # placeholder that had to fall back to the root-tree name is
-                            # then readable on the ticket face after the worker log rolls.
-                            _cf_resolved = [str(x) for x in
-                                            (getattr(_cf, "resolved", None) or [])]
-                            self.meta["file_blast_radius_trace"]["resolved_branches"] = \
-                                _cf_resolved
-                            if _cf_resolved:
-                                self._log("changed-files resolved branches: %s"
-                                          % ", ".join(_cf_resolved))
                         if _cf_err:
                             # fail-closed 留痕：清单不可得 ≠ 无改动，恒全跑
                             self._log("文件级爆炸半径：改动清单不可得（%s）——恒全跑"
@@ -8683,10 +8636,50 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
             return True
         return bool(_failed > 0 or (_ran > 0 and _passed == 0))
 
-    def _quick_gate_verdict(self, ir: Any) -> str:
-        """Verdict for a FULL-registry round (pure w.r.t. the receipt + the parent's
+    @staticmethod
+    def _quick_scope_facts(ir: Any) -> Dict[str, Any]:
+        """The narrowing facts the zero-run decision reads off the round receipt.
+
+        Pure (no IO, no judging): it only collects what the receipt already says, so
+        `shared.quick_scope_state` stays the single writer of the state and of the
+        zero decision. Every key is optional; a round whose receipt names no decision
+        reads as the honest `registry_mismatch` face. t261030-18 (KI-424)."""
+        _zrf = getattr(ir, "zero_run_face", None)
+        zrf = dict(_zrf) if isinstance(_zrf, dict) else {}
+        _kr = getattr(ir, "known_red", None)
+        kr = dict(_kr) if isinstance(_kr, dict) else {}
+        retired: List[str] = []
+        for _rec in (zrf.get("retired_premise_excluded") or []):
+            if isinstance(_rec, dict) and str(_rec.get("name") or "").strip():
+                retired.append(str(_rec["name"]).strip())
+        retired.extend(str(x).strip()
+                       for x in (zrf.get("retired_premise_pointed_skipped") or [])
+                       if str(x).strip())
+        try:
+            _excluded_count = int(zrf.get("excluded_count")
+                                  or getattr(ir, "excluded_count", 0) or 0)
+        except (TypeError, ValueError):
+            # a malformed count is not guessed at: the fact stays 0 and the decision
+            # is still named by the faces that ARE readable
+            _excluded_count = 0
+        return {
+            "excluded_pools": [str(x) for x in
+                               (getattr(ir, "excluded_pools", None) or [])],
+            "excluded_count": _excluded_count,
+            "known_red_names": [str(x) for x in (kr.get("names") or [])],
+            "retired_names": retired,
+            "face_vacuous": bool(zrf.get("face_vacuous")),
+            "narrowed_face_empty": bool(zrf.get("narrowed_face_empty")),
+            "collect_route": str(getattr(ir, "collect_route", "") or ""),
+        }
+
+    def _quick_gate_verdict(self, ir: Any,
+                            quick_scope: Optional[Dict[str, Any]] = None) -> str:
+        """Verdict for the machine-gate round (pure w.r.t. the receipt + the parent's
         red-name single writers):
           - a receipt error is red;
+          - a NARROWED round (t261030-18, KI-424) that ran zero cases is red: the
+            declared scope was not judged, so there is no verdict to be green about;
           - the counts may never disagree with the verdict (t261028-15, KI-388):
             `failed > 0`, or `ran > 0 with passed == 0`, is red — a round that
             recorded failures, or that ran work and passed nothing, can never be
@@ -8703,6 +8696,14 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
         `failed > 0` round fully attributed to the main baseline stays green
         there by design."""
         if str(getattr(ir, "error", "") or ""):
+            return "red"
+        # Zero-run lock (t261030-18, KI-424): a NARROWED round that ran no case
+        # judged nothing, so it has no verdict to be green about. Measured on
+        # t261030-06 round 4: `ran=0 / passed=0 / failed=0 / env_fail=0` recorded
+        # green with only the pool-exclusion line as evidence. A full round (no
+        # quick_scope) keeps today's caliber: this lock is scoped to the narrowing.
+        if shared.quick_scope_state(quick_scope, getattr(ir, "ran", 0),
+                                    self._quick_scope_facts(ir))["zero_run"]:
             return "red"
         # Counts lock (t261028-15, KI-388): an unreadable count is red, never green.
         if self._quick_counts_red(ir):
@@ -8747,7 +8748,15 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
             excluded_pools=[str(x) for x in (rraw.get("excluded_pools") or [])],
             excluded_count=int(rraw.get("excluded_count") or 0),
             only_names=[str(x) for x in (rraw.get("only_names") or [])],
-            env_red=[str(x) for x in (rraw.get("env_red") or [])])
+            env_red=[str(x) for x in (rraw.get("env_red") or [])],
+            # t261030-18: the zero-attribution + collection-route faces ride the
+            # decode too, so a Temporal-transported (dict) result carries them
+            # (absent keys = an old activity payload, both stay at their defaults).
+            # known_red rides it for the same reason: the roster-skip decision is
+            # one of the zero-run faces this ticket must name on the receipt.
+            zero_run_face=dict(rraw.get("zero_run_face") or {}),
+            known_red=dict(rraw.get("known_red") or {}),
+            collect_route=str(rraw.get("collect_route") or ""))
 
     @staticmethod
     def _quick_scope_phrase(quick_scope: Optional[Dict[str, Any]]) -> str:
@@ -8777,18 +8786,43 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
         _wf_line = shared.worker_verified_line(getattr(ir, "worker_identity", ""),
                                                getattr(ir, "code_stamp", None))
         names = self._tests_red_names(ir)
-        green = self._quick_gate_verdict(ir) == "green"
+        green = self._quick_gate_verdict(ir, quick_scope) == "green"
+        # t261030-18 (KI-424): the three states a signer needs are named keys on the
+        # receipt, not something to infer from four counts: scope_judged (the declared
+        # scope was judged) / nothing_ran (a decision dropped it) / target_not_collected
+        # (the declared target produced no row at all). zero_run_decision names WHICH
+        # decision produced the zero.
+        _state = shared.quick_scope_state(quick_scope, getattr(ir, "ran", 0),
+                                          self._quick_scope_facts(ir))
+        _state_tail = ""
+        if _state["state"] != shared.QUICK_SCOPE_STATE_FULL:
+            _state_tail = " | scope state: %s%s" % (
+                _state["state"],
+                (" (decision: %s)" % _state["zero_decision"])
+                if _state["zero_decision"] else "")
+            if _state["zero_run"]:
+                _state_tail += " | " + _state["line"]
+        # t261030-18 (KI-423): a battery round says HOW its target was collected on
+        # the same sentence (the full route text rides the `collect_route` key below).
+        _route = str(getattr(ir, "collect_route", "") or "")
+        _route_tail = (" | collection: single-file route (the declared target is the "
+                       "only collected argument)") if _route else ""
         return {
             "status": "ok" if green else "failed",
             "summary": ("integration gate (%s): %s ran / %s passed / %s "
-                        "failed / %s env-red%s%s"
+                        "failed / %s env-red%s%s%s%s"
                         % (self._quick_scope_phrase(quick_scope),
                            ir.ran, ir.passed, ir.failed, ir.env_fail,
+                           _state_tail, _route_tail,
                            (" | " + str(ir.error)) if ir.error else "",
                            (" | " + _wf_line) if _wf_line else "")),
             "report": "", "deliverables": [], "files_changed": [],
             "evidence": json.dumps(ir.details, ensure_ascii=False)[-4000:],
             "gen": gen,
+            # t261030-18: the machine-readable siblings of the summary sentence.
+            "scope_state": _state["state"],
+            "zero_run_decision": _state["zero_decision"],
+            "collect_route": _route,
             "worker_identity": str(getattr(ir, "worker_identity", "") or ""),
             "code_stamp": getattr(ir, "code_stamp", None) or {},
             "blockers": [str(b) for b in (getattr(ir, "blockers", None) or [])],
@@ -8810,6 +8844,35 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                     "cannot be mutated in place: re-create the ticket with a "
                     "declaration that resolves, or cancel."
                     % str(ir.error or "")[:400])
+        if reason_code == "quick_gate_zero_run":
+            # t261030-18 (KI-424): a narrowed round that judged NOTHING is not a
+            # green, and the face says which state and which decision produced the
+            # zero - a signer never again reads four zeros as "declared scope passed".
+            _state = shared.quick_scope_state(quick_scope, getattr(ir, "ran", 0),
+                                              self._quick_scope_facts(ir))
+            _lines = [
+                "Integration gate round %d judged NOTHING (%s): %s ran / %s passed "
+                "/ %s failed / %s env-red." % (
+                    gen, self._quick_scope_phrase(quick_scope),
+                    ir.ran, ir.passed, ir.failed, ir.env_fail),
+                "State: %s%s - zero cases ran, so this round is a NAMED red, never "
+                "a green." % (
+                    _state["state"],
+                    (" (zero decision: %s)" % _state["zero_decision"])
+                    if _state["zero_decision"] else ""),
+                _state["line"] or "the receipt named no reason for the zero.",
+            ]
+            if not _state["zero_run"]:
+                # Defensive: the reason code fires only for a zero_run state; if a
+                # future lock disagrees, say so instead of implying a cause.
+                _lines.append("The receipt's counts do not read as a zero-run; the "
+                              "reason code and the counts disagree - treat this as "
+                              "a defect of the gate face.")
+            _lines.append("Ways out: retry_qc to re-run the gate, or rework("
+                          "to_stage=work) to make the declared scope judged "
+                          "(declare a scenario/check/battery this round can collect, "
+                          "or widen the declaration).")
+            return "\n".join(_lines)[:self.FACE_MAX_CHARS]
         names = [str(n) for n in self._tests_red_names(ir)]
         shown = names[:self.FACE_NAME_LIMIT]
         more = len(names) - len(shown)
@@ -9271,7 +9334,13 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                     ir = await self._quick_gate_round(quick_scope)
                 if not ir.error:
                     self._handover_debt_clear()
-                verdict = self._quick_gate_verdict(ir)
+                verdict = self._quick_gate_verdict(ir, quick_scope)
+                # t261030-18 (KI-424): the zero-run state is computed once here and
+                # rides the gate row, so the query face answers "was the declared
+                # scope judged?" without re-deriving it from four counts.
+                _zstate = shared.quick_scope_state(quick_scope,
+                                                   getattr(ir, "ran", 0),
+                                                   self._quick_scope_facts(ir))
                 self.results["run_integration_tests"] = self._quick_gate_receipt(
                     ir, gen0, quick_scope)
                 self.gate_runs.append({
@@ -9289,19 +9358,29 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                     # `declared_scope` names every declared kind.
                     "narrowed": list((quick_scope or {}).get("only_names") or []),
                     "declared_scope": (dict(quick_scope) if quick_scope else {}),
+                    "scope_state": _zstate["state"],
+                    "zero_run_decision": _zstate["zero_decision"],
                     "error": str(ir.error or "")})
                 self._finish("run_integration_tests", by="run_integration_tests",
                              evidence=self.results["run_integration_tests"]
                              ["summary"])
                 self._handoff("run_integration_tests",
                               "gate round %d: ran=%s passed=%s failed=%s "
-                              "env_fail=%s%s"
+                              "env_fail=%s%s%s"
                               % (gen0 + 1, ir.ran, ir.passed, ir.failed, ir.env_fail,
+                                 (" | scope state: " + _zstate["state"])
+                                 if _zstate["state"]
+                                 != shared.QUICK_SCOPE_STATE_FULL else "",
                                  (" | " + str(ir.error)) if ir.error else ""))
                 if verdict != "green":
                     _err = str(getattr(ir, "error", "") or "")
                     if _err.startswith("quick_scope_unresolved"):
                         reason_code = "quick_scope_unresolved"
+                    elif _zstate["zero_run"]:
+                        # t261030-18 (KI-424): a narrowed round that judged nothing
+                        # is its own cause, named before the generic error/counts/
+                        # env branches (four zeros must never read as env-unnamed).
+                        reason_code = "quick_gate_zero_run"
                     elif _err:
                         reason_code = "quick_gate_error"
                     elif not self._tests_red_names(ir) and self._quick_counts_red(ir):
@@ -9322,6 +9401,8 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                             "violations": self._tests_red_names(ir),
                             "counts": {"ran": ir.ran, "passed": ir.passed,
                                        "failed": ir.failed, "env_fail": ir.env_fail},
+                            "scope_state": _zstate["state"],
+                            "zero_run_decision": _zstate["zero_decision"],
                             "next_action": QUICKMANUAL_NEXT_ACTION_REWRITE,
                             **({"declared_scope": dict(quick_scope)}
                                if quick_scope else {}),

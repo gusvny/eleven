@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 358,
+      "engine_tests": 359,
       "scenarios": 855
     },
     "vocab": [
@@ -14,6 +14,10 @@
     "what": "anchor label per engine test and per registered scenario (vocabulary: behaviour | contract | production-snapshot | source-text); enforced by integration/lint_tests.py L16 (coverage/vocabulary/sync) and L18 (production-snapshot marker discipline); added by t261004-20"
   },
   "engine_tests": {
+    "server/engine/tests/test_t261030_gate_zero_run_and_declaration_shape.py": {
+      "anchor": "behaviour",
+      "note": "t261030-18 KI-424 + KI-423: a narrowed quickmanual gate round that ran zero cases is a NAMED red (shared.quick_scope_state returns full_round / scope_judged / nothing_ran / target_not_collected, and names which decision produced the zero: pool exclusion, retired premise, roster skip, registry mismatch, declaration shape); the receipt carries scope_state + zero_run_decision + collect_route so a signer can tell declared-scope-judged from nothing-ran from target-not-collected; verify_lane collects an l1_battery target through the single-file route (the declared cmd positional targets are replaced, options kept) so a battery under integration/ runs, a missing target is refused by name, pytest exit 5 is named as not-collected and a real failing case still reds; the live verify.yaml test command is rewritten to that route (this leg reads the project declaration as it stands today and says so when the premise changes). Offline, real pytest on tiny generated fixture-lane files, no docker/Temporal/3099"
+    },
     "server/engine/tests/test_t261026_37_fork_selfheal.py": {
       "anchor": "behaviour",
       "note": "t261026-37 KI-376: the lane-dsh missing-profile self-heal journey driven through the real dev_lane main loop with a stubbed activity seam (all live gates on): B-heal fork re-run -> join settle -> mechanical tests -> arb_acc fork double precheck refusal -> blocked(arbitrate) -> host retry -> arbitrate re-run (verdict=pass) -> gate-5 consumes the stranded FAILED walkthrough receipt -> blocked(acceptance_walkthrough) -> host retry -> walkthrough re-runs ok -> verdict consumes the ok receipt -> merge_check; pins edge call counts (implement/design/arbitrate/acceptance each exactly one real spawn) and the blocked stage order, plus the malformed-refusal predicate matrix and, from t261027-26, the split walkthrough-receipt face: a receipt naming no failed item becomes an observation (merge_check, implement not re-run) while a receipt naming an item still bounces to implement.",

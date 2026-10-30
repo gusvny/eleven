@@ -747,12 +747,6 @@ class ChangedFilesResult:
     # t260925-12 闸段分相计时（additive）：活动自报墙钟秒（执行面，不含 Temporal
     # 调度等待）。0.0=未计时（老回放/旧 dict 回退重建点缺键=缺省值，零行为变化）。
     wall_s: float = 0.0
-    # t261029-18 (additive): the branch name each lane scope actually resolved to,
-    # ``"<scope name>:<branch>"`` in scope order. Empty = an old payload or no scope ran;
-    # a dict-rebuild point that predates this key must keep the default. The gate
-    # projects this onto the ticket face so a resolve/degrade leaves a record after the
-    # worker log rolls over.
-    resolved: List[str] = field(default_factory=list)
 
 
 def gate_phase_timings(phases, wall_s):
@@ -878,6 +872,18 @@ class IntegrationRunResult:
     #              注入了 SANDBAR_KNOWN_RED_EXCLUDE；未跑 ≠ 判绿）。
     reuse: Dict[str, Any] = field(default_factory=dict)
     known_red: Dict[str, Any] = field(default_factory=dict)
+    # t261030-18 (KI-424 + KI-423): the two faces a narrowed round needs to say WHY it
+    # ran zero cases, and HOW a battery target was collected. Additive and defaulted:
+    # an old receipt / an old executor / an old replay carries neither key, so both
+    # stay empty and every pre-change behavior is byte-identical.
+    #   zero_run_face = the runner's own zero-attribution block (face_vacuous /
+    #                   narrowed_face_empty / retired premise names / excluded pools
+    #                   / only_scenarios) relayed by the gate — the single source of
+    #                   the decision named by shared.quick_scope_state;
+    #   collect_route = the single-file collection route a battery round ran through
+    #                   (named by verify_lane, so a signer reads it off the face).
+    zero_run_face: Dict[str, Any] = field(default_factory=dict)
+    collect_route: str = ""
     # 宿主令 260930（B 档「谁验的」上票面）：**服务本轮的 worker 身份**与其**代码指纹**
     # （additive；缺省 "" / {} = 老回放与老闸形态逐字节零漂移）。为什么要它：同一个队列上
     # 若并存两颗 worker（或进程跑的是改动前的旧码），票面结果**不可归因到代码版本**——
@@ -1841,16 +1847,6 @@ def changed_files_blast_radius(changed_files, diff_error: str = "") -> str:
         if n.endswith("/"):
             return "shared"  # 目录折叠条目=范围未知，宁宽勿窄（缺陷②纵深）
         if n.startswith(_SHARED_BASE_PREFIXES):
-            return "shared"
-        # t261029-18 (review C5): a multi-repo lane reports a member-tree path with the
-        # repo directory in front (`<repo>/integration/run_scenarios.py`). A member tree
-        # can carry a shared face itself — the gate resolves verify.yaml over candidate
-        # trees, member trees included (t261019-45). This pure function cannot know the
-        # project's repo names, so it also tests the tail after ONE leading segment.
-        # Matching too much = a full run (slow, safe). Matching too little = a narrowed
-        # round, the unsafe direction this rail exists to close.
-        tail = n.split("/", 1)[1] if "/" in n else ""
-        if tail and tail.startswith(_SHARED_BASE_PREFIXES):
             return "shared"
     return "localized" if seen else "shared"
 
@@ -3898,62 +3894,6 @@ def flatten_branch_suffix(repo_rel: str) -> str:
     return sanitize_branch_segment(str(repo_rel).replace("/", "-"))
 
 
-#: The root-repo tree's name inside a multi-repo lane (that tree's path IS the lane
-#: container). This constant is the ONE source of the `-root` branch suffix
-#: (t261029-18): the mint (`build_repo_worktrees`) and the resolution
-#: (`lane_branch_candidates`) both read it, so the name cannot drift between the two
-#: sides. A literal copied into a second module is the trap this ticket is about.
-ROOT_TREE_NAME = "root"
-
-
-def lane_branch(lane_dir_name: str, tree_name: str = "") -> str:
-    """The lane branch name for ONE tree (the single naming source, t261029-18).
-
-    Empty ``tree_name`` = a single-repo lane: ``lane/<lane dir>``.
-    A tree name (the root tree's ``ROOT_TREE_NAME``, or a member repo's flattened
-    segment) = ``lane/<lane dir>-<tree name>``.
-
-    The mint is `build_repo_worktrees`; the read side is `lane_branch_candidates`.
-    """
-    base = sanitize_branch_segment(lane_dir_name)
-    return ("lane/%s-%s" % (base, tree_name)) if tree_name else ("lane/" + base)
-
-
-def lane_branch_candidates(branch: Any, allow_root_twin: bool = True) -> List[str]:
-    """The branch names to try for a lane, in order (pure function, t261029-18).
-
-    A ``meta.branch`` value can be the multi-repo placeholder ``lane/<id>``
-    (`derive_lane_workspace`) while the root tree's real branch is
-    ``lane/<id>-<ROOT_TREE_NAME>``. The candidate list is therefore: the name as given,
-    then its root-tree twin (built by `lane_branch`, never by a second copy of the
-    suffix).
-
-    ``allow_root_twin=False`` is for a member-repo scope: its twin cannot exist there,
-    so asking for it would only add noise to a failure message.
-
-    Malformed input (non-string / blank) returns an empty list: the caller treats that
-    as "no candidate resolvable" (fail-closed), never as "no change". A name that
-    already ends with ``-<ROOT_TREE_NAME>`` gets no second suffix, so ``-root-root`` is
-    unrepresentable. A name whose lane segment is not already refname-safe gets no twin
-    either (the engine never mints such a name, and inventing one would be a guess).
-    """
-    if not isinstance(branch, str):
-        return []
-    s = branch.strip()
-    if not s:
-        return []
-    suffix = "-" + ROOT_TREE_NAME
-    if not allow_root_twin or s.endswith(suffix):
-        return [s]
-    if not s.startswith("lane/"):
-        return [s]
-    lane_dir = s[len("lane/"):]
-    if not lane_dir or sanitize_branch_segment(lane_dir) != lane_dir:
-        return [s]
-    twin = lane_branch(lane_dir, ROOT_TREE_NAME)
-    return [s] if twin == s else [s, twin]
-
-
 def repos_under(project_root) -> List[pathlib.Path]:
     """The git repos under the project root that a lane can attach to (this section's
     only scanning source of truth).
@@ -4151,19 +4091,18 @@ def build_repo_worktrees(project_root, write_set, lane_dir_name: str) -> List[Di
         raise ValueError("multi-repo lane derivation needs a non-empty write_set "
                          "(write_set is the only input of the ownership derivation)")
     root = pathlib.Path(project_root).resolve()  # macOS /var → /private/var normalization
+    base = sanitize_branch_segment(lane_dir_name)
     entries: List[Dict[str, str]] = []
     seen_branch = set()
     for repo_abs, _paths in resolve_repos_for_paths(project_root, write_set).items():
         repo_rel = pathlib.Path(repo_abs).relative_to(root).as_posix()
         if repo_rel == ".":
             repo_rel = ""  # the root-repo tree (the mixed shape): rel normalized to the empty string
-        # repo_rel="" (the root-repo tree) → name explicitly ROOT_TREE_NAME (the tree
-        # path = the lane container itself); the theoretical collision of a child repo
-        # literally named root is caught by seen_branch fail-closed. The branch name
-        # comes from `lane_branch` — the one naming source the resolution side also
-        # reads (t261029-18).
-        name = flatten_branch_suffix(repo_rel) if repo_rel else ROOT_TREE_NAME
-        branch = lane_branch(lane_dir_name, name)
+        # repo_rel="" (the root-repo tree) → name explicitly "root" (the tree path = the
+        # lane container itself); the theoretical collision of a child repo literally
+        # named root is caught by seen_branch fail-closed.
+        name = flatten_branch_suffix(repo_rel) if repo_rel else "root"
+        branch = "lane/%s-%s" % (base, name)
         if branch in seen_branch:
             raise ValueError("multi-repo branch name collision: %s (repo paths still colliding "
                              "after flattening need a manual rename)" % branch)
@@ -5379,6 +5318,135 @@ def quick_scope_plan(kind: str, names: list, registry_names,
         return ("", {"mode": "battery", "only_names": [], "check": "",
                      "pytest_node": nm, "note": ""})
     return ("quick_scope_unresolved: unknown evidence kind %r" % (kind,), {})
+
+
+# ---- t261030-18 (KI-424): was a narrowed round JUDGED, or did it judge nothing? ----
+#
+# The defect this repairs: a narrowed quickmanual round that executed NOTHING was
+# recorded green (`ran=0 / passed=0 / failed=0 / env_fail=0`, measured on t261030-06
+# round 4). The counts alone cannot carry that verdict, because "the declared scope
+# was judged and passed" and "nothing was judged" read as the same four zeros. The
+# three states below are the ones a signer must be able to tell apart on the face.
+
+#: A round that was not narrowed (full registry, or no plan at all). Its caliber is
+#: unchanged by this guard (byte-identical to the pre-t261030-18 behavior).
+QUICK_SCOPE_STATE_FULL = "full_round"
+#: The declared scope was judged: at least one case ran.
+QUICK_SCOPE_STATE_JUDGED = "scope_judged"
+#: Nothing ran: a decision dropped the declared scope (see QUICK_ZERO_DECISIONS).
+QUICK_SCOPE_STATE_NOTHING_RAN = "nothing_ran"
+#: The declared target was not collected (a battery/check target that produced no
+#: row for the declared check) — distinct from "nothing ran", because there the
+#: round's own run face never existed.
+QUICK_SCOPE_STATE_NOT_COLLECTED = "target_not_collected"
+
+QUICK_SCOPE_STATES = (QUICK_SCOPE_STATE_FULL, QUICK_SCOPE_STATE_JUDGED,
+                      QUICK_SCOPE_STATE_NOTHING_RAN, QUICK_SCOPE_STATE_NOT_COLLECTED)
+
+#: The decisions that can produce a zero-case narrowed round, named on the receipt
+#: so a signer knows WHICH decision produced the zero (never a bare count).
+QUICK_ZERO_POOL = "pool_exclusion"
+QUICK_ZERO_RETIRED = "retired_premise"
+QUICK_ZERO_ROSTER = "roster_skip"
+QUICK_ZERO_REGISTRY = "registry_mismatch"
+QUICK_ZERO_SHAPE = "declaration_shape"
+QUICK_ZERO_DECISIONS = (QUICK_ZERO_POOL, QUICK_ZERO_RETIRED, QUICK_ZERO_ROSTER,
+                        QUICK_ZERO_REGISTRY, QUICK_ZERO_SHAPE)
+
+
+def quick_scope_state(quick_scope: Any, ran: Any, facts: Any = None
+                      ) -> Dict[str, Any]:
+    """Turn a narrowed round's counts + receipt faces into the state a signer needs.
+
+    Pure (no IO; single writer for the three states and the zero decision). Returns:
+      state:          one of QUICK_SCOPE_STATES
+      zero_run:       True when the narrowed round judged nothing (never green)
+      zero_decision:  which decision produced the zero ("" unless zero_run)
+      line:           a one-sentence human face naming the state and the decision
+
+    `facts` carries what the round's receipt already says about why a case list can
+    come out empty (all keys optional; absent = the receipt did not say):
+      excluded_pools:   the pool-exclusion decision in force this round (pool names)
+      excluded_count:   how many entries that decision took out of the round
+      known_red_names:  the roster-skip decision's names
+      retired_names:    the retired-premise decision's names (the round's excluded set)
+      face_vacuous:     the runner said the (widened) face was empty too
+      narrowed_face_empty: the runner said the narrowed face was empty (it widened)
+      collect_route:    the single-file route a battery round ran through (naming it
+                        is the receipt's job, see verify_lane)
+
+    A full round keeps today's caliber (state FULL, zero_run False): this guard is
+    scoped to the NARROWED round, which is the shape that fed a signer a green.
+    """
+    sc = dict(quick_scope or {}) if isinstance(quick_scope, dict) else {}
+    f = dict(facts or {}) if isinstance(facts, dict) else {}
+    mode = str(sc.get("mode") or "")
+    names = [str(x) for x in (sc.get("names") or []) if str(x).strip()]
+    try:
+        _ran = int(ran or 0)
+    except (TypeError, ValueError):
+        _ran = 0
+    out = {"state": QUICK_SCOPE_STATE_FULL, "zero_run": False, "zero_decision": "",
+           "line": ""}
+    if mode not in ("scenario", "check", "battery"):
+        out["line"] = ("full round (nothing was narrowed): %d case(s) ran" % _ran)
+        return out
+    if _ran > 0:
+        out["state"] = QUICK_SCOPE_STATE_JUDGED
+        out["line"] = ("declared scope judged: %d case(s) ran (%s)"
+                       % (_ran, mode))
+        return out
+    # ran == 0 on a NARROWED round: this round judged nothing.
+    out["zero_run"] = True
+    _decl = ", ".join(names) or "(no name)"
+    if mode in ("check", "battery"):
+        # A check/battery round proves itself by the row the declared check
+        # produces. No row = the declared target was never collected; the shape
+        # of the declaration (not an environment fault) produced the zero.
+        out["state"] = QUICK_SCOPE_STATE_NOT_COLLECTED
+        out["zero_decision"] = QUICK_ZERO_SHAPE
+        _route = str(f.get("collect_route") or "")
+        out["line"] = (
+            "nothing ran: the declared %s target %s was NOT collected (no row for "
+            "the declared check)%s — the declaration's shape produced zero cases"
+            % (mode, _decl, ("; collection route: " + _route) if _route else ""))
+        return out
+    out["state"] = QUICK_SCOPE_STATE_NOTHING_RAN
+    _retired = set(str(x) for x in (f.get("retired_names") or []))
+    _roster = set(str(x) for x in (f.get("known_red_names") or []))
+    _pools = [str(x) for x in (f.get("excluded_pools") or []) if str(x).strip()]
+    _hit_retired = sorted(n for n in names if n in _retired)
+    _hit_roster = sorted(n for n in names if n in _roster)
+    if _hit_retired:
+        out["zero_decision"] = QUICK_ZERO_RETIRED
+        out["line"] = (
+            "nothing ran: the retired-premise decision excluded the declared "
+            "scenario(s) %s (a retired premise is never judged again, so these "
+            "entries cannot provide evidence this round)"
+            % ", ".join(_hit_retired))
+    elif _hit_roster:
+        out["zero_decision"] = QUICK_ZERO_ROSTER
+        out["line"] = (
+            "nothing ran: the roster-skip decision (known-red, every-round path) "
+            "dropped the declared scenario(s) %s — not judged this round"
+            % ", ".join(_hit_roster))
+    elif _pools:
+        out["zero_decision"] = QUICK_ZERO_POOL
+        out["line"] = (
+            "nothing ran: the pool-exclusion decision was in force (excluded "
+            "pools: %s; %s entries out of the round) and the declared scenario(s) "
+            "%s ran nowhere%s"
+            % (", ".join(_pools), f.get("excluded_count", 0) or 0, _decl,
+               " (the widened face was empty too)"
+               if f.get("face_vacuous") else ""))
+    else:
+        out["zero_decision"] = QUICK_ZERO_REGISTRY
+        out["line"] = (
+            "nothing ran: the declaration named %s and the round's receipt carries "
+            "no executed row for it, while no pool-exclusion / retired-premise / "
+            "roster-skip decision was recorded — the registry and the declaration "
+            "disagree" % _decl)
+    return out
 
 
 @dataclass
@@ -7971,187 +8039,12 @@ def roles_dir_for_spawn(project_key: str, cwd) -> pathlib.Path:
     <cwd>/server/roles (the current convention, the worktree ticket snapshot semantics
     unchanged; a missing directory doesn't blow up here — the soft skip for a missing
     concrete <role>.yml belongs to the call site's existing logic, and declared and
-    undeclared are equally soft at this layer).
-
-    Since t261028-54 the spawn consumer is role_preset_for_spawn, which calls this
-    helper for the project leg and takes the declared flag from the same project_paths
-    read - the anchor rule stays here, in ONE place (no second copy to drift)."""
+    undeclared are equally soft at this layer)."""
     info = project_paths(project_key, roles_base=str(cwd))
     if info["roles_dir"] is not None:
         _require_anchor(info["entry"], "roles_dir", info["roles_dir"], "dir")
         return info["roles_dir"]
     return pathlib.Path(cwd) / DEFAULT_ROLES_DIR
-
-
-# ---- Role preset resolution (ticket t261028-54): per-file fallback, traced ----
-# A stage's role buys an agent four things (persona, model route, ticket/lane naming,
-# in-code role branches); this section owns ONLY the persona file, and the spawn step
-# turns one decision from here into a --patch argument.
-#
-# Resolution is per ROLE FILE, not per directory: a project may own one role and
-# inherit the rest. Chain, first hit wins:
-#   1. project leg = <project roles dir>/<role>.yml (see _roles_dir_resolved).
-#   2. built-in    = roles whose persona the engine writes itself (inspection ->
-#                    inspection_inspect.build_persona_patch): a missing file is the
-#                    configured state, not a defect.
-#   3. engine leg  = <engine tree>/server/roles/<role>.yml, the cross-project generic
-#                    persona library named by
-#                    docs/design/sandbar-distribution-v1.md. It applies ONLY when the
-#                    project DECLARES paths.roles_dir: the declaration is the opt-in.
-#                    An undeclared project keeps the pre-ticket behavior byte for byte
-#                    (project leg only), so no project inherits another project's
-#                    persona doctrine by surprise (KI-063; review_plan round 1
-#                    decision D1).
-#   4. soft skip   = the profile's default persona. Undeclared = info only (the old
-#                    silence is preserved); declared = a warning naming both candidate
-#                    files, because a declaring project asked for a role and did not
-#                    get it.
-# The engine leg reads the tree that RUNS this code (_repo_root(), never an assumed main
-# checkout: in a lane worktree that imports the lane copy it IS the lane root). It
-# follows the live tree, not the lane snapshot, so a library edit reaches an in-flight
-# lane; the trace records source_sha256_16 so a mid-ticket change is attributable
-# (review C3/D4).
-ENGINE_ROLES_DIR_REL = "server/roles"   # the engine library base, relative to the engine tree
-# The role name becomes a file stem, and it arrives from a project-external workflow
-# template (untrusted input): letters/digits first, then letters/digits/._- up to 64
-# characters, no path separator and no leading dot.
-ROLE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
-# Roles whose persona the engine builds itself at spawn time (no preset file needed).
-ENGINE_BUILTIN_ROLE_PERSONAS = ("inspection",)
-# Rollback knob: "0"/"false"/"off"/"no" turns the engine leg off without a code revert.
-ENV_ROLE_PRESET_FALLBACK = "SANDBAR_ROLE_PRESET_FALLBACK"
-ROLE_PRESET_STATES = ("project", "builtin", "engine", "declared_missing",
-                      "undeclared_missing", "invalid_role", "no_role")
-
-
-def engine_roles_dir() -> pathlib.Path:
-    """Base of the engine's cross-project role library (the tree running this code).
-
-    Separate function, not a module constant, so tests can inject a fixture library by
-    monkeypatching this name (the same injection stance as roles_base/routes_base)."""
-    return _repo_root() / ENGINE_ROLES_DIR_REL
-
-
-def _role_file_kind(p: pathlib.Path) -> str:
-    """Kind of a role preset candidate: 'file' | 'dir' | 'absent' | 'unreadable'.
-
-    A DIRECTORY named <role>.yml is not a preset; it is reported as its own kind and
-    never reads as present (review C5/K6). Never raises."""
-    try:
-        if p.is_file():
-            return "file"
-        if p.is_dir():
-            return "dir"
-        return "absent"
-    except OSError:
-        return "unreadable"
-
-
-def _role_file_sha256_16(p: pathlib.Path) -> Optional[str]:
-    """First 16 hex characters of the preset file's sha256 (attribution aid, review
-    C3). Unreadable file = None, never a raise."""
-    try:
-        h = hashlib.sha256()
-        with open(str(p), "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                h.update(chunk)
-        return h.hexdigest()[:16]
-    except OSError:
-        return None
-
-
-def role_preset_for_spawn(project_key: str, cwd, role,
-                          engine_dir=None) -> Dict[str, Any]:
-    """Resolve the role preset FILE for one spawn (ticket t261028-54).
-
-    Returns a decision dict; the spawn step turns it into a --patch argument and a
-    trace record. Keys (stable, asserted by the unit battery):
-      role, role_len, state, source, source_file, source_sha256_16, declared,
-      roles_rel, project_dir, engine_dir, fallback_enabled, candidates
-      [{leg, file, kind, consulted}], error.
-    `patch` / `patch_arg_added` / `materialized` are added by the spawn step.
-
-    state ∈ ROLE_PRESET_STATES. The function never raises for a missing or malformed
-    role; it raises only through the unchanged declarations contract (a declared
-    roles_dir anchor that is missing or of the wrong kind -> ProjectPathsError).
-
-    engine_dir is a test injection point; production callers pass nothing and get
-    engine_roles_dir()."""
-    cwd_path = pathlib.Path(cwd)
-    role_text = "" if role is None else (role if isinstance(role, str) else str(role))
-    knob = str(os.environ.get(ENV_ROLE_PRESET_FALLBACK, "1")).strip().lower()
-    fallback_enabled = knob not in ("0", "false", "off", "no")
-    engine_base = engine_roles_dir() if engine_dir is None else pathlib.Path(engine_dir)
-    decision: Dict[str, Any] = {
-        "role": role_text,
-        "role_len": len(role_text),
-        "state": "no_role",
-        "source": None,
-        "source_file": None,
-        "source_sha256_16": None,
-        "declared": False,
-        "roles_rel": None,
-        "project_dir": None,
-        "engine_dir": str(engine_base),
-        "fallback_enabled": fallback_enabled,
-        "candidates": [],
-        "error": "",
-    }
-    if not role_text:
-        return decision
-    if not isinstance(role, str) or ROLE_NAME_RE.match(role_text) is None:
-        # No file is read or stat-ed for a malformed name (review C5); the caller's
-        # trace names the raw text, escaped.
-        decision["state"] = "invalid_role"
-        decision["error"] = ("role name shape rejected: allowed = %s"
-                             % ROLE_NAME_RE.pattern.replace("\\Z", ""))
-        return decision
-    # Project leg: the declared flag comes from the same project_paths read the
-    # directory helper uses; the anchor rule itself lives only inside
-    # roles_dir_for_spawn (review K4: one implementation, one meaning).
-    paths_info = project_paths(project_key, roles_base=str(cwd_path))
-    declared = paths_info["roles_rel"] is not None
-    project_dir = roles_dir_for_spawn(project_key, cwd_path)
-    decision["declared"] = declared
-    decision["roles_rel"] = paths_info["roles_rel"]
-    decision["project_dir"] = str(project_dir)
-    project_file = project_dir / (role_text + ".yml")
-    engine_file = engine_base / (role_text + ".yml")
-    project_kind = _role_file_kind(project_file)
-    engine_kind = _role_file_kind(engine_file)
-    fallback_applies = declared and fallback_enabled
-    # Both candidates are always recorded, with `consulted` saying whether the leg was
-    # ALLOWED to serve (the declaration is the opt-in). A record therefore shows the
-    # alternative that existed, not only the branch that ran.
-    decision["candidates"] = [
-        {"leg": "project", "file": str(project_file), "kind": project_kind,
-         "consulted": True},
-        {"leg": "engine", "file": str(engine_file), "kind": engine_kind,
-         "consulted": bool(fallback_applies)},
-    ]
-    if project_kind == "file":
-        # A project hit stops here: the engine leg is recorded (with its kind) but it
-        # was not consulted for this decision.
-        decision["candidates"][1]["consulted"] = False
-        decision.update({"state": "project", "source": "project",
-                         "source_file": str(project_file),
-                         "source_sha256_16": _role_file_sha256_16(project_file)})
-        return decision
-    if role_text in ENGINE_BUILTIN_ROLE_PERSONAS:
-        # Engine-built persona: the absent file is the configured state (no warning,
-        # no engine leg - this role's persona never comes from the library).
-        decision["candidates"][1]["consulted"] = False
-        decision["state"] = "builtin"
-        return decision
-    if fallback_applies and engine_kind == "file":
-        decision.update({"state": "engine", "source": "engine",
-                         "source_file": str(engine_file),
-                         "source_sha256_16": _role_file_sha256_16(engine_file)})
-        return decision
-    decision["state"] = "declared_missing" if declared else "undeclared_missing"
-    if declared and not fallback_enabled:
-        decision["error"] = "engine fallback disabled by %s" % ENV_ROLE_PRESET_FALLBACK
-    return decision
 
 
 def dsh_bin_for_spawn(project_key: str) -> Optional[pathlib.Path]:

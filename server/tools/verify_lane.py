@@ -155,8 +155,15 @@ TOOL = {
                                           'The quickmanual evidence gate narrows through this — the narrowed round is '
                                           'named as narrowed by the caller, never here.'},
             'pytest_node': {'type': 'string',
-                            'description': 'code lane (t261022-09): valid ONLY with only_check; appends a pytest target to '
-                                           "that check's command. A non-pytest check plus pytest_node is a NAMED red. "
+                            'description': 'code lane (t261022-09, route fixed by t261030-18/KI-423): valid ONLY with '
+                                           "only_check; runs this ONE pytest target through that check's command. The "
+                                           "check's own positional targets are REPLACED by the node (its options, shell "
+                                           "prefix and redirections are kept), so the target is the only collected "
+                                           'argument — appending it instead collects both roots and dies on a '
+                                           'non-top-level conftest. The route is named on the receipt '
+                                           '(pytest_node_route). A non-pytest check plus pytest_node is a NAMED red; a '
+                                           'target that does not exist in the lane is a NAMED red with nothing run; '
+                                           'pytest exit 5 (nothing collected) is named apart from a failing case. '
                                            'Absent = the check runs as declared.'},
             'ticket_id': {'type': 'string',
                           'description': 'code lane: ticket id — the write-set whitelist admits files whose basename '
@@ -180,8 +187,133 @@ WS_CHECK_ID = 'write_set_whitelist'
 # v2：checks 为列表命令制（无专属类型词表）——每条 {id, cmd, cwd?, timeout?}。
 
 
+#: t261030-18 (KI-424): the runner's own zero-attribution keys. The gate relays them
+#: verbatim so the engine can NAME which decision produced a zero-case round instead
+#: of reading four zeros as "the declared scope passed". Data only — the judging
+#: single point is `shared.quick_scope_state`.
+_ZERO_FACE_KEYS = ('face_vacuous', 'narrowed_face_empty', 'only_scenarios',
+                   'excluded_pools', 'excluded_count',
+                   'retired_premise_excluded', 'retired_premise_count',
+                   'retired_premise_pointed_skipped',
+                   'known_red_names', 'known_red_skipped', 'expected', 'reused')
+
+
+def _zero_run_face_from_summary(executor_summary):
+    """Filter the runner's INTEG_SUMMARY down to the zero-attribution keys."""
+    out = {}
+    if isinstance(executor_summary, dict):
+        for k in _ZERO_FACE_KEYS:
+            if k in executor_summary:
+                out[k] = executor_summary[k]
+    return out
+
+
+def _summary_from_stdout(text):
+    """The LAST INTEG_SUMMARY dict in a round's stdout (None when absent/malformed).
+
+    Used by the paths that must return a receipt BEFORE the full summary parse (for
+    example the zero-signal red), so the zero decision is still nameable there.
+    A malformed summary is not guessed at: it reads as absent."""
+    got = None
+    for ln in (text or '').splitlines():
+        if ln.startswith('INTEG_SUMMARY '):
+            try:
+                got = json.loads(ln[len('INTEG_SUMMARY '):])
+            except ValueError:
+                got = None
+    return got
+
+
 def _check(name, items):
     return {'check': name, 'level': 'red' if items else 'green', 'items': items}
+
+
+# ---- t261030-18 (KI-423): the single-file collection route for a pytest target ----
+#
+# A battery declaration names ONE pytest target. APPENDING it to the check's own
+# command (`pytest server/engine/tests -q integration/tests/test_x.py`) makes pytest
+# collect BOTH roots under the repo rootdir, and the second root's conftest then dies
+# ("Defining 'pytest_plugins' in a non-top-level conftest"). The declared battery can
+# never pass, and the round reds with "1 ran / 0 passed / 1 failed" that names neither
+# the cause nor the route (measured, KI-423: three gate rounds red while the same
+# battery was green alone in that lane and in a fresh clone).
+#
+# The route below runs the declared target ALONE: the command's own positional
+# targets are dropped, its options are kept, its shell prefix and trailing comment
+# are kept, and the node becomes the only collected argument. The route is named on
+# the receipt (`pytest_node_route`) so a signer reads HOW the target was collected.
+_PYTEST_LAUNCHER_RE = re.compile(r'-m\s+pytest\b|(?<![\w./-])pytest(?![\w-])')
+#: pytest options that TAKE a value — the value token must be kept verbatim (it is
+#: an option's value, never a declared target, so the rewrite must not drop it).
+_PYTEST_VALUE_OPTS = frozenset((
+    '-k', '-m', '-p', '-c', '-o', '-W', '-r', '-n',
+    '--rootdir', '--confcutdir', '--maxfail', '--deselect', '--ignore',
+    '--ignore-glob', '--junitxml', '--basetemp', '--tb', '--durations',
+    '--timeout', '--dist', '--log-level', '--log-cli-level', '--cov',
+))
+_TOKEN_RE = re.compile(r"'[^']*'|\"[^\"]*\"|\S+")
+
+
+def _comment_start(tail):
+    """Index of the first shell comment '#' in `tail` (outside quotes), or None."""
+    quote = ''
+    i = 0
+    while i < len(tail):
+        ch = tail[i]
+        if quote:
+            if ch == quote:
+                quote = ''
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == '#' and (i == 0 or tail[i - 1].isspace()):
+            return i
+        i += 1
+    return None
+
+
+def _single_file_route(cmd, node):
+    """Rebuild a pytest-form check command so pytest collects EXACTLY `node`.
+
+    Returns (new_cmd, dropped_targets, route_note, error). error non-empty = the
+    command could not be read as a pytest invocation; the caller then refuses BY NAME
+    and nothing runs (never a guessed command, never a silent fallback to the
+    declared cmd's own targets)."""
+    if not node:
+        return cmd, [], '', 'no pytest target was declared'
+    matches = list(_PYTEST_LAUNCHER_RE.finditer(cmd))
+    if not matches:
+        return cmd, [], '', ('no pytest launcher (-m pytest / pytest) in the check '
+                             'command, so the declared target cannot be its only '
+                             'collected argument')
+    head, tail = cmd[:matches[-1].end()], cmd[matches[-1].end():]
+    comment = ''
+    cut = _comment_start(tail)
+    if cut is not None:
+        tail, comment = tail[:cut], tail[cut:]
+    kept, dropped = [], []
+    toks = _TOKEN_RE.findall(tail)
+    i = 0
+    while i < len(toks):
+        raw = toks[i]
+        quoted = raw[:1] in ("'", '"')
+        if not quoted and raw.startswith('-'):
+            kept.append(raw)
+            if raw in _PYTEST_VALUE_OPTS and i + 1 < len(toks):
+                kept.append(toks[i + 1])
+                i += 2
+                continue
+        elif not quoted and (raw[:1] in '|&<>' or re.match(r'^\d*(>>?|<<?|>&|<&)', raw)):
+            kept.append(raw)   # a shell redirection/pipe is not a declared target
+        else:
+            dropped.append(raw)  # the check's own positional target: replaced
+        i += 1
+    parts = [head] + kept + [node]
+    new_cmd = ' '.join(parts) + ((' ' + comment) if comment else '')
+    route = ('pytest_node single-file route: pytest collects ONLY the declared '
+             'target %r (the check command\'s own positional target(s) %s are '
+             'replaced; its options are kept)'
+             % (node, ', '.join(dropped) if dropped else '(none)'))
+    return new_cmd, dropped, route, ''
 
 
 def _note(msg):
@@ -753,9 +885,12 @@ def _code(a):
     # t261022-09 quickmanual evidence scope: `only_check` runs EXACTLY ONE declared
     # check by id (the declaration drives the gate; the narrowed round is named as
     # narrowed by the caller, never here). `pytest_node` (only valid together with
-    # only_check) appends a pytest target to that check's command — the check must
-    # be a pytest-form command, else a NAMED red (never a guessed run). Absent
-    # params = byte-identical old behavior (every declared check runs).
+    # only_check) runs that ONE target through the check's command: t261030-18
+    # (KI-423) replaced the old APPEND with the single-file route, because appending
+    # collects the check's own target AND the declared node in one pytest run and
+    # the second root dies on a non-top-level conftest. The check must still be a
+    # pytest-form command, else a NAMED red (never a guessed run). Absent params =
+    # byte-identical old behavior (every declared check runs).
     _only_check = str(a.get('only_check') or '').strip()
     _pytest_node = str(a.get('pytest_node') or '').strip()
     if _only_check and isinstance(ck, list) and ck:
@@ -782,10 +917,39 @@ def _code(a):
                 'declared check %r command is not one — nothing ran'
                 % (_pytest_node, _only_check)}]))
             return checks
-        ck = [dict(ck[0], cmd='%s %s' % (_cmd, _pytest_node))] if ck else ck
+        # t261030-18 (KI-423): the declared target must EXIST in the lane before any
+        # spawn — a target that does not exist is refused by name here (nothing ran),
+        # not left to pytest's own "file or directory not found" wording.
+        _node_file = _pytest_node.split('::')[0]
+        if not (root / _node_file).is_file():
+            checks.append(_check(_only_check, [{'detail':
+                'pytest_node %r does not exist in the lane (looked for %s) — '
+                'nothing ran; declare an existing pytest target'
+                % (_pytest_node, root / _node_file)}]))
+            return checks
+        _new_cmd, _dropped, _route, _route_err = _single_file_route(_cmd, _pytest_node)
+        if _route_err:
+            checks.append(_check(_only_check, [{'detail':
+                'pytest_node %r cannot be collected: %s — nothing ran'
+                % (_pytest_node, _route_err)}]))
+            return checks
+        # The route rides the executed check: `pytest_node_route` names it on the
+        # receipt, `note` keeps it readable on the green row too.
+        ck = [dict(ck[0], cmd=_new_cmd, note=_route,
+                   pytest_node_route=_route)] if ck else ck
 
     if isinstance(ck, list) and ck:
         from concurrent.futures import ThreadPoolExecutor
+
+        def _with_route(cid, items, declared):
+            """The executed check row, carrying the declaration faces the rewrite
+            attached (t261030-18: the single-file route must be readable on a GREEN
+            row too, not only in the docs of the code)."""
+            row = _check(cid, items)
+            for k in ('note', 'pytest_node_route'):
+                if str(declared.get(k) or '').strip():
+                    row[k] = str(declared[k])
+            return row
 
         def _one(c):
             if not isinstance(c, dict):
@@ -793,14 +957,25 @@ def _code(a):
             cid = str(c.get('id') or 'check')
             cmd = str(c.get('cmd') or '').strip()
             if not cmd:
-                return _check(cid, [{'detail': '声明缺 cmd'}])
+                return _with_route(cid, [{'detail': '声明缺 cmd'}], c)
             cwd = _p(c.get('cwd') or '.')
             to = int(c.get('timeout') or 600)
             try:
                 rc, out = _sh(['/bin/sh', '-c', cmd], cwd, timeout=to, crop=None)
             except subprocess.TimeoutExpired:
-                return _check(cid, [{'detail': '%s 超时（%ds），进程已终态回收' % (cid, to)}])
-            return _check(cid, [{'detail': 'rc=%d: %s' % (rc, out[-400:])}] if rc != 0 else [])
+                return _with_route(cid, [{'detail': '%s 超时（%ds），进程已终态回收'
+                                                    % (cid, to)}], c)
+            if rc == 0:
+                return _with_route(cid, [], c)
+            if rc == 5 and c.get('pytest_node_route'):
+                # pytest exit 5 = no test collected from the declared target: the
+                # target was NOT collected. Named apart from a real failing case
+                # (rc=1), because "nothing was collected" is not "a case failed".
+                return _with_route(cid, [{'detail':
+                    'rc=5: pytest collected no test from the declared target '
+                    '(pytest exit 5 = no tests collected) — the declared target '
+                    'was not collected: %s' % out[-300:]}], c)
+            return _with_route(cid, [{'detail': 'rc=%d: %s' % (rc, out[-400:])}], c)
 
         if a.get('skip_slow'):
             return checks
@@ -1638,6 +1813,13 @@ def _integ_impl(args, _face):
     if perr:
         return {'lane': 'integ', 'green': False, 'err': perr,
                 'warnings': list(_warnings),
+                # t261030-18 (KI-424): this is the shape that used to read green with
+                # four zeros (a narrowed round whose cases all ran nowhere). The
+                # runner's own zero-attribution face rides the red receipt too, so the
+                # engine can NAME the decision (retired premise / pool exclusion / ...)
+                # instead of guessing one.
+                'zero_run_face': _zero_run_face_from_summary(
+                    _summary_from_stdout(proc.stdout or '')),
                 'supply_used_sec': supply_used, 'runner_used_sec': runner_used}
     # 260927 总预算耗尽（执行器自行收口的形态）：**独立可见发现**——不是产品红（那些
     # 场景根本没验到），也不是「零信号」；点名已跑/未跑数量，明细在明细行与执行器汇总。
@@ -1702,6 +1884,14 @@ def _integ_impl(args, _face):
                 'note': ('未跑 ≠ 判绿：这些条目本轮没有被验证'
                          if _kr_n else ''),
             }
+    # ---- t261030-18 (KI-424): the zero-attribution face of a narrowed round ----
+    # The runner already knows WHICH decision emptied the round (a pool exclusion, a
+    # retired premise, a roster skip, a vacuous widened face). The gate used to relay
+    # none of it, so the engine saw four zeros and called them green. This block
+    # carries those keys verbatim (additive; a receipt without them = the old shape
+    # byte for byte). It is DATA only: the judging single point is the engine's
+    # shared.quick_scope_state.
+    _zero_run_face = _zero_run_face_from_summary(executor_summary)
     reuse_parsed, reuse_header = [], [False, False]
     _track_reuse_lines(lane_out, reuse_parsed, reuse_header)
     # 全复用轮（ran=0/reused>0）凭什么算「有信号」：**这笔复用得能交代**——见
@@ -1912,6 +2102,10 @@ def _integ_impl(args, _face):
             # 同在册红豁免面（runner 汇总的 known_red_skipped/known_red_names；t260930-01
             # 「在册红不进每轮路径」）。同一加性口径：缺键/畸形 → 空块，老执行器零漂移。
             'known_red': _known_red_face,
+            # t261030-18 (KI-424): why a narrowed round can produce zero cases (the
+            # runner's own zero-attribution keys, relayed verbatim — data, not a
+            # verdict). Empty block = the executor reported none.
+            'zero_run_face': dict(_zero_run_face),
             'baseline_ref': baseline_ref,
             'baseline': {'ok': baseline_ok, 'err': baseline_err,
                          'enabled': baseline_enabled,
@@ -2632,4 +2826,17 @@ def run(args):
         return _integ(args)
     checks = _content(args) if lane == 'content' else _code(args)
     red = sum(len(c['items']) for c in checks if c['level'] == 'red')
-    return {'lane': lane, 'green': red == 0, 'red_count': red, 'checks': checks}
+    out = {'lane': lane, 'green': red == 0, 'red_count': red, 'checks': checks}
+    # t261030-18: lift the faces the check rows carry onto the receipt, so a caller
+    # reads HOW a target was collected (pytest_node_route) and the green notes (why a
+    # check was skipped/rewritten) without walking the rows. Additive: absent keys =
+    # the pre-change receipt shape, byte for byte.
+    notes = [str(c.get('note') or '') for c in checks
+             if isinstance(c, dict) and str(c.get('note') or '').strip()]
+    if notes:
+        out['note'] = '; '.join(notes)
+    routes = [str(c.get('pytest_node_route') or '') for c in checks
+              if isinstance(c, dict) and str(c.get('pytest_node_route') or '').strip()]
+    if routes:
+        out['pytest_node_route'] = routes[0]
+    return out

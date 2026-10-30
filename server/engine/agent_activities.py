@@ -11879,6 +11879,14 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
         # the field rides as a defaulted dynamic attribute — getattr consumers
         # see "" on old replays, and no replayed history is required to have it.
         out_err.gate_root = str(_res.get("root") or "")
+        # t261030-18 (KI-424): the gate's zero-attribution face must ride the RED
+        # receipt too — the shape that used to read green with four zeros (a narrowed
+        # round whose cases all ran nowhere) is exactly this error leg, so a red leg
+        # that dropped the face would leave the engine guessing which decision
+        # produced the zero. Additive: an old gate receipt carries no key and the
+        # attribute stays out (old replays read their default).
+        if isinstance(_res.get("zero_run_face"), dict):
+            out_err.zero_run_face = dict(_res["zero_run_face"])
         for _k in ("pass", "fail", "env_fail"):
             try:
                 setattr(out_err, "passed" if _k == "pass" else
@@ -12019,6 +12027,15 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
                   if int(_kr_skipped or 0) else "")),
         "injection": "SANDBAR_KNOWN_RED_EXCLUDE=1 (engine in-lane round)",
     }
+    # t261030-18 (KI-424): the narrowed-round zero attribution face, carried verbatim
+    # from the gate receipt (face_vacuous / narrowed_face_empty / retired premise /
+    # excluded pools). Additive: a receipt without the key = an old gate, so the
+    # attribute stays out of the result and the workflow side reads its default (old
+    # receipts and old replays behave byte-identically). Never judged here — the
+    # single judging point is shared.quick_scope_state.
+    _zrf = res.get("zero_run_face")
+    if isinstance(_zrf, dict) and _zrf:
+        out.zero_run_face = dict(_zrf)
     # t261009-01: pre-existing-main discriminator face (additive; absent or
     # unmapped = the old receipt byte-for-byte). Carried, never re-judged: the block/record semantics
     # stay single-sourced in the gate's decision table (failure_protocol.decide —
@@ -12414,7 +12431,11 @@ def _quick_check_receipt(receipt_payload: Dict[str, Any], returncode: int,
             details=[{"name": check_id, "cmd": cmd, "exit": 1,
                       "output_tail": (stderr_tail
                                       or (stdout_text or "")[-400:])[:400]}],
-            only_names=[check_id])
+            only_names=[check_id],
+            # t261030-18: when the gate did state its collection route, the red face
+            # carries it too (an empty string = the receipt said nothing, the old
+            # shape byte for byte).
+            collect_route=str((body or {}).get("pytest_node_route") or ""))
 
     if not v.get("parsed"):
         return _named_red(
@@ -12451,13 +12472,18 @@ def _quick_check_receipt(receipt_payload: Dict[str, Any], returncode: int,
     for c in (body.get("checks") or []):
         if not isinstance(c, dict):
             continue
+        _row_note = str(c.get("note") or "")
+        _details = "; ".join(
+            str(i.get("detail") or "") for i in (c.get("items") or [])
+            if isinstance(i, dict))
         rows.append({
             "name": str(c.get("check") or check_id),
             "cmd": cmd,
             "exit": 0 if str(c.get("level")) != "red" else 1,
-            "output_tail": "; ".join(
-                str(i.get("detail") or "") for i in (c.get("items") or [])
-                if isinstance(i, dict))[-400:]})
+            # t261030-18 (KI-423): the check's own note rides the row, so a GREEN
+            # battery row still names the collection route it ran through (the
+            # route would otherwise be invisible on every passing round).
+            "output_tail": ("; ".join(x for x in (_row_note, _details) if x))[-400:]})
     green = bool(v.get("green"))
     if not any(r["name"] == check_id for r in rows):
         # KI-395: the receipt carries no row for the DECLARED check, so that
@@ -12474,7 +12500,8 @@ def _quick_check_receipt(receipt_payload: Dict[str, Any], returncode: int,
             details=[{"name": check_id, "cmd": cmd, "exit": 1,
                       "output_tail": (_detail or
                                       "the receipt named no check row")[:400]}],
-            only_names=[check_id])
+            only_names=[check_id],
+            collect_route=str(body.get("pytest_node_route") or ""))
     if not green and not any(int(r.get("exit") or 0) != 0 for r in rows):
         # A red round must stay NAMED even when the receipt forgot its red row.
         rows.append({
@@ -12486,7 +12513,10 @@ def _quick_check_receipt(receipt_payload: Dict[str, Any], returncode: int,
     note = str(body.get("note") or "")
     return IntegrationRunResult(
         ran=1, passed=1 if green else 0, failed=0 if green else 1,
-        details=rows, warnings=([note] if note else []), only_names=[check_id])
+        details=rows, warnings=([note] if note else []), only_names=[check_id],
+        # t261030-18 (KI-423): name the single-file collection route on the receipt
+        # (additive; an old gate receipt carries no such key and this stays "").
+        collect_route=str(body.get("pytest_node_route") or ""))
 
 
 async def _run_quick_named_check(wt: Path, args: IntegrationRunArgs,
