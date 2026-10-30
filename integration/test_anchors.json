@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 367,
+      "engine_tests": 369,
       "scenarios": 855
     },
     "vocab": [
@@ -1815,6 +1815,11 @@
     "server/engine/tests/test_t261030_31_evidence_creation_gate.py": {
       "anchor": "behaviour",
       "note": "t261030-31: the quickmanual evidence declaration is judged at the creation face, not at workflow start. Real client.cmd_ticket_start with a stubbed _connect: a malformed declaration (non-object, unknown kind, empty / repeated / blank / non-string / over-long name list) is refused before _connect() with the validator's named reason and no workflow starts; a valid declaration (one name or a list of names) travels verbatim into TicketInput and then decodes through the real temporalio data converter, so the workflow input can never be the failing layer (the t261030-30 unstartable-ticket shape); an absent declaration stays empty because the quickmanual open gate owns that block. Offline: no Temporal, no network, no git."
+    },
+    "server/engine/tests/test_t261031_narrowed_scope_stability.py": {
+      "anchor": "behaviour",
+      "note": "t261031-04 KI-435: a narrowed quickmanual gate round keeps ONE scope inside an attempt. The measured defect was not the declaration (immutable) and not a pool exclusion (only engine/exclusive are ever excluded, while the declared case lived in browser-free): the round's concurrency width moved, and the result-ledger reuse peel took the declared case out of round 2, while the receipt called it pool_exclusion. The battery pins: a declared name that lives inside the ticket's write set joins the round's keep face (shared.path_inside_write_set / quick_scope_protect / quick_scope_keep_names), so neither the pool exclusion, the known-red roster nor the ledger reuse can peel it; the zero decision names the reuse (names + commit/env_fp/width key), the pools and the decider, and never blames a pool that did not cover the declared case; the receipt carries zero_run_decided_by / zero_run_decision_detail / scope_unjudged / scope_pin; and the declared case is RED BY NAME when a round strips it, in both shapes (the zero-run and the widened round that ran other cases). The real runner leg runs an injected mini registry where the declared case lives in the excluded engine pool: it really runs with the keep face, runs again on a second round, and does not run when the mutation strips the keep face. Offline, stub scripts only, no docker/Temporal/browser/3099",
+      "sync_path": "server/engine/shared.py; server/engine/dev_lane.py; server/engine/agent_activities.py; server/tools/verify_lane.py; integration/run_scenarios.py"
     }
   },
   "scenarios": {

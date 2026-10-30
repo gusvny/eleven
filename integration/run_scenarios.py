@@ -8374,6 +8374,12 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
     # 扣完为空必须回落**全量注册面**，并在回执里具名（哪几条被豁免/排除、去哪了）。
     # 「未跑 ≠ 判绿」纪律不变：回落跑出来的绿才是绿。
     narrowed_face_empty = False
+    # t261031-04 (KI-435): the "the widened face was empty too" claim is decided
+    # HERE, at the widening step. It used to be re-derived later from `registry`,
+    # which the ledger-reuse peel empties as well - so a reuse-eaten pointed round
+    # reported a vacuous registry that was never vacuous, and that false face is
+    # what made the measured zero-run unreadable.
+    widened_face_vacuous = False
     if only_names and not registry:
         narrowed_face_empty = True
         # t261025-02 (KI-355): the fallback keeps the own scenario (named) —
@@ -8413,6 +8419,7 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         # 具名成独立通道（`INTEG_FACE_VACUOUS`），让闸侧/消费方与「启动级 error/零信号」分开；
         # 「未跑 ≠ 判绿」照旧（0 ran 永远不是绿）。
         if not registry:
+            widened_face_vacuous = True
             print("INTEG_FACE_VACUOUS 全量注册面扣除在册豁免/被排除池后**也为空**"
                   "（在册 %d 条、被排除 %d 条、注册面 %d 条）——面真空：本轮未验证任何条目。"
                   "这不是产品红；未跑 ≠ 判绿，请人裁定（或等合并前全量/每日巡检的观察位）"
@@ -8796,12 +8803,20 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
                 "收窄面扣除在册豁免/被排除池后为空 ⇒ 本轮跑的是**全量注册面**"
                 "（空=更宽，不判红；未跑 ≠ 判绿）")
             _summary["narrowed_face_requested"] = list(only_names)[:50]
-        if only_names and not registry:
+        if narrowed_face_empty and widened_face_vacuous:
             _summary["face_vacuous"] = True
             _summary["face_vacuous_note"] = (
                 "全量注册面扣除在册豁免/被排除池后也为空：本轮**未验证任何条目**"
                 "（面真空，非产品红；未跑 ≠ 判绿）")
             _summary["known_red_names"] = list(known_red_skipped)
+        elif only_names and not registry:
+            # t261031-04 (KI-435): the pointed face is empty for a reason the
+            # widening never saw - the ledger-reuse peel took it AFTER the widen
+            # decision. Named as its own face so nobody reads it as "the whole
+            # registry is empty", and so the zero decision can name the reuse.
+            _summary["pointed_face_reuse_empty"] = True
+            _summary["pointed_face_reuse_note"] = (
+                "点名面被台账复用/豁免扣除后为空（不是全量面真空）：本轮未实跑任何条目")
         if known_red_skipped:
             _summary["known_red_names"] = list(known_red_skipped)
         # ---- t261029-76: the retired-premise exclusion rides the receipt ----
@@ -8819,6 +8834,26 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
             _summary["excluded_count"] = len(excluded_entries)
         if only_names:
             _summary["only_scenarios"] = list(only_names)
+        # ---- t261031-04 (KI-435): the supply-side peels name themselves ----
+        # The measured defect: a narrowed round reported `ran=0` and the engine
+        # could only say `pool_exclusion`, because the reuse peel (t260930-01) was
+        # invisible on the summary face. These keys carry the DECIDER side: which
+        # names the ledger reuse took, the key it judged on, which declared names a
+        # pool decision actually dropped, and the round's keep face. Additive only
+        # (absent key = old receipt); nothing here is judged.
+        if reused_names:
+            _summary["reuse_names"] = list(reused_names)[:50]
+            _summary["reuse_judged_by"] = {
+                "commit": _reuse.get("git_head"), "env_fp": _reuse.get("env_fp"),
+                "conc_width": conc_width, "ledger": _reuse.get("ledger_path")}
+        if _dropped_by_pool:
+            _summary["dropped_by_pool"] = dict(_dropped_by_pool)
+        if own_names:
+            _summary["own_names"] = list(own_names)
+        if own_kept:
+            _summary["own_kept"] = list(own_kept)
+        if own_rerun:
+            _summary["own_rerun"] = list(own_rerun)
         # t261009-16 additive fast-set keys (consumers without them untouched):
         if fast_mode:
             _summary["fast_set"] = True

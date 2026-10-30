@@ -137,7 +137,13 @@ class DevLaneLocks(unittest.TestCase):
     def test_quick_gate_carries_the_own_refusal(self):
         self.assertIn("shared.own_set_expected_error(", _DEV_LANE)
         self.assertIn("__own_set_empty__", _DEV_LANE)
-        self.assertIn('"own_names": list(r.own_names)', _DEV_LANE)
+        # t261031-04 (KI-435): the scope's own face is now the round's KEEP face —
+        # the derived own set plus the declared names that live inside the write
+        # set (shared.quick_scope_keep_names). The intent this lock guards is
+        # unchanged: the ticket's own face rides the scope into the round instead
+        # of being re-derived (or dropped) on the way.
+        self.assertIn('"own_names": list(shared.quick_scope_keep_names(', _DEV_LANE)
+        self.assertIn("r.own_names,", _DEV_LANE)
 
     def test_develop_buffer_gate_carries_the_named_refusal(self):
         self.assertIn('reason_code": "own_set_derivation_empty"', _DEV_LANE)

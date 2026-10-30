@@ -8735,17 +8735,81 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
         return bool(_failed > 0 or (_ran > 0 and _passed == 0))
 
     @staticmethod
-    def _quick_scope_facts(ir: Any) -> Dict[str, Any]:
+    def _quick_scope_unjudged_names(ir: Any,
+                                    quick_scope: Optional[Dict[str, Any]] = None
+                                    ) -> List[str]:
+        """The DECLARED scenario names this round produced no row for (t261031-04).
+
+        Pure (no IO, no judging): it reads the round's own details face. A scenario
+        round that names a case and has no row for it did not judge that case — the
+        gate must say so BY NAME (requirement 4: never a silent zero-run). Non-
+        scenario modes return [] (a battery/check round proves itself through its
+        declared check row, and that face has its own state).
+
+        A round that reports `ran > 0` but carries NO scenario row at all is not
+        judged here: an absent face is not evidence that the case did not run
+        (inventing a red out of silence is the same family of defect as reading four
+        zeros as a pass), and the counts lock covers a receipt that disagrees with
+        itself. `ran == 0` is the other direction: no row is exactly what "nothing
+        ran" looks like, so the declared names ARE named there."""
+        sc = dict(quick_scope or {}) if isinstance(quick_scope, dict) else {}
+        if str(sc.get("mode") or "") != "scenario":
+            return []
+        declared = [str(x).strip() for x in (sc.get("names") or [])
+                    if str(x).strip()]
+        if not declared:
+            return []
+        seen = set()
+        for d in (getattr(ir, "details", None) or []):
+            if not isinstance(d, dict):
+                continue
+            n = str(d.get("name") or "").strip()
+            if n and not n.startswith("__"):
+                seen.add(n)
+        try:
+            _ran = int(getattr(ir, "ran", 0) or 0)
+        except (TypeError, ValueError):
+            _ran = 0
+        if not seen and _ran > 0:
+            return []
+        return [n for n in declared if n not in seen]
+
+    def _quick_gate_red_names(self, ir: Any,
+                              quick_scope: Optional[Dict[str, Any]] = None
+                              ) -> List[str]:
+        """The gate round's NAMED violation set: the product-red names
+        (`_tests_red_names`, the parent's single writer) plus the declared
+        scenarios this round never judged (t261031-04). The added names are not a
+        fabricated failure: they are the cases the round owed and did not judge,
+        which is exactly what a zero-run receipt must say by name."""
+        names = list(self._tests_red_names(ir))
+        for n in self._quick_scope_unjudged_names(ir, quick_scope):
+            if n not in names:
+                names.append(n)
+        return names
+
+    @staticmethod
+    def _quick_scope_facts(ir: Any,
+                           quick_scope: Optional[Dict[str, Any]] = None
+                           ) -> Dict[str, Any]:
         """The narrowing facts the zero-run decision reads off the round receipt.
 
         Pure (no IO, no judging): it only collects what the receipt already says, so
         `shared.quick_scope_state` stays the single writer of the state and of the
         zero decision. Every key is optional; a round whose receipt names no decision
-        reads as the honest `registry_mismatch` face. t261030-18 (KI-424)."""
+        reads as the honest `registry_mismatch` face. t261030-18 (KI-424).
+
+        t261031-04 (KI-435): the facts also carry the DECIDER side of each supply
+        peel, because one word was not a diagnosis: the ledger-reuse names and the
+        key they were judged on, the declared names a pool decision actually
+        dropped, the round's own/keep face, and the registry pool of every declared
+        name (so a pool decision that never covered the declared case is named as
+        such instead of taking credit for the zero)."""
         _zrf = getattr(ir, "zero_run_face", None)
         zrf = dict(_zrf) if isinstance(_zrf, dict) else {}
         _kr = getattr(ir, "known_red", None)
         kr = dict(_kr) if isinstance(_kr, dict) else {}
+        sc = dict(quick_scope or {}) if isinstance(quick_scope, dict) else {}
         retired: List[str] = []
         for _rec in (zrf.get("retired_premise_excluded") or []):
             if isinstance(_rec, dict) and str(_rec.get("name") or "").strip():
@@ -8760,12 +8824,29 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
             # a malformed count is not guessed at: the fact stays 0 and the decision
             # is still named by the faces that ARE readable
             _excluded_count = 0
+        _drop_pool = zrf.get("dropped_by_pool")
+        _reuse_by = zrf.get("reuse_judged_by")
         return {
             "excluded_pools": [str(x) for x in
                                (getattr(ir, "excluded_pools", None) or [])],
             "excluded_count": _excluded_count,
             "known_red_names": [str(x) for x in (kr.get("names") or [])],
             "retired_names": retired,
+            # t261031-04: the reuse peel names the names it took AND the key it
+            # decided on (commit/env_fp/width). A malformed face reads as "the
+            # receipt said nothing", never as a guessed decision.
+            "reuse_names": [str(x) for x in (zrf.get("reuse_names") or [])
+                            if str(x).strip()],
+            "reuse_judged_by": dict(_reuse_by) if isinstance(_reuse_by, dict) else {},
+            "dropped_by_pool": dict(_drop_pool) if isinstance(_drop_pool, dict)
+            else {},
+            "own_names": [str(x) for x in ((sc.get("own_names")
+                                            or zrf.get("own_names")) or [])
+                          if str(x).strip()],
+            "name_pools": dict(sc.get("name_pools") or {})
+            if isinstance(sc.get("name_pools"), dict) else {},
+            "fast_round": bool(zrf.get("fast_set")),
+            "caller_narrowed": bool(sc.get("caller_narrowed")),
             "face_vacuous": bool(zrf.get("face_vacuous")),
             "narrowed_face_empty": bool(zrf.get("narrowed_face_empty")),
             "collect_route": str(getattr(ir, "collect_route", "") or ""),
@@ -8801,7 +8882,15 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
         # green with only the pool-exclusion line as evidence. A full round (no
         # quick_scope) keeps today's caliber: this lock is scoped to the narrowing.
         if shared.quick_scope_state(quick_scope, getattr(ir, "ran", 0),
-                                    self._quick_scope_facts(ir))["zero_run"]:
+                                    self._quick_scope_facts(ir,
+                                                            quick_scope))["zero_run"]:
+            return "red"
+        # t261031-04 (KI-435) requirement 4: the declared cases must be NAMED and
+        # RED when the round did not judge them - including the shape where the
+        # round widened and ran OTHER cases (ran > 0), which the zero-run lock
+        # above cannot see. A gate green on "the declared scope was not judged"
+        # is the defect this ticket closes; the name rides `violations`.
+        if self._quick_scope_unjudged_names(ir, quick_scope):
             return "red"
         # Counts lock (t261028-15, KI-388): an unreadable count is red, never green.
         if self._quick_counts_red(ir):
@@ -8883,7 +8972,7 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
         reader sees the lane proved less than everything — honestly."""
         _wf_line = shared.worker_verified_line(getattr(ir, "worker_identity", ""),
                                                getattr(ir, "code_stamp", None))
-        names = self._tests_red_names(ir)
+        names = self._quick_gate_red_names(ir, quick_scope)
         green = self._quick_gate_verdict(ir, quick_scope) == "green"
         # t261030-18 (KI-424): the three states a signer needs are named keys on the
         # receipt, not something to infer from four counts: scope_judged (the declared
@@ -8891,15 +8980,19 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
         # (the declared target produced no row at all). zero_run_decision names WHICH
         # decision produced the zero.
         _state = shared.quick_scope_state(quick_scope, getattr(ir, "ran", 0),
-                                          self._quick_scope_facts(ir))
+                                          self._quick_scope_facts(ir,
+                                                                  quick_scope))
         _state_tail = ""
         if _state["state"] != shared.QUICK_SCOPE_STATE_FULL:
             _state_tail = " | scope state: %s%s" % (
                 _state["state"],
-                (" (decision: %s)" % _state["zero_decision"])
+                (" (decision: %s, decided by: %s)"
+                 % (_state["zero_decision"], _state["decided_by"]))
                 if _state["zero_decision"] else "")
             if _state["zero_run"]:
                 _state_tail += " | " + _state["line"]
+                if _state["detail"]:
+                    _state_tail += " | decision detail: " + _state["detail"]
         # t261030-18 (KI-423): a battery round says HOW its target was collected on
         # the same sentence (the full route text rides the `collect_route` key below).
         _route = str(getattr(ir, "collect_route", "") or "")
@@ -8920,6 +9013,15 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
             # t261030-18: the machine-readable siblings of the summary sentence.
             "scope_state": _state["state"],
             "zero_run_decision": _state["zero_decision"],
+            # t261031-04 (KI-435): which pool was excluded and WHO decided it, plus
+            # the declared names this round did not judge (named, never implied by
+            # a count). A receipt that only says `pool_exclusion` is not a
+            # diagnosis; these keys are.
+            "zero_run_decided_by": _state["decided_by"],
+            "zero_run_decision_detail": _state["detail"],
+            "scope_unjudged": self._quick_scope_unjudged_names(ir, quick_scope),
+            "scope_pin": dict((quick_scope or {}).get("scope_pin") or {}),
+            "own_source": dict((quick_scope or {}).get("own_source") or {}),
             "collect_route": _route,
             "worker_identity": str(getattr(ir, "worker_identity", "") or ""),
             "code_stamp": getattr(ir, "code_stamp", None) or {},
@@ -8947,7 +9049,8 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
             # green, and the face says which state and which decision produced the
             # zero - a signer never again reads four zeros as "declared scope passed".
             _state = shared.quick_scope_state(quick_scope, getattr(ir, "ran", 0),
-                                              self._quick_scope_facts(ir))
+                                              self._quick_scope_facts(ir,
+                                                                      quick_scope))
             _lines = [
                 "Integration gate round %d judged NOTHING (%s): %s ran / %s passed "
                 "/ %s failed / %s env-red." % (
@@ -8956,10 +9059,17 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                 "State: %s%s - zero cases ran, so this round is a NAMED red, never "
                 "a green." % (
                     _state["state"],
-                    (" (zero decision: %s)" % _state["zero_decision"])
+                    (" (zero decision: %s, decided by: %s)"
+                     % (_state["zero_decision"], _state["decided_by"]))
                     if _state["zero_decision"] else ""),
                 _state["line"] or "the receipt named no reason for the zero.",
             ]
+            if _state["detail"]:
+                _lines.append("Decision detail: %s" % _state["detail"])
+            _unjudged = self._quick_scope_unjudged_names(ir, quick_scope)
+            if _unjudged:
+                _lines.append("Declared but NOT judged this round: %s"
+                              % ", ".join(_unjudged[:self.FACE_NAME_LIMIT]))
             if not _state["zero_run"]:
                 # Defensive: the reason code fires only for a zero_run state; if a
                 # future lock disagrees, say so instead of implying a cause.
@@ -8971,7 +9081,29 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                           "(declare a scenario/check/battery this round can collect, "
                           "or widen the declaration).")
             return "\n".join(_lines)[:self.FACE_MAX_CHARS]
-        names = [str(n) for n in self._tests_red_names(ir)]
+        if reason_code == "quick_gate_scope_unjudged":
+            # t261031-04 (KI-435): the round ran cases but NOT the declared ones
+            # (the widened-round shape: the declared face was emptied, the runner
+            # fell back to the full registry). Named by case, never a quiet pass.
+            _unjudged = self._quick_scope_unjudged_names(ir, quick_scope)
+            _lines = [
+                "Integration gate round %d did NOT judge the declared scope (%s): "
+                "%s ran / %s passed / %s failed / %s env-red." % (
+                    gen, self._quick_scope_phrase(quick_scope),
+                    ir.ran, ir.passed, ir.failed, ir.env_fail),
+                "Declared but NOT judged: %s - a round that judges other cases is "
+                "not evidence for this declaration, so this round is a NAMED red."
+                % ", ".join(_unjudged[:self.FACE_NAME_LIMIT]),
+            ]
+            _state = shared.quick_scope_state(quick_scope, getattr(ir, "ran", 0),
+                                              self._quick_scope_facts(
+                                                  ir, quick_scope))
+            if _state["detail"]:
+                _lines.append("Decision detail: %s" % _state["detail"])
+            _lines.append("Ways out: retry_qc to re-run the gate, or rework("
+                          "to_stage=work) to make the declared scope judged.")
+            return "\n".join(_lines[:self.FACE_MAX_LINES])[:self.FACE_MAX_CHARS]
+        names = [str(n) for n in self._quick_gate_red_names(ir, quick_scope)]
         shown = names[:self.FACE_NAME_LIMIT]
         more = len(names) - len(shown)
         lines = [
@@ -9342,7 +9474,11 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                             ticket_id=self.ticket_id,
                             worktree=str(self.meta.get("worktree") or ""),
                             kind=str(_ev.get("kind") or ""),
-                            names=[str(x) for x in (_ev.get("names") or [])]),
+                            names=[str(x) for x in (_ev.get("names") or [])],
+                            # t261031-04 (KI-435): the write set, so the resolution
+                            # can tell which DECLARED names live inside the
+                            # ticket's own change (the keep face below).
+                            write_set=list(self._effective_write_set() or [])),
                         start_to_close_timeout=SHORT, retry_policy=RETRY)
                     r = rraw if isinstance(rraw, shared.QuickScopeResolveResult) \
                         else shared.QuickScopeResolveResult(
@@ -9361,6 +9497,12 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                             own_names=[str(x) for x in (rraw.get("own_names")
                                                         or [])],
                             own_error=str(rraw.get("own_error") or ""),
+                            # t261031-04: the keep face + the declared pools ride
+                            # the same receipt (defaulted empty = old payloads).
+                            protected_names=[str(x) for x in
+                                             (rraw.get("protected_names") or [])],
+                            name_pools={str(k): str(v) for k, v in
+                                        (rraw.get("name_pools") or {}).items()},
                             error=str(rraw.get("error") or ""))
                     if r.error.startswith("quick_scope_resolve_failed"):
                         # The resolution INFRASTRUCTURE failed — never a verdict,
@@ -9382,7 +9524,20 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                         # names from the pool/roster drops AND the ledger
                         # reuse face — a supply-side filter schedules work,
                         # it never drops the ticket's own proof).
-                        "own_names": list(r.own_names),
+                        # t261031-04 (KI-435): the keep face is the derived own
+                        # set UNION the declared names that live inside the
+                        # ticket's write set. The measured defect: the declared
+                        # scenario lived under integration/t261011-15/ (a case the
+                        # ticket fixes), so the own derivation (integration/
+                        # <ticket_id>/) marked nothing, and round 2's ledger reuse
+                        # silently peeled the very case the ticket declared.
+                        "own_names": list(shared.quick_scope_keep_names(
+                            r.own_names, getattr(r, "protected_names", None))),
+                        "own_source": {
+                            "derived": list(r.own_names or []),
+                            "declared_in_write_set": list(
+                                getattr(r, "protected_names", None) or [])},
+                        "name_pools": dict(getattr(r, "name_pools", None) or {}),
                         "own_error": str(r.own_error or "")}
                     # t261024-60: a genuinely EMPTY derived own set is refused
                     # BY NAME when the ticket's change actually carries
@@ -9405,11 +9560,40 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                         self._log(_own_refusal)
                     if r.note:
                         quick_scope["note"] = r.note
+                    # t261031-04 requirement 1: the narrowed scope must be STABLE
+                    # inside one attempt. The declaration is creation-time input
+                    # and cannot change, so a difference between two rounds of the
+                    # same attempt means something else moved the scope (a merged
+                    # main that renamed/removed the case, a registry edit). That is
+                    # named on the receipt instead of passing silently; the fresh
+                    # resolution still wins (it is the truth now), so the gate
+                    # never runs a name the registry no longer carries.
+                    _pin = dict(self.meta.get("quick_scope_pin") or {})
+                    _pin_cmp = shared.quick_scope_pin(_pin.get("names") or [],
+                                                      list(quick_scope["names"]))
+                    quick_scope["scope_pin"] = dict(_pin_cmp)
+                    if _pin_cmp["changed"]:
+                        self._log("narrowed scope changed since round %s of this "
+                                  "attempt: %s" % (_pin.get("round", "?"),
+                                                   _pin_cmp["line"]))
+                    else:
+                        quick_scope["scope_pin"]["stable_rounds"] = int(
+                            _pin.get("rounds") or 0) + 1
+                        _pin["rounds"] = int(
+                            quick_scope["scope_pin"]["stable_rounds"] or 0)
+                    _pin["names"] = list(quick_scope["names"])
+                    _pin["round"] = gen0 + 1
+                    self.meta["quick_scope_pin"] = _pin
                     # Requirement 4: the merge human sees the declared scope next
                     # to the claim, on the same face (snapshot quick_evidence).
                     self.meta["quick_evidence"]["scope"] = {
                         "mode": r.mode,
                         "names": list(quick_scope["names"]),
+                        # t261031-04: the keep face is part of the claim face - a
+                        # reader must see that the ticket's own proof cannot be
+                        # peeled by a supply-side filter.
+                        **({"own_source": dict(quick_scope["own_source"])}
+                           if any(quick_scope["own_source"].values()) else {}),
                         **({"note": r.note} if r.note else {})}
                     self._touch()
                     if _own_refusal and r.ok:
@@ -9438,7 +9622,8 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                 # scope judged?" without re-deriving it from four counts.
                 _zstate = shared.quick_scope_state(quick_scope,
                                                    getattr(ir, "ran", 0),
-                                                   self._quick_scope_facts(ir))
+                                                   self._quick_scope_facts(
+                                                       ir, quick_scope))
                 self.results["run_integration_tests"] = self._quick_gate_receipt(
                     ir, gen0, quick_scope)
                 self.gate_runs.append({
@@ -9446,7 +9631,7 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                     "label": "machine gate (%s, round %d)"
                              % (self._quick_scope_phrase(quick_scope), gen0 + 1),
                     "green": verdict == "green",
-                    "red_count": len(self._tests_red_names(ir)),
+                    "red_count": len(self._quick_gate_red_names(ir, quick_scope)),
                     "counts": {"ran": ir.ran, "passed": ir.passed,
                                "failed": ir.failed, "env_fail": ir.env_fail},
                     "exit_code": 0 if not ir.error else 1,
@@ -9458,6 +9643,12 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                     "declared_scope": (dict(quick_scope) if quick_scope else {}),
                     "scope_state": _zstate["state"],
                     "zero_run_decision": _zstate["zero_decision"],
+                    # t261031-04: what the decision names and who made it, plus the
+                    # declared cases this round did not judge (named on the row).
+                    "zero_run_decided_by": _zstate["decided_by"],
+                    "zero_run_decision_detail": _zstate["detail"],
+                    "scope_unjudged": self._quick_scope_unjudged_names(
+                        ir, quick_scope),
                     "error": str(ir.error or "")})
                 self._finish("run_integration_tests", by="run_integration_tests",
                              evidence=self.results["run_integration_tests"]
@@ -9479,6 +9670,11 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                         # is its own cause, named before the generic error/counts/
                         # env branches (four zeros must never read as env-unnamed).
                         reason_code = "quick_gate_zero_run"
+                    elif self._quick_scope_unjudged_names(ir, quick_scope):
+                        # t261031-04: the round ran something, but not the declared
+                        # case(s) - its own cause, named before the generic
+                        # counts/env branches could mislabel it.
+                        reason_code = "quick_gate_scope_unjudged"
                     elif _err:
                         reason_code = "quick_gate_error"
                     elif not self._tests_red_names(ir) and self._quick_counts_red(ir):
@@ -9496,11 +9692,16 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                                     % self._quick_scope_phrase(quick_scope),
                             "red": True,
                             "reason_code": reason_code,
-                            "violations": self._tests_red_names(ir),
+                            "violations": self._quick_gate_red_names(
+                                ir, quick_scope),
                             "counts": {"ran": ir.ran, "passed": ir.passed,
                                        "failed": ir.failed, "env_fail": ir.env_fail},
                             "scope_state": _zstate["state"],
                             "zero_run_decision": _zstate["zero_decision"],
+                            "zero_run_decided_by": _zstate["decided_by"],
+                            "zero_run_decision_detail": _zstate["detail"],
+                            "scope_unjudged": self._quick_scope_unjudged_names(
+                                ir, quick_scope),
                             "next_action": QUICKMANUAL_NEXT_ACTION_REWRITE,
                             **({"declared_scope": dict(quick_scope)}
                                if quick_scope else {}),

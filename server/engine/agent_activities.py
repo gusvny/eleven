@@ -12031,6 +12031,20 @@ async def _run_scenarios(wt: Path, ticket_id: str, write_set=None,
             out.own_declared, sorted(_executed_names))
         if out.own_coverage_error and not out.error:
             out.error = out.own_coverage_error
+        # t261031-04 (KI-435) requirement 4: the peeled own/declared scenario must
+        # be a NAMED violation, never a bare error string next to an empty name
+        # list. One details row per missing name (exit 1 = red, its name is the
+        # case name) so the gate's violation set names the CASE BY NAME instead of
+        # saying "none named by the product-red channel".
+        for _n in (out.own_missing or []):
+            out.details.append({
+                "name": _n, "cmd": "",
+                "exit": 1,
+                "output_tail": ("own-scenario coverage (t261025-02/t261031-04): the "
+                                "declared own/kept scenario %s ran NOWHERE this round "
+                                "— a supply-side decision peeled the ticket's proof "
+                                "obligation out of its own gate round (KI-355/KI-435)"
+                                % _n)})
     # 宿主令 260930（devlane-lite 轻道，直修无票）：少跑面另两块**原样透传**（additive；缺键/畸形 = 空
     # dict = 老回执/老闸形态逐字节零漂移）。此前它们只活在闸的 JSON 回执里，工作流侧
     # （轻道的 blocked 文案）看不到「本轮没跑哪几条、被台账复用了几条」——票面于是只能
@@ -12663,9 +12677,13 @@ async def quick_scope_resolve(args: "shared.QuickScopeResolveArgs"
 # NAMED in the payload (own_error), never collapsed into an empty list; a lane
 # runner without own_set_entries degrades to names-only with the mixed-version
 # seam named (same stance as the fast-set face's capability probe).
+# t261031-04 (KI-435): the same read also carries each entry's COMMAND PATH and
+# POOL (`cmds`, `pools`), so the resolver can tell which DECLARED names live
+# inside the ticket's write set (the keep face) and, on a zero-run, whether the
+# excluded pools actually covered the declared case. One spawn, one registry.
 def _quick_scope_registry_snippet(ticket_id: str) -> str:
-    """The registry+own read snippet with the ticket id baked in (quoted via
-    json.dumps — a malformed slug is refused INSIDE own_set_entries as its own
+    """The registry+own+path+pool read snippet with the ticket id baked in (quoted
+    via json.dumps — a malformed slug is refused INSIDE own_set_entries as its own
     named ValueError, which lands in the payload's own_error). Multi-line on
     purpose: the own half needs a real try/except, and `python3 -c` takes it."""
     tid = json.dumps(str(ticket_id or ""))
@@ -12674,6 +12692,15 @@ def _quick_scope_registry_snippet(ticket_id: str) -> str:
         "sys.path.insert(0, 'integration')\n"
         "import run_scenarios as _r\n"
         "_d = {'names': [e[0] for e in _r.SCENARIOS]}\n"
+        "_d['cmds'] = {e[0]: (e[2] if len(e) > 2 else '') for e in _r.SCENARIOS}\n"
+        "_pool_of = getattr(_r, 'pool_of', None)\n"
+        "_d['pools'] = {}\n"
+        "if _pool_of is not None:\n"
+        "    for _e in _r.SCENARIOS:\n"
+        "        try:\n"
+        "            _d['pools'][_e[0]] = str(_pool_of(_e))\n"
+        "        except Exception:\n"
+        "            _d['pools'][_e[0]] = ''\n"
         "_own = getattr(_r, 'own_set_entries', None)\n"
         "_d['own'] = []\n"
         "_d['own_error'] = ''\n"
@@ -12736,6 +12763,11 @@ async def _quick_scope_resolve_body(args: "shared.QuickScopeResolveArgs"
     # t261024-60: the payload carries {'names': [...], 'own': [...],
     # 'own_error': str}. A plain list = a pre-t261024-60 shape (or a foreign
     # runner) — names-only, own face named unavailable, never guessed.
+    # t261031-04: 'cmds' (name -> registry command path) and 'pools'
+    # (name -> pool) are additive; a lane runner that predates them leaves both
+    # empty, and then nothing is protected and no pool is attributed - the old
+    # behavior, named, never a guessed protection.
+    name_paths: Dict[str, str] = {}
     if isinstance(_payload, list):
         names = [str(x) for x in _payload]
         out.own_error = ("the lane registry read returned a names-only payload "
@@ -12745,6 +12777,14 @@ async def _quick_scope_resolve_body(args: "shared.QuickScopeResolveArgs"
         out.own_names = [str(x) for x in (_payload.get("own") or [])
                          if str(x).strip()]
         out.own_error = str(_payload.get("own_error") or "")
+        _cmds = _payload.get("cmds")
+        if isinstance(_cmds, dict):
+            name_paths = {str(k): str(v) for k, v in _cmds.items()
+                          if isinstance(v, str) and str(v).strip()}
+        _pools = _payload.get("pools")
+        if isinstance(_pools, dict):
+            out.name_pools = {str(k): str(v) for k, v in _pools.items()
+                              if isinstance(v, str) and str(v).strip()}
     else:
         out.error = ("quick_scope_resolve_failed: the lane scenario registry read "
                      "produced an unexpected payload type %s — named failure, "
@@ -12819,6 +12859,16 @@ async def _quick_scope_resolve_body(args: "shared.QuickScopeResolveArgs"
                 "empty only_check call and never an environment red"
                 % (str(plan.get("pytest_node") or ""), _why))
             return out
+    # t261031-04 (KI-435): the KEEP face. A declared scenario that lives inside
+    # the ticket's own write set is the ticket's proof obligation (the measured
+    # case: the declared scenario lived under integration/t261011-15/, which the
+    # ticket was allowed to fix, while the own-set derivation only marks
+    # integration/<ticket_id>/). Derived here, from the same registry read, so no
+    # supply-side filter can peel it: the caller threads this list as part of the
+    # round's own face. A runner that carries no command paths protects nothing
+    # (old behavior, and the zero decision then names the absence).
+    out.protected_names = shared.quick_scope_protect(
+        list(out.only_names or []), name_paths, list(args.write_set or []))
     return out
 
 

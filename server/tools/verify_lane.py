@@ -195,7 +195,15 @@ _ZERO_FACE_KEYS = ('face_vacuous', 'narrowed_face_empty', 'only_scenarios',
                    'excluded_pools', 'excluded_count',
                    'retired_premise_excluded', 'retired_premise_count',
                    'retired_premise_pointed_skipped',
-                   'known_red_names', 'known_red_skipped', 'expected', 'reused')
+                   'known_red_names', 'known_red_skipped', 'expected', 'reused',
+                   # t261031-04 (KI-435): the decider side of every supply peel -
+                   # the reuse names and the key they were judged on, the declared
+                   # names a pool decision actually dropped, the round's keep face,
+                   # and the reuse-emptied pointed face. Relayed verbatim, judged
+                   # nowhere here.
+                   'reuse_names', 'reuse_judged_by', 'dropped_by_pool',
+                   'own_names', 'own_kept', 'own_rerun', 'fast_set',
+                   'pointed_face_reuse_empty')
 
 
 def _zero_run_face_from_summary(executor_summary):

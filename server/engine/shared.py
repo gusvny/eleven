@@ -509,6 +509,12 @@ class QuickScopeResolveArgs:
     worktree: str = ""                 # lane root (the registry/declaration live there)
     kind: str = ""                     # validated declaration kind
     names: List[str] = field(default_factory=list)  # validated declaration names
+    # t261031-04 (KI-435): the ticket's effective write set, so the resolution can
+    # tell which declared names live INSIDE the ticket's own change. Such a name
+    # is the ticket's proof obligation, so no supply-side filter may peel it out
+    # of the round. Empty default = old payloads/replays decode unchanged, and
+    # nothing is protected (byte-identical pre-ticket behavior).
+    write_set: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -534,7 +540,116 @@ class QuickScopeResolveResult:
     # = the derivation failed (named), never read as "nothing own".
     own_names: List[str] = field(default_factory=list)
     own_error: str = ""
+    # t261031-04 (KI-435): the DECLARED names that live inside the ticket's own
+    # write set. They ride the round's keep face next to the derived own set, so
+    # the runner's own exemption (pool exclusion / roster skip / ledger reuse)
+    # can never strip the one case the declaration promised to judge. Empty =
+    # nothing declared lives in the write set (or no write set was handed in).
+    protected_names: List[str] = field(default_factory=list)
+    # t261031-04: the registry pool of every DECLARED name ({name: pool}), so a
+    # zero-run receipt can say whether the pool that was excluded actually
+    # covered the declared case (the measured misdiagnosis: `pool_exclusion` was
+    # reported while the case lived in `browser-free`, which was never excluded).
+    name_pools: Dict[str, str] = field(default_factory=dict)
     error: str = ""
+
+
+def quick_scope_protect(declared_names, name_paths, write_set) -> List[str]:
+    """The declared names that live INSIDE the ticket's write set (pure, no IO).
+
+    t261031-04 (KI-435): the measured defect was a quickmanual ticket whose
+    declared scenario lives under ``integration/t261011-15/`` (an old case the
+    ticket FIXES) while the own-set derivation only marks
+    ``integration/<ticket_id>/`` — so the declared case was not "own", a
+    supply-side decision peeled it from round 2, and the round judged nothing
+    while the ticket's own proof was the very case it declared.
+
+    Rule: a name the ticket DECLARED (a claim on its face) and that lives inside
+    the write set it is allowed to touch is part of its proof obligation — never
+    peeled by pool exclusion, roster skip or ledger reuse. Derived, never
+    guessed: a name with no readable registry command path, or whose path is
+    outside the write set, is NOT protected (and the caller names it).
+    Malformed inputs never raise (external-input discipline): non-string items
+    and non-list containers are dropped item-wise.
+
+    Write-set matching is `path_inside_write_set` (the lane's existing prefix
+    rule), never a second spelling of it."""
+    ws = []
+    for w in (write_set or []):
+        if isinstance(w, str) and w.strip():
+            ws.append(w.strip())
+    if not ws:
+        return []
+    paths = name_paths if isinstance(name_paths, dict) else {}
+    out: List[str] = []
+    for raw in (declared_names or []):
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        name = raw.strip()
+        path = paths.get(name)
+        path = path.strip() if isinstance(path, str) else ""
+        if not path or name in out:
+            continue
+        if command_touches_write_set(path, ws):
+            out.append(name)
+    return out
+
+
+def command_touches_write_set(cmd: str, write_set) -> bool:
+    """True when a registry COMMAND line touches the write set: either the whole
+    line or one of its whitespace-separated tokens matches a write-set entry
+    (a registry entry is a command line such as `node integration/t1/sc.py`, so
+    the touched file is a token of it). No shell parsing, no execution: the test
+    is a prefix comparison of text, and malformed input never raises."""
+    c = str(cmd or "").strip()
+    if not c:
+        return False
+    if path_inside_write_set(c, write_set):
+        return True
+    for tok in c.split():
+        if path_inside_write_set(tok, write_set):
+            return True
+    return False
+
+
+def path_inside_write_set(path: str, write_set) -> bool:
+    """The lane's write-set prefix rule as one pure predicate (the same rule
+    verify_lane's `_in_write_set` applies to diffs): a path matches when it
+    equals an entry, or when it starts with that entry read as a directory
+    prefix. Malformed entries never match, and nothing raises."""
+    p = str(path or "").strip()
+    if not p:
+        return False
+    for raw in (write_set or []):
+        if not isinstance(raw, str):
+            continue
+        w = raw.strip()
+        if not w:
+            continue
+        if p == w or p.startswith(w.rstrip("/") + "/"):
+            return True
+    return False
+
+
+def quick_scope_keep_names(own_names, protected_names) -> List[str]:
+    """The round's KEEP face: the derived own set ∪ the declared names that live
+    inside the ticket's write set (pure, t261031-04).
+
+    Both halves ride the runner's own face (SANDBAR_SCENARIO_OWN): the pool
+    exclusion does not drop them, the known-red roster does not skip them, and
+    the result-ledger reuse does not substitute a green row for them. They are
+    also the list the own-coverage check holds the round to, so a peeled name is
+    a NAMED red, never a legal-looking ran=0. Order-stable and de-duplicated;
+    malformed inputs are dropped item-wise and never raise."""
+    out: List[str] = []
+    for group in (own_names, protected_names):
+        for raw in (group or []):
+            if not isinstance(raw, str):
+                continue
+            name = raw.strip()
+            if name and name not in out:
+                out.append(name)
+    return out
 
 
 def own_set_expected_error(ticket_id: str, write_set: List[str],
@@ -5709,8 +5824,24 @@ QUICK_ZERO_RETIRED = "retired_premise"
 QUICK_ZERO_ROSTER = "roster_skip"
 QUICK_ZERO_REGISTRY = "registry_mismatch"
 QUICK_ZERO_SHAPE = "declaration_shape"
+#: t261031-04 (KI-435): the ledgers-reuse peel (t260930-01) took the declared case
+#: out of the round. Measured shape of the defect: round 1 really ran the case and
+#: wrote its green result-ledger row; round 2 (same attempt, same commit) matched
+#: that row and did not run it, and the receipt called that `pool_exclusion` even
+#: though the case lives in a pool the gate never excluded.
+QUICK_ZERO_REUSE = "ledger_reuse"
+#: t261031-04: the round's own/keep face (write-set derivation) lost the declared
+#: case — the declared name was part of the keep face and still ran nowhere.
+QUICK_ZERO_OWN = "own_scenario_peel"
+#: t261031-04: the round ran as a FAST-SET round (the develop-buffer closing face),
+#: so its scope came from the declaration query, not from this declaration.
+QUICK_ZERO_FAST = "fast_set"
+#: t261031-04: an explicit caller narrowing (a pointed list that is not this
+#: declaration's names) produced the round.
+QUICK_ZERO_FLAG = "caller_flag"
 QUICK_ZERO_DECISIONS = (QUICK_ZERO_POOL, QUICK_ZERO_RETIRED, QUICK_ZERO_ROSTER,
-                        QUICK_ZERO_REGISTRY, QUICK_ZERO_SHAPE)
+                        QUICK_ZERO_REGISTRY, QUICK_ZERO_SHAPE, QUICK_ZERO_REUSE,
+                        QUICK_ZERO_OWN, QUICK_ZERO_FAST, QUICK_ZERO_FLAG)
 
 
 def quick_scope_state(quick_scope: Any, ran: Any, facts: Any = None
@@ -5727,12 +5858,31 @@ def quick_scope_state(quick_scope: Any, ran: Any, facts: Any = None
     come out empty (all keys optional; absent = the receipt did not say):
       excluded_pools:   the pool-exclusion decision in force this round (pool names)
       excluded_count:   how many entries that decision took out of the round
+      dropped_by_pool:  {declared name: pool} for declared names that decision dropped
       known_red_names:  the roster-skip decision's names
       retired_names:    the retired-premise decision's names (the round's excluded set)
+      reuse_names:      the ledger-reuse decision's names (t261031-04)
+      reuse_judged_by:  the reuse key it decided on ({commit, env_fp, conc_width,
+                        ledger}) — WHO decided, not just that someone did
+      own_names:        the round's keep face (own ∪ declared-in-write-set)
+      keep_dropped:     declared names the keep face was supposed to protect and
+                        that still ran nowhere
+      name_pools:       {declared name: registry pool} (so a signer can see that an
+                        excluded pool never covered the declared case)
+      fast_round:       the round ran as a fast-set round
+      caller_narrowed:  an explicit caller narrowing supplied the pointed list
       face_vacuous:     the runner said the (widened) face was empty too
       narrowed_face_empty: the runner said the narrowed face was empty (it widened)
       collect_route:    the single-file route a battery round ran through (naming it
                         is the receipt's job, see verify_lane)
+
+    t261031-04 (KI-435): the returned dict also carries `decided_by` (the short
+    token naming WHO decided: `ledger_reuse`, `write_set_derivation`,
+    `own_scenario_peel`, `fast_set`, `caller_flag`, `retired_premise`,
+    `known_red_roster`, `lane_pool_declaration`, `registry`) and `detail` (one
+    sentence naming what the decision actually did, so one word is never the whole
+    diagnosis). A pool exclusion that never covered the declared case's pool now
+    SAYS SO instead of claiming credit for a zero it did not cause.
 
     A full round keeps today's caliber (state FULL, zero_run False): this guard is
     scoped to the NARROWED round, which is the shape that fed a signer a green.
@@ -5746,7 +5896,7 @@ def quick_scope_state(quick_scope: Any, ran: Any, facts: Any = None
     except (TypeError, ValueError):
         _ran = 0
     out = {"state": QUICK_SCOPE_STATE_FULL, "zero_run": False, "zero_decision": "",
-           "line": ""}
+           "decided_by": "", "detail": "", "line": ""}
     if mode not in ("scenario", "check", "battery"):
         out["line"] = ("full round (nothing was narrowed): %d case(s) ran" % _ran)
         return out
@@ -5764,6 +5914,10 @@ def quick_scope_state(quick_scope: Any, ran: Any, facts: Any = None
         # of the declaration (not an environment fault) produced the zero.
         out["state"] = QUICK_SCOPE_STATE_NOT_COLLECTED
         out["zero_decision"] = QUICK_ZERO_SHAPE
+        out["decided_by"] = "declaration_shape"
+        out["detail"] = ("the declared %s target %s produced no row for the "
+                         "declared check, so the round had nothing to judge"
+                         % (mode, _decl))
         _route = str(f.get("collect_route") or "")
         out["line"] = (
             "nothing ran: the declared %s target %s was NOT collected (no row for "
@@ -5773,39 +5927,197 @@ def quick_scope_state(quick_scope: Any, ran: Any, facts: Any = None
     out["state"] = QUICK_SCOPE_STATE_NOTHING_RAN
     _retired = set(str(x) for x in (f.get("retired_names") or []))
     _roster = set(str(x) for x in (f.get("known_red_names") or []))
+    _reuse = set(str(x) for x in (f.get("reuse_names") or []))
+    _keep = set(str(x) for x in (f.get("own_names") or []))
     _pools = [str(x) for x in (f.get("excluded_pools") or []) if str(x).strip()]
+    _drop_pool = f.get("dropped_by_pool") if isinstance(
+        f.get("dropped_by_pool"), dict) else {}
+    _name_pools = f.get("name_pools") if isinstance(
+        f.get("name_pools"), dict) else {}
     _hit_retired = sorted(n for n in names if n in _retired)
     _hit_roster = sorted(n for n in names if n in _roster)
+    _hit_reuse = sorted(n for n in names if n in _reuse)
+    _hit_pool = sorted(n for n in names if n in _drop_pool)
+    _hit_keep = sorted(n for n in names if n in _keep)
+    _reuse_by = f.get("reuse_judged_by") if isinstance(
+        f.get("reuse_judged_by"), dict) else {}
+    if _hit_reuse:
+        # The measured defect (KI-435): the round did not run the declared case
+        # because the result ledger already carried a green row for it. Name the
+        # names AND the key it was decided on — the reader must be able to see
+        # that round 1 is what wrote that row.
+        out["zero_decision"] = QUICK_ZERO_REUSE
+        out["decided_by"] = "result_ledger_reuse"
+        _key = ", ".join(
+            "%s=%s" % (k, str(_reuse_by.get(k)) or "unstated")
+            for k in ("commit", "env_fp", "conc_width"))
+        out["detail"] = (
+            "the result-ledger reuse decision (t260930-01) dropped the declared "
+            "scenario(s) %s: the ledger already carried a green row for them under "
+            "the same key (%s) — a supply-side economy, not a judgement%s"
+            % (", ".join(_hit_reuse), _key,
+               ("; the round's keep face was %s" % ", ".join(sorted(_keep)))
+               if _keep else ""))
+        out["line"] = (
+            "nothing ran: the ledger-reuse decision took the declared scenario(s) "
+            "%s out of the round (green row already booked: %s) — nothing was "
+            "verified this round, and the row it reused is not this round's proof"
+            % (", ".join(_hit_reuse), _key))
+        return out
     if _hit_retired:
         out["zero_decision"] = QUICK_ZERO_RETIRED
+        out["decided_by"] = "retired_premise_data"
+        out["detail"] = ("the retired-premise data (integration/retired-premises."
+                         "json) excluded the declared scenario(s) %s"
+                         % ", ".join(_hit_retired))
         out["line"] = (
             "nothing ran: the retired-premise decision excluded the declared "
             "scenario(s) %s (a retired premise is never judged again, so these "
             "entries cannot provide evidence this round)"
             % ", ".join(_hit_retired))
-    elif _hit_roster:
+        return out
+    if _hit_roster:
         out["zero_decision"] = QUICK_ZERO_ROSTER
+        out["decided_by"] = "known_red_roster"
+        out["detail"] = ("the known-red roster skip (SANDBAR_KNOWN_RED_EXCLUDE=1, "
+                         "every-round path) dropped the declared scenario(s) %s"
+                         % ", ".join(_hit_roster))
         out["line"] = (
             "nothing ran: the roster-skip decision (known-red, every-round path) "
             "dropped the declared scenario(s) %s — not judged this round"
             % ", ".join(_hit_roster))
-    elif _pools:
+        return out
+    if f.get("caller_narrowed"):
+        out["zero_decision"] = QUICK_ZERO_FLAG
+        out["decided_by"] = "caller_flag"
+        out["detail"] = ("an explicit caller narrowing ran this round (pointed "
+                         "list is not this declaration's names), so the declared "
+                         "scope %s was never the round's face" % _decl)
+        out["line"] = (
+            "nothing ran: an explicit caller narrowing supplied this round's face "
+            "instead of the declaration (%s) — the declared scope was not judged"
+            % _decl)
+        return out
+    if f.get("fast_round"):
+        out["zero_decision"] = QUICK_ZERO_FAST
+        out["decided_by"] = "fast_set_declaration"
+        out["detail"] = ("the round ran the declared FAST SET (t261009-16), not "
+                         "this declaration's names (%s)" % _decl)
+        out["line"] = (
+            "nothing ran: this round was a fast-set round, so its face came from "
+            "the fast-set declaration rather than from the declaration (%s)"
+            % _decl)
+        return out
+    if _hit_keep:
+        # The keep face DID carry the declared name (own set ∪ declared-in-write-
+        # set) and it still ran nowhere: the keep face itself was defeated - a
+        # stale lane runner that ignores the own knob, a filtered list, or (when
+        # the pool drop is also recorded) a pool split that ran before the keep.
+        out["zero_decision"] = QUICK_ZERO_OWN
+        out["decided_by"] = "write_set_derivation"
+        _why = []
+        if _hit_pool:
+            _why.append("the pool-exclusion decision still dropped %s (pool %s)"
+                        % (", ".join(_hit_pool),
+                           ", ".join(sorted({str(_drop_pool.get(n) or "?")
+                                             for n in _hit_pool}))))
+        else:
+            _why.append("no pool/roster/retired/reuse decision is recorded for "
+                        "this round")
+        out["detail"] = (
+            "the declared scenario(s) %s were part of this round's keep face "
+            "(own ∪ declared-in-write-set) and still ran nowhere — the keep face "
+            "was defeated (%s)" % (", ".join(_hit_keep), "; ".join(_why)))
+        out["line"] = (
+            "nothing ran: the declared scenario(s) %s were in this round's keep "
+            "face and were still peeled (%s) — the write-set/own protection did "
+            "not hold (KI-355/KI-435)"
+            % (", ".join(_hit_keep), "; ".join(_why)))
+        return out
+    if _pools:
+        # The pool exclusion is named WITH the pools, the decider and the honest
+        # attribution: a declared case whose own pool was never excluded was not
+        # dropped by this decision, and the line must say so.
+        _covered = [n for n in names
+                    if str(_name_pools.get(n) or "") in _pools]
         out["zero_decision"] = QUICK_ZERO_POOL
-        out["line"] = (
-            "nothing ran: the pool-exclusion decision was in force (excluded "
-            "pools: %s; %s entries out of the round) and the declared scenario(s) "
-            "%s ran nowhere%s"
-            % (", ".join(_pools), f.get("excluded_count", 0) or 0, _decl,
-               " (the widened face was empty too)"
-               if f.get("face_vacuous") else ""))
-    else:
-        out["zero_decision"] = QUICK_ZERO_REGISTRY
-        out["line"] = (
-            "nothing ran: the declaration named %s and the round's receipt carries "
-            "no executed row for it, while no pool-exclusion / retired-premise / "
-            "roster-skip decision was recorded — the registry and the declaration "
-            "disagree" % _decl)
+        out["decided_by"] = "lane_pool_declaration"
+        _who = ("the lane's verify.yaml integration.exclude_pools, applied by the "
+                "gate (apply_skip_pools)")
+        if _covered:
+            out["detail"] = (
+                "the pool-exclusion decision excluded pools %s (declared by %s) "
+                "and the declared scenario(s) %s live in one of them"
+                % (", ".join(_pools), _who, ", ".join(_covered)))
+            out["line"] = (
+                "nothing ran: the pool-exclusion decision excluded pools %s (by %s; "
+                "%s entries out of the round) and the declared scenario(s) %s live "
+                "in one of those pools%s"
+                % (", ".join(_pools), _who, f.get("excluded_count", 0) or 0,
+                   ", ".join(_covered),
+                   " (the widened face was empty too)"
+                   if f.get("face_vacuous") else ""))
+        else:
+            _own_pools = ", ".join(
+                "%s=%s" % (n, str(_name_pools.get(n)) or "unstated")
+                for n in names) or _decl
+            out["detail"] = (
+                "the pool-exclusion decision excluded pools %s (by %s), but the "
+                "declared scenario(s) live in %s — this decision did NOT drop them, "
+                "so it does not explain the zero" % (", ".join(_pools), _who,
+                                                     _own_pools))
+            out["line"] = (
+                "nothing ran: excluded pools %s came from %s, but the declared "
+                "scenario(s) live in %s — the pool decision did not cover them, so "
+                "the zero came from another decision (this round's receipt names "
+                "no reuse/roster/retired hit)" % (", ".join(_pools), _who,
+                                                  _own_pools))
+        return out
+    out["zero_decision"] = QUICK_ZERO_REGISTRY
+    out["decided_by"] = "registry"
+    out["detail"] = ("the registry carries no executed row for %s and no "
+                     "pool/roster/retired/reuse decision was recorded" % _decl)
+    out["line"] = (
+        "nothing ran: the declaration named %s and the round's receipt carries "
+        "no executed row for it, while no pool-exclusion / retired-premise / "
+        "roster-skip / ledger-reuse decision was recorded — the registry and the "
+        "declaration disagree" % _decl)
     return out
+
+
+def quick_scope_pin(prior_names, current_names) -> Dict[str, Any]:
+    """Compare this round's narrowed scope with the one pinned earlier in the same
+    attempt (pure, t261031-04 requirement 1).
+
+    A narrowed round's scope must be stable: a declaration that ran in round 1
+    runs in every later round of that attempt. This helper names a difference
+    instead of letting it pass silently — `line` is empty when the scope is
+    unchanged, and otherwise says what left and what joined (the receipt carries
+    it, so a "legitimately changed" scope is never implicit). Malformed inputs
+    read as an empty scope, never as a raise."""
+    def _norm(raw):
+        out = []
+        for x in (raw or []) if isinstance(raw, (list, tuple, set)) else []:
+            if isinstance(x, str) and x.strip() and x.strip() not in out:
+                out.append(x.strip())
+        return out
+    prior = _norm(prior_names)
+    cur = _norm(current_names)
+    dropped = [n for n in prior if n not in cur]
+    added = [n for n in cur if n not in prior]
+    if not prior or (not dropped and not added):
+        return {"changed": False, "added": [], "dropped": [], "line": ""}
+    parts = []
+    if dropped:
+        parts.append("no longer in scope: %s" % ", ".join(dropped))
+    if added:
+        parts.append("newly in scope: %s" % ", ".join(added))
+    return {
+        "changed": True, "added": added, "dropped": dropped,
+        "line": ("the narrowed scope CHANGED since the earlier round of this "
+                 "attempt (%s) — a stable scope is required inside one attempt, so "
+                 "the receipt names the difference instead of letting it pass"
+                 % "; ".join(parts))}
 
 
 @dataclass
