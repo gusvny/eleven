@@ -32,9 +32,9 @@ import {
   splitWaiting, hasOptions, chipLabel, masterOn, localDateTime, newestFirst, wakeRowSentence, themeParamOf,
   // t261008-19: docs tree page count + the mock's two entry rows (single implementation).
   countDocsTree, docEntryRow,
-  // t261019-43: the reply face — collapsed badge + expanded per-reply named lines
-  // (single implementation, embedded via String(fn) below).
-  replyBadge, replyFace,
+  // t261019-43: the reply face — collapsed badge + expanded per-reply named lines.
+  // t261030-41: the audited grants save body + the epic list it carries (all embedded via String(fn)).
+  replyBadge, replyFace, grantsSaveBody, epicsToPost,
 } from './page-logic.ts'
 import { LIST_CONTRACTS } from './list-contracts.ts'
 import { renderMarkdown } from './markdown.ts'
@@ -382,7 +382,7 @@ const EMBEDDED = EMBED_CONSTS + [
   String(beepDecision), String(pickDegraded), String(fmtProportion),
   String(fmtWaiting), String(fmtAge), String(groupByProject),
   String(splitWaiting), String(hasOptions), String(chipLabel), String(masterOn),
-  String(localDateTime), String(newestFirst), String(wakeRowSentence), String(themeParamOf),
+  String(localDateTime), String(newestFirst), String(wakeRowSentence), String(themeParamOf), String(grantsSaveBody), String(epicsToPost), // t261030-41: the audited grants save body + the epic-list source (one implementation with the UT)
   // t261019-43: reply face cores (badge + named per-reply lines; escaping at the page).
   String(replyBadge), String(replyFace),
   // t261004-16：markdown 渲染器同样单实现嵌入（UT 与页面同一份函数源码）。
@@ -2699,7 +2699,10 @@ th{color:var(--muted);font-weight:600;font-size:11px}
   // A code that is authorized but has no document is still a row (in_registry:false),
   // so its switch renders on and the next save keeps the authorization.
   function epicRowLine(e){
-    var parts = [String(e.status||'unknown')];
+    // t261030-41: a row with no status line keeps the graceful fallback (never a
+    // blank or a bare placeholder), as the panel section has always promised.
+    var status = (e.status === null || e.status === undefined) ? '' : String(e.status).trim();
+    var parts = [status === '' ? '(no status line)' : status];
     if(e.summary) parts.push(String(e.summary));
     var line = parts.join(' · ');
     if(e.reason) line += ' — ' + String(e.reason);
@@ -2737,13 +2740,16 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     });
     return out;
   }
-  // t261030-30 (A4): the epic list is only posted when the face that rendered the
-  // switches was readable. A degraded read renders no switch, and posting an empty
-  // list would erase every authorization; an absent key makes the server inherit the
-  // on-disk list instead.
-  function openEpicsReadable(){
+  // t261030-41: the epic list that travels with the save. The rendered switches are
+  // the truth when the face they came from was readable. A degraded read renders no
+  // switch, so the list already on disk (the declaration in the same grants read
+  // face) is posted instead of an empty one: the payload always carries the key and
+  // never erases an authorization it could not show.
+  function openEpicsToPost(){
     var g = state.grants;
-    return !!(g && g.open_ticket_epics && g.open_ticket_epics.ok === true);
+    var face = g && g.open_ticket_epics;
+    var d = g && g.declaration;
+    return epicsToPost(selectedOpenEpics(), !!(face && face.ok === true), d && d.open_ticket_epics);
   }
   function setAllSwitches(on){
     Array.prototype.forEach.call(el('permList').querySelectorAll('.sw.grant'), function(s){ s.dataset.on = String(on); });
@@ -2760,10 +2766,13 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       if(s.dataset.on==='true') grants[s.dataset.op] = true;
     });
     // t261004-18（KI-193）：不带 by——写者由服务端凭据定名。
-    var body = { grants: grants };
-    var sess = el('grantSession').value.trim();
-    if(sess) body.executor_sessions = [sess];
-    if(openEpicsReadable()) body.open_ticket_epics = selectedOpenEpics();
+    // t261030-41: the save body is the whole declaration — grants, session and the
+    // epic list. grantsSaveBody is the one place that decides that shape (the unit
+    // test drives the same source), and the literal below names every field this
+    // save writes: no value is decided here, and the write-face parity guard
+    // (integration/lint_tests.py L20) reads exactly this literal.
+    var built = grantsSaveBody({ grants: grants, session: el('grantSession').value, epics: openEpicsToPost() });
+    var body = { grants: built.grants, executor_sessions: built.executor_sessions, open_ticket_epics: built.open_ticket_epics };
     postJson('/sandbar-executor-panel/api/grants?project='+encodeURIComponent(state.project), body)
       .then(function(j){
         grantsSaveMsg = j.saved===true ? '<span class="good">Saved.</span>'

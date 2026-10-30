@@ -308,3 +308,69 @@ export function replyFace(replies: unknown): { lines: ReplyFaceLine[]; malformed
   }
   return { lines: out, malformed }
 }
+
+/**
+ * t261030-41: the body of an audited grants save is the WHOLE declaration.
+ *
+ * A save that carried only the permission switches looked complete and was not:
+ * whether the epic list travelled was decided by a separate branch, so a save
+ * could drop the authorization that lets an executor open a ticket and nothing
+ * in the payload said so. This builder is the single implementation (embedded
+ * into the page via String(fn), like the other pure cores) and it always returns
+ * the open_ticket_epics key, so the payload states the list it means instead of
+ * leaving the writer to guess.
+ *
+ * `epics` is the list the save means to leave authorized: the rendered switches
+ * when the epic face was readable, else the list already on disk. A caller must
+ * never pass an empty array produced by a read that failed — that erases every
+ * authorization. `session` is optional: an absent or blank session keeps the
+ * declared session list untouched (the writer inherits it).
+ */
+export function grantsSaveBody(input: {
+  grants?: Record<string, boolean> | null
+  session?: string | null
+  epics?: string[] | null
+}): { grants: Record<string, boolean>; executor_sessions?: string[]; open_ticket_epics: string[] } {
+  const inGrants = input ? input.grants : null
+  const grants: Record<string, boolean> = {}
+  if (inGrants && typeof inGrants === 'object') {
+    // Only the switches that are ON enter the payload: an absent op stays untouched
+    // on disk, exactly as the page's switches always meant it.
+    for (const op of Object.keys(inGrants)) {
+      if (inGrants[op] === true) grants[op] = true
+    }
+  }
+  const body: { grants: Record<string, boolean>; executor_sessions?: string[]; open_ticket_epics: string[] } = {
+    grants,
+    open_ticket_epics: [],
+  }
+  const session = input && typeof input.session === 'string' ? input.session.trim() : ''
+  if (session) body.executor_sessions = [session]
+  const epics = input ? input.epics : null
+  body.open_ticket_epics = Array.isArray(epics) ? epics.slice() : []
+  return body
+}
+
+/**
+ * t261030-41: the epic list a grants save posts.
+ *
+ * Two states have to be told apart, and the payload cannot: either the switches
+ * were rendered from a readable epic face (then the switches are the truth), or
+ * the read failed and no switch exists (then the list already on disk is the
+ * truth). Posting the empty switch set from a failed read would erase every
+ * authorization, so the on-disk list is posted instead. Pure and closure-free,
+ * embedded into the page via String(fn) along with the save-body builder.
+ */
+export function epicsToPost(
+  selected: string[] | null | undefined,
+  faceReadable: boolean,
+  declared: unknown,
+): string[] {
+  if (faceReadable) return Array.isArray(selected) ? selected.slice() : []
+  if (!Array.isArray(declared)) return []
+  const out: string[] = []
+  for (const code of declared) {
+    if (typeof code === 'string' && code !== '' && out.indexOf(code) < 0) out.push(code)
+  }
+  return out
+}

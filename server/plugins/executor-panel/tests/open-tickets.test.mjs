@@ -22,6 +22,8 @@ import { assert, done, freshDir, cleanup, fakeClock } from './lib.mjs'
 import { validateDeclaration, saveGrantsDecl, declarationPath, auditPath, readDeclaration } from '../src/host/executor-grants.ts'
 import { listOpenTicketEpics, resolveOpenTicketEpicsDir } from '../src/host/open-tickets.ts'
 import { epicFromGrantSource, parseActionLine } from '../src/host/recent-actions.ts'
+import { grantsSaveBody, epicsToPost } from '../src/host/page-logic.ts'
+import { PANEL_PAGE_HTML } from '../src/host/panel-page.ts'
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
@@ -230,11 +232,9 @@ try {
       assert(inherited.ok === true
         && JSON.stringify(inherited.declaration.open_ticket_epics) === JSON.stringify(['artifact-face', 'ghost-epic']),
         `A4 a save that omits the epic list keeps the authorization (${++n})`)
-      // The page wiring: it posts the epic list only when the face was readable, and
-      // it renders one switch per row.
+      // The page wiring: it renders one switch per row, and its save body is the
+      // tested builder (asserted below by source parity) — never a hand-rolled body.
       const pageSrc = readFileSync(join(repo, 'server/plugins/executor-panel/src/host/panel-page.ts'), 'utf8')
-      assert(pageSrc.includes('if(openEpicsReadable()) body.open_ticket_epics = selectedOpenEpics();'),
-        `A4 the page never posts an epic list it did not render (${++n})`)
       assert(pageSrc.includes("data-epic=\"'+esc(e.code)+'\"") && pageSrc.includes('epicRowLine(e)'),
         `A4 the page renders a switch and a non-blank status line per row (${++n})`)
     } finally {
@@ -245,6 +245,88 @@ try {
       else process.env.SANDBAR_PROJECTS_DIR = savedProjectsDir
       cleanup([docProject, docRegistry])
     }
+  }
+
+  // ---- t261030-41: the audited save payload is the WHOLE declaration ----
+  // The regression this guards: the save posted only the permission switches, so the
+  // epic list that authorizes the open-ticket row silently dropped out of the payload
+  // and the writer had to guess whether the list was cleared or merely not sent.
+  // Asserting "a save happened" cannot see that, so the assertions below pin the
+  // PAYLOAD: it carries the epic list AND the surviving grants, and the epic key is
+  // present even when the list is empty (present-empty = cleared on purpose; absent =
+  // the field was dropped).
+  {
+    const payload = grantsSaveBody({
+      grants: { 'open-ticket': true, sign: true },
+      session: ' exec-1 ',
+      epics: ['engine-hardening', 'localization'],
+    })
+    assert(Object.hasOwn(payload, 'open_ticket_epics'),
+      `the save payload carries the open_ticket_epics key (${++n})`)
+    assert(Array.isArray(payload.open_ticket_epics)
+      && payload.open_ticket_epics.join(',') === 'engine-hardening,localization',
+      `the save payload carries the whole epic list the switches selected: ${JSON.stringify(payload.open_ticket_epics)} (${++n})`)
+    assert(payload.grants['open-ticket'] === true && payload.grants.sign === true,
+      `the save payload keeps the existing grants: ${JSON.stringify(payload.grants)} (${++n})`)
+    assert(JSON.stringify(payload.executor_sessions) === JSON.stringify(['exec-1']),
+      `the save payload carries the trimmed session (${++n})`)
+
+    const empty = grantsSaveBody({ grants: {}, epics: [] })
+    assert(Object.hasOwn(empty, 'open_ticket_epics') && empty.open_ticket_epics.length === 0
+      && Object.keys(empty.grants).length === 0 && !('executor_sessions' in empty),
+      `an empty save still carries the epic key and no session key (${++n})`)
+    // Only ON switches travel: an off switch is an absent op, never an explicit false.
+    const off = grantsSaveBody({ grants: { sign: true, 'open-ticket': false }, epics: ['proj-exec'] })
+    assert(JSON.stringify(off.grants) === JSON.stringify({ sign: true }),
+      `only on-switches travel: ${JSON.stringify(off.grants)} (${++n})`)
+    // Malformed input never throws and never drops the key (external-input discipline).
+    for (const bad of [undefined, null, {}, { grants: null, epics: 'nope' }, { grants: {}, session: 5, epics: [1, null] }]) {
+      const b = grantsSaveBody(bad)
+      assert(Object.hasOwn(b, 'open_ticket_epics') && Array.isArray(b.open_ticket_epics)
+        && b.grants !== null && typeof b.grants === 'object' && !('executor_sessions' in b),
+        `malformed input still yields a whole payload: ${JSON.stringify(bad)} (${++n})`)
+    }
+
+    // The epic list the save carries: a readable face posts the switches; a read that
+    // failed posts the list already on disk instead of an empty one that erases it.
+    assert(JSON.stringify(epicsToPost(['engine-hardening', 'localization'], true, ['proj-exec']))
+      === JSON.stringify(['engine-hardening', 'localization']),
+      `readable face: the switches are what the save posts (${++n})`)
+    assert(JSON.stringify(epicsToPost([], false, ['artifact-face', 'ghost-epic']))
+      === JSON.stringify(['artifact-face', 'ghost-epic']),
+      `failed read: the on-disk list is posted, never [] (${++n})`)
+    assert(JSON.stringify(epicsToPost(null, false, ['proj-exec', 'proj-exec', 7, '']))
+      === JSON.stringify(['proj-exec']),
+      `failed read: a malformed declaration degrades to its readable codes (${++n})`)
+    assert(JSON.stringify(epicsToPost(undefined, false, null)) === JSON.stringify([]),
+      `failed read with no declaration posts an empty list, never a throw (${++n})`)
+
+    // End to end over the two halves: the payload the page would post for the
+    // scenario's face (both epics on) lands on disk with the grants intact.
+    const roundTrip = grantsSaveBody({
+      grants: { sign: true, 'open-ticket': true },
+      epics: epicsToPost(['engine-hardening', 'localization'], true, []),
+    })
+    const saved = saveGrantsDecl('t261030-41-payload', roundTrip, 'host', env, clock.now())
+    const onDisk = saved.saved === true ? JSON.parse(readFileSync(declarationPath('t261030-41-payload', env), 'utf8')) : null
+    assert(saved.saved === true
+      && JSON.stringify(onDisk.open_ticket_epics) === JSON.stringify(['engine-hardening', 'localization'])
+      && onDisk.grants.sign === true && onDisk.grants['open-ticket'] === true,
+      `the posted payload reaches the declaration file with the epic list and the grants (${++n})`)
+
+    // The served page runs the SAME source these assertions drive (String(fn) embed),
+    // so this test cannot stay green while the page posts something else.
+    assert(PANEL_PAGE_HTML.includes(String(grantsSaveBody)),
+      `the served page embeds the tested save-body builder (${++n})`)
+    assert(PANEL_PAGE_HTML.includes(String(epicsToPost)),
+      `the served page embeds the tested epic-list source (${++n})`)
+    const pageSrc = readFileSync(join(repo, 'server/plugins/executor-panel/src/host/panel-page.ts'), 'utf8')
+    assert(/var built = grantsSaveBody\(\{/.test(pageSrc) && pageSrc.includes('epics: openEpicsToPost()'),
+      `the panel save builds its body with the builder and the epic source (${++n})`)
+    assert(/\{ grants: built\.grants, executor_sessions: built\.executor_sessions, open_ticket_epics: built\.open_ticket_epics \}/.test(pageSrc),
+      `the posted body names the whole declaration, epic list included (${++n})`)
+    assert(!/body\.open_ticket_epics\s*=/.test(pageSrc),
+      `the panel never sets the epic key outside the builder (the shape that lost it) (${++n})`)
   }
 
   // ---- C3 fail-soft：epic 解析 ----
