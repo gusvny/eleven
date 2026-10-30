@@ -187,8 +187,13 @@ class WiringLocks(unittest.TestCase):
         dev = open(os.path.join(ENGINE, "dev_lane.py"), encoding="utf-8").read()
         self.assertIn('T261025_02_OWN_CLOSING_PATCH_ID = '
                       '"t261025-02-own-gate-run-v1"', dev)
-        closing = dev[dev.index("async def _closing_full_run"):
-                      dev.index("async def _closing_full_run") + 5000]
+        # the whole method (t261030-33 grew it by the pointed-union step; a fixed
+        # character window would silently stop covering the face below)
+        _start = dev.index("async def _closing_full_run")
+        _rest = dev[_start + 10:]
+        _end = min([_rest.index(mark) for mark in ("\n    async def ", "\n    def ")
+                    if mark in _rest] or [len(_rest)])
+        closing = dev[_start:_start + 10 + _end]
         self.assertIn("workflow.patched(T261025_02_OWN_CLOSING_PATCH_ID)",
                       closing)
         self.assertIn("own_names=_closing_own", closing)

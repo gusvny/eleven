@@ -536,6 +536,31 @@ def closing_face_plan(fast_members, fast_error="") -> ClosingFacePlan:
     return ClosingFacePlan(run_only=members, error="")
 
 
+def closing_pointed_names(run_only, own_names=()) -> List[str]:
+    """The closing run's POINTED list = the declared fast set ∪ the ticket's own
+    scenarios (t261030-33 arbitration: t261024-40 carried the own names as an
+    exemption face only, so the runner kept/annotated an own name that was already
+    pointed but never ADDED one — the closing face declared its own proof and did
+    not run it, and the t261025-02 coverage check voided the pass).
+
+    Pure and order-stable: the fast set keeps its order, an own name that is not
+    already pointed is appended in declaration order, a duplicate or blank name is
+    dropped. Anything unreadable degrades to the other side of the union — this
+    function decides a run list, never a verdict."""
+    out: List[str] = []
+
+    def _add(value: Any) -> None:
+        name = str(value).strip() if value is not None else ""
+        if name and name not in out:
+            out.append(name)
+
+    for n in (run_only or []):
+        _add(n)
+    for n in (own_names or []):
+        _add(n)
+    return out
+
+
 def fast_budget_verdict(wall_s, budget_min) -> Tuple[bool, str]:
     """Named stewardship verdict for the round's wall clock against the
     declared budget. A breach is a NAMED signal — never an auto-trim, never a
@@ -1007,6 +1032,15 @@ ENABLE_NARROWED_ANCHOR_SIGNAL = "enable_narrowed_anchor"
 # an in-flight instance replaying old history evaluates it un-patched and passes
 # no own list, exactly as history recorded.
 T261025_02_OWN_CLOSING_PATCH_ID = "t261025-02-own-gate-run-v1"
+
+# t261030-33 (arbitration of the own-coverage failure): the closing run's POINTED
+# list must carry the ticket's own scenario names as well. Passing them only as
+# `own_names` was a no-op for the run list: the runner's own face keeps/annotates a
+# name that is already pointed and never adds one, so two closing attempts spent a
+# full fast-set round and then voided the pass with "own scenario did NOT run".
+# A new patch id keeps in-flight replays byte-identical: an old history evaluates
+# it un-patched and passes the declared fast set alone, exactly as recorded.
+OWN_CLOSING_UNION_PATCH_ID = "dev-lane-own-closing-union-v1"
 
 #: Patch guard CONCURRENCY_GATE_PATCH_ID (t261005-14; fixes the replay break
 #: CL-1 / t261004-32 introduced). 775bdb1 wired the whole concurrency command
@@ -2672,9 +2706,9 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             handover_runs=self._handover_debt_legs(),
             only_names=list(only_names or []),
             # t261024-40: the ticket's own-scenario face (empty default = old
-            # payloads/replays decode unchanged; the closing run passes none -
-            # the closing face is the fast set, own scenarios are not part of
-            # the closing caliber).
+            # payloads/replays decode unchanged). t261030-33: the closing run
+            # passes the derived own list here AND points it in `only_names`
+            # (an own name that is not pointed is never run).
             own_names=list(own_names or []))
 
     async def _closing_full_run(self):
@@ -2731,9 +2765,21 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                           or []) if str(n).strip()]
             else:
                 _closing_own = []
+            # t261030-33 (arbitration): the own names must also be POINTED, not
+            # only declared. The runner's own face keeps an already-pointed name
+            # and never adds one, so the closing face declared its own proof,
+            # did not run it, and the coverage check voided the pass (two
+            # attempts). New patch id: an old history replays the fast set alone.
+            _closing_only = list(_cplan.run_only)
+            if workflow.patched(OWN_CLOSING_UNION_PATCH_ID):
+                _closing_only = closing_pointed_names(_cplan.run_only, _closing_own)
+                if _closing_own:
+                    self._log("closing run: pointed list carries %d own "
+                              "scenario(s) as well (the closing proof "
+                              "obligation)" % len(_closing_own))
             rraw = await workflow.execute_activity(
                 run_integration_tests,
-                self._integ_run_args(_cplan.run_only, own_names=_closing_own),
+                self._integ_run_args(_closing_only, own_names=_closing_own),
                 start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
             _cres = rraw if isinstance(rraw, IntegrationRunResult) else \
                 IntegrationRunResult(
@@ -2749,6 +2795,11 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 # t261025-02: the own face carried by this closing run (empty =
                 # un-patched replay / no own scenarios derived).
                 "own": list(_closing_own),
+                # t261030-33: the list the runner was actually POINTED at. The
+                # incident this fixes was invisible precisely here: `own` was
+                # declared while `members` was run, so a reader could not tell
+                # whether the own proof was pointed.
+                "pointed": list(_closing_only),
                 "wall_s": round(max(0, self._now_epoch() - _ct0), 1),
                 "error": str(getattr(_cres, "error", "") or "")}
             return _cres
