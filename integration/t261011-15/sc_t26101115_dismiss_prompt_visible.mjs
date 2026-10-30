@@ -27,6 +27,22 @@
 // surfacing, and the twin bundles DRIFTING (KI-052). No known-red booking, no
 // skip, no weakened assertion.
 //
+// S3d fixture determinism + the POST's answer (t261031-01). The 261031 round
+// recorded the refusal notice missing for the whole 180 s ceiling (893 poll
+// rounds) AND the prompt closed at the end - the shape of a dismissal the route
+// ANSWERED, not of a refusal that was waited for too briefly. The receipt could
+// not say more, because the leg recorded the REQUEST side only. Two changes:
+//   1. the leg now records what the route ANSWERED (status + body) and what the
+//      stub's refusal predicate saw for the clicked row, inside the same state
+//      JSON as the existing fields - a next occurrence is decidable without a
+//      rerun;
+//   2. the refusal is established BY CONSTRUCTION before the click and asserted
+//      to hold (S3p1-S3p3): the fixture still serves the clicked failed row, the
+//      engine channel the route spawns answers that exact dismissal with the
+//      named refusal, the probe went through the stub and changed nothing. The
+//      assertion itself is untouched: a refusal must surface verbatim on the
+//      face and must never be swallowed.
+//
 // S3d condition wait (t261030-50, KI-431 family). The refusal-notice leg used
 // to wait a FIXED settle budget for a DOM condition, so a loaded machine read
 // "not yet" as "never" and reddened a full round twice. It now polls the
@@ -55,6 +71,7 @@
 import { bootConsole, teardownOnExit, makeRegistryRoot, writeProjectEntry, makeTicketStub, benchAuthUrl, dismissNotice } from '../t260904-17/lib_fix17.mjs';
 import { loadPlaywright } from '../lib_pw_deps.mjs';
 import { readFileSync, existsSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -313,39 +330,158 @@ function noticeCeiling() {
 // One probe is one evaluate round with NO Playwright auto-wait: locator
 // text-content waits for attachment up to the action timeout, which would hide
 // the budget from the poll. Errors are data here (the poll keeps trying).
+// t261031-01: the probe also reports whether the prompt is still on the page -
+// the notice is rendered INSIDE the prompt, so a closed prompt means the notice
+// can never attach. That moment is recorded, not judged here.
 async function probeNotice() {
   try {
     const got = await page.evaluate((sel) => {
       const el = document.querySelector(sel)
-      return { attached: el !== null, text: el ? String(el.textContent || '').trim() : '' }
+      return {
+        attached: el !== null,
+        text: el ? String(el.textContent || '').trim() : '',
+        promptOpen: document.querySelector('[data-wb-dismiss-prompt]') !== null,
+      }
     }, NOTICE_SELECTOR)
-    return { attached: got?.attached === true, text: String(got?.text || ''), error: '' }
+    return {
+      attached: got?.attached === true, text: String(got?.text || ''),
+      promptOpen: got?.promptOpen === true, error: '',
+    }
   } catch (e) {
-    return { attached: false, text: '', error: String(e && e.message ? e.message : e).slice(0, 140) }
+    return {
+      attached: false, text: '', promptOpen: null,
+      error: String(e && e.message ? e.message : e).slice(0, 140),
+    }
   }
 }
 
+// One probe bounded by what is LEFT of the ceiling (t261031-01). A probe is an
+// evaluate round, and on a stalled page that round can outlast the declared
+// ceiling: on a loaded machine this leg has run 835 poll rounds over 1091 s
+// against a 180 s ceiling (the stall also starved the timer that was supposed to
+// end it), and a leg that runs past its own ceiling is no longer the wait it
+// declares. A probe that cannot answer inside the remaining budget is reported as
+// such, never as an empty notice.
+async function boundedProbe(remainMs) {
+  const probe = probeNotice()
+  return Promise.race([
+    probe,
+    new Promise((resolveP) => {
+      const timer = setTimeout(() => resolveP({
+        attached: false, text: '', promptOpen: null,
+        error: `probe did not answer within the remaining ceiling (${remainMs}ms)`,
+      }), Math.max(0, remainMs))
+      if (typeof timer.unref === 'function') timer.unref()
+    }),
+  ])
+}
+
 // Poll for the refusal notice to attach with non-empty text. Returns
-// { shown, rounds, waitedMs, last, provenance, ceilingMs? } - the verdict and
-// the whole receipt come from here, so "never appeared" is always named.
+// { shown, rounds, waitedMs, last, provenance, ceilingMs?, promptClosedAfterMs,
+// firstProbe } - the verdict and the whole receipt come from here, so "never
+// appeared" is always named, and a prompt that closed DURING the wait is named
+// with the moment it was first seen gone (the answer side is added by the
+// caller).
 async function waitForNotice(ceiling) {
   const started = Date.now()
   let rounds = 0
-  let last = { attached: false, text: '', error: '' }
+  let last = { attached: false, text: '', promptOpen: null, error: '' }
+  let promptClosedAfterMs = null
+  let firstProbe = null
   for (;;) {
     rounds += 1
-    last = await probeNotice()
+    last = await boundedProbe(Math.max(0, ceiling.ms - (Date.now() - started)))
+    if (firstProbe === null) firstProbe = { ...last }
     if (last.attached && last.text !== '') {
-      return { shown: true, rounds, waitedMs: Date.now() - started, last, provenance: ceiling.provenance }
+      return {
+        shown: true, rounds, waitedMs: Date.now() - started, last,
+        provenance: ceiling.provenance, promptClosedAfterMs, firstProbe,
+      }
     }
+    if (last.promptOpen === false && promptClosedAfterMs === null) promptClosedAfterMs = Date.now() - started
     const elapsed = Date.now() - started
     if (elapsed >= ceiling.ms) {
       return {
         shown: false, rounds, waitedMs: elapsed, last,
-        provenance: ceiling.provenance, ceilingMs: ceiling.ms,
+        provenance: ceiling.provenance, ceilingMs: ceiling.ms, promptClosedAfterMs, firstProbe,
       }
     }
     await new Promise(r => setTimeout(r, Math.min(NOTICE_POLL_MS, Math.max(0, ceiling.ms - elapsed))))
+  }
+}
+
+// ---------------------------------------------------------------- fixture determinism (t261031-01)
+// The engine channel of this bench refuses EVERY ticket op it does not serve
+// (only list and show are served), so the refusal this leg needs is a property
+// of the CHANNEL, not of the ticket's state. It is still established before the
+// click and asserted to hold: the probe below runs the same channel shape the
+// dismiss route uses (admin.py call ticket {...} with the bench env, where
+// python3 resolves to the stub's shim through PATH), so the receipt proves what
+// the engine channel answered at that moment instead of assuming it.
+const ENGINE_REFUSAL_MARK = 'fix17'   // the isolated bench's named dismissal refusal
+const PROBE_CEILING_MS = 120000       // child-process hard ceiling for the probe channel
+
+// The fixture face the stub serves for the clicked row: what a refusal predicate
+// keyed on ticket state would read, and what the row face is derived from.
+function fixtureRowFacts(stubRef) {
+  try {
+    const ctrl = JSON.parse(readFileSync(stubRef.ctrlPath, 'utf8'))
+    const rows = Array.isArray(ctrl.tickets) ? ctrl.tickets : []
+    const row = rows.find((t) => t && t.id === TARGET) ?? null
+    return {
+      rows: rows.length,
+      row: row === null ? null : {
+        id: row.id, project: row.project, status: row.status,
+        stage_state: row.stage_state, dismissed: Object.hasOwn(row, 'dismissed'),
+      },
+      digest: JSON.stringify(row),
+    }
+  } catch (e) {
+    return { rows: -1, row: null, digest: `unreadable: ${String(e).slice(0, 120)}` }
+  }
+}
+
+// One probe of the engine channel the dismiss route spawns. Returns the answer
+// verbatim plus the stub trace rows it produced, so "the channel refused" is
+// observed rather than assumed.
+function dismissalProbe(stubRef) {
+  const traceSize = stubRef.traceSizeAt()
+  const env = {
+    ...process.env,
+    PATH: `${stubRef.dir}:${process.env.PATH || ''}`,
+    FIX17_CTRL: stubRef.ctrlPath,
+    FIX17_TRACE: stubRef.tracePath,
+  }
+  const res = spawnSync(join(stubRef.dir, 'python3'),
+    [join(REPO, 'server', 'admin.py'), 'call', 'ticket',
+      JSON.stringify({ op: 'dismiss', id: TARGET, by: 'fixture-probe', reason: 'fixture determinism probe' })],
+    { env, encoding: 'utf8', timeout: PROBE_CEILING_MS })
+  let answer = null
+  let parseError = ''
+  try { answer = JSON.parse(String(res.stdout || '').trim()) } catch (e) {
+    parseError = String(e && e.message ? e.message : e).slice(0, 140)
+  }
+  return {
+    status: res.status,
+    answer,
+    parseError,
+    signal: res.signal ?? '',
+    stderr: String(res.stderr || '').slice(0, 200),
+    traced: stubRef.traceSince(traceSize).map((t) => `${t.op}:${t.id}`),
+  }
+}
+
+// What the stub's refusal predicate saw for the clicked row at the moment the
+// leg looks: the served fixture row and the ops the shim actually received.
+function stubPredicateView(stubRef, sinceSize) {
+  const fixture = fixtureRowFacts(stubRef)
+  let ops = []
+  try { ops = stubRef.traceSince(sinceSize ?? 0).map((t) => `${t.op}:${t.id}`).slice(-8) } catch { /* reported below */ }
+  return {
+    refuseRule: 'every ticket op other than list/show is refused by name (the channel, not the ticket state)',
+    servedRow: fixture.row,
+    fixtureRows: fixture.rows,
+    opsSinceClick: ops,
   }
 }
 
@@ -372,6 +508,10 @@ try {
   await benchEnvFail('browser-context', e)
 }
 page.on('pageerror', (e) => { pageErrors.push(String(e && e.message ? e.message : e).slice(0, 200)) })
+// t261031-01: a renderer crash also wipes the prompt state (and with it a notice
+// that WAS rendered), so it is recorded on the same face as a page error instead
+// of surfacing as an unexplained missing notice.
+page.on('crash', () => { pageErrors.push('page crashed (renderer gone - state would be lost)') })
 const dismissPosts = []
 page.on('request', (req) => {
   const u = req.url()
@@ -379,6 +519,43 @@ page.on('request', (req) => {
     dismissPosts.push({ url: u, body: req.postData() ?? '' })
   }
 })
+// t261031-01: the ANSWER side of the same request. The 261031 red recorded only
+// what was sent, so the answer had to be guessed from a rerun. Status and body
+// text are stored per POST answer; the leg prints them beside its own state
+// fields. A body that cannot be read is NAMED (an unread answer is not "empty").
+const wireAnswers = []
+page.on('response', (res) => {
+  const u = res.url()
+  if (!u.includes('/dismiss') && !u.includes('/restore')) return
+  const answer = { url: u, status: res.status(), body: '', readError: '', settled: false }
+  wireAnswers.push(answer)
+  void res.text()
+    .then((t) => { answer.body = String(t).slice(0, 400) })
+    .catch((e) => { answer.readError = String(e && e.message ? e.message : e).slice(0, 140) })
+    .finally(() => { answer.settled = true })
+})
+// t261031-01: a page reload or a sidebar remount would wipe the prompt state -
+// and the notice lives INSIDE the prompt, so that looks exactly like a swallowed
+// refusal. Counted, so the receipt can tell the two apart.
+const mainFrameNavs = []
+page.on('framenavigated', (f) => { try { if (f === page.mainFrame()) mainFrameNavs.push(page.url().slice(0, 120)) } catch { /* page gone */ } })
+
+// Bounded settle for the answer bodies (called on every verdict path, so it may
+// not hang the exit). Returns the count and the last answer verbatim.
+async function wireAnswerFacts(boundMs = 5000) {
+  const started = Date.now()
+  while (wireAnswers.some((a) => !a.settled) && Date.now() - started < boundMs) {
+    await new Promise(r => setTimeout(r, 50))
+  }
+  const last = wireAnswers[wireAnswers.length - 1] ?? null
+  return {
+    count: wireAnswers.length,
+    unread: wireAnswers.filter((a) => !a.settled).length,
+    last: last === null ? null : {
+      status: last.status, body: last.body, readError: last.readError, settled: last.settled,
+    },
+  }
+}
 STEP = 'page-load'
 try {
   await bench.goto(page, { waitUntil: 'domcontentloaded', timeout: 30000 })
@@ -424,6 +601,38 @@ if (!listReady) {
 // S1: 点最后一个 failed 行的 Dismiss —— 理由框必须在视口内（不用人手滚）。
 // 修复前该框开在滚动容器尾部 = 折叠线以下，本子用例在旧 bundle 上必红（TDD 信号）。
 STEP = 'dismissal'
+// S3-pre (t261031-01): establish the refusal BY CONSTRUCTION before the click and
+// assert it held. This is the half the 261031 round was missing - it assumed the
+// fixture refused, so an ACCEPTED answer and a swallowed refusal produced the
+// same receipt. Three legs, each on a public face:
+//   S3p1 the fixture still serves the row the person clicks (status/stage, and
+//        no dismissal voucher - a voucher would make the row a restore row);
+//   S3p2 the engine channel the dismiss route spawns answers that exact
+//        dismissal with the named refusal (a real probe, not an assumption);
+//   S3p3 the probe really went through the stub and changed nothing (trace row,
+//        fixture row byte-identical), so "the channel refuses" is about THIS
+//        bench and not about a stale or foreign channel.
+const fixtureBefore = fixtureRowFacts(stub)
+const servedOk = fixtureBefore.row !== null
+  && fixtureBefore.row.project === PROJ && fixtureBefore.row.status === 'failed'
+  && fixtureBefore.row.stage_state === 'failed' && fixtureBefore.row.dismissed === false
+rec('S3p1 fixture serves the fd-last failed row the person clicks', servedOk,
+  `row=${JSON.stringify(fixtureBefore.row)} of ${fixtureBefore.rows} fixture rows`)
+const probe = dismissalProbe(stub)
+const probeRefused = probe.status === 0 && probe.answer?.ok === false
+  && String(probe.answer?.error ?? '').includes(ENGINE_REFUSAL_MARK)
+rec('S3p2 engine channel refuses that dismissal by name before the click', probeRefused,
+  `probe answer=${JSON.stringify(probe.answer)} exit=${probe.status}`
+  + `${probe.parseError ? ` parse=${probe.parseError}` : ''}`
+  + `${probe.signal ? ` signal=${probe.signal}` : ''}`
+  + `${probe.stderr ? ` stderr=${JSON.stringify(probe.stderr)}` : ''}`)
+const fixtureAfterProbe = fixtureRowFacts(stub)
+const probeWentThrough = probe.traced.includes(`ticket:dismiss:${TARGET}`)
+  && fixtureAfterProbe.digest === fixtureBefore.digest
+rec('S3p3 the refusal probe went through the stub and changed nothing', probeWentThrough,
+  `probe trace=${JSON.stringify(probe.traced)};`
+  + ` fixture row unchanged=${fixtureAfterProbe.digest === fixtureBefore.digest}`)
+
 const prompt = page.locator('[data-wb-dismiss-prompt]')
 await page.evaluate(`(${FIND_BTN})(${JSON.stringify(TARGET)}, 'Dismiss:').click()`)
 await prompt.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
@@ -462,8 +671,15 @@ try {
 } catch { bodyOk = false }
 rec('S3b body carries who+reason only (engine contract unchanged)', bodyOk,
   post?.body ?? 'no body')
-const traced = stub.readTrace().some(t => t.op === 'ticket:dismiss' && t.id === TARGET)
+// Scoped to what arrived AFTER the click (t261031-01): S3p2 already put a
+// ticket:dismiss row in the trace from the probe, so a whole-file scan would
+// pass even if this click never reached the channel.
+const traced = stub.traceSince(traceSizeBefore).some(t => t.op === 'ticket:dismiss' && t.id === TARGET)
 rec('S3c request reached the engine channel', traced)
+// The answer, printed as soon as it settles (t261031-01): the request side alone
+// left the 261031 occurrence undecidable. Bounded settle, never a blind sleep.
+const answerAfterClick = await wireAnswerFacts()
+console.log(`[note] S3 dismiss answer (status/body): ${JSON.stringify(answerAfterClick)}`)
 
 // S3d: the engine's named refusal must surface VERBATIM on the row's face and
 // must never be swallowed. The engine channel refuses this op with a NAMED
@@ -473,24 +689,30 @@ rec('S3c request reached the engine channel', traced)
 // notice could never pass as "swallowed") and reads the engine's own word, so
 // a locally invented message or an emptied refusal cannot pass as the
 // engine's refusal either.
-const ENGINE_REFUSAL_MARK = 'fix17'   // the isolated bench's named dismissal refusal
 const NOTICE_CEILING = noticeCeiling()
 console.log(`[note] S3d condition wait: polling ${NOTICE_SELECTOR} on the ${TARGET} row's`
   + ` face every ${NOTICE_POLL_MS}ms, ceiling ${NOTICE_CEILING.ms}ms (wait=${NOTICE_CEILING.provenance})`)
 const noticeWait = await waitForNotice(NOTICE_CEILING)
+// What the route answered, and what the stub's predicate saw (t261031-01). Always
+// read on both verdict paths: the answer is the fact the 261031 receipt lacked.
+const answerFacts = await wireAnswerFacts()
+const predicateView = stubPredicateView(stub, traceSizeBefore)
 const noticeCarriesEngineRefusal = noticeWait.shown && noticeWait.last.text.includes(ENGINE_REFUSAL_MARK)
 if (noticeCarriesEngineRefusal) {
   rec('S3d refusal surfaces verbatim on the face (never swallowed)', true,
     `the engine refusal attached to the ${TARGET} row's face after ${noticeWait.waitedMs}ms`
     + ` (${noticeWait.rounds} poll rounds; ceiling ${NOTICE_CEILING.ms}ms,`
-    + ` wait=${noticeWait.provenance}); notice=${JSON.stringify(noticeWait.last.text.slice(0, 120))}`)
+    + ` wait=${noticeWait.provenance}); notice=${JSON.stringify(noticeWait.last.text.slice(0, 120))}`
+    + `; postAnswer=${JSON.stringify(answerFacts)}`
+    + `; firstNoticeProbe=${JSON.stringify(noticeWait.firstProbe)}`
+    + `; stubPredicate=${JSON.stringify(predicateView)}`)
 } else {
   // A working bench that swallowed the refusal IS the product claim this leg
   // guards, so the verdict stays a content red - but the receipt must name
   // what was observed and WHICH condition never held (t261030-46: the
   // historical round booked this leg red and the record carried nothing but
   // the word 'fail'; t261030-50: it must also name the ceiling it waited).
-  const diag = await page.evaluate((mark) => {
+  const diag = await page.evaluate(({ mark, target }) => {
     const notice = document.querySelector('[data-wb-dismiss-notice]')
     const sb = document.querySelector('.wb-sb') || document.body
     const text = String((sb)?.innerText || '').replace(/\s+/g, ' ')
@@ -499,9 +721,16 @@ if (noticeCarriesEngineRefusal) {
       noticeAttached: notice !== null,
       noticeText: notice ? String(notice.textContent || '').slice(0, 120) : '',
       stubRefusalOnFace: text.includes(mark),
+      // t261031-01: the surrounding faces, so "the prompt is gone" is separable
+      // from "the row/group is gone" (a vanished group unmounts the prompt slot
+      // and with it the notice, which is not the refusal being swallowed).
+      promptSlots: document.querySelectorAll('[data-wb-dismiss-prompt]').length,
+      projectBlocks: document.querySelectorAll('[data-wb-project-block]').length,
+      targetRowOnFace: text.includes(target),
+      confirmButtons: document.querySelectorAll('[data-dismiss-confirm]').length,
       sidebarText: text.slice(0, 200),
     }
-  }, ENGINE_REFUSAL_MARK).catch((e) => ({ probeError: String(e).slice(0, 140) }))
+  }, { mark: ENGINE_REFUSAL_MARK, target: TARGET }).catch((e) => ({ probeError: String(e).slice(0, 140) }))
   const what = noticeWait.shown
     ? `the notice attached but never carried the engine's named refusal`
       + ` (${JSON.stringify(ENGINE_REFUSAL_MARK)}); it read`
@@ -512,8 +741,28 @@ if (noticeCarriesEngineRefusal) {
       + ` last probe: attached=${noticeWait.last.attached}`
       + ` text=${JSON.stringify(noticeWait.last.text.slice(0, 60))}`
       + ` error=${JSON.stringify(noticeWait.last.error)})`
+  // One state JSON, the same keys on every failing path (t261031-01): the DOM
+  // faces, then the ANSWER the route gave, then what the stub's refusal
+  // predicate saw, then the wait's own facts. An accepted answer can therefore
+  // never read like a refused one, and neither can read like a lost state.
+  const state = {
+    ...diag,
+    postAnswer: answerFacts.last,
+    postAnswers: answerFacts.count,
+    postAnswersUnread: answerFacts.unread,
+    promptClosedAfterMs: noticeWait.promptClosedAfterMs,
+    firstNoticeProbe: noticeWait.firstProbe,
+    noticeRounds: noticeWait.rounds,
+    noticeWaitedMs: noticeWait.waitedMs,
+    ceilingMs: noticeWait.ceilingMs,
+    waitProvenance: noticeWait.provenance,
+    mainFrameNavs: mainFrameNavs.slice(-3),
+    mainFrameNavCount: mainFrameNavs.length,
+    stubPredicate: predicateView,
+    pageErrors: pageErrors.slice(-4),
+  }
   record('S3d refusal surfaces verbatim on the face (never swallowed)', 'fail',
-    `${what}: ${JSON.stringify(diag)}`)
+    `${what}: ${JSON.stringify(state)}`)
 }
 
 // 收掉本框，进 restore 子用例。
