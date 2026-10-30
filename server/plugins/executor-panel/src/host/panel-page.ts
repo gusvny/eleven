@@ -2692,14 +2692,26 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     el('grantsSaveOut').innerHTML = grantsSaveMsg;
   }
   // ---- t261004-19：「Open tickets in these epics」节（宿主专属授权面） ----
-  // 数据源=GET /api/grants 的 open_ticket_epics 读面（全部 epic + 状态行原文 +
-  // 当前是否授权）。解析不出=显式降级卡（点名原因），绝不渲染成「无 epic」空表。
+  // t261030-30: data source = the GET /api/grants open_ticket_epics face, whose rows
+  // come from the epic registry the engine reads (<project root>/docs/epics, or env
+  // SANDBAR_EPICS_DIR). Each row carries a status line that is never empty, the
+  // front-matter summary, and a named reason when the record cannot be read.
+  // A code that is authorized but has no document is still a row (in_registry:false),
+  // so its switch renders on and the next save keeps the authorization.
+  function epicRowLine(e){
+    var parts = [String(e.status||'unknown')];
+    if(e.summary) parts.push(String(e.summary));
+    var line = parts.join(' · ');
+    if(e.reason) line += ' — ' + String(e.reason);
+    return line;
+  }
   function renderOpenEpics(g){
     var face = g && g.open_ticket_epics;
     if(!face){ el('openEpics').innerHTML = ''; return; }
     if(face.ok !== true){
       el('openEpics').innerHTML = '<div class="sect lead">Open tickets in these epics</div>'
-        + '<div class="muted" style="font-size:11px">The epic list cannot be read. Reason: '+esc(face.reason||'?')+'</div>';
+        + '<div class="muted" style="font-size:11px">The epic list cannot be read. Reason: '+esc(face.reason||'?')
+        +'. Saving the switches above leaves the epic authorization untouched.</div>';
       return;
     }
     var cap = (typeof g.open_ticket_cap === 'number') ? g.open_ticket_cap : 3;
@@ -2707,11 +2719,11 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       + '<div class="muted" style="font-size:11px">An executor ticket-start must name one of these epics; every other epic stays closed. Cap: '+cap+' open ticket(s) per epic. Saving here goes through the audited grants declaration.</div>';
     for(var i=0;i<face.epics.length;i++){
       var e = face.epics[i];
-      html += '<div class="line"><div class="lab">'+esc(e.code)+' <small>'+esc(e.status||'(no status line)')+'</small></div>'
+      html += '<div class="line"><div class="lab">'+esc(e.code)+' <small>'+esc(epicRowLine(e))+'</small></div>'
         + '<div class="sw grant" data-epic="'+esc(e.code)+'" data-on="'+String(e.authorized===true)+'"></div></div>';
     }
     if(face.epics.length===0){
-      html += '<div class="muted" style="font-size:11px">This project has no epic yet (docs/epics/ is empty or absent). Nothing can be authorized.</div>';
+      html += '<div class="muted" style="font-size:11px">This project has no epic yet ('+esc(face.dir||'docs/epics')+' is empty or absent). Nothing can be authorized.</div>';
     }
     el('openEpics').innerHTML = html;
     Array.prototype.forEach.call(el('openEpics').querySelectorAll('.sw.grant'), function(s){
@@ -2724,6 +2736,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
       if(s.dataset.on==='true' && s.dataset.epic && out.indexOf(s.dataset.epic)<0) out.push(s.dataset.epic);
     });
     return out;
+  }
+  // t261030-30 (A4): the epic list is only posted when the face that rendered the
+  // switches was readable. A degraded read renders no switch, and posting an empty
+  // list would erase every authorization; an absent key makes the server inherit the
+  // on-disk list instead.
+  function openEpicsReadable(){
+    var g = state.grants;
+    return !!(g && g.open_ticket_epics && g.open_ticket_epics.ok === true);
   }
   function setAllSwitches(on){
     Array.prototype.forEach.call(el('permList').querySelectorAll('.sw.grant'), function(s){ s.dataset.on = String(on); });
@@ -2743,7 +2763,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     var body = { grants: grants };
     var sess = el('grantSession').value.trim();
     if(sess) body.executor_sessions = [sess];
-    body.open_ticket_epics = selectedOpenEpics();
+    if(openEpicsReadable()) body.open_ticket_epics = selectedOpenEpics();
     postJson('/sandbar-executor-panel/api/grants?project='+encodeURIComponent(state.project), body)
       .then(function(j){
         grantsSaveMsg = j.saved===true ? '<span class="good">Saved.</span>'

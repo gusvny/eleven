@@ -1,34 +1,37 @@
 /**
- * 基线：立项单（epics）API 契约（第 2 组）。
+ * Baseline: the epic (立项单) API contract, group 2 — the docs/epics face.
  *
- * 意图：epics API 是立项单的读写面。本基线锁定其契约，让路由回归（防穿越破功、
- * 收口静默失败、徽标说谎）被机械捕获，而不是靠偶然发现。
+ * Intent: the epics API is the read face of the epic registry. This baseline locks the
+ * contract so that a route regression (escape guard broken, silent failure, a badge
+ * that lies) is caught mechanically rather than by accident.
  *
- * 步骤（全离线：tmp 仓 fixture + 桩 admin.py + mock HTTP）：
- *   A. listEpics 扫 fixture 目录：合法 *.md 收集/排序；畸形形状忽略；
- *      目录缺失/为空 → 空数组，不抛错。
- *   B. 详情路由：200 带 markdown；畸形形状 → 400（全形状集）；双重编码的
- *      穿越 → 4xx；404 文案列现存代号；POST → 405；未知子路径 → 404。
- *   C. /tickets 聚合：状态分桶 + 行字段；两条降级路径（admin.py 崩溃与
- *      ok:false）→ 200 degraded，永不 502。
- *   D. 收口：仅 POST；状态行改写为「已完结」并备份 /tmp；缺状态行 → 422；
- *      未知代号 → 404。
- *   E. 下一步建议缓存：坏 JSON 缓存 → 徽标亮但建议=miss；state_key 失配
- *      → miss；dismiss 删缓存（备份 /tmp）且幂等；非法代号 → 400。
+ * t261030-30 migrated this baseline to the store the engine reads:
+ *   - the directory is <project root>/docs/epics (env SANDBAR_EPICS_DIR wins when it is
+ *     set and non-empty); notes/epics is not read at all;
+ *   - a row comes from the document's front-matter record (code / retired / summary /
+ *     started), and the legacy field table is only a fallback;
+ *   - the close/status write routes are gone (410, t261019-12): retiring an epic is an
+ *     edit of `retired:` in git.
  *
- * 参考实现：server/plugins/workbench/smoke/epics.mjs。故障模式取舍在方案阶段
- * 逐项过审（10 项全带，另加 close/dismiss；票行 epic 透传不在此重复——smoke C5
- * 已覆盖）。
+ * Steps (fully offline: tmp fixture + stub admin.py + mock HTTP):
+ *   A. listEpics over a fixture directory: legal *.md files become rows sorted by code;
+ *      an illegal code shape and a non-md file are not rows; a document without
+ *      front-matter degrades with a named defect and keeps the legacy status line; an
+ *      absent directory throws a named error (never an empty registry that reads as
+ *      "this project has no epic"). A2 pins the anchor rule.
+ *   B. detail route: 200 carries the front-matter row + path; illegal shape -> 400
+ *      (every shape); double-encoded traversal -> 4xx; 404 names the existing codes;
+ *      POST -> 405; unknown subpath -> 404; list route -> 200 with the count.
+ *   C. /tickets aggregation: status buckets + row fields; two degraded paths
+ *      (admin.py crash and ok:false) -> 200 degraded, never 502.
+ *   D. the retired write face: close/status answer 410 with a message that points at
+ *      docs/epics/<code>.md, and the document on disk is untouched.
  *
- * 曾有的引擎缺陷（已修，票 t260907-11）：分支顺序缺陷让
- * POST /sandbar-workbench/api/epics/<code>/next-hint/dismiss 恒 405——GET-only 405
- * 分支排在 dismiss 分支之前，前端 [忽略建议] 钮全灭。修复把 dismiss 分支挪到 405
- * 闸之前。下方路由级探针：200 即断言通过；非 200 打印 KNOWN-ISSUE 行（遗留容忍
- * 分支，字符串在字面量里，清理需动代码另票做）不计 FAIL。
+ * Reference implementation: server/plugins/workbench/smoke/epics.mjs (that smoke file
+ * still pins the pre-t261019-12 notes/epics face; it is outside this ticket's write set).
  */
 
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -42,17 +45,37 @@ function ok(cond, label) {
 }
 function section(t) { console.log(`\n== ${t}`) }
 
-const EPIC_MD = `# 立项单：demo-epic
+const EPIC_MD = `---
+code: demo-epic
+retired: false
+summary: Demonstrate the registry contract.
+started: 2026-08-25
+---
+
+# demo-epic
+
+## Goal
+
+Show the shape.
+`
+
+const RETIRED_MD = `---
+code: aaa
+retired: true
+summary: A retired epic.
+started: 2026-08-01
+---
+
+# aaa
+`
+
+const LEGACY_MD = `# 立项单：legacy-epic
 
 | 字段 | 值 |
 | --- | --- |
-| 代号 | \`demo-epic\` |
+| 代号 | \`legacy-epic\` |
 | 状态 | 已立项（执行中） |
 | 立项日期 | 2026-08-25 |
-
-## 目标
-
-做个示范。
 `
 
 const tmp = await mkdtemp(join(tmpdir(), 'integ-epics-api-'))
@@ -113,18 +136,42 @@ sys.exit(1)
 }
 
 try {
-  /* ------------------------------------------------------------ A. list + dir tolerance */
-  section('A epics list / directory tolerance')
-  const epicsDir = join(tmp, 'notes', 'epics')
+  /* ------------------------------------------------------------ A. list + anchor */
+  section('A epics list / anchor / record degradation')
+  const epicsDir = join(tmp, 'docs', 'epics')
   await mkdir(epicsDir, { recursive: true })
   await writeFile(join(epicsDir, 'demo-epic.md'), EPIC_MD, 'utf8')
-  await writeFile(join(epicsDir, 'aaa.md'), '# 立项单：aaa\n\n| 状态 | 已归档 |\n| 立项日期 | 2026-08-01 |\n', 'utf8')
-  await writeFile(join(epicsDir, 'README.md'), '# notes\n', 'utf8')     // 坏形状：不入列
-  await writeFile(join(epicsDir, 'notes.txt'), 'not a charter\n', 'utf8') // 非 .md：不入列
+  await writeFile(join(epicsDir, 'aaa.md'), RETIRED_MD, 'utf8')
+  await writeFile(join(epicsDir, 'legacy-epic.md'), LEGACY_MD, 'utf8')
+  await writeFile(join(epicsDir, 'README.md'), '# notes\n', 'utf8')     // illegal shape: not a row
+  await writeFile(join(epicsDir, 'notes.txt'), 'not a charter\n', 'utf8') // non-md: not a row
   const list = await listEpics(epicsDir)
-  ok(list.length === 2 && list[0].code === 'aaa' && list[1].code === 'demo-epic', 'only valid *.md collected, sorted by code')
-  ok((await listEpics(join(tmp, 'no-such-dir'))).length === 0, 'missing dir -> empty array, no throw')
+  ok(list.length === 3 && list[0].code === 'aaa' && list[1].code === 'demo-epic' && list[2].code === 'legacy-epic',
+    'only valid *.md collected, sorted by code')
+  const demo = list.find((e) => e.code === 'demo-epic')
+  ok(demo.retired === false && demo.summary === 'Demonstrate the registry contract.'
+    && demo.started === '2026-08-25' && demo.status === 'open' && demo.defect === undefined,
+    'front-matter row: retired/summary/started/status=open, no defect')
+  const retiredRow = list.find((e) => e.code === 'aaa')
+  ok(retiredRow.retired === true && retiredRow.status === 'retired', 'retired: true reads as retired')
+  const legacyRow = list.find((e) => e.code === 'legacy-epic')
+  ok(legacyRow.status === '已立项（执行中）' && String(legacyRow.defect).includes('no front-matter block')
+    && legacyRow.retired === true,
+    'document without front-matter: legacy table status + named defect + fail-closed retired')
+  ok(list.every((e) => typeof e.status === 'string' && e.status !== ''), 'no row carries a blank status')
+  let threw = ''
+  try { await listEpics(join(tmp, 'no-such-dir')) } catch (e) { threw = String(e && e.message) }
+  ok(threw.includes('epic registry directory not found') && threw.includes('docs/epics'),
+    'missing dir -> named error naming docs/epics (no empty registry pretending "no epic")')
   ok(EPIC_CODE_RE.test('demo-epic') && !EPIC_CODE_RE.test('..%2f..%2fetc'), 'EPIC_CODE_RE whitelist shape')
+
+  section('A2 the anchor rule (env when non-empty, else <root>/docs/epics)')
+  delete process.env.SANDBAR_EPICS_DIR
+  ok(resolveEpicsDir('/some/repo') === join('/some/repo', 'docs', 'epics'), 'no env -> <root>/docs/epics')
+  process.env.SANDBAR_EPICS_DIR = ''
+  ok(resolveEpicsDir('/some/repo') === join('/some/repo', 'docs', 'epics'), 'empty env is not an anchor')
+  process.env.SANDBAR_EPICS_DIR = '/env/epics'
+  ok(resolveEpicsDir('/some/repo') === '/env/epics', 'non-empty env wins')
 
   /* ------------------------------------------------------------ B. detail + anti-traversal */
   section('B detail route + anti-traversal (shapes / encoding / 404 / 405 / unknown subpath)')
@@ -134,22 +181,24 @@ try {
   const h = makeHarness(repoB)
   ok(h.prefixEpics !== undefined && h.exactEpics !== undefined, 'epics exact+prefix routes mounted')
   let r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic')
-  ok(r.status === 200 && r.body.result.markdown.includes('## 目标')
-    && r.body.result.path === 'notes/epics/demo-epic.md', 'GET detail -> 200 markdown+path')
+  ok(r.status === 200 && r.body.result.path === 'docs/epics/demo-epic.md'
+    && r.body.result.retired === false && r.body.result.summary === 'Demonstrate the registry contract.'
+    && r.body.result.started === '2026-08-25',
+    'GET detail -> 200 front-matter row + path docs/epics/<code>.md')
   r = await call(h.exactEpics, '/sandbar-workbench/api/epics')
-  ok(r.status === 200 && r.body.result.count === 2, 'GET list route -> 200 count')
+  ok(r.status === 200 && r.body.result.count === 3, 'GET list route -> 200 count')
   for (const bad of ['Demo-epic', 'a b', 'x'.repeat(42)]) {
     r = await call(h.prefixEpics, `/sandbar-workbench/api/epics/${encodeURIComponent(bad)}`)
     ok(r.status === 400, `invalid shape '${bad.slice(0, 12)}' -> 400`)
   }
-  // '..' 会被 URL 解析规范化掉；穿越形状以编码形式打到路由
-  //（与真实攻击者会用的入口相同）
+  // '..' is normalized away by URL parsing; traversal shapes are sent percent-encoded
+  // (the entry a real attacker would use).
   for (const enc of ['%2e%2e', '..%2f..%2fetc', '%2e%2e%2f%2e%2e%2fpasswd', 'a%2Fb']) {
     r = await call(h.prefixEpics, `/sandbar-workbench/api/epics/${enc}`)
     ok(r.status >= 400 && r.status < 500, `traversal shape '${enc}' -> rejected with 4xx`)
   }
   r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/no-such-epic')
-  ok(r.status === 404 && String(r.body.error).includes('不存在') && String(r.body.error).includes('demo-epic'),
+  ok(r.status === 404 && String(r.body.error).includes('not found') && String(r.body.error).includes('demo-epic'),
     'non-existent -> 404 human message listing existing codes')
   r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic', 'POST')
   ok(r.status === 405, 'POST detail -> 405 (read-only contract)')
@@ -163,7 +212,7 @@ try {
   ok(r.body.result.buckets.closed === 1 && r.body.result.buckets.dispatched === 1, 'bucketed by status')
   const row = r.body.result.tickets.find(t => t.id === 't260831-02')
   ok(row !== undefined && row.stage === 'implement' && row.stage_state === 'running', 'ticket row fields present')
-  // 降级路径 1：admin.py 崩溃（非 JSON 输出）→ 200 degraded，永不 502
+  // Degraded path 1: admin.py crashes (non-JSON output) -> 200 degraded, never 502.
   const repoC = join(tmp, 'repo-c')
   await mkdir(join(repoC, 'server'), { recursive: true })
   await writeFile(join(repoC, 'server', 'admin.py'),
@@ -173,7 +222,7 @@ try {
   ok(r.status === 200 && r.body.result?.degraded === true
     && String(r.body.result.reason).includes('connection refused'),
     'admin.py crash (non-JSON) -> 200 degraded, reason carries underlying error')
-  // 降级路径 2：ok:false → degraded，reason 透传底层错误
+  // Degraded path 2: ok:false -> degraded, reason passes the underlying error through.
   await writeFile(join(repoC, 'server', 'admin.py'), `import json, sys
 if sys.argv[2] == 'ticket' and json.loads(sys.argv[3]).get('op') == 'list':
     print(json.dumps({"ok": False, "error": "ticket-list failed: temporal unreachable: connection refused"})); sys.exit(1)
@@ -184,27 +233,24 @@ print(json.dumps({"ok": False, "error": "stub unsupported"})); sys.exit(1)
     && String(r.body.result.reason).includes('connection refused'),
     'ok:false -> 200 degraded, reason passthrough of underlying error')
 
-  /* ------------------------------------------------------------ D. close (rewrite + backup + 422) */
-  section('D close: status-row rewrite + /tmp backup + 422 (new vs smoke)')
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/close', 'GET')
-  ok(r.status === 405, 'GET close -> 405 (human-confirmed POST-only action)')
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/demo-epic/close', 'POST')
-  ok(r.status === 200 && r.body.result?.status === '已完结', 'POST close -> status row rewritten to 已完结')
+  /* ------------------------------------------------------------ D. retired write face */
+  section('D the write face is retired: close/status answer 410 and touch no file')
+  const before = await readFile(join(epicsDir, 'demo-epic.md'), 'utf8')
+  for (const sub of ['close', 'status']) {
+    r = await call(h.prefixEpics, `/sandbar-workbench/api/epics/demo-epic/${sub}`, 'POST', { status: '已完结' })
+    ok(r.status === 410 && String(r.body.error).includes('t261019-12')
+      && String(r.body.error).includes('docs/epics/demo-epic.md'),
+      `POST ${sub} -> 410 naming docs/epics/<code>.md (the document is edited in git now)`)
+    r = await call(h.prefixEpics, `/sandbar-workbench/api/epics/demo-epic/${sub}`, 'GET')
+    ok(r.status === 410, `GET ${sub} -> 410 (the same named retirement)`)
+  }
   const after = await readFile(join(epicsDir, 'demo-epic.md'), 'utf8')
-  ok(after.includes('| 状态 | 已完结 |') && !after.includes('已立项（执行中）'), 'close persisted: status row actually rewritten on disk')
-  const backupDir = '/tmp/epic-close-backup'
-  const backups = existsSync(backupDir) ? await readdir(backupDir) : []
-  ok(backups.some(f => f.startsWith('demo-epic-')), 'close backed up to /tmp/epic-close-backup before writing')
-  await writeFile(join(epicsDir, 'no-status.md'), '# 立项单：no-status\n\nno status row here.\n', 'utf8')
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/no-status/close', 'POST')
-  ok(r.status === 422 && String(r.body.error).includes('状态'), 'missing status row -> 422 (no vague success)')
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/no-such-epic/close', 'POST')
-  ok(r.status === 404, 'close on non-existent code -> 404')
+  ok(after === before, 'the document on disk is untouched by the retired routes')
 
-  // t260910-14 退役注记：原 E 段（next-hint 缓存命中/坏 JSON 容错/dismiss 删除
-  // + 备份 + 幂等）随 suggest_next 整链退役删除。
+  // t260910-14 retirement note: the old section E (next-hint cache / bad JSON tolerance /
+  // dismiss removal + backup + idempotence) is gone with the whole suggest_next chain.
 } finally {
-  // 终态全回收：还原 env，删除 tmp fixture
+  // Every end state is reclaimed: restore the env, remove the tmp fixture.
   if (savedEnv.SANDBAR_EPICS_DIR === undefined) delete process.env.SANDBAR_EPICS_DIR
   else process.env.SANDBAR_EPICS_DIR = savedEnv.SANDBAR_EPICS_DIR
   await rm(tmp, { recursive: true, force: true }).catch(() => {})

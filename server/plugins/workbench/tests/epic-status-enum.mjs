@@ -1,37 +1,43 @@
 /**
- * 基线：立项状态枚举 + 备注列 + 状态编辑端点（票 t260831-05）。
+ * Baseline: the epic registry row model — the retired-enum write face, the note column
+ * and the state-edit endpoint (ticket t260831-05), migrated to the docs/epics face by
+ * t261030-30.
  *
- * 背景：立项单「状态」原是自由文本（七张立项单七种写法），工单台无法按状态
- * 筛选/计数，agent 也无法可靠解析。本票把状态钉成 4 值枚举，自由文本细节
- * 迁入新增「备注」列，加 POST /api/epics/<code>/status，并迁移存量 7 张立项单。
- * 本基线锁定用户可感知契约：只有 4 个合法值可写；迁移后细节文本在备注列
- * 存活；畸形输入绝不损坏立项单文件；工单台可按每个枚举值筛选列表。
+ * Background: the epic 'status' used to be free text. t260831-05 pinned it to a four
+ * value enumeration and added the state-edit endpoint. t261019-12 then moved the store
+ * from notes/epics to docs/epics and made the `retired` boolean the only epic state, so
+ * the enum writer is a LEGACY face now (no route calls it; it survives for its fixture
+ * and smoke contract) and the READ row comes from the front-matter record.
  *
- * 步骤（全离线：tmp fixture + 真仓性质断言）：
- *   A. 枚举真源：恰好 4 个合法值（全角括号）；isEpicStatus 只收这 4 个，
- *      拒半角括号/首尾空白/子串/空串/形近值。
- *   B. 真仓不变量（性质断言而非快照）：notes/epics 下每张立项单状态 ∈ 枚举、
- *      备注可解析、无自由文本残留——名册跟随目录，无镜像清单。
- *      名册独立性本身用 fixture 测（B2：tmp 目录数量刻意与真仓不同）。
- *   C. setEpicStatus 写契约（fixture）：合法改写落盘 status+note，写前备份到
- *      /tmp（该代号最新备份=原文）；note 缺省/null 不动备注列，'' 清空；
- *      非法枚举 → 422 且文件逐字节不变；畸形备注（|、换行、反引号、>200 字）
- *      → 422，非字符串备注 → 400，两者都不碰文件；防穿越 → 400；缺状态行 → 422；
- *      未知代号 → 404；closeEpic 回归：收口得「已完结」（在枚举内）、保留备注、
- *      有备份。
- *   D. 路由契约（mock req/res 套 apply()）：POST /status 200 带
- *      {code,status,note}；畸形 JSON / 缺 status → 400；非法枚举 / 畸形备注 → 422；
- *      note 九态端到端；GET → 405；未知代号 → 404；未知子路径 404 文案列 /status。
- *   E. 前端模型契约：filterEpicsByStatus（'' = 全部、按枚举匹配、零命中 → 空、
- *      未知值 → 空、永不抛错）；EPIC_STATUS_OPTIONS 与 host 枚举同步（同值同序）。
- *   （t260910-14 退役注记：原 F 段「建议 prompt 可读性」随 epic-next 退役删除。）
+ * Steps (fully offline: tmp fixture + real-repo property assertions):
+ *   A. Enum source of truth: exactly four legal values (full-width brackets);
+ *      isEpicStatus takes only those — half-width brackets, leading/trailing blanks, a
+ *      substring, a look-alike and the empty string are all refused.
+ *   B. Real-repo invariant over docs/epics (property, not a snapshot): every row either
+ *      carries a healthy front-matter record (retired is a boolean, status is 'open' or
+ *      'retired') or a named defect, and no row carries a blank status. The roster
+ *      follows the directory — no mirrored list (B2 proves it on a fixture whose size
+ *      deliberately differs from the real repo).
+ *   C. setEpicStatus write contract (fixture) — the legacy field-table writer: a legal
+ *      value rewrites the status row on disk with a /tmp backup = the original text; the
+ *      note column is untouched when the note is omitted or null, cleared by '', and
+ *      inserted when the document has no note row; every refusal (illegal enum value,
+ *      malformed note, non-string note, traversal-shaped code, unknown code, missing
+ *      status row) leaves the file byte-identical. closeEpic closes with 「已完结」,
+ *      keeps the note and backs the document up.
+ *   D. The state-edit route is retired: POST/GET /api/epics/<code>/status answer 410
+ *      naming docs/epics/<code>.md, and the document is untouched. (The full close +
+ *      status route contract lives in tests/epics-api.mjs section D.)
+ *   E. Front-end model contract: filterEpicsByStatus ('' = all, exact enum match, zero
+ *      hits = empty, unknown value = empty, never throws); EPIC_STATUS_OPTIONS is
+ *      identical to the host enum (same values, same order).
+ *   G. Note-column read tolerance: a document without the note row answers ''.
+ *   (t260910-14 retirement note: the old section F 'suggestion prompt readability' is
+ *   gone with the epic-next retirement.)
  *
- * 注意：本基线在票 t260831-05 实现落地前会大声失败（枚举常量、备注解析、
- * setEpicStatus、/status 路由、前端筛选都不存在）——这是实现前的预期状态；
- * run_integration_tests 是裁决场。
- *
- * 参考：已过审方案 v2（.suyou/stage_create_plan_gen1.json）；复用 closeEpic 骨架的
- * 故障模式取舍逐项过审（7 项全带；备份目录共用 /tmp/epic-close-backup）。
+ * Reference: the approved plan v2 (.suyou/stage_create_plan_gen1.json); the failure-mode
+ * list for the closeEpic skeleton was reviewed item by item (7 of 7 carried over; the
+ * backup directory is shared at /tmp/epic-close-backup).
  */
 
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, stat } from 'node:fs/promises'
@@ -40,7 +46,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
-  EPIC_STATUSES, isEpicStatus, listEpics, parseEpicMeta,
+  EPIC_CODE_RE, EPIC_STATUSES, isEpicStatus, listEpics, parseEpicMeta,
   setEpicStatus, validateEpicNote, closeEpic,
 } from './../src/host/epics.ts'
 import { EPIC_STATUS_OPTIONS, filterEpicsByStatus } from './../src/client/epics-model.ts'
@@ -140,48 +146,60 @@ try {
   // 260904 重构（宿主质疑「真实数据自测」）：本段原为 suyou 时代真数据快照——写死
   // 9 张 charter 清单+逐张 note 点名，每新增/迁移一张 epic 就红一次，测试在追真数据
   // 跑。重构为两层，快照镜像删除：
-  //   B1 真数据不变量（性质而非快照）：真实 notes/epics 下每张 status ∈ 枚举、note
-  //      可解析、无自由格式残留——真源增删不红，坏数据才红；
-  //   B2 roster 独立性（fixture）：tmp 目录受控 charter 集（数量刻意与真实仓不同），
-  //      证明 listEpics 跟随目录真源；note 细节保留断言移入 fixture。
-  section('B1 real-repo invariant (property over notes/epics; roster follows truth)')
-  const realDir = join(process.cwd(), 'notes', 'epics')
+  //   B1 real-data invariant (a property, not a snapshot): every row under the real
+  //      docs/epics either is a healthy front-matter record or carries a named defect,
+  //      and no row carries a blank status — new or removed documents do not turn it
+  //      red, bad data does;
+  //   B2 roster independence (fixture): a controlled document set whose size
+  //      deliberately differs from the real repo proves listEpics follows the directory.
+  section('B1 real-repo invariant (property over docs/epics; roster follows truth)')
+  const realDir = join(process.cwd(), 'docs', 'epics')
   const real = await listEpics(realDir)
-  ok(real.length >= 1, 'notes/epics has at least one charter')
-  for (const e of real) {
-    ok(EPIC_STATUSES.includes(e.status), `${e.code}: status '${e.status}' is a canonical enum value`)
-    ok(typeof e.note === 'string', `${e.code}: note column is parsed (string, possibly empty)`)
+  ok(real.length >= 1, 'docs/epics has at least one epic document')
+  ok(real.every((e) => typeof e.status === 'string' && e.status !== ''),
+    'every real row carries a status line (never a blank, healthy-looking row)')
+  const healthy = real.filter((e) => e.defect === undefined)
+  const defective = real.filter((e) => e.defect !== undefined)
+  ok(healthy.every((e) => typeof e.retired === 'boolean' && (e.status === 'open' || e.status === 'retired')),
+    'every healthy row: retired is a boolean and status is open|retired')
+  for (const e of defective) {
+    ok(typeof e.defect === 'string' && e.defect !== '' && e.retired === true,
+      `${e.code}: unreadable record carries a named defect and fails closed`)
   }
-  // 自由文本残留扫描：状态格不得带枚举外的括号细节。
-  const residue = real.filter(e => /（.*）/.test(e.status) && !isEpicStatus(e.status))
-  ok(residue.length === 0, 'no free-form residue left in any status cell')
+  ok(real.every((e) => EPIC_CODE_RE.test(e.code)), 'every listed code passes the engine code shape')
 
   section('B2 roster independence (fixture dir; listEpics follows the dir, no mirror list)')
   {
     const fxDir = join(tmp, 'epic-roster-fx')
     await mkdir(fxDir, { recursive: true })
-    const charter = (code, status, note) =>
-      `# ${code}\n\n| 字段 | 值 |\n| --- | --- |\n| 代号 | \`${code}\` |\n| 状态 | ${status} |\n| 备注 | ${note} |\n`
-    // 数量刻意 ≠ 真实仓（3 张 vs 2 张）：roster 由目录决定，测试不镜像清单
-    await writeFile(join(fxDir, 'alpha.md'), charter('alpha', '已立项（执行中）', '方向待拍板：先做哪条线'), 'utf8')
-    await writeFile(join(fxDir, 'beta.md'), charter('beta', '已完结（2026-09-01）', ''), 'utf8')
-    await writeFile(join(fxDir, 'gamma.md'), charter('gamma', '已归档', 'sandbar 迁移'), 'utf8')
+    const doc = (code, retired, summary) =>
+      `---\ncode: ${code}\nretired: ${retired}\nsummary: ${summary}\nstarted: 2026-08-30\n---\n\n# ${code}\n`
+    // The fixture size deliberately differs from the real repo: the roster is decided
+    // by the directory, so the test never mirrors a list.
+    await writeFile(join(fxDir, 'alpha.md'), doc('alpha', 'false', 'Alpha line.'), 'utf8')
+    await writeFile(join(fxDir, 'beta.md'), doc('beta', 'true', 'Beta is closed.'), 'utf8')
+    await writeFile(join(fxDir, 'gamma.md'), doc('gamma', 'false', 'Gamma line.'), 'utf8')
     let fx = await listEpics(fxDir)
     ok(fx.length === 3 && fx.every(e => ['alpha', 'beta', 'gamma'].includes(e.code)),
-      'fixture: exactly the 3 written charters listed (roster follows the dir)')
+      'fixture: exactly the 3 written documents listed (roster follows the dir)')
     const fxBy = Object.fromEntries(fx.map(e => [e.code, e]))
-    ok(fxBy['alpha'].note.includes('方向待拍板'), 'fixture: pending-direction detail preserved in note')
-    ok(fxBy['beta'].status === '已完结（2026-09-01）' && fxBy['beta'].note === '',
-      'fixture: completed status with date parses; empty note stays empty')
-    // 新 charter 出现 → 清单随之变化（无写死镜像可判败）
-    await writeFile(join(fxDir, 'delta.md'), charter('delta', '已立项（执行中）', '第 4 张'), 'utf8')
+    ok(fxBy['alpha'].summary === 'Alpha line.' && fxBy['alpha'].status === 'open',
+      'fixture: front-matter summary and open status parsed')
+    ok(fxBy['beta'].status === 'retired' && fxBy['beta'].retired === true,
+      'fixture: retired: true reads as retired')
+    // A new document appears -> the list changes (nothing to mirror, so a stale mirror fails).
+    await writeFile(join(fxDir, 'delta.md'), doc('delta', 'false', 'Delta line.'), 'utf8')
     fx = await listEpics(fxDir)
-    ok(fx.length === 4 && fx.some(e => e.code === 'delta'), 'fixture: new charter appears without mirror-list edits')
-    // 非 .md / 非法代号形状不入列（防御面回归）
+    ok(fx.length === 4 && fx.some(e => e.code === 'delta'), 'fixture: new document appears without mirror-list edits')
+    // Non-md files and illegal code shapes are not rows (defense regression).
     await writeFile(join(fxDir, 'not-a-charter.txt'), 'x', 'utf8')
     await writeFile(join(fxDir, 'BAD_CODE.md'), 'x', 'utf8')
     fx = await listEpics(fxDir)
     ok(fx.length === 4, 'fixture: non-md and bad-code files excluded from roster')
+    let missing = ''
+    try { await listEpics(join(fxDir, 'no-such-dir')) } catch (e) { missing = String(e && e.message) }
+    ok(missing.includes('epic registry directory not found'),
+      'fixture: an absent registry throws a named error (no fake empty roster)')
   }
 
   /* ------------------------------------------------ C. setEpicStatus write contract */
@@ -279,49 +297,23 @@ try {
   ok(closeBackup !== null && (await readFile(closeBackup, 'utf8')) === preClose,
     'closeEpic: pre-write backup equals pre-close text')
 
-  /* ------------------------------------------------ D. route contract */
-  section('D POST /api/epics/<code>/status route contract (mock req/res over apply())')
+  /* ------------------------------------------------ D. the retired route */
+  section('D POST /api/epics/<code>/status is retired (410, named, file untouched)')
   const repoD = join(tmp, 'repo-d')
   await mkdir(repoD, { recursive: true })
   const h = makeHarness(repoD)
   ok(h.prefixEpics !== undefined, 'epics prefix route mounted')
-
+  const beforeD = await read('integ-st-alpha')
   r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST',
     { status: '已归档', note: '路由写入' })
-  ok(r.status === 200 && r.body.ok === true && r.body.result?.code === 'integ-st-alpha'
-    && r.body.result?.status === '已归档' && r.body.result?.note === '路由写入',
-    'POST /status -> 200 {ok,result:{code,status,note}}')
-  ok(parseEpicMeta(await read('integ-st-alpha')).status === '已归档',
-    'POST /status: rewrite persisted on disk')
-
+  ok(r.status === 410 && String(r.body.error).includes('t261019-12')
+    && String(r.body.error).includes('docs/epics/integ-st-alpha.md'),
+    'POST /status -> 410 naming docs/epics/<code>.md (retired is the only state now)')
   r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'GET')
-  ok(r.status === 405, 'GET /status -> 405 (write action is POST-only)')
-  // 拒收调用批：这些都不得改动立项单（前后快照比对）。
-  const snapD = parseEpicMeta(await read('integ-st-alpha'))
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST',
-    undefined, '{"status": "已完结", broken')
-  ok(r.status === 400 && r.body.ok === false, 'malformed JSON body -> 400')
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST', { note: '只有备注' })
-  ok(r.status === 400, 'missing status field -> 400')
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '半角(执行中)' })
-  ok(r.status === 422 && String(r.body.error).includes('已立项（执行中）'),
-    'invalid enum -> 422 with legal-value hint')
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '已完结', note: 'a|b' })
-  ok(r.status === 422, 'note with pipe -> 422')
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '已完结', note: 42 })
-  ok(r.status === 400, 'non-string note -> 400')
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/status', 'POST', { status: '已完结', note: null })
-  const afterNull = parseEpicMeta(await read('integ-st-alpha'))
-  ok(r.status === 200 && afterNull.status === '已完结' && afterNull.note === '路由写入',
-    'note:null -> status applied, note column untouched (null == omitted)')
-  r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/no-such-epic/status', 'POST', { status: '已完结' })
-  ok(r.status === 404, 'unknown code -> 404')
+  ok(r.status === 410, 'GET /status -> 410 (the same named retirement)')
+  ok((await read('integ-st-alpha')) === beforeD, 'the retired route leaves the document byte-identical')
   r = await call(h.prefixEpics, '/sandbar-workbench/api/epics/integ-st-alpha/bogus-op')
-  ok(r.status === 404 && String(r.body.error).includes('/status'),
-    'unknown subpath -> 404 message lists /status')
-  const afterRejects = parseEpicMeta(await read('integ-st-alpha'))
-  ok(afterRejects.status === '已完结' && afterRejects.note === '路由写入',
-    'route: charter stable after rejected-call batch')
+  ok(r.status === 404, 'unknown subpath -> 404')
 
   /* ------------------------------------------------ E. frontend model contract */
   section('E frontend model contract (filter + options lockstep with host enum)')

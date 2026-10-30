@@ -72,6 +72,10 @@ const B_ROOT = '/tmp-wb-fpv-repo'
   writeFileSync(join(reg, 'fpv', 'project.yaml'), entry('fpv', '/tmp-wb-fpv-primary'), 'utf8')
   mkdirSync(join(reg, 'broken'), { recursive: true })
   writeFileSync(join(reg, 'broken', 'project.yaml'), 'dirs:\n  - 相对路径不是绝对\n', 'utf8')
+  // The per-key loader trusts a populated root only when the one-time migration marker
+  // exists (registry loader rule); the fixture is a settled registry, not a migration
+  // scene.
+  writeFileSync(join(reg, '.migrated'), 'source: ki057-fixture\n', 'utf8')
 
   const a = resolveProjectAnchor('sandbar', FALLBACK)
   ok(a.ok && a.source === 'project' && a.root === B_ROOT, '真注册表：sandbar key → fixture 主目录')
@@ -92,7 +96,9 @@ section('C env 覆盖闸（红线：旧 env 链保留，仅默认仓锚生效）
   ok(anchorEpicsDir(def) === '/env/epics', '默认锚：SANDBAR_EPICS_DIR 生效（旧链保留）')
   ok(anchorEvidenceBase(def) === '/env/evidence', '默认锚：SANDBAR_EVIDENCE_DIR 生效')
   const proj = resolveProjectAnchor('fpv', FALLBACK, FIND_OK)
-  ok(anchorEpicsDir(proj) === '/fpv/primary/notes/epics', '项目锚：epics 目录随项目根，env 不透出')
+  // t261030-30: the project anchor is <root>/docs/epics — the same store the engine
+  // reads (notes/epics is not an anchor for any console reader).
+  ok(anchorEpicsDir(proj) === '/fpv/primary/docs/epics', '项目锚：epics 目录随项目根 docs/epics，env 不透出')
   ok(anchorEvidenceBase(proj) === '/fpv/primary/.suyou/evidence', '项目锚：证据基目录随项目根')
   delete process.env.SANDBAR_EPICS_DIR
   delete process.env.SANDBAR_EVIDENCE_DIR

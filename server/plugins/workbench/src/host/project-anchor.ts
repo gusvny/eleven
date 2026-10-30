@@ -77,9 +77,15 @@ export function anchorEnv(a: Extract<ProjectAnchor, { ok: true }>, name: string)
   return typeof v === 'string' && v !== '' ? v : null
 }
 
-/** 立项单目录：默认仓锚=SANDBAR_EPICS_DIR 优先（epics.ts resolveEpicsDir 同款先例）；项目锚=<项目根>/notes/epics。 */
+/**
+ * The epic document directory (t261030-30: the console anchor and the engine anchor
+ * are one rule). The default-repo anchor takes env SANDBAR_EPICS_DIR when it is set
+ * and non-empty; a project anchor always joins its own root, so the env value cannot
+ * bleed across projects. Either way the store is <root>/docs/epics — the engine's
+ * anchor since t261019-12 (hard cut, no notes/epics fallback).
+ */
 export function anchorEpicsDir(a: Extract<ProjectAnchor, { ok: true }>): string {
-  return anchorEnv(a, 'SANDBAR_EPICS_DIR') ?? join(a.root, 'notes', 'epics')
+  return anchorEnv(a, 'SANDBAR_EPICS_DIR') ?? join(a.root, 'docs', 'epics')
 }
 /** 证据归档基目录：默认仓锚=SANDBAR_EVIDENCE_DIR 优先（node.ts 既有先例）；项目锚=<项目根>/.suyou/evidence。
  * ⚠️ t260910-05 注记：本函数当前无生产消费方（证据读侧真源=node.ts evidenceCandidateDirs——

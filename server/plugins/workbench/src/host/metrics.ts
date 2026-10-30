@@ -1274,7 +1274,9 @@ export async function buildMetricsResponse(
   if (p.epic !== 'all' && p.epic !== 'none') {
     const codes = await deps.listEpicCodes()
     if (codes !== null && !codes.includes(p.epic)) {
-      return { status: 400, body: bad4xx(`未知立项代号：'${p.epic}'（notes/epics 无此文件）`) }
+      // t261030-30: the message names the directory the reader really reads
+      // (docs/epics — the engine anchor since t261019-12).
+      return { status: 400, body: bad4xx(`unknown epic code: '${p.epic}' (no such document in the docs/epics registry)`) }
     }
   }
 

@@ -1,18 +1,29 @@
 /**
- * epics.ts —— 立项单（epic）只读 API 的宿主半纯函数（epic-linkage 拆解工单 4 / Tier 2，
- * t260825-04）。
+ * epics.ts — the epic registry reader of the workbench host (epic-linkage Tier 2,
+ * t260825-04; one anchor and one row model since t261030-30).
  *
- * 真源分工（立项单关键决策 2/5）：
- *   - 立项单文档真源 = notes/epics/*.md（文件存在性 = 代号存在性强校验，决策 2）；
- *   - 工单实时状态真源 = Temporal EpicCode 查询——在 node.ts 路由侧 spawn
- *     ticket list --epic（本模块不管），UI 不存状态（决策 5）。本模块全部只读纯函数，
- *     可被 smoke 直测。
+ * Source of truth:
+ *   - the epic documents are <project root>/docs/epics/*.md. The store moved from
+ *     notes/epics to docs/epics in t261019-12 (a hard cut, no notes/epics fallback);
+ *   - a live ticket status comes from Temporal (the EpicCode query) in node.ts. This
+ *     module never stores status (decision 5). Every function here is read-only, so a
+ *     test can drive it directly.
  *
- * 与 python 侧真源互指（改一边必须同步另一边）：
- *   - EPIC_CODE_RE 复刻 server/engine/shared.py 的 EPIC_CODE_RE
- *     （形状白名单：小写字母/数字/连字符——字符集本身即防穿，'..'、'/' 全在表外）；
- *   - SANDBAR_EPICS_DIR env 覆盖先例同 shared.py 的 EPICS_DIR（自测/验收临时指向
- *     空目录或 fixture 目录）。
+ * One anchor — the same rule as server/engine/shared.py resolve_epics_dir: env
+ * SANDBAR_EPICS_DIR when it is set and non-empty, else <root>/docs/epics. The root is
+ * the repo root in this module; a project-aware caller takes the root from
+ * project-anchor.ts (anchorEpicsDir), which applies the same rule per project.
+ *
+ * One row model (EpicRecord): code / retired / summary / started come from the
+ * front-matter record (docs/design/epic-registry-v1.md). The legacy field table
+ * (| field | value |) is a fallback for a document that has no front-matter, never the
+ * primary face. A document that cannot be read as a record carries a named defect and
+ * fails closed (retired: true), exactly like shared.py validate_epic_code.
+ *
+ * Cross-references to the python side (change one side, change the other):
+ *   - EPIC_CODE_RE mirrors shared.py EPIC_CODE_RE (shape whitelist: lowercase letters,
+ *     digits and hyphens — '..' and '/' are outside the character set);
+ *   - the SANDBAR_EPICS_DIR precedence mirrors shared.py resolve_epics_dir.
  */
 
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
@@ -24,8 +35,13 @@ export const EPIC_CODE_RE = /^[a-z0-9][a-z0-9-]{0,40}$/
 /* ------------------------------------------------ 立项状态枚举（t260831-05，单点真源） */
 
 /**
- * 立项状态四值枚举（派单规格逐字）。单点真源：工单台筛选/写入校验/迁移断言
- * 全部从这里取，不散落字面量。全角括号「（）」与 notes/epics/*.md 档案惯例一致。
+ * The four epic status values, verbatim from the dispatch spec (legacy face).
+ * One source: the console filter, the write validation and the migration
+ * assertion all read this list, so no literal is scattered. The values keep
+ * their legacy full-width parentheses, because they are data, not copy.
+ * t261030-30: this enum is the LEGACY write face (docs/epics documents carry the
+ * retired boolean instead); it survives because the field-table fallback and its
+ * tests still use it.
  */
 export const EPIC_STATUSES = ['已立项（待开工单）', '已立项（执行中）', '已完结', '已归档'] as const
 
@@ -50,35 +66,130 @@ export function isEvidenceFileName(file: string): boolean {
   return EVIDENCE_FILE_RE.test(file) && file.endsWith('.png')
 }
 
-/** 立项单列表/详情共用的元信息形态。 */
-export interface EpicMeta {
-  /** 代号 = 文件名主名（notes/epics/<代号>.md）。 */
+/**
+ * The one row shape every console epic reader renders (t261030-30). The front-matter
+ * fields are the primary face; the legacy field-table fields stay for a document that
+ * has no front-matter (title/note/created are '' when the table is absent).
+ */
+export interface EpicRecord {
+  /** Code = the file name without '.md' (docs/epics/<code>.md). */
   code: string
-  /** 标题 = 首个 # 行内容（约定形「立项单：<代号>」剥前缀，剥空则保留原文）。 */
-  title: string
-  /** 状态 = 字段表格里「状态」行的值；缺行给 ''。 */
+  /** Fail-closed: true unless the front-matter says exactly 'retired: false'. */
+  retired: boolean
+  /** The front-matter summary line ('' when absent). */
+  summary: string
+  /** The front-matter started value ('' when absent). */
+  started: string
+  /** The status line of the row: 'open' or 'retired' from the front-matter, else the
+   *  legacy field-table value, else 'unknown'. Never empty — a row without a readable
+   *  status must never look healthy. */
   status: string
-  /** 备注 = 字段表格里「备注」行的值；缺行给 ''（t260831-05：括号细节从状态迁入此列）。 */
+  /** Named defect when the record is not a healthy registry entry (absent when healthy). */
+  defect?: string
+  /** Legacy field-table face (fallback for a document without front-matter). */
+  title: string
   note: string
-  /** 立项日期 = 字段表格里「立项日期」行的值；缺行给 ''。 */
   created: string
-  // t260910-14 退役注记：原「下一步已备」缓存命中标记随预跑建议整链退役删除。
+  // t260910-14 retirement note: the old 'next step ready' cache marker is gone with the
+  // pre-run suggestion chain.
 }
 
-/** readEpicMarkdown 的返回：成功带全文+元信息；失败带 HTTP 状态码与人话 error。 */
+/** The row shape before t261030-30 (legacy field table only). Kept as an alias so an
+ *  older caller keeps type-checking; new code takes EpicRecord. */
+export type EpicMeta = EpicRecord
+
+/** readEpicMarkdown's answer: success carries the full text plus the row; failure
+ *  carries an HTTP status and a human error. */
 export type EpicReadResult =
-  | ({ ok: true; markdown: string } & EpicMeta)
+  | ({ ok: true; markdown: string } & EpicRecord)
   | { ok: false; status: number; error: string }
 
-/** 立项单目录：env SANDBAR_EPICS_DIR 优先（shared.py EPICS_DIR 同款先例），缺省 <repo>/notes/epics。 */
+/**
+ * The epic document directory: env SANDBAR_EPICS_DIR when it is set and non-empty
+ * (the same rule as shared.py resolve_epics_dir), else <repo>/docs/epics.
+ */
 export function resolveEpicsDir(repo: string): string {
-  return process.env.SANDBAR_EPICS_DIR ?? join(repo, 'notes', 'epics')
+  const envDir = process.env.SANDBAR_EPICS_DIR
+  if (typeof envDir === 'string' && envDir.trim() !== '') return envDir
+  return join(repo, 'docs', 'epics')
 }
 
-/** 从立项单 Markdown 解析标题/状态/备注/立项日期（容错：缺字段给 ''，不拒收）。 */
+/**
+ * Parse the front-matter block of an epic document (the text between two leading
+ * '---' lines, one 'key: value' pair per line). Keys are lowercased, values trimmed.
+ * Mirrors shared.py parse_epic_front_matter: a missing block, an unterminated block or
+ * a malformed line throws an Error that names the failed check — the caller decides
+ * whether that is fatal (the row model fails closed).
+ */
+export function parseEpicFrontMatter(markdown: string): Record<string, string> {
+  if (!markdown.startsWith('---')) throw new Error("no front-matter block (file must start with '---')")
+  const lines = markdown.split('\n')
+  let end = -1
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].trim() === '---') { end = i; break }
+  }
+  if (end === -1) throw new Error("unterminated front-matter block (no closing '---')")
+  const fields: Record<string, string> = {}
+  for (let i = 1; i < end; i++) {
+    const line = lines[i].trim()
+    if (line === '') continue
+    const idx = line.indexOf(':')
+    if (idx <= 0) throw new Error(`malformed front-matter line (no 'key: value'): ${JSON.stringify(line)}`)
+    fields[line.slice(0, idx).trim().toLowerCase()] = line.slice(idx + 1).trim()
+  }
+  return fields
+}
+
+/**
+ * Build one row from one document (pure). The front-matter decides; the legacy field
+ * table is the fallback. A front-matter that cannot be read, or a 'retired' value that
+ * is not exactly 'false' or 'true', is a defect: the row keeps a named reason and fails
+ * closed as retired (the same rule as shared.py validate_epic_code).
+ */
+export function epicRecord(code: string, markdown: string): EpicRecord {
+  const legacy = parseEpicMeta(markdown)
+  let fields: Record<string, string>
+  try {
+    fields = parseEpicFrontMatter(markdown)
+  } catch (err) {
+    return {
+      code, retired: true, summary: '', started: '',
+      status: legacy.status !== '' ? legacy.status : 'unknown',
+      defect: String(err instanceof Error ? err.message : err),
+      title: legacy.title, note: legacy.note, created: legacy.created,
+    }
+  }
+  const retiredRaw = fields.retired ?? ''
+  const defect = retiredRaw !== 'false' && retiredRaw !== 'true'
+    ? `front-matter 'retired' must be exactly 'false' or 'true' (found: ${retiredRaw === '' ? '(missing)' : JSON.stringify(retiredRaw)})`
+    : undefined
+  const retired = retiredRaw !== 'false'
+  // A healthy record states its own state. A defect falls back to the legacy field
+  // table, and to 'unknown' when that table is absent too.
+  const status = defect === undefined
+    ? (retired ? 'retired' : 'open')
+    : (legacy.status !== '' ? legacy.status : 'unknown')
+  const row: EpicRecord = {
+    code,
+    retired,
+    summary: fields.summary ?? '',
+    started: fields.started ?? '',
+    status,
+    title: legacy.title,
+    note: legacy.note,
+    created: legacy.created,
+  }
+  if (defect !== undefined) row.defect = defect
+  return row
+}
+
+/** Parse title/status/note/created from the legacy field table (tolerant: a missing
+ *  field is '', never a refusal). This is the fallback face only. */
 export function parseEpicMeta(markdown: string): { title: string; status: string; note: string; created: string } {
   const heading = /^#\s+(.+?)\s*$/m.exec(markdown)?.[1] ?? ''
-  // 约定标题形「立项单：<代号>」（notes/README.md）：剥前缀留实质；剥完为空则保留原文。
+  // The conventional legacy heading carries a Chinese "epic" label before the
+  // code: strip that label and keep the substance;
+  // an empty remainder keeps the raw heading.
   const stripped = heading.replace(/^立项单：\s*/, '')
   const title = stripped !== '' ? stripped : heading
   return {
@@ -89,41 +200,48 @@ export function parseEpicMeta(markdown: string): { title: string; status: string
   }
 }
 
-/** 取字段表格（| 字段 | 值 |）里指定字段的值；剥反引号，缺行返回 ''。 */
+/** Read one field of the legacy field table (| field | value |); backticks stripped,
+ *  a missing row answers ''. */
 function tableField(markdown: string, key: string): string {
   const m = new RegExp(`^\\|\\s*${key}\\s*\\|\\s*([^|]+?)\\s*\\|`, 'm').exec(markdown)
   return m ? m[1].replace(/`/g, '').trim() : ''
 }
 
 /**
- * 列 notes/epics/*.md（只读纯函数）。目录不存在/无文件 → 空数组不报错；
- * 文件名主名不符合代号形状的不入列；单文件读失败跳过，不拖垮整列。按代号排序。
+ * List <epicsDir>/*.md as rows (read-only). A name whose stem fails the code shape is
+ * not a row; a single unreadable file is skipped and never drags the list down; the
+ * answer is sorted by code.
+ *
+ * An unreadable directory throws a named Error: since t261019-12 the epic store is
+ * docs/epics and an absent store must not answer as "this project has no epic"
+ * (a face that cannot read the registry says so, it does not fake an empty registry).
  */
-export async function listEpics(epicsDir: string): Promise<EpicMeta[]> {
+export async function listEpics(epicsDir: string): Promise<EpicRecord[]> {
   let names: string[]
   try {
     names = await readdir(epicsDir)
-  } catch {
-    return []
+  } catch (err) {
+    throw new Error(`epic registry directory not found: ${epicsDir} (docs/epics — the store moved from notes/epics in t261019-12; hard cut, no fallback): ${String(err instanceof Error ? err.message : err)}`)
   }
-  const out: EpicMeta[] = []
+  const out: EpicRecord[] = []
   for (const name of names.sort()) {
     if (!name.endsWith('.md')) continue
     const code = name.slice(0, -'.md'.length)
     if (!EPIC_CODE_RE.test(code)) continue
     try {
-      const markdown = await readFile(join(epicsDir, name), 'utf8')
-      out.push({ code, ...parseEpicMeta(markdown) })
-    } catch { /* 单文件读失败跳过 */ }
+      out.push(epicRecord(code, await readFile(join(epicsDir, name), 'utf8')))
+    } catch { /* a single unreadable file is skipped */ }
   }
   return out
 }
 
 /**
- * 读单份立项单 Markdown 全文（只读纯函数）。
- * 防穿双保险（仿 agent-logs.ts resolveAgentBaseDir 先例）：①EPIC_CODE_RE 形状白名单
- * （'..'、'/' 本就在字符集外）；②resolve 后断言落在 epicsDir 内。非法 400 / 不存在 404，
- * 人话 error 并附现有代号清单（同 shared.py validate_epic_code 的纠错风格）。
+ * Read one epic document in full (read-only).
+ * Two guards against path escape (the resolveAgentBaseDir precedent): (1) the
+ * EPIC_CODE_RE shape whitelist ('..' and '/' are outside the character set);
+ * (2) the resolved path must stay inside epicsDir. An illegal shape answers 400, a
+ * missing document answers 404 with the existing code list in the message (the same
+ * correction style as shared.py validate_epic_code).
  */
 export async function readEpicMarkdown(epicsDir: string, code: string): Promise<EpicReadResult> {
   if (!EPIC_CODE_RE.test(code)) {
@@ -148,15 +266,15 @@ export async function readEpicMarkdown(epicsDir: string, code: string): Promise<
           .filter((f) => f.endsWith('.md') && EPIC_CODE_RE.test(f.slice(0, -'.md'.length)))
           .map((f) => f.slice(0, -'.md'.length))
           .sort()
-      } catch { /* 目录不可读则不给清单 */ }
+      } catch { /* an unreadable directory gets no list */ }
       return {
         ok: false, status: 404,
-        error: `立项代号不存在：'${code}'（notes/epics/ 无此档案）。现有代号：${existing.join('、') || '（目录为空或不存在）'}`,
+        error: `Epic code not found: '${code}' (no document at ${epicsDir}). Known codes: ${existing.join(', ') || '(the directory is empty or absent)'}`,
       }
     }
     return { ok: false, status: 500, error: `立项单读取失败：${String(err?.message ?? err)}` }
   }
-  return { ok: true, code, markdown, ...parseEpicMeta(markdown) }
+  return { ok: true, markdown, ...epicRecord(code, markdown) }
 }
 
 /* ---------------------------------------------------------------- 状态写函数（t260831-05） */
@@ -214,7 +332,13 @@ const NOTE_ROW_RE = /^(\|\s*备注\s*\|\s*)([^|]*?)(\s*\|)/m
  *
  * 备份目录与 closeEpic 单点共用 /tmp/epic-close-backup（评审定案：
  * 两函数写同一份档案真源，回滚单点，只查一个目录）。真源分工不变：只改
- * notes/epics/*.md 这一份档案真源；工单状态仍以 Temporal 为真源。
+ * <epicsDir>/<code>.md is that single source of truth; ticket state still comes
+ * from Temporal.
+ *
+ * t261019-12 retirement note: no route calls this any more (the old close/status
+ * routes answer 410). docs/epics documents carry a front-matter record and no status
+ * row, so this legacy table writer keeps its fixture/smoke contract only. Retire an
+ * epic by editing `retired:` in docs/epics/<code>.md in git.
  */
 export async function setEpicStatus(
   epicsDir: string,
