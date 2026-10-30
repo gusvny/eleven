@@ -1,7 +1,7 @@
 /**
  * t261012-03-round-dialog-view.test.mjs — the round dialog's pure render core
  * and its page wiring UT (t261012-03, approved mock
- * notes/discussions/261011-line-round-ui-mock.html §2).
+ * notes/epics/develop-buffer/261011-line-round-ui-mock.html §2).
  *
  * Review conditions carried here:
  *  - the dialog render core is the page's OWN implementation (embedded via

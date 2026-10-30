@@ -5,7 +5,7 @@
 // 红线零接触 3099）：t261009-22 补齐了 mock 的 chrome 面但段渲染仍留 v1/v5 块结构
 // ——整段一个大盒子（.wb-lm-track min-height:96px + 整底填色的 .wb-lm-item）、
 // 标签塞在盒子里的 flex 列。本条独占 t261009-53 的段几何面（mock laneMap()
-// notes/discussions/261004-concurrency-limit-mock.html，设计稿 §7.6 判据 1/4/5）：
+// notes/epics/concurrency-limit/261004-concurrency-limit-mock.html，设计稿 §7.6 判据 1/4/5）：
 // P1 主道=一条基线上的细条（12px 级、同高、同一 y）而非满轨道高的盒子；
 // P2 标签浮在条上方、middle 锚、夹在画布内、不压条；
 // P3 caption readability contract (re-anchored by t261028-27): visible caption

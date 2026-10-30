@@ -1,7 +1,7 @@
 /**
  * t261009-44-certification-tab.test.mjs — the Certification tab's page-shape
  * and mock-reconcile UT (approved mock v15:
- * notes/discussions/261009-executor-certification-tab-mock.html).
+ * notes/epics/project-executor/261009-executor-certification-tab-mock.html).
  *
  * Review conditions carried here:
  *  - C2a (KI-01M4HMCZAM4ZBC2CKN15HDBZ, "dead button"): the tab's fetch target

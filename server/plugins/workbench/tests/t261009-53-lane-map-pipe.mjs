@@ -2,7 +2,7 @@
  * tests/t261009-53-lane-map-pipe.mjs —— 泳道图细管道几何 UT（t261009-53）。
  *
  * 直跑：node server/plugins/workbench/tests/t261009-53-lane-map-pipe.mjs
- * 真源：notes/discussions/261004-concurrency-limit-mock.html laneMap(t)
+ * 真源：notes/epics/concurrency-limit/261004-concurrency-limit-mock.html laneMap(t)
  * （设计稿 §7.6 判据 1-8）。覆盖（ticket 验收口径，语义锚非类名/序号）：
  *   A. 同一条基线细条：主道每条 y/h 恒等（12）、rx=3 语义（渲染层）；段宽
  *      仍 ∝ v5 权重（t261008-23 不回退）；伙伴条在第二道、宽=窗×min(1,ratio)。

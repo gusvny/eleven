@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// t261008-08 左栏工单行对齐 mock v11（notes/discussions/261004-concurrency-limit-mock.html
+// t261008-08 左栏工单行对齐 mock v11（notes/epics/concurrency-limit/261004-concurrency-limit-mock.html
 // 的 .tk 行，renderSide）UT：源级锚 + 模型层真值表。
 //
 // 纪律（同 t260919-02）：渲染断言归集成场景（integration/t261006-18 等）；本文件做

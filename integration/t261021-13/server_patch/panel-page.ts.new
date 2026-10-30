@@ -466,7 +466,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
    aligns by box edge, meta by text edge, SAME line). */
 #inspRunBtn{margin-right:2px}
 
-/* ---- t261009-37 mock deltas (261009 host orders; yardstick notes/discussions/261009-executor-panel-overview-mock.html) ---- */
+/* ---- t261009-37 mock deltas (261009 host orders; yardstick notes/epics/project-executor/261009-executor-panel-overview-mock.html) ---- */
 /* Project identity colour bar. --proj default is the grey stand-in for "no project
    resolved yet": renderProjBadge sets the real colour from projectIdentity(key); a
    failed/absent status fetch leaves the grey default — the bar states that no
