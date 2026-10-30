@@ -4,6 +4,21 @@
 count visible and the reclaim path refuses to kill anything that is not an
 orphan (clause C, grey-box L3, offline, real child processes, zero docker).
 
+Fixture readiness (t261030-43, the line's last certification blocker): every leg
+below asserts about LIVE fixture children, so the fixture must WAIT for that
+condition instead of assuming it. Each child announces itself on its own stdout
+(`lane-child-ready pid=<pid>`, lib_t26100503.CHILD_READY_MARK) and then holds the
+process open until the parent closes its stdin pipe — lifetime is parent-owned,
+never a wall clock — and each leg re-checks liveness right before it probes. The
+wait is bounded and injectable through the project's `SANDBAR_*_SECS` convention
+(`SANDBAR_T26100503_CHILD_READY_SECS`, default 30 s), and its expiry is a NAMED
+FAIL carrying the pid and the condition that never became true. Measured race
+this replaces: the old child slept 120 s, a loaded round ran this case for 123.9 s
+(round run-01M65ZKFPHSTWQ21A2EKD744KX), both children had already retired at the
+O3 probe, and the resulting red read `children_alive=False rc=0` — a fixture race
+booked as a product defect. The assertion itself is NOT relaxed: a live non-orphan
+must still make `--apply` refuse.
+
 User-perceivable contract (261005: 57 lane orphans accumulated for 15 days with
 no probe; the hand sweep that finally killed them had to be careful NOT to kill
 the resident and live workers):
@@ -84,6 +99,24 @@ def cli_supports(sub):
     return r.returncode == 0 and sub in r.stdout
 
 
+def kids_state(kids) -> str:
+    """Per-child one-liners (pid, alive/exit code, readiness), so no leg ever
+    reports a bare boolean about an anonymous child."""
+    return " | ".join(k.state() for k in kids)
+
+
+def require_alive(kids, leg: str) -> bool:
+    """The leg's precondition, checked at the moment the leg probes: the fixture
+    children it makes a claim about are alive NOW, each proven by its own ready
+    line and by poll(). A child that died mid-case is NAMED (which pid, which
+    exit code) instead of hollowing the safety assertion that follows — the
+    claim below is still judged, not skipped."""
+    dead = [k for k in kids if not k.alive]
+    check("%s precondition: fixture children live when the leg probes them" % leg,
+          not dead, kids_state(kids))
+    return not dead
+
+
 def main():
     if not (ENGINE / "client.py").is_file():
         env_fail("engine client.py missing under %s" % ENGINE)
@@ -95,8 +128,30 @@ def main():
         return
 
     root = mk_lane_root("orphan")
-    kids = [LaneChild(root), LaneChild(root, with_pidfile=True)]
+    kids: list = []
     try:
+        # --- F0 the fixture proves its own precondition before any leg runs ---
+        # Spawn one child per pidfile shape, each appended only after it exists,
+        # so a spawn failure can never leak the sibling that already started.
+        for i in range(2):
+            try:
+                kids.append(LaneChild(root, with_pidfile=(i == 1)))
+            except OSError as e:
+                # A spawn refusal is a NAMED fixture failure, never an
+                # unattributable traceback (same discipline as CliTimeout below).
+                check("F0 fixture child %d spawns" % i, False,
+                      "spawn failed (%s: %s)" % (type(e).__name__, e))
+                summary()
+        not_ready = [k for k in kids if not k.ready_ok]
+        check("F0 both fixture children announce ready before the legs probe them",
+              not not_ready,
+              (kids_state(kids) if not not_ready else
+               "condition never became true: " + kids_state(not_ready)))
+        if not_ready:
+            # A fixture whose own precondition never held cannot judge the
+            # product: stop here BY NAME instead of booking a product red.
+            summary()
+
         # --- O1 probe counts 0 orphans while healthy lane processes exist ---
         r = run_cli(["lane-orphans", str(root)], timeout=CHILD_STOP_S)
         # Environment gate (B2 named-channel discipline): if the scan face itself
@@ -172,6 +227,7 @@ def main():
                       % (count,))
 
         # --- O2 default is dry-run: nothing dies ---
+        require_alive(kids, "O2")
         r = run_cli(["lane-reclaim", str(root)], timeout=CHILD_STOP_S)
         if '"ok": false' in r.stdout and (
                 "PermissionError" in r.stdout or "'ps'" in r.stdout
@@ -181,17 +237,19 @@ def main():
             sys.exit(2)
         alive = all(k.alive for k in kids)
         check("O2 dry-run kills nothing", alive,
-              "rc=%d children_alive=%s stdout=%.120r stderr=%.120r"
-              % (r.returncode, alive, r.stdout, r.stderr))
+              "rc=%d children=%s stdout=%.120r stderr=%.120r"
+              % (r.returncode, kids_state(kids), r.stdout, r.stderr))
 
         # --- O3 --apply refuses non-orphans, refusal names the pid ---
+        require_alive(kids, "O3")
         r = run_cli(["lane-reclaim", str(root), "--apply"], timeout=CHILD_STOP_S)
         alive = all(k.alive for k in kids)
         named = all(str(k.proc.pid) in (r.stdout + r.stderr) for k in kids)
         check("O3 --apply refuses non-orphans", alive,
-              "children_alive=%s rc=%d" % (alive, r.returncode))
+              "rc=%d children=%s" % (r.returncode, kids_state(kids)))
         check("O3 refusals name the spared pids", named or not alive,
-              "stdout=%.120r stderr=%.120r" % (r.stdout, r.stderr))
+              "named=%s children=%s stdout=%.120r stderr=%.120r"
+              % (named, kids_state(kids), r.stdout, r.stderr))
 
         # --- O4 nonexistent lane root: named refusal, no traceback ---
         ghost = str(root / "no-such-lane-root")
