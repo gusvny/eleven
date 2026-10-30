@@ -860,8 +860,44 @@ def _choose_project(env, skip_run_id=None):
     ``already_recorded`` is True when the ledger already carries
     ``skip_run_id`` — the caller must not duplicate the row. No project
     resolvable -> (None, False) with the named stderr line, never a guess
-    into the wrong ledger."""
+    into the wrong ledger.
+
+    A caller that STATED where this round's records live
+    (``SANDBAR_SCENARIO_LEDGER_DIR``) is answered from that seam and the
+    projects root is never scanned (t261030-25, KI-429): fixtures stage a
+    round against a temp ledger, and the old rule still fished in the real
+    projects root — with one declared project it took that project as-is and
+    booked the fixture's run row into the PRODUCTION runs store, whose
+    reconciliation then minted a certification for a revision that is not a
+    git object here. Production does not pin the seam, so its answer is
+    unchanged."""
     import json as _json
+    explicit = str(env.get(LEDGER_DIR_ENV) or "").strip()
+    if explicit:
+        ledger_dir = Path(explicit)
+        proj = ledger_dir.parent if ledger_dir.name == "ledger" else ledger_dir
+        ledger = ledger_dir / "scenario-runs.jsonl"
+        if skip_run_id is not None and ledger.exists():
+            try:
+                for line in ledger.read_text(encoding="utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    row = _json.loads(line)
+                    if isinstance(row, dict) and row.get("id") == skip_run_id:
+                        return proj, True
+            except (OSError, ValueError):
+                pass
+        return proj, False
+    face = str(env.get("SANDBAR_LINE_ROUND_FACE_DIR") or "").strip()
+    if face:
+        # The caller stated the round's develop dir: its project is that
+        # dir's project (``<project>/data/develop``), so a staged round
+        # records inside the caller's tree — never in the projects root
+        # (t261030-25 isolation; a dir that is not shaped like a develop dir
+        # keeps the row inside the staged tree rather than guessing upward).
+        fdir = Path(face)
+        proj = fdir.parent.parent if fdir.name == "develop" else fdir
+        return proj, False
     base = Path(str(env.get("SANDBAR_PROJECTS_DIR") or "").strip()
                 or os.path.expanduser("~/.sandbar/projects"))
     cands = [p for p in base.iterdir() if p.is_dir()] if base.is_dir() else []

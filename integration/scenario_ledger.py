@@ -116,12 +116,30 @@ DETAIL_TRUNCATED_KEY = "__truncated__"
 RUN_CASE_FIELDS = ("ran", "passed", "failed", "env_failed")
 
 
+#: The projects-root seam, spelled exactly as the engine spells it
+#: (``shared.perkey_projects_root``: empty or relative = unset).
+PROJECTS_DIR_ENV = "SANDBAR_PROJECTS_DIR"
+
+
 def ledger_dir():
-    """台账目录：SANDBAR_SCENARIO_LEDGER_DIR 覆盖 > ~/.sandbar/projects/sandbar/ledger
-    （票据①写死的项目位；覆盖缝仅供测试/多项目未来，不接注册表——越界不做的）。"""
+    """The runs store's directory: SANDBAR_SCENARIO_LEDGER_DIR override >
+    the project's ledger under the PROJECTS ROOT > the hardcoded production
+    path.
+
+    t261030-25 (KI-429): the middle tier is the fix. A fixture that pins the
+    projects root (SANDBAR_PROJECTS_DIR — the engine's one injection point) used
+    to isolate every writer EXCEPT this one: the store ignored the seam and
+    wrote production rows anyway, so a round staged against a temp projects
+    root still booked a run row into the real ledger. The store now follows the
+    same root the engine follows, so "owns an isolated projects root" holds for
+    the whole write set. Unset (or relative) is byte-unchanged production: no
+    seam, no behaviour change."""
     env = os.environ.get(LEDGER_DIR_ENV)
     if env:
         return Path(env)
+    root = os.environ.get(PROJECTS_DIR_ENV) or ""
+    if root and os.path.isabs(root):
+        return Path(root) / "sandbar" / "ledger"
     return Path.home() / ".sandbar" / "projects" / "sandbar" / "ledger"
 
 

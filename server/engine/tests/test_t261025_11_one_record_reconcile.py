@@ -291,14 +291,43 @@ def _tick(tmp_path, runs_lines, lines=("develop-buffer",)):
         runs_store=str(runs_store))
 
 
-def test_t1_tick_heals_witness_then_idles_without_a_round(tmp_path):
+def _line_tree_with_commit(tmp_path, monkeypatch, project="proj",
+                           repo="sandbar"):
+    """A line worktree the reachability net (t261030-25) can judge: a real git
+    repository with one commit, under an injected projects root. The witness
+    run then cites a revision this repository CAN produce — the only kind a
+    reconciliation may certify."""
+    import subprocess
+    projects = tmp_path / "projects"
+    monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(projects))
+    tree = projects / project / "data" / "develop" / "wt" / repo
+    tree.mkdir(parents=True)
+    for argv in (["git", "init", "-q", "."],
+                 ["git", "config", "user.email", "it@t"],
+                 ["git", "config", "user.name", "it"]):
+        subprocess.run(["git", "-C", str(tree)] + argv[1:], check=True,
+                       capture_output=True)
+    (tree / "a.txt").write_text("a\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tree), "add", "-A"], check=True,
+                   capture_output=True)
+    subprocess.run(["git", "-C", str(tree), "commit", "-qm", "m0"], check=True,
+                   capture_output=True)
+    return subprocess.run(["git", "-C", str(tree), "rev-parse", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
+
+
+def test_t1_tick_heals_witness_then_idles_without_a_round(tmp_path,
+                                                          monkeypatch):
     p = ledger(tmp_path)
-    dc.append_rows([landing("sandbar", "dbb88cd5")], p)
-    out = _tick(tmp_path, [json.dumps(witness_run())])
+    real_rev = _line_tree_with_commit(tmp_path, monkeypatch)
+    dc.append_rows([landing("sandbar", real_rev)], p)
+    out = _tick(tmp_path, [json.dumps(witness_run(rev=real_rev))])
     states = [e.get("state") for e in out["lines"]]
     assert "reconciled" in states and "idle" in states
     assert not certs(rows_of(p)) or len(certs(rows_of(p))) == 1
     assert len(certs(rows_of(p))) == 1  # exactly one heal row
+    assert certs(rows_of(p))[0]["repos"] == [{"repo": "sandbar",
+                                              "revision": real_rev}]
 
 
 def test_t2_malformed_runs_store_is_named_never_guessed(tmp_path):

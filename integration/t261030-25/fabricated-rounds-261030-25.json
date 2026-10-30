@@ -1,0 +1,331 @@
+{
+ "project": "sandbar",
+ "repo": "/Users/user/Documents/sandbar/.lane/t261030-25",
+ "note": "Fabricated round directories removed from the live rounds face by t261030-25 (KI-429). Each cited a revision that is not a git commit object in the repo it claimed to judge. The face.json and suite.log are the evidence; the live face no longer carries a green round nobody ran.",
+ "state": {
+  "fabricated": [
+   {
+    "run_id": "run-01M65CXM3HH9QV2VF0BFBBF96T",
+    "path": "/Users/user/.sandbar/projects/sandbar/data/develop/rounds/run-01M65CXM3HH9QV2VF0BFBBF96T",
+    "revisions": [
+     {
+      "repo": "src",
+      "revision": "55401deef6452484ed167940acf160b772c76408",
+      "reachable": false
+     }
+    ],
+    "face": {
+     "counts": {
+      "env_fail": 0,
+      "fail": 0,
+      "pass": 1,
+      "ran": 1
+     },
+     "last_scenario": {
+      "name": "sc_0",
+      "verdict": "PASS"
+     },
+     "line": null,
+     "outcome": {
+      "reason": "",
+      "record_rule": "content-v1",
+      "record_verdict": "green",
+      "verdict": "green"
+     },
+     "pool": "unknown",
+     "revision": {
+      "src": "55401deef6452484ed167940acf160b772c76408"
+     },
+     "run_id": "run-01M65CXM3HH9QV2VF0BFBBF96T",
+     "started_at": "2026-10-30T03:16:11Z",
+     "state": "done",
+     "updated_at": "2026-10-30T03:16:12Z",
+     "writer_pid": 36231
+    },
+    "suite_log": "PASS [sc_0] (0.1s)\nINTEG_SUMMARY {\"ran\": 1, \"run_id\": \"run-01M65CXM3HH9QV2VF0BFBBF96T\"}\n"
+   },
+   {
+    "run_id": "run-01M65CXTPHMG7KD0KPE2BS5VG0",
+    "path": "/Users/user/.sandbar/projects/sandbar/data/develop/rounds/run-01M65CXTPHMG7KD0KPE2BS5VG0",
+    "revisions": [
+     {
+      "repo": "src",
+      "revision": "4a994ea9eed31cd728a495d83a24603255c3550b",
+      "reachable": false
+     }
+    ],
+    "face": {
+     "counts": {
+      "env_fail": 0,
+      "fail": 0,
+      "pass": 1,
+      "ran": 1
+     },
+     "last_scenario": {
+      "name": "sc_0",
+      "verdict": "PASS"
+     },
+     "line": null,
+     "outcome": {
+      "reason": "",
+      "record_rule": "content-v1",
+      "record_verdict": "green",
+      "verdict": "green"
+     },
+     "pool": "unknown",
+     "revision": {
+      "src": "4a994ea9eed31cd728a495d83a24603255c3550b"
+     },
+     "run_id": "run-01M65CXTPHMG7KD0KPE2BS5VG0",
+     "started_at": "2026-10-30T03:16:18Z",
+     "state": "done",
+     "updated_at": "2026-10-30T03:16:18Z",
+     "writer_pid": 36773
+    },
+    "suite_log": "PASS [sc_0] (0.1s)\nINTEG_SUMMARY {\"ran\": 1, \"run_id\": \"run-01M65CXTPHMG7KD0KPE2BS5VG0\"}\n"
+   },
+   {
+    "run_id": "run-01M65G2X7X03NFXHQZXQB71TN1",
+    "path": "/Users/user/.sandbar/projects/sandbar/data/develop/rounds/run-01M65G2X7X03NFXHQZXQB71TN1",
+    "revisions": [
+     {
+      "repo": "src",
+      "revision": "58bfa7bd4eca5911acc12d429505053c8706ccc3",
+      "reachable": false
+     }
+    ],
+    "face": {
+     "counts": {
+      "env_fail": 0,
+      "fail": 0,
+      "pass": 1,
+      "ran": 1
+     },
+     "last_scenario": {
+      "name": "sc_0",
+      "verdict": "PASS"
+     },
+     "line": null,
+     "outcome": {
+      "reason": "",
+      "record_rule": "content-v1",
+      "record_verdict": "green",
+      "verdict": "green"
+     },
+     "pool": "unknown",
+     "revision": {
+      "src": "58bfa7bd4eca5911acc12d429505053c8706ccc3"
+     },
+     "run_id": "run-01M65G2X7X03NFXHQZXQB71TN1",
+     "started_at": "2026-10-30T04:11:30Z",
+     "state": "done",
+     "updated_at": "2026-10-30T04:11:30Z",
+     "writer_pid": 24587
+    },
+    "suite_log": "PASS [sc_0] (0.1s)\nINTEG_SUMMARY {\"ran\": 1, \"run_id\": \"run-01M65G2X7X03NFXHQZXQB71TN1\"}\n"
+   },
+   {
+    "run_id": "run-01M65G33NS9379PSFM28EBAJED",
+    "path": "/Users/user/.sandbar/projects/sandbar/data/develop/rounds/run-01M65G33NS9379PSFM28EBAJED",
+    "revisions": [
+     {
+      "repo": "src",
+      "revision": "6f3b43d02ed4b133f3d29b85f852e6005be5078f",
+      "reachable": false
+     }
+    ],
+    "face": {
+     "counts": {
+      "env_fail": 0,
+      "fail": 0,
+      "pass": 1,
+      "ran": 1
+     },
+     "last_scenario": {
+      "name": "sc_0",
+      "verdict": "PASS"
+     },
+     "line": null,
+     "outcome": {
+      "reason": "",
+      "record_rule": "content-v1",
+      "record_verdict": "green",
+      "verdict": "green"
+     },
+     "pool": "unknown",
+     "revision": {
+      "src": "6f3b43d02ed4b133f3d29b85f852e6005be5078f"
+     },
+     "run_id": "run-01M65G33NS9379PSFM28EBAJED",
+     "started_at": "2026-10-30T04:11:37Z",
+     "state": "done",
+     "updated_at": "2026-10-30T04:11:37Z",
+     "writer_pid": 24920
+    },
+    "suite_log": "PASS [sc_0] (0.1s)\nINTEG_SUMMARY {\"ran\": 1, \"run_id\": \"run-01M65G33NS9379PSFM28EBAJED\"}\n"
+   },
+   {
+    "run_id": "run-01M65HYBH3PQR4ZWH1081DMN0N",
+    "path": "/Users/user/.sandbar/projects/sandbar/data/develop/rounds/run-01M65HYBH3PQR4ZWH1081DMN0N",
+    "revisions": [
+     {
+      "repo": "src",
+      "revision": "b69221d7077fc8c518625c3684a126be66f0e00e",
+      "reachable": false
+     }
+    ],
+    "face": {
+     "counts": {
+      "env_fail": 0,
+      "fail": 0,
+      "pass": 1,
+      "ran": 1
+     },
+     "last_scenario": {
+      "name": "sc_0",
+      "verdict": "PASS"
+     },
+     "line": null,
+     "outcome": {
+      "reason": "",
+      "record_rule": "content-v1",
+      "record_verdict": "green",
+      "verdict": "green"
+     },
+     "pool": "unknown",
+     "revision": {
+      "src": "b69221d7077fc8c518625c3684a126be66f0e00e"
+     },
+     "run_id": "run-01M65HYBH3PQR4ZWH1081DMN0N",
+     "started_at": "2026-10-30T04:43:58Z",
+     "state": "done",
+     "updated_at": "2026-10-30T04:43:58Z",
+     "writer_pid": 25785
+    },
+    "suite_log": "PASS [sc_0] (0.1s)\nINTEG_SUMMARY {\"ran\": 1, \"run_id\": \"run-01M65HYBH3PQR4ZWH1081DMN0N\"}\n"
+   },
+   {
+    "run_id": "run-01M65HYBVQQNJG88VPDEZGDNNR",
+    "path": "/Users/user/.sandbar/projects/sandbar/data/develop/rounds/run-01M65HYBVQQNJG88VPDEZGDNNR",
+    "revisions": [
+     {
+      "repo": "src",
+      "revision": "c683e5388422c2efeba143b06e80b6d0048492d4",
+      "reachable": false
+     }
+    ],
+    "face": {
+     "counts": {
+      "env_fail": 0,
+      "fail": 0,
+      "pass": 1,
+      "ran": 1
+     },
+     "last_scenario": {
+      "name": "sc_0",
+      "verdict": "PASS"
+     },
+     "line": null,
+     "outcome": {
+      "reason": "",
+      "record_rule": "content-v1",
+      "record_verdict": "green",
+      "verdict": "green"
+     },
+     "pool": "unknown",
+     "revision": {
+      "src": "c683e5388422c2efeba143b06e80b6d0048492d4"
+     },
+     "run_id": "run-01M65HYBVQQNJG88VPDEZGDNNR",
+     "started_at": "2026-10-30T04:43:59Z",
+     "state": "done",
+     "updated_at": "2026-10-30T04:43:59Z",
+     "writer_pid": 25809
+    },
+    "suite_log": "PASS [sc_0] (0.1s)\nINTEG_SUMMARY {\"ran\": 1, \"run_id\": \"run-01M65HYBVQQNJG88VPDEZGDNNR\"}\n"
+   },
+   {
+    "run_id": "run-01M65J3GQWWXHCBRA7DDRYFRV5",
+    "path": "/Users/user/.sandbar/projects/sandbar/data/develop/rounds/run-01M65J3GQWWXHCBRA7DDRYFRV5",
+    "revisions": [
+     {
+      "repo": "src",
+      "revision": "382cd8eb83204e995dfc11558cd5b3110326ce16",
+      "reachable": false
+     }
+    ],
+    "face": {
+     "counts": {
+      "env_fail": 0,
+      "fail": 0,
+      "pass": 1,
+      "ran": 1
+     },
+     "last_scenario": {
+      "name": "sc_0",
+      "verdict": "PASS"
+     },
+     "line": null,
+     "outcome": {
+      "reason": "",
+      "record_rule": "content-v1",
+      "record_verdict": "green",
+      "verdict": "green"
+     },
+     "pool": "unknown",
+     "revision": {
+      "src": "382cd8eb83204e995dfc11558cd5b3110326ce16"
+     },
+     "run_id": "run-01M65J3GQWWXHCBRA7DDRYFRV5",
+     "started_at": "2026-10-30T04:46:47Z",
+     "state": "done",
+     "updated_at": "2026-10-30T04:46:48Z",
+     "writer_pid": 31273
+    },
+    "suite_log": "PASS [sc_0] (0.1s)\nINTEG_SUMMARY {\"ran\": 1, \"run_id\": \"run-01M65J3GQWWXHCBRA7DDRYFRV5\"}\n"
+   },
+   {
+    "run_id": "run-01M65J3H61RTJKQT5EHJWFVQBY",
+    "path": "/Users/user/.sandbar/projects/sandbar/data/develop/rounds/run-01M65J3H61RTJKQT5EHJWFVQBY",
+    "revisions": [
+     {
+      "repo": "src",
+      "revision": "f58ac57da7043b943e1676960369f2d87cd24f29",
+      "reachable": false
+     }
+    ],
+    "face": {
+     "counts": {
+      "env_fail": 0,
+      "fail": 0,
+      "pass": 1,
+      "ran": 1
+     },
+     "last_scenario": {
+      "name": "sc_0",
+      "verdict": "PASS"
+     },
+     "line": null,
+     "outcome": {
+      "reason": "",
+      "record_rule": "content-v1",
+      "record_verdict": "green",
+      "verdict": "green"
+     },
+     "pool": "unknown",
+     "revision": {
+      "src": "f58ac57da7043b943e1676960369f2d87cd24f29"
+     },
+     "run_id": "run-01M65J3H61RTJKQT5EHJWFVQBY",
+     "started_at": "2026-10-30T04:46:48Z",
+     "state": "done",
+     "updated_at": "2026-10-30T04:46:48Z",
+     "writer_pid": 31288
+    },
+    "suite_log": "PASS [sc_0] (0.1s)\nINTEG_SUMMARY {\"ran\": 1, \"run_id\": \"run-01M65J3H61RTJKQT5EHJWFVQBY\"}\n"
+   }
+  ],
+  "real": [],
+  "pointer": []
+ }
+}

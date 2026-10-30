@@ -37,8 +37,14 @@ ROOT = Path(__file__).resolve().parents[2]
 INTEG = ROOT / "integration"
 
 sys.path.insert(0, str(INTEG))
+sys.path.insert(0, str(INTEG / "t261030-25"))
 import lib_round_face as lrf  # noqa: E402
 import line_round_runner as runner  # noqa: E402
+import lib_real_root_watch as real_root  # noqa: E402
+
+#: The project whose production state this battery must never write
+#: (t261030-25, KI-429: the incident wrote into exactly this one).
+PROJECT_KEY = "sandbar"
 
 
 class SnapshotProgress(unittest.TestCase):
@@ -356,7 +362,21 @@ class ResolveDevelopDir(unittest.TestCase):
 
 class StubTree(unittest.TestCase):
     """A tiny git fixture whose HEAD carries integration/run_scenarios.py —
-    the runner can clone it and run the STUB suite command inside."""
+    the runner can clone it and run the STUB suite command inside.
+
+    Ownership of a projects root (t261030-25, KI-429): every round this class
+    starts runs against the fixture's OWN projects root (``self.projects``,
+    injected with SANDBAR_PROJECTS_DIR — the engine's one seam) and the REAL
+    projects root is asserted BYTE-UNCHANGED around each test.
+
+    The incident this prevents: the face-dir resolution falls back to "the
+    project whose ledger the run row lands in", so a fixture that left the
+    seam unset made the runner publish a real ``run-*`` directory into
+    ``~/.sandbar/projects/sandbar/data/develop/rounds/`` (and the tick-entry
+    reconciliation then booked a certification for it). The classes below run
+    that exact round, with the seam pinned, so a re-leak fails HERE instead of
+    landing in production state.
+    """
 
     def make_repo(self):
         import shutil
@@ -383,9 +403,23 @@ class StubTree(unittest.TestCase):
         self.run_root = Path(self.tmp.name) / "run"
         self.face_dir = Path(self.tmp.name) / "develop"
         self.decl_dir = self.face_dir  # resolution override target
+        # the fixture's own projects root (never the production one)
+        self.projects = Path(self.tmp.name) / "projects"
+        self.projects.mkdir()
+        self.real_before = real_root.snapshot(PROJECT_KEY)
 
     def tearDown(self):
-        self.tmp.cleanup()
+        # the assertion KI-429 was missing: the real root is byte-unchanged
+        try:
+            after = real_root.snapshot(PROJECT_KEY)
+            added, removed, changed = real_root.diff(self.real_before, after)
+            self.assertEqual(
+                (added, removed, changed), ([], [], []),
+                "this fixture wrote the REAL projects root (%s): %s"
+                % (after["root"],
+                   real_root.describe(self.real_before, after)))
+        finally:
+            self.tmp.cleanup()
 
     def env(self, extra=None):
         rev = subprocess.run(["git", "-C", str(self.src), "rev-parse", "HEAD"],
@@ -398,6 +432,12 @@ class StubTree(unittest.TestCase):
             "SANDBAR_LINE_ROUND_REPO_PATH_SRC": str(self.src),
             runner.SUITE_CMD_ENV: "%s %s" % (sys.executable, self.stub_path),
             lrf.FACE_DIR_ENV: str(self.face_dir),
+            # t261030-25 (KI-429): the fixture owns its projects root. Every
+            # writer that resolves "which project" — the face dir's ledger
+            # fallback, the runner's run-row store, the runs-store path —
+            # follows this seam, so an unset FACE_DIR_ENV below degrades
+            # against the TEMP root instead of publishing into production.
+            lrf.PROJECTS_DIR_ENV: str(self.projects),
         })
         env.update(extra or {})
         return env

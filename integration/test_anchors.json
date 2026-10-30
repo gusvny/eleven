@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 365,
+      "engine_tests": 366,
       "scenarios": 855
     },
     "vocab": [
@@ -1803,6 +1803,10 @@
       "anchor": "behaviour",
       "note": "t261030-19 KI-420/KI-421 L1: the round slot's lifecycle survives a kill, proven with REAL subprocesses - the guard records its holder (run id, pid, pgid, start stamp) and round_state distinguishes running/died/reclaimed/idle/never_ran; a SIGKILLed round's slot is reclaimed BY NAME (stale holder + reason + adopter named, no human) while a held record with no pid is never reclaimed on a guess; the killed tick's registered runner is adopted and killed (a survivor stays adopt_pending, named); six concurrent claimants -> exactly one grant; every terminal path releases the guard (normal, runner error, and a REAL runner timeout whose spawned pid is asserted dead); and no verdict rule changed (green certifies, red still opens its freeze).",
       "sync_path": "server/engine/develop_certify.py"
+    },
+    "server/engine/tests/test_t261030_ledger_isolation_guard.py": {
+      "anchor": "behaviour",
+      "note": "t261030-25 KI-429: the ledger-side reachability net - a certification and a freeze may only cite revisions this repository can produce. Revision reachability (git cat-file -e <rev>^{commit}; blob, absent tree and garbage answer false), the named guard (revision_not_a_git_object / repo_not_resolvable / candidate_malformed, every member judged), the one refusal wording (check + repo@revision + caller), the reconciliation refusing a fabricated run with NO certification and NO freeze plus one idempotent range-growth refusal, the settle path refusing before it builds a batch, and the two behaviours that must not change: a real green round still certifies and a real red round still freezes. Temp git repos and temp ledgers only, no docker/Temporal/3099"
     }
   },
   "scenarios": {

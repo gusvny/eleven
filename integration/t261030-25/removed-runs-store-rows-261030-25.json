@@ -1,0 +1,1483 @@
+{
+ "note": "Run-store rows removed by t261030-25 (KI-429): fixture run rows the bisect harness created in the production runs store between 04:45 and 05:00Z; every dropped row's revisions are not git objects in this repo. Backup: scenario-runs.jsonl.bak-t261030-25. Nothing cites them (zero uncited lane:line-round rows remain).",
+ "backup": "/Users/user/.sandbar/projects/sandbar/ledger/scenario-runs.jsonl.bak-t261030-25",
+ "removed_count": 82,
+ "removed": [
+  {
+   "id": "run-01M65H9DYRJP4V23BV7RNRCDAD",
+   "source": "lane:stub",
+   "started_at": 1793334753244,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "fbd818a920978425ba6bdbcb4833ab96cb8db942"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9EKKBEGEDJ1GT32GJ32D",
+   "source": "lane:stub",
+   "started_at": 1793334753911,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "dcfa15cc11c2e7bed887ee206b34669739809804"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 0,
+    "env_failed": 1
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9F44RKMG126Q9M73GXCB",
+   "source": "lane:stub",
+   "started_at": 1793334754440,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "0f38781a9ef54cc2f98fd55f98518fde34e669b1"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9J4C3JHJ6QQSSNG5TV2T",
+   "source": "lane:stub",
+   "started_at": 1793334757521,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "84f945e165f7fa213ba07dbeb63a2ed5ce52db70"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9JD7WSXHJ65ZT12ASHME",
+   "source": "lane:stub",
+   "started_at": 1793334757803,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "84f945e165f7fa213ba07dbeb63a2ed5ce52db70"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9JN4ZFHA6Y02YNZA67BZ",
+   "source": "lane:stub",
+   "started_at": 1793334758056,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "84f945e165f7fa213ba07dbeb63a2ed5ce52db70"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9JW7XM0CA8QSST42HX3Y",
+   "source": "lane:stub",
+   "started_at": 1793334758283,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "84f945e165f7fa213ba07dbeb63a2ed5ce52db70"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9KAJXMXH08K28W60AN4T",
+   "source": "lane:stub",
+   "started_at": 1793334758742,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "7606ee2e8dd5f5b31fbb12e587f35353dff6398c"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9KH969NZZN881K6GWD9F",
+   "source": "lane:stub",
+   "started_at": 1793334758957,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "7606ee2e8dd5f5b31fbb12e587f35353dff6398c"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9GXAA1M533TAT48NJBGE",
+   "source": "lane:stub",
+   "started_at": 1793334761278,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "64c29ddfca6c98c990f09e94f5b6ae270ed84ab6"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9P7NZ76JNM0X9ZMA32KW",
+   "source": "lane:stub",
+   "started_at": 1793334761721,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "64c29ddfca6c98c990f09e94f5b6ae270ed84ab6"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 1,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65H9KQX72VD7H7J3Q27PQ6A",
+   "source": "lane:stub",
+   "started_at": 1793334764180,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "7606ee2e8dd5f5b31fbb12e587f35353dff6398c"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9SJ1RYXE9MT0X56C1N5X",
+   "source": "lane:stub",
+   "started_at": 1793334765121,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "7db31a99db408471438646e4fdde408aa83cf02b"
+    }
+   ],
+   "cases": {
+    "ran": 0,
+    "passed": 0,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65H9SXTKW58SMVMX86T0T27",
+   "source": "lane:stub",
+   "started_at": 1793334765502,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "7db31a99db408471438646e4fdde408aa83cf02b"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9T4H804N73K4ZQ1BNFDF",
+   "source": "lane:stub",
+   "started_at": 1793334765717,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "7db31a99db408471438646e4fdde408aa83cf02b"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65H9TB7DD6SF5K9VWA75ZHK",
+   "source": "lane:stub",
+   "started_at": 1793334765931,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "7db31a99db408471438646e4fdde408aa83cf02b"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 1,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65HF9Q9AGZ1Y9MZA2FWCGRS",
+   "source": "lane:stub",
+   "started_at": 1793334945517,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "456408da8bee36438b54640afbfd345dea219791"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HF9YKVQNZVCCHWHT2HE8Q",
+   "source": "lane:stub",
+   "started_at": 1793334945751,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "456408da8bee36438b54640afbfd345dea219791"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HFA5AFHN3RNRW63YB21QQ",
+   "source": "lane:stub",
+   "started_at": 1793334945966,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "456408da8bee36438b54640afbfd345dea219791"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 1,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65HFBXNBACJ9PQY9HBCZNVP",
+   "source": "lane:stub",
+   "started_at": 1793334947769,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "456408da8bee36438b54640afbfd345dea219791"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HFCERY6SKKEE8FFFNS80J",
+   "source": "lane:stub",
+   "started_at": 1793334948316,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "a7ff970a5b65eae8169446e10bd716ce11587201"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HFCNZMMTTFVAWJM07EE6E",
+   "source": "lane:stub",
+   "started_at": 1793334948547,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "a7ff970a5b65eae8169446e10bd716ce11587201"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HKSF2DBJFAYHPPWE1AXKQ",
+   "source": "lane:stub",
+   "started_at": 1793335092710,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "02df04dbab5d1eceefef581ee4572aa9f350ea4e"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HKT5AXAA7HDNT3K7N5MGF",
+   "source": "lane:stub",
+   "started_at": 1793335093422,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "1a5f1ec9fab89bd5b458b688ca2b5cdd79a701bf"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 0,
+    "env_failed": 1
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HKTMJG079ZJ7XTBHGWKCD",
+   "source": "lane:stub",
+   "started_at": 1793335093910,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "2347a24add188e21f9e3f7b31b69062b9206c2e1"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HKYYKSMGEGM95EDC3XV25",
+   "source": "lane:stub",
+   "started_at": 1793335103337,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "5375fdeb9befec43ab77056bc633ea3fe8f4d963"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HM48DD6K63CSV9DAFD4DP",
+   "source": "lane:stub",
+   "started_at": 1793335103761,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "5375fdeb9befec43ab77056bc633ea3fe8f4d963"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 1,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65HM4YAFAAYPR1BF6NVJ8MV",
+   "source": "lane:stub",
+   "started_at": 1793335104463,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "02814b1bdb202e483743438d794f55c0fedda4bb"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HM54S1TG8JFG08FPCCQK4",
+   "source": "lane:stub",
+   "started_at": 1793335104669,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "02814b1bdb202e483743438d794f55c0fedda4bb"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HM5B36DD2HKVJY07EDS81",
+   "source": "lane:stub",
+   "started_at": 1793335104870,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "02814b1bdb202e483743438d794f55c0fedda4bb"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HM5HKYTQ525PAG4Z533P6",
+   "source": "lane:stub",
+   "started_at": 1793335105079,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "02814b1bdb202e483743438d794f55c0fedda4bb"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HM5YQJ418HG8BS5AEB6CT",
+   "source": "lane:stub",
+   "started_at": 1793335105499,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "a75a8db34d1c080a19e71eff15c2d8929d5feca7"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HM64XS8YHT13C5P236BG1",
+   "source": "lane:stub",
+   "started_at": 1793335105697,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "a75a8db34d1c080a19e71eff15c2d8929d5feca7"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HM6B2Q1HGE7TTPTS719MB",
+   "source": "lane:stub",
+   "started_at": 1793335110909,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "a75a8db34d1c080a19e71eff15c2d8929d5feca7"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HMMF9Z4ZBTYR7QBSFSCAG",
+   "source": "lane:stub",
+   "started_at": 1793335120362,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "b8a861d9cc3ea16e63994131b033cb8895ebd5a9"
+    }
+   ],
+   "cases": {
+    "ran": 0,
+    "passed": 0,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65HMMT7ZAWT74APH8DGE0ZJ",
+   "source": "lane:stub",
+   "started_at": 1793335120715,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "b8a861d9cc3ea16e63994131b033cb8895ebd5a9"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HMN0CYKKKF3DEDKVND5GD",
+   "source": "lane:stub",
+   "started_at": 1793335120912,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "b8a861d9cc3ea16e63994131b033cb8895ebd5a9"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HMN6HJMPV95GN2P9M7EV6",
+   "source": "lane:stub",
+   "started_at": 1793335121109,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "b8a861d9cc3ea16e63994131b033cb8895ebd5a9"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 1,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65HPV0QNT83J8TFG892B23D",
+   "source": "lane:stub",
+   "started_at": 1793335192602,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "865d7d637ccd7a65857e8edeed9499eb6fed7a99"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HPV82K03Q8AXC049YK3ES",
+   "source": "lane:stub",
+   "started_at": 1793335192837,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "865d7d637ccd7a65857e8edeed9499eb6fed7a99"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HPVEJSCPNXEK36WKP5GQX",
+   "source": "lane:stub",
+   "started_at": 1793335193046,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "865d7d637ccd7a65857e8edeed9499eb6fed7a99"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 1,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65HPX259BY1SEVFFCH5RDCW",
+   "source": "lane:stub",
+   "started_at": 1793335194697,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "865d7d637ccd7a65857e8edeed9499eb6fed7a99"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HPXFHTPGG6QQEE96PXYQC",
+   "source": "lane:stub",
+   "started_at": 1793335195124,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "2979696bc2c2fac6f955fc46bee4c62241e226e1"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HPXP2XGQJSM63T23SG2RC",
+   "source": "lane:stub",
+   "started_at": 1793335195333,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "2979696bc2c2fac6f955fc46bee4c62241e226e1"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HYBH3PQR4ZWH1081DMN0N",
+   "source": "lane:line-round",
+   "started_at": 1793335438887,
+   "repos": [
+    {
+     "repo": "src",
+     "revision": "b69221d7077fc8c518625c3684a126be66f0e00e"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65HYBVQQNJG88VPDEZGDNNR",
+   "source": "lane:line-round",
+   "started_at": 1793335439227,
+   "repos": [
+    {
+     "repo": "src",
+     "revision": "c683e5388422c2efeba143b06e80b6d0048492d4"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J3GQWWXHCBRA7DDRYFRV5",
+   "source": "lane:line-round",
+   "started_at": 1793335608066,
+   "repos": [
+    {
+     "repo": "src",
+     "revision": "382cd8eb83204e995dfc11558cd5b3110326ce16"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J3H61RTJKQT5EHJWFVQBY",
+   "source": "lane:line-round",
+   "started_at": 1793335608517,
+   "repos": [
+    {
+     "repo": "src",
+     "revision": "f58ac57da7043b943e1676960369f2d87cd24f29"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J3VS2JA2JRV8ZB937B143",
+   "source": "lane:stub",
+   "started_at": 1793335619366,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "098ec8ef1928aa05a0212b7ee3470d65096eaeb9"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J3WD9XR5XQTZDB5AJGBWH",
+   "source": "lane:stub",
+   "started_at": 1793335620013,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "86a1bd240b7f84f77b713121bdc675e50cb7f4ab"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 0,
+    "env_failed": 1
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J3WX9PG9WEYZGC96TQ5M2",
+   "source": "lane:stub",
+   "started_at": 1793335620525,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "2266fe1bcc5545db46073f73d623cfe9b6c1d2d3"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J3XAR2T6T8WZQ17S842RN",
+   "source": "lane:stub",
+   "started_at": 1793335625966,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "e11b567fbc2a1f2fe406652cd6d9780d0c96805c"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J42N2J3DNJ2WHZADVK4GF",
+   "source": "lane:stub",
+   "started_at": 1793335626407,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "e11b567fbc2a1f2fe406652cd6d9780d0c96805c"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 1,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65J43EJNQVMMYF6PW4EY67J",
+   "source": "lane:stub",
+   "started_at": 1793335627222,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "2462b7fed309078ddf81fb3bcd4b8d674f910c4a"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J43NPCFR7R144VTN1DH0W",
+   "source": "lane:stub",
+   "started_at": 1793335627451,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "2462b7fed309078ddf81fb3bcd4b8d674f910c4a"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J43X6NJSP3ZP7P1N41DVP",
+   "source": "lane:stub",
+   "started_at": 1793335627690,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "2462b7fed309078ddf81fb3bcd4b8d674f910c4a"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J4455XEC68R3DE6NH9B6B",
+   "source": "lane:stub",
+   "started_at": 1793335627946,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "2462b7fed309078ddf81fb3bcd4b8d674f910c4a"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J44K9W5TMP6JXXX60RHE9",
+   "source": "lane:stub",
+   "started_at": 1793335628397,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "d97708350117c05cfbcd167563881926e8c6c35b"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J44SXN5ZW8WBQS7RKHRSC",
+   "source": "lane:stub",
+   "started_at": 1793335628609,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "d97708350117c05cfbcd167563881926e8c6c35b"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J450AMM1E9MV971NB72C9",
+   "source": "lane:stub",
+   "started_at": 1793335633824,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "d97708350117c05cfbcd167563881926e8c6c35b"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J4AF9ZZT2Z9FW30BRZH55",
+   "source": "lane:stub",
+   "started_at": 1793335634409,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "6625e999e381732a8e51ad0868de2bdd33e4f207"
+    }
+   ],
+   "cases": {
+    "ran": 0,
+    "passed": 0,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65J4AV3PATP1P1D9JEXN5WN",
+   "source": "lane:stub",
+   "started_at": 1793335634791,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "6625e999e381732a8e51ad0868de2bdd33e4f207"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J4B1MRXEW6E4TQMG794P8",
+   "source": "lane:stub",
+   "started_at": 1793335635004,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "6625e999e381732a8e51ad0868de2bdd33e4f207"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J4B86MZ1Y7YBH5TQMWAZH",
+   "source": "lane:stub",
+   "started_at": 1793335635210,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "6625e999e381732a8e51ad0868de2bdd33e4f207"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 1,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65J4BNGJJJPWJAQ08HZT3DH",
+   "source": "lane:stub",
+   "started_at": 1793335635635,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "c7da44d7d077d8a16e593f839560b1fbc46ebd70"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J4BWKYHDR1XVWVYACJPGV",
+   "source": "lane:stub",
+   "started_at": 1793335635863,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "c7da44d7d077d8a16e593f839560b1fbc46ebd70"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J4C3VJ4NWFDRYA6K9AQC3",
+   "source": "lane:stub",
+   "started_at": 1793335636095,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "c7da44d7d077d8a16e593f839560b1fbc46ebd70"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 1,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65J4DRFQ9C7E90NQ510RB0R",
+   "source": "lane:stub",
+   "started_at": 1793335637780,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "c7da44d7d077d8a16e593f839560b1fbc46ebd70"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J4E7N00GMMRYZ78VG651A",
+   "source": "lane:stub",
+   "started_at": 1793335638265,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "0ca2e92c3079b8c69566e62dce8b3c947a238ce9"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J4EEKNYB7F88041BACBKQ",
+   "source": "lane:stub",
+   "started_at": 1793335638487,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "0ca2e92c3079b8c69566e62dce8b3c947a238ce9"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J6RSY8HYECRPVXF7RGGZG",
+   "source": "lane:line-round",
+   "started_at": 1793335714625,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "6dfc283d1accb00bc5def7561c2770f1ec3d61f8"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J6S38HZYXZZ7DKXRWRZNQ",
+   "source": "lane:line-round",
+   "started_at": 1793335714921,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "6dfc283d1accb00bc5def7561c2770f1ec3d61f8"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 1,
+    "failed": 1,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65J6TYQMF0P33HE4BWRXDWB",
+   "source": "lane:line-round",
+   "started_at": 1793335716824,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "478b499ffe6473f6ea1e743d860f6f8ca6aee233"
+    }
+   ],
+   "cases": {
+    "ran": 2,
+    "passed": 2,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J6ZCCF30XHEC4Z5M4QBBE",
+   "source": "lane:stub",
+   "started_at": 1793335721360,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "cf0dce8460d23ee2de9992941bb1695a5ee1c089"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J7025AQP33EKWR1SM97V7",
+   "source": "lane:stub",
+   "started_at": 1793335722057,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "bb24326d6846b7e09625511dfaface27947172d3"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 0,
+    "env_failed": 1
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J70JCFGQ5NW3AV9KT5JE3",
+   "source": "lane:stub",
+   "started_at": 1793335722576,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "a40f73d80ef9f46713eaf48a372027189e234396"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J7EWPT8B5VJKECJBFXB5Z",
+   "source": "lane:stub",
+   "started_at": 1793335737242,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "411c22321f31709bded357ba8d2e19f21c444159"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J7F4PN3Y5XPPVBE20PMFJ",
+   "source": "lane:stub",
+   "started_at": 1793335737498,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "411c22321f31709bded357ba8d2e19f21c444159"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J7FCMZJ2PZXSQZZBT1PJQ",
+   "source": "lane:stub",
+   "started_at": 1793335737753,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "411c22321f31709bded357ba8d2e19f21c444159"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 0,
+    "failed": 1,
+    "env_failed": 0
+   },
+   "verdict": "red"
+  },
+  {
+   "id": "run-01M65J7H246TTCRPGCA3S2WXFA",
+   "source": "lane:stub",
+   "started_at": 1793335739464,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "411c22321f31709bded357ba8d2e19f21c444159"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J7HFVJNKFVNG44VHKYJ2R",
+   "source": "lane:stub",
+   "started_at": 1793335739902,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "dc2cdc2e6bf25fa8c5f7cd59eef092e16868252a"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  },
+  {
+   "id": "run-01M65J7HPMA361MGSWHPWCDCW0",
+   "source": "lane:stub",
+   "started_at": 1793335740120,
+   "repos": [
+    {
+     "repo": "sandbar",
+     "revision": "dc2cdc2e6bf25fa8c5f7cd59eef092e16868252a"
+    }
+   ],
+   "cases": {
+    "ran": 1,
+    "passed": 1,
+    "failed": 0,
+    "env_failed": 0
+   },
+   "verdict": "green"
+  }
+ ]
+}

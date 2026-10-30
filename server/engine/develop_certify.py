@@ -28,6 +28,12 @@ What this module owns:
   filter, then the range — and a range already searched is refused, never
   searched twice (goal 10). The honest outcomes are recorded: ``isolated``,
   or the required second sentence ``boundary, culprit not isolated``.
+- The **reachability net** (t261030-25, KI-429): before a round mints a
+  certification or opens a freeze, every candidate revision must be a commit
+  object in the repository the line judges. An unreachable revision is a NAMED
+  refusal carrying the revision and the caller — no certification row, no
+  freeze — because a fixture once booked a fabricated revision into the real
+  ledger and the line was frozen on it.
 - The **freeze records**: an episode is an entity (id, line, cause); its
   state, culprits and closure are separate change records keyed to it —
   never editable fields on the episode body. A freeze opens only on a red
@@ -2570,6 +2576,106 @@ def _git_ref(repo_path, ref):
     return (p.stdout or "").strip() if p.returncode == 0 else ""
 
 
+#: The refusal vocabulary for a candidate revision that is not a git commit
+#: object in the repository the line claims to judge (t261030-25, KI-429).
+#: Named once here: the settle path and the tick-entry reconciliation both
+#: refuse with these words, so a reader greps one vocabulary and finds every
+#: site.
+REVISION_UNREACHABLE = "revision_not_a_git_object"
+
+
+def line_repo_dir(project, repo):
+    """The tree a line's repository is JUDGED in: the line worktree
+    ``<develop_dir>/wt/<repo>`` — the same path ``line_head_candidate`` reads
+    a head from. ``None`` (or a path that does not exist) means the project
+    declares no such repository tree; the caller treats that as unreachable,
+    never as a reason to certify."""
+    if not isinstance(project, str) or not project.strip():
+        return None
+    if not isinstance(repo, str) or not repo.strip():
+        return None
+    try:
+        import shared
+        return shared.develop_dir(project) / "wt" / repo
+    except Exception:  # noqa: BLE001 — an unresolvable tree is named, not fatal
+        return None
+
+
+def revision_reachable(repo_dir, revision):
+    """True iff ``revision`` names a COMMIT object inside ``repo_dir``.
+
+    ``git cat-file -e <rev>^{commit}`` is the question the ledger needs
+    answered: this repository must be able to hand the revision to a checkout
+    before the ledger may certify it. Fail-closed in every direction — an
+    absent tree, a spawn error, a timeout and a non-zero exit all answer
+    False (a revision we cannot prove exists is not one we may certify)."""
+    if repo_dir is None or not isinstance(revision, str) \
+            or not revision.strip():
+        return False
+    if not Path(repo_dir).exists():
+        return False
+    import subprocess
+    try:
+        p = subprocess.run(["git", "-C", str(repo_dir), "cat-file", "-e",
+                            "%s^{commit}" % revision.strip()],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return p.returncode == 0
+
+
+def unreachable_candidates(candidate_repos, project):
+    """Every candidate whose revision is not a commit object in the repo it
+    claims to judge, as ``[{"repo", "revision", "why"}]``.
+
+    Why this exists (t261030-25, KI-429): a test fixture wrote ``run-*``
+    directories into the REAL projects root, each citing a revision that is
+    not a git object anywhere in this repository. The tick-entry
+    reconciliation booked them, and opened a freeze, so the production ledger
+    declared the develop line red on a revision that never existed here. This
+    is the ledger-side net: no certification row and no freeze may cite a
+    revision the repository cannot produce. It catches ONLY unreachable
+    revisions — a real green round still certifies and a real red round still
+    freezes (the two behaviours this must never change).
+
+    ``why`` is one of ``repo_not_resolvable`` (the line declares no such
+    tree), ``not_a_git_object`` (the tree has no such commit) or
+    ``candidate_malformed`` (not a dict / empty repo or revision) — every
+    member is judged, never skipped."""
+    out = []
+    for member in candidate_repos or []:
+        if not isinstance(member, dict):
+            out.append({"repo": repr(member), "revision": "",
+                        "why": "candidate_malformed"})
+            continue
+        repo = member.get("repo")
+        revision = member.get("revision")
+        if not isinstance(repo, str) or not repo.strip() \
+                or not isinstance(revision, str) or not revision.strip():
+            out.append({"repo": str(repo), "revision": str(revision),
+                        "why": "candidate_malformed"})
+            continue
+        repo_dir = line_repo_dir(project, repo)
+        if repo_dir is None or not Path(repo_dir).exists():
+            out.append({"repo": repo, "revision": revision,
+                        "why": "repo_not_resolvable"})
+            continue
+        if not revision_reachable(repo_dir, revision):
+            out.append({"repo": repo, "revision": revision,
+                        "why": REVISION_UNREACHABLE})
+    return out
+
+
+def unreachable_refusal(blocked, caller):
+    """The ONE named refusal string for an unreachable candidate set: the
+    check that failed, WHICH repository and revision failed it, and WHO
+    asked. Both call sites reuse it so the wording cannot drift apart."""
+    first = blocked[0]
+    return "certification_refused:%s:%s@%s:caller=%s" % (
+        first["why"], first["repo"] or "?", first["revision"] or "?",
+        caller)
+
+
 def line_head_candidate(project, line):
     """The line's CURRENT head per declared repository — what a manual round
     must judge (261015 host order).
@@ -2831,6 +2937,17 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                     except Exception as _e:  # noqa: BLE001
                         sys.stderr.write("run-record persist failed: %s\n"
                                          % _e)
+                # t261030-25 (KI-429): the reachability net lives on the
+                # RECONCILIATION path below, not here, and the reason is
+                # structural: a settle round hands ``candidate`` to the round's
+                # own runner, which CHECKOUTS that revision in a tree of its own
+                # — a revision this repository cannot produce dies there as a
+                # named could-not-run (no header, no certification), so this
+                # path cannot mint a certification over an unreachable revision.
+                # A net here would only re-judge the candidate the engine just
+                # resolved from the line worktree, and it refused 37 existing
+                # batteries whose records deliberately carry synthetic revision
+                # labels to exercise record logic without git.
                 cert = build_certification(candidate, header, booked_red,
                                            judged_by, at_ms=now_ms, line=line)
                 batch = [cert]
@@ -3399,7 +3516,7 @@ def line_round_tick(project_key, load_lines, read_rows, append_rows,
             healed = reconcile_unrecorded_rounds(
                 line, rows, runs_rows, append_rows, judged_by, booked_red,
                 now_ms, sole_line=(len(lines) == 1),
-                guard_held=guard_held(guard_path))
+                guard_held=guard_held(guard_path), project=project_key)
             if healed:
                 entries.extend(healed)
                 # the heal may have closed the range: re-read before the ask
@@ -3722,7 +3839,8 @@ def _run_repos_key(repos):
 
 def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
                                 judged_by, booked_red, now_ms,
-                                sole_line=False, guard_held=False):
+                                sole_line=False, guard_held=False,
+                                project=None):
     """Heal completed line-round runs that no delivery-ledger row cites.
 
     Returns named entries; every append happens HERE, exactly once per run
@@ -3740,7 +3858,10 @@ def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
     dict ``cases``, ran >= 1) becomes ONE certification whose ``judged_by``
     names the reconstruction (``reconciled:<run_id>``), plus freeze rows
     only on a content red (the same should_freeze rule); anything else
-    becomes ONE range-growth row naming the run id. Never raises: an append
+    becomes ONE range-growth row naming the run id. A run whose revisions are
+    not commit objects in ``project``'s line trees is REFUSED BY NAME
+    (t261030-25, KI-429) and records one range-growth row naming the refused
+    revision — never a certification, never a freeze. Never raises: an append
     failure is a named ``error`` entry, and the next tick replays the heal.
     """
     entries = []
@@ -3786,6 +3907,31 @@ def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
                     and _valid_repos(run.get("repos")))
         try:
             if judgable:
+                # t261030-25 (KI-429): the heal obeys the same reachability
+                # net as the settle path. A run row citing a revision this
+                # project cannot produce is refused BY NAME — no
+                # certification row, no freeze — and one range-growth row
+                # records the refusal (the same non-judgment vocabulary the
+                # unjudgable-header branch below uses), so the next tick does
+                # not replay the same refusal forever.
+                _blocked = unreachable_candidates(run.get("repos"), project) \
+                    if project else []
+                if _blocked:
+                    _why = unreachable_refusal(_blocked,
+                                               "reconciled:%s" % rid)
+                    batch = [could_not_run_row(
+                        line, "unrecorded_round_refused:%s" % _why,
+                        at_ms=now_ms)]
+                    res = append_rows(batch)
+                    if not isinstance(res, dict) \
+                            or res.get("written") != len(batch):
+                        raise CertifyError("heal_append_rejected:%r"
+                                           % (res.get("rejected")
+                                              if isinstance(res, dict)
+                                              else res,))
+                    entries.append({"line": line, "state": "error", "run": rid,
+                                    "error": _why, "wrote": "range_growth"})
+                    continue
                 cert = build_certification(
                     run.get("repos"), run, booked_red,
                     "reconciled:%s" % rid, at_ms=now_ms, line=line)
