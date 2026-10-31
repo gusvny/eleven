@@ -4447,7 +4447,7 @@
     },
     "integration/t261005-09/sc_left_column_ui_journey.mjs": {
       "anchor": "behaviour",
-      "note": "UI-1 left-column journey: brand first row, project identity + colour block, order-free ticket rows (no invented queue face), session handles with new-session entrance, executor handle only when a face marks it, inspection rows still present",
+      "note": "UI-1 left-column journey: brand first row, project identity + colour block, order-free ticket rows (no invented queue face), session handles with the new-session entrance — no committed name renders the handle short code as the tab label, a committed name wins with the handle kept reachable in the tooltip (t261031-42 R5) — executor handle only when a face marks it, inspection rows still present",
       "sync_path": ""
     },
     "integration/t261005-09/sc_session_handle_contract.mjs": {

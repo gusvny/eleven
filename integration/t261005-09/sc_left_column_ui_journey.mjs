@@ -7,6 +7,11 @@
 // （含阶段英文标签、无排队号/无拖拽箭头=CL-2/CL-3 边界面：引擎面未下发排队字段就不造）；
 // 项目内会话区每行带会话句柄短码，可发现「+ 新建会话」入口；executor 句柄只在有面标记时
 // 出现（今日无该面，不得凭空渲染）。
+// Handle-vs-name contract (both halves hold at once): with no committed name the tab
+// label IS the handle short code (UI-5 / t261005-06); a committed name wins on the
+// label and the handle stays reachable in the tab tooltip (t261031-42 R5). On the
+// ledger the `title` field is the committed name, so a seeded `title` is NOT a
+// no-name row (the misread that froze this case after the rename landing).
 //
 // 两层：
 //   S0 build-contract（纯 node）：shipped 双 bundle 同步（KI-052）+ 品牌/会话入口文案字面
@@ -73,13 +78,24 @@ const WAIT_ID = 'devfixa0902wait'  // 等你（updated_ts 较新）
 const INS_ID = 'inspfixa0903w'     // 巡检行（在场性回归守卫，归 0915-19 的面不复断）
 const T2 = 1789353600
 const T3 = 1789357200
+const T4 = 1789360800
 
-// 会话区种子（LEDGER_KEY 公开字面量，session-ledger-store.ts）：两条项目内会话，
-// 短码期望由 session-handle 模块现算（单源：渲染=模块，断言=同模块）。
+// Session-area seed (LEDGER_KEY is a public literal, session-ledger-store.ts).
+// Three project sessions in one row cover both halves of the contract:
+//   - SESS_A / SESS_B carry NO name. On the ledger the optional `title` field IS
+//     the name the user committed (the rename commit writes it, t261031-42 R3;
+//     the sessions.json face stores nothing else), so leaving it out is exactly
+//     the no-custom-name state. Their tab label must therefore BE the handle
+//     short code (UI-5 / t261005-06);
+//   - SESS_NAMED carries a committed name. The name must win on the label while
+//     the handle stays reachable in the tab tooltip (t261031-42 R5).
+// Short-code expectations are computed from the session-handle module (single
+// source: the render and the assertion use the same module).
 const LEDGER_KEY = 'sandbar-workbench-opened-sessions-v1'
-const SESS_A = { id: 'sess-3f9c2a7e-1111-4000-8000-000000000001', seq: 1, title: 'Plan session', project: PROJ_A, cwd: '', lastOpenedAt: T2 }
-const SESS_B = { id: 'sess-77aa4b2e-2222-4000-8000-000000000002', seq: 2, title: 'Review session', project: PROJ_A, cwd: '', lastOpenedAt: T3 }
-const LEDGER_SEED = JSON.stringify([SESS_A, SESS_B])
+const SESS_A = { id: 'sess-3f9c2a7e-1111-4000-8000-000000000001', seq: 1, project: PROJ_A, cwd: '', lastOpenedAt: T2 }
+const SESS_B = { id: 'sess-77aa4b2e-2222-4000-8000-000000000002', seq: 2, project: PROJ_A, cwd: '', lastOpenedAt: T3 }
+const SESS_NAMED = { id: 'sess-c0de4b1e-3333-4000-8000-000000000003', seq: 3, title: 'Plan session', project: PROJ_A, cwd: '', lastOpenedAt: T4 }
+const LEDGER_SEED = JSON.stringify([SESS_A, SESS_B, SESS_NAMED])
 
 // ui-labels + ticket-list-model 现算期望标签（界面英文=前端映射表统一映射引擎既有英文标识，
 // CLAUDE.md 规则 6；不锚具体哪个映射函数/词表=合法实现选择面，锚「有映射词、非自造词」）。
@@ -409,30 +425,64 @@ async function runBrowser(pw, browser) {
       qbad.length ? `queue/drag ordering invented locally: ${qbad.map(q => `${q.id}(${q.bad})`).join('；')}`
         : 'rows carry no queue numbers / drag handles (CL-2/CL-3 face not invented)')
 
-    // B5 会话区句柄：种子账册两行渲染在组内，各以模块现算短码可辨（可见词面或可及名/tooltip），
-    // 标题可经 tooltip/可及名到达；executor 字面零出现（今日无标记面，渲染 executor=凭空造数据）。
-    const sess = await page.evaluate((titles) => {
+    // B5 session handles, read on the real panel. Both contract halves at once
+    // (UI-5/t261005-06 + t261031-42 R5):
+    //   (a) no custom name -> the tab's main label IS the module short code. The
+    //       label node (data-wb-psess-handle, a declared semantic anchor of this
+    //       component) must equal sessionHandle(id, []) exactly — not "some text
+    //       exists" — and the tab's own text must carry the code;
+    //   (b) a committed name -> the name wins on the label AND the handle stays
+    //       reachable in the tab tooltip;
+    //   (c) every tab keeps its session id reachable in the tooltip (identity is
+    //       never lost behind a name), and the literal 'executor' appears nowhere
+    //       (no marking face exists today — rendering it = fabricated data).
+    const sess = await page.evaluate(() => {
       const sb = document.querySelector('.wb-sb') || document.body
       const text = (sb.innerText || '').replace(/\s+/g, ' ')
-      const named = [...sb.querySelectorAll('[title], [aria-label]')]
-        .map(el => `${el.getAttribute('title') || ''} ${el.getAttribute('aria-label') || ''}`).join(' ')
-      return {
-        text,
-        exec: /\bexecutor\b/.test(text),
-        titleReachable: titles.every(t => named.includes(t)),
-        handlesInNamed: named,
-      }
-    }, [SESS_A.title, SESS_B.title])
+      const tabs = [...sb.querySelectorAll('[data-wb-psess-tab]')].map(el => {
+        const lbl = el.querySelector('[data-wb-psess-handle]')
+        return {
+          label: lbl ? (lbl.textContent || '').trim() : null,
+          named: lbl ? lbl.getAttribute('data-named') === 'true' : null,
+          tooltip: el.getAttribute('title') || '',
+          text: (el.innerText || '').replace(/\s+/g, ' '),
+        }
+      })
+      return { text, exec: /\bexecutor\b/.test(text), tabs }
+    })
     const codeA = sessionHandle ? sessionHandle(SESS_A.id, []) : null
     const codeB = sessionHandle ? sessionHandle(SESS_B.id, []) : null
-    const codeOk = !!sessionHandle && !!codeA && !!codeB
-      && sess.text.includes(codeA) && sess.text.includes(codeB)
-    const sessBad = !codeOk ? `handle short codes not rendered as defined (module=${!!sessionHandle}, A=${codeA}, B=${codeB})`
-      : !sess.titleReachable ? `session titles not reachable via tooltip/accessible name (text=${sess.text.slice(0, 120)})`
-      : sess.exec ? 'executor literal rendered without a marking face (must not invent data)'
-      : null
-    record('B5 session-handles', sessBad ? 'fail' : 'pass',
-      sessBad ?? `tabs distinguishable by derived short codes (${codeA}, ${codeB}); titles reachable via tooltip; no executor literal`)
+    const codeN = sessionHandle ? sessionHandle(SESS_NAMED.id, []) : null
+    // Tabs are located by the session id in their tooltip (the tooltip carries
+    // the id on every tab), never by row position.
+    const tabOf = (id) => sess.tabs.find(t => t.tooltip.includes(id)) ?? null
+    const b5bad = []
+    if (!sessionHandle) b5bad.push('session-handle module absent (label expectations unavailable)')
+    for (const [sid, code] of [[SESS_A.id, codeA], [SESS_B.id, codeB]]) {
+      const t = tabOf(sid)
+      if (!t) { b5bad.push(`no tab rendered for ${sid}`); continue }
+      if (t.named) b5bad.push(`${sid} carries the named flag with no committed name`)
+      if (!code) { b5bad.push(`${sid} has no module short code`); continue }
+      if (t.label !== code) b5bad.push(`${sid} label=${JSON.stringify(t.label)}, expected the handle short code ${code}`)
+      if (!t.text.includes(code)) b5bad.push(`${sid} tab text lacks the handle short code ${code} (text=${JSON.stringify(t.text.slice(0, 60))})`)
+      if (!t.tooltip.includes(sid)) b5bad.push(`${sid} session id not reachable in the tab tooltip`)
+    }
+    const namedTab = tabOf(SESS_NAMED.id)
+    if (!namedTab) b5bad.push(`no tab rendered for ${SESS_NAMED.id}`)
+    else {
+      if (namedTab.label !== SESS_NAMED.title) {
+        b5bad.push(`committed name lost: label=${JSON.stringify(namedTab.label)}, expected ${JSON.stringify(SESS_NAMED.title)}`)
+      }
+      if (!namedTab.tooltip.includes(SESS_NAMED.title)) b5bad.push('committed name not reachable in the named tab tooltip')
+      if (!codeN || !namedTab.tooltip.includes(codeN)) {
+        b5bad.push(`handle ${codeN} not reachable on the named tab (tooltip=${JSON.stringify(namedTab.tooltip.slice(0, 120))})`)
+      }
+      if (!namedTab.tooltip.includes(SESS_NAMED.id)) b5bad.push(`${SESS_NAMED.id} session id not reachable in the tab tooltip`)
+    }
+    if (sess.exec) b5bad.push('executor literal rendered without a marking face (must not invent data)')
+    record('B5 session-handles', b5bad.length ? 'fail' : 'pass',
+      b5bad.length ? b5bad.join('; ')
+        : `no name -> label is the handle short code (${codeA}, ${codeB}); committed name '${SESS_NAMED.title}' wins with handle ${codeN} + session id reachable in the tooltip; no executor literal`)
 
     // B6 入口 1：组内「+ New session」控件在场可发现（可见文案或可及名/tooltip 含 new session），
     // 是可点 button 面；空组态=带字按钮形态（现实现两形态同锚 data-wb-psess-new）。
