@@ -685,7 +685,12 @@ def test_scope_patch_id_declared_and_consumed():
     assert src.index("quick_scope_unresolved") < src.index("quick_gate_error")
     # the round carries the plan through the single-writer args
     rd = inspect.getsource(dev_lane.QuickmanualLaneWorkflow._quick_gate_round)
-    assert "_args.quick_scope = dict(quick_scope or {})" in rd
+    # t261031-23: the plan is copied once into `_sc` (the pointed-list helper and
+    # the args both read that one copy), and the args still carry the WHOLE plan.
+    # The intent this lock guards is unchanged: the round never re-derives it.
+    assert "_sc = dict(quick_scope or {}) if isinstance(quick_scope, dict) else {}" \
+        in rd
+    assert "_args.quick_scope = dict(_sc)" in rd
 
 
 def test_quick_scope_args_default_keeps_old_payloads_replay_legal():

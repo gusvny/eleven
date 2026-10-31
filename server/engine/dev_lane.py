@@ -565,6 +565,42 @@ def closing_pointed_names(run_only, own_names=()) -> List[str]:
     return out
 
 
+def quick_gate_pointed_names(quick_scope) -> List[str]:
+    """The quickmanual gate round's POINTED list (t261031-23, KI-442).
+
+    The declared scope of the resolved plan ∪ the ticket's own scenario names.
+    The own names are also the runner's exemption face (pools / known-red roster
+    / ledger reuse never drop them), but an exemption is not a run order: a name
+    that is not pointed never runs, and the t261025-02 coverage check then voids
+    the round. So the own names are ADDED here, through the one union helper the
+    develop-buffer closing run already uses (`closing_pointed_names`).
+
+    Pure and order-stable: the declared scope keeps its order, an own name that
+    is not already pointed is appended in declaration order, duplicates and
+    blank/None names are dropped. An empty own set returns the declared scope
+    unchanged (docs-only and un-declared rounds stay byte-identical).
+
+    Scope by mode (the declared scope is what the round would run without any own
+    name):
+      - scenario / no mode: the plan's `only_names` (the scenario seam);
+      - check / battery: nothing is pointed — those modes run the NAMED check
+        (and its pytest target) on their own route, so the pointed list carries
+        the own names only;
+      - full (the reserved full-gate token): nothing is pointed at all — the
+        union of "everything" with the own names is still everything, and
+        pointing names here would NARROW the full round.
+    An unreadable scope answers [] (no narrowing), never a guessed list."""
+    sc = dict(quick_scope) if isinstance(quick_scope, dict) else {}
+    mode = str(sc.get("mode") or "")
+    if mode == "full":
+        return []
+    if mode in ("check", "battery"):
+        declared: List[str] = []
+    else:
+        declared = list(sc.get("only_names") or [])
+    return closing_pointed_names(declared, list(sc.get("own_names") or []))
+
+
 def fast_budget_verdict(wall_s, budget_min) -> Tuple[bool, str]:
     """Named stewardship verdict for the round's wall clock against the
     declared budget. A breach is a NAMED signal — never an auto-trim, never a
@@ -1045,6 +1081,18 @@ T261025_02_OWN_CLOSING_PATCH_ID = "t261025-02-own-gate-run-v1"
 # A new patch id keeps in-flight replays byte-identical: an old history evaluates
 # it un-patched and passes the declared fast set alone, exactly as recorded.
 OWN_CLOSING_UNION_PATCH_ID = "dev-lane-own-closing-union-v1"
+
+# t261031-23 (KI-442): the QUICKMANUAL gate round carried the same defect one lane
+# family over. `_quick_gate_round` passed the ticket's own names as `own_names`
+# (the exemption face) and pointed only the declared scope, so an own scenario the
+# ticket had just registered never ran, and the t261025-02 coverage check voided
+# the round ("declared own scenario(s) X did NOT run this round"; measured on
+# t261031-06, blocked again on t261031-14). The pointed list must be the declared
+# scope UNION the own names: one rule for both lanes, one helper
+# (`closing_pointed_names`). A new patch id keeps in-flight replays
+# byte-identical: an old history evaluates it un-patched and sends the declared
+# scope alone, exactly as recorded.
+QUICK_OWN_POINTED_PATCH_ID = "quickmanual-own-pointed-union-v1"
 
 #: Patch guard CONCURRENCY_GATE_PATCH_ID (t261005-14; fixes the replay break
 #: CL-1 / t261004-32 introduced). 775bdb1 wired the whole concurrency command
@@ -8910,16 +8958,33 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
         runner, fail-closed on out-of-registry names) and a check/battery scope
         rides the additive `quick_scope` field (exactly the named check, the
         battery = that check with the pytest target). Empty plan = the FULL
-        registry round, byte-identical to today."""
+        registry round, byte-identical to today.
+
+        t261031-23 (KI-442): the pointed list is now the declared scope ∪ the
+        ticket's OWN scenario names (the same union the develop-buffer closing run
+        uses). Before this, the own names rode the exemption face only, so an own
+        scenario the ticket had just registered was never run and the t261025-02
+        coverage check voided an otherwise green round. An empty own set keeps the
+        declared scope unchanged."""
+        _sc = dict(quick_scope or {}) if isinstance(quick_scope, dict) else {}
+        _own = list(_sc.get("own_names") or [])
+        _declared = list(_sc.get("only_names") or [])
+        _pointed = _declared
+        if workflow.patched(QUICK_OWN_POINTED_PATCH_ID):
+            _pointed = quick_gate_pointed_names(_sc)
+            if any(str(n).strip() for n in _own) and _pointed != _declared:
+                self._log("quick gate: pointed list carries the ticket's own "
+                          "scenario(s) as well (%s)" % ",".join(
+                              [n for n in _pointed if n not in _declared]))
         _args = self._integ_run_args(
-            list((quick_scope or {}).get("only_names") or []),
+            _pointed,
             # t261024-60: the quick gate threads the ticket's OWN face like the
             # develop-buffer gate — the runner exempts own names from the pool
             # exclusion, the known-red roster skip AND the ledger reuse face
             # (a supply-side filter schedules work, it never drops the own
             # proof). Empty default = full rounds and old callers unchanged.
-            own_names=list((quick_scope or {}).get("own_names") or []))
-        _args.quick_scope = dict(quick_scope or {})
+            own_names=_own)
+        _args.quick_scope = dict(_sc)
         rraw = await workflow.execute_activity(
             run_integration_tests, _args,
             start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
@@ -9022,6 +9087,12 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
             "scope_unjudged": self._quick_scope_unjudged_names(ir, quick_scope),
             "scope_pin": dict((quick_scope or {}).get("scope_pin") or {}),
             "own_source": dict((quick_scope or {}).get("own_source") or {}),
+            # t261031-23 (KI-442): the list the runner was actually POINTED at,
+            # next to the own face above. The incident was invisible precisely
+            # here: the own names were declared on the receipt while the pointed
+            # list carried the declared scope alone, so no reader could tell that
+            # the own proof obligation never ran.
+            "pointed": quick_gate_pointed_names(quick_scope),
             "collect_route": _route,
             "worker_identity": str(getattr(ir, "worker_identity", "") or ""),
             "code_stamp": getattr(ir, "code_stamp", None) or {},

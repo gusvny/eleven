@@ -130,9 +130,12 @@ class PayloadParse(unittest.TestCase):
 
 class DevLaneLocks(unittest.TestCase):
     def test_quick_gate_round_threads_own_names(self):
-        self.assertIn(
-            'own_names=list((quick_scope or {}).get("own_names") or [])',
-            _DEV_LANE)
+        # t261031-23 (KI-442): the own face is read once into `_own` and rides
+        # `_integ_run_args(..., own_names=_own)`; the same list is also POINTED
+        # (the union), which is what this ticket adds. The intent this lock
+        # guards is unchanged: the own face of the scope reaches the round.
+        self.assertIn('_own = list(_sc.get("own_names") or [])', _DEV_LANE)
+        self.assertIn("own_names=_own)", _DEV_LANE)
 
     def test_quick_gate_carries_the_own_refusal(self):
         self.assertIn("shared.own_set_expected_error(", _DEV_LANE)
