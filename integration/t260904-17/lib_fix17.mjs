@@ -12,7 +12,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import {
   mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, openSync, closeSync,
-  readdirSync, realpathSync, chmodSync, symlinkSync, unlinkSync,
+  readdirSync, realpathSync, chmodSync, symlinkSync, unlinkSync, cpSync,
 } from 'node:fs';
 import { copyFile, mkdir, symlink } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -101,8 +101,12 @@ export function realPython() {
  *   { workflows: [{id,name,stages:[{id,name}...]}...],
  *     tickets: [{id,project,title,status,stage,stage_state,epic,updated_ts,workflow,...}...],
  *     show: { <ticketId>: {mode:'ok', timeline:[{at,stage,state}...]} |
- *                          {mode:'fail'} | {mode:'delay', ms:N, then:'ok'|'fail'} } }
+ *                          {mode:'fail'} | {mode:'delay', ms:N, then:'ok'|'fail'} },
+ *     delay:  { dismiss|restore: ms },      // t261031-06: answer late
+ *     accept: { dismiss|restore: true } }   // t261031-05: answer ok:true
  * 轨迹：每次被拦截的调用追加一行 {op,id,t0,t1}（时序/并发断言面）。
+ * Both keys are optional and off by default: without them the op is refused by
+ * name, nothing is delayed, and the fixture rows never change.
  */
 /** 造引擎通道夹具仓（t260910-04 起 handleTickets 直调 runPocCli→client.py；其 python
  * 解析 venv 优先、PATH shim 被短路）——在 <stubDir>/engine-repo 造一个
@@ -220,6 +224,16 @@ if tool == 'ticket':
         detail['timeline'] = spec.get('timeline', [])
         detail['pending'] = spec.get('pending', [])
         emit({'ok': True, 'result': detail})
+    # t261031-06: an OPT-IN delayed answer, so a case can trigger a reset while a
+    # write is still out. ctrl.delay={"<op>": ms}; absent = answer at once. Placed
+    # before the acceptance block so a delayed ACCEPT is lawful too.
+    wait_ms = 0
+    try:
+        wait_ms = int((ctrl.get('delay') or {}).get(op, 0) or 0)
+    except (TypeError, ValueError):
+        wait_ms = 0
+    if wait_ms > 0 and op in ('dismiss', 'restore'):
+        time.sleep(min(wait_ms, 120000) / 1000.0)
     # t261031-05: an OPT-IN acceptance face for the disposition ops. The default
     # stays "every ticket op other than list/show is refused by name" - that
     # refusal is a property of the CHANNEL and the refusal legs are built on it,
@@ -249,8 +263,11 @@ if tool == 'ticket':
                     t.pop('dismissed', None)
         if not found:
             emit({'ok': False, 'error': 'fix17 桩：夹具无此票 ' + tid})
-        with open(ctrl_path, 'w') as f:
+        # atomic: a reader may re-read the list the moment the answer lands
+        ctrl_tmp = ctrl_path + '.tmp'
+        with open(ctrl_tmp, 'w') as f:
             json.dump(ctrl, f)
+        os.replace(ctrl_tmp, ctrl_path)
         emit({'ok': True, 'result': {'ticket': tid, 'op': op, 'by': who, 'reason': reason}})
     emit({'ok': False, 'error': 'fix17 桩不认识 ticket op=' + str(op)})
 emit({'ok': False, 'error': 'fix17 桩不可达'})
@@ -445,8 +462,61 @@ export async function waitReady(port, timeoutMs, logPath, label = 'ready') {
   }
 }
 
-/** 自举隔离台（票源=FIX17 桩；env PATH 前置 shim 目录）。失败抛错由调用方转环境红（env_fail 点名）。 */
-export async function bootConsole(projectsRoot, stub) {
+/**
+ * Temp-tree copy of the workbench plugin (t261031-06).
+ *
+ * Why: a case that needs the HMR bundle watcher to see a REBUILT bundle (the
+ * plugin re-register path the shell owns) must write bundle bytes. Writing the
+ * lane's own `server/plugins/workbench/lib/client.js` would plant into the
+ * shared repo tree while other pools run - every other booted bench watches
+ * that same file and would re-register its sidebar mid-assertion (the exact
+ * false-red shape t261004-34 forbids). The copy gives the same real package to
+ * ONE bench, so the rebuild lands in a temp tree and the shared tree stays
+ * byte-clean.
+ *
+ * The copy keeps the sibling layout (`<root>/server/plugins/{workbench,
+ * knowledge,providers}`) because the client package resolves its siblings
+ * through `../../../knowledge|providers` (see build-client.sh). `node_modules`
+ * is skipped: it holds the build toolchain only, never a runtime dependency.
+ * The temp root is reclaimed by tmpRoot's exit hook (same file, one reclaim
+ * path).
+ *
+ * @param prefix - temp-dir prefix (attribution in $TMPDIR listings).
+ * @returns {{dir: string, root: string}} dir = the copied plugin package.
+ */
+export function copyWorkbenchPlugin(prefix = 'fix17-wb-') {
+  const root = tmpRoot(prefix);
+  const plugins = path.join(root, 'server', 'plugins');
+  mkdirSync(plugins, { recursive: true });
+  const source = path.join(REPO_ROOT, 'server', 'plugins', 'workbench');
+  const dest = path.join(plugins, 'workbench');
+  cpSync(source, dest, {
+    recursive: true,
+    filter: (p) => !p.split(path.sep).includes('node_modules'),
+  });
+  // Siblings stay symlinks to the real tree: the package imports
+  // `../../sandbar-tools.ts`, `../repo-anchor.mjs` and the client resolves
+  // `../../../knowledge|providers`, so the copy needs the same `server/` shape,
+  // read-only. Only the workbench package itself is copied.
+  const sourceServer = path.join(REPO_ROOT, 'server');
+  for (const name of readdirSync(sourceServer)) {
+    if (name === 'plugins' || name === 'node_modules') continue;
+    symlinkSync(path.join(sourceServer, name), path.join(root, 'server', name));
+  }
+  const sourcePlugins = path.join(sourceServer, 'plugins');
+  for (const name of readdirSync(sourcePlugins)) {
+    if (name === 'workbench' || name === 'node_modules') continue;
+    symlinkSync(path.join(sourcePlugins, name), path.join(plugins, name));
+  }
+  return { dir: dest, root };
+}
+
+/**
+ * 自举隔离台（票源=FIX17 桩；env PATH 前置 shim 目录）。失败抛错由调用方转环境红（env_fail 点名）。
+ * t261031-06: `options.workbenchDir` points the bench at a temp copy of the
+ * workbench plugin (see copyWorkbenchPlugin); default = this tree's package.
+ */
+export async function bootConsole(projectsRoot, stub, options = {}) {
   const tmpHome = mkdtempSync(path.join(tmpdir(), 'fix17-bench-'));
   const clean = () => { try { rmSync(tmpHome, { recursive: true, force: true }); } catch { /* 留警告 */ } };
   try {
@@ -456,7 +526,7 @@ export async function bootConsole(projectsRoot, stub) {
       path.join(process.env.HOME || '', '.dsh', '.credentials.yaml'),
     ].find((p) => existsSync(p));
     if (cred) await copyFile(cred, path.join(tmpHome, '.credentials.yaml')).catch(() => {});
-    await buildProfile(tmpHome, path.join(REPO_ROOT, 'server', 'plugins', 'workbench'));
+    await buildProfile(tmpHome, options.workbenchDir ?? path.join(REPO_ROOT, 'server', 'plugins', 'workbench'));
     const port = await freePort();
     if (port === 3099) throw new Error('freePort 撞 3099（概率≈0，命中即拒跑）');
     const patchFile = path.join(tmpHome, 'bench.patch.yml');

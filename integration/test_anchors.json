@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 369,
-      "scenarios": 855
+      "scenarios": 860
     },
     "vocab": [
       "behaviour",
@@ -5452,7 +5452,7 @@
     },
     "integration/t261011-15/sc_t26101115_dismiss_prompt_visible.mjs": {
       "anchor": "behaviour",
-      "note": "t261011-15: dismiss reason box visible in viewport on a long list + ?project= on the wire",
+      "note": "t261011-15: dismiss reason box visible in viewport on a long list + ?project= on the wire t261031-06 adds the re-register legs: the console's own client reload chain (@deepseek-ai/dsh-client-hmr) swaps the plugin while a dismissal answer is held by the fixture, so the prompt state is re-created; the refusal must still surface verbatim (prompt back, typed reason restored, one POST only), an accepted dismissal must leave nothing a later re-register could resurrect, and a refusal whose prompt slot cannot exist must be named by its condition (group-gone | group-collapsed | row-gone) with the engine's words. Anchored on the public DOM anchors, the engine's own answer and the documented /plugins/events reload frames.",
       "sync_path": ""
     },
     "integration/t261011-17/sc_t26101117_registration_surface.py": {

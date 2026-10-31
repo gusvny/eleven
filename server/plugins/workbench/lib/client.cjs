@@ -7390,6 +7390,169 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 	});
 }
 //#endregion
+//#region src/client/dismiss-pending-store.ts
+/** Symbol.for: the same key across a bundle re-evaluation (see the header). */
+const HOLDER_KEY = Symbol.for("sandbar.workbench.dismissPending.v1");
+function holder() {
+	const scope = globalThis;
+	let h = scope[HOLDER_KEY];
+	if (h === void 0) {
+		h = {
+			entries: /* @__PURE__ */ new Map(),
+			listeners: /* @__PURE__ */ new Set(),
+			snapshot: null
+		};
+		scope[HOLDER_KEY] = h;
+	}
+	return h;
+}
+/** Row identity inside the store (project key + ticket id, never the id alone). */
+function pendingDismissalKey(projectKey, ticketId) {
+	return `${projectKey}\u0000${ticketId}`;
+}
+function notify(h) {
+	h.snapshot = null;
+	for (const fn of [...h.listeners]) try {
+		fn();
+	} catch {}
+}
+/** Subscribe to store changes (useSyncExternalStore protocol). */
+function subscribePendingDismissals(fn) {
+	const h = holder();
+	h.listeners.add(fn);
+	return () => {
+		h.listeners.delete(fn);
+	};
+}
+/** Snapshot, oldest first. The reference is stable while nothing changes. */
+function getPendingDismissals() {
+	const h = holder();
+	if (h.snapshot === null) h.snapshot = [...h.entries.values()].sort((a, b) => a.at - b.at);
+	return h.snapshot;
+}
+/** Record that a write is out for this row (called before the POST leaves). */
+function beginPendingDismissal(target, reason, at = Date.now()) {
+	const h = holder();
+	h.entries.set(pendingDismissalKey(target.projectKey, target.ticketId), {
+		projectKey: target.projectKey,
+		ticketId: target.ticketId,
+		action: target.action,
+		reason,
+		phase: "inflight",
+		notice: "",
+		at
+	});
+	notify(h);
+}
+/** Keep the typed reason with the pending request (survives a remount). */
+function setPendingDismissalReason(target, reason) {
+	const h = holder();
+	const key = pendingDismissalKey(target.projectKey, target.ticketId);
+	const entry = h.entries.get(key);
+	if (entry === void 0 || entry.reason === reason) return;
+	h.entries.set(key, {
+		...entry,
+		reason
+	});
+	notify(h);
+}
+/**
+* Record the engine's refusal verbatim. The entry is created when it is missing
+* (the answer can land after the instance that sent the request is gone, so the
+* store - not the caller - must be able to carry it alone).
+*/
+function notePendingDismissalRefusal(target, notice, at = Date.now()) {
+	const h = holder();
+	const key = pendingDismissalKey(target.projectKey, target.ticketId);
+	const entry = h.entries.get(key);
+	h.entries.set(key, {
+		projectKey: target.projectKey,
+		ticketId: target.ticketId,
+		action: target.action,
+		reason: entry?.reason ?? "",
+		phase: "refused",
+		notice,
+		at: entry?.at ?? at
+	});
+	notify(h);
+}
+/**
+* Forget this row's pending dismissal. Both a lawful accept and a person's
+* cancel end here: nothing is left to re-open, so a later remount shows no
+* prompt (that is the accepted-path contract, not an oversight).
+*/
+function forgetPendingDismissal(target) {
+	const h = holder();
+	if (!h.entries.delete(pendingDismissalKey(target.projectKey, target.ticketId))) return;
+	notify(h);
+}
+//#endregion
+//#region src/client/dismiss-notice-face.ts
+/**
+* Refusals whose prompt slot cannot exist on this face, in store order.
+* A refusal that CAN render is not listed - it renders in its prompt slot.
+*/
+function strandedRefusals(pending, face) {
+	const out = [];
+	for (const entry of pending) {
+		if (entry.phase !== "refused" || entry.notice === "") continue;
+		if (entry.projectKey === "") {
+			if (!face.unownedOnFace) out.push({
+				entry,
+				condition: "group-gone",
+				detail: "the inspection group that held the row is not on the face"
+			});
+			else if (!face.unownedIds.includes(entry.ticketId)) out.push({
+				entry,
+				condition: "row-gone",
+				detail: "the row is no longer on the face"
+			});
+			continue;
+		}
+		const group = face.groups.find((g) => g.projectKey === entry.projectKey);
+		if (group === void 0) {
+			out.push({
+				entry,
+				condition: "group-gone",
+				detail: `project group "${entry.projectKey}" is not on the face`
+			});
+			continue;
+		}
+		if (group.collapsed) {
+			out.push({
+				entry,
+				condition: "group-collapsed",
+				detail: `project group "${entry.projectKey}" is collapsed`
+			});
+			continue;
+		}
+		if (!group.ticketIds.includes(entry.ticketId) && !group.dismissedIds.includes(entry.ticketId)) out.push({
+			entry,
+			condition: "row-gone",
+			detail: "the row is no longer on the face"
+		});
+	}
+	return out;
+}
+/** Row keys of the stranded refusals (the prompt slot must skip these). */
+function strandedKeys(strands) {
+	return new Set(strands.map((s) => `${s.entry.projectKey}\u0000${s.entry.ticketId}`));
+}
+/**
+* One visible line: which condition failed, and the engine's refusal verbatim
+* (quoted, never paraphrased - the person must be able to read the engine's own
+* words even when the prompt cannot open).
+*
+* The condition is named twice on purpose: the token (`group-gone` /
+* `group-collapsed` / `row-gone`) is the same word the face carries in its
+* `data-dismiss-unrenderable-condition` attribute, so a reader of the printed
+* line and a reader of the DOM name the SAME thing, and the clause after it says
+* what that means in plain words.
+*/
+function strandedRefusalLine(s) {
+	return `${s.entry.action === "dismiss" ? "Dismiss" : "Restore"} of ${s.entry.ticketId} was refused, and the notice cannot show in its row prompt: ${s.condition} - ${s.detail}. The engine said: ${JSON.stringify(s.entry.notice)}`;
+}
+//#endregion
 //#region src/client/sandbar-dwell.ts
 /**
 * sandbar-dwell —— closed dev-lane ticket dwell window for the sidebar groups
@@ -9576,6 +9739,13 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-order-notice { margin:2px 8px 6px 14px; padding:4px 8px; font-size:10px; line-height:1.5;
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
   border:1px solid var(--dsw-derive-warn,#b8860b); border-radius:5px; word-break:break-all; }
+/* t261031-06: a refused dismissal whose prompt slot cannot exist (the group is
+ * gone/collapsed or the row left the face) - one line naming the failed
+ * condition, carrying the engine's refusal verbatim. Same token family as
+ * .wb-order-notice (no new palette). */
+.wb-dismiss-unrenderable { margin:4px 8px 6px 10px; padding:4px 8px; font-size:10px; line-height:1.5;
+  color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
+  border:1px solid var(--dsw-derive-warn,#b8860b); border-radius:5px; word-break:break-word; flex:none; }
 .wb-group-empty { padding:2px 8px 8px 24px; color:var(--dsw-derive-fg,#666); font-size:11px; }
 /* t260904-17 list v5: ticket entries = compact TicketRowCard — dark-theme
  * overrides: transparent base, inherited text colour, selected violet wash;
@@ -9807,6 +9977,7 @@ function WorkbenchSidebar(props) {
 	const [dismissBusy, setDismissBusy] = (0, react.useState)({});
 	/** Named refusal (ticket id -> verbatim error; '' = none) rendered in the prompt panel. */
 	const [dismissNotice, setDismissNotice] = (0, react.useState)({});
+	const pendingDismissals = (0, react.useSyncExternalStore)(subscribePendingDismissals, getPendingDismissals, getPendingDismissals);
 	/** t261009-43: bump to force the data load effect to re-run right after a
 	*  successful dismiss/restore (the row leaves / returns on the ENGINE's
 	*  payload, never a local flip; the 10 s poll would catch it eventually —
@@ -10079,6 +10250,11 @@ function WorkbenchSidebar(props) {
 		}
 	}, [concByProject, refreshConc]);
 	const submitDismissal = (0, react.useCallback)(async (projectKey, ticketId, action, reason) => {
+		const target = {
+			projectKey,
+			ticketId,
+			action
+		};
 		if (reason.trim() === "") {
 			setDismissNotice((m) => ({
 				...m,
@@ -10086,6 +10262,7 @@ function WorkbenchSidebar(props) {
 			}));
 			return;
 		}
+		beginPendingDismissal(target, reason);
 		setDismissBusy((m) => ({
 			...m,
 			[ticketId]: true
@@ -10113,10 +10290,11 @@ function WorkbenchSidebar(props) {
 			[ticketId]: false
 		}));
 		if (refused === "") {
+			forgetPendingDismissal(target);
 			setDismissPrompt(null);
 			setDismissReason("");
 			setReloadNonce((n) => n + 1);
-		}
+		} else notePendingDismissalRefusal(target, refused);
 	}, []);
 	const handleTicketClick = (0, react.useCallback)((t, projectKey) => {
 		setSelectedId(t.id);
@@ -10157,6 +10335,28 @@ function WorkbenchSidebar(props) {
 		ticketsByProject,
 		inspectionSplit
 	]);
+	const unownedOnFace = !loading && inspectionSplit.unowned.length > 0;
+	const strands = strandedRefusals(pendingDismissals, {
+		groups: groups.map((g) => ({
+			projectKey: g.project.key,
+			collapsed: collapsed[g.project.key] === true,
+			ticketIds: g.tickets.map((t) => t.id),
+			dismissedIds: g.dismissed.map((t) => t.id)
+		})),
+		unownedOnFace,
+		unownedIds: inspectionSplit.unowned.map((t) => t.id)
+	});
+	const strandKeySet = strandedKeys(strands);
+	const storedPrompt = [...pendingDismissals].reverse().find((entry) => !strandKeySet.has(pendingDismissalKey(entry.projectKey, entry.ticketId))) ?? null;
+	const promptTarget = dismissPrompt ?? (storedPrompt === null ? null : {
+		projectKey: storedPrompt.projectKey,
+		ticketId: storedPrompt.ticketId,
+		action: storedPrompt.action
+	});
+	const promptPending = promptTarget === null ? void 0 : pendingDismissals.find((entry) => entry.ticketId === promptTarget.ticketId && entry.projectKey === promptTarget.projectKey);
+	const promptReason = dismissPrompt !== null ? dismissReason : promptPending?.reason ?? "";
+	const promptNotice = promptTarget === null ? "" : dismissNotice[promptTarget.ticketId] || (promptPending?.notice ?? "");
+	const promptBusy = promptTarget === null ? false : dismissBusy[promptTarget.ticketId] === true || promptPending?.phase === "inflight";
 	const Ws = views.overlay;
 	if (!wide) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 		ref: rootRef,
@@ -10169,9 +10369,9 @@ function WorkbenchSidebar(props) {
 		})]
 	});
 	const renderDismissPrompt = () => {
-		if (dismissPrompt === null) return null;
-		const p = dismissPrompt;
-		const notice = dismissNotice[p.ticketId] ?? "";
+		if (promptTarget === null) return null;
+		const p = promptTarget;
+		const notice = promptNotice;
 		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 			ref: dismissPromptRef,
 			className: "wb-dismiss-prompt",
@@ -10187,9 +10387,12 @@ function WorkbenchSidebar(props) {
 					ref: dismissReasonRef,
 					className: "wb-dismiss-reason",
 					"data-wb-dismiss-reason": "",
-					value: dismissReason,
+					value: promptReason,
 					placeholder: "Reason (required, recorded)",
-					onChange: (e) => setDismissReason(e.target.value)
+					onChange: (e) => {
+						setDismissReason(e.target.value);
+						if (promptPending !== void 0) setPendingDismissalReason(p, e.target.value);
+					}
 				}),
 				notice !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "wb-order-notice",
@@ -10203,9 +10406,9 @@ function WorkbenchSidebar(props) {
 						type: "button",
 						className: "wb-card-btn wb-card-btn-dismiss",
 						"data-dismiss-confirm": "",
-						disabled: dismissBusy[p.ticketId] === true || dismissReason.trim() === "",
+						disabled: promptBusy || promptReason.trim() === "",
 						onClick: () => {
-							submitDismissal(p.projectKey, p.ticketId, p.action, dismissReason);
+							submitDismissal(p.projectKey, p.ticketId, p.action, promptReason);
 						},
 						children: p.action === "dismiss" ? "Dismiss" : "Restore"
 					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
@@ -10219,6 +10422,7 @@ function WorkbenchSidebar(props) {
 								...m,
 								[p.ticketId]: ""
 							}));
+							forgetPendingDismissal(p);
 						},
 						children: "Cancel"
 					})]
@@ -10439,7 +10643,7 @@ function WorkbenchSidebar(props) {
 										})
 									}, t.id);
 								}),
-								dismissPrompt?.projectKey === g.project.key && renderDismissPrompt(),
+								promptTarget?.projectKey === g.project.key && renderDismissPrompt(),
 								orderNotice[g.project.key] && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 									className: "wb-order-notice",
 									"data-wb-order-notice": "",
@@ -10541,7 +10745,7 @@ function WorkbenchSidebar(props) {
 										action: "dismiss"
 									})
 								}, t.id)),
-								dismissPrompt?.projectKey === "" && renderDismissPrompt(),
+								promptTarget?.projectKey === "" && renderDismissPrompt(),
 								!inspCollapsed && unownedDismissed.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "wb-dismissed-fold",
 									"data-wb-dismissed-fold": "unowned",
@@ -10594,6 +10798,16 @@ function WorkbenchSidebar(props) {
 								})
 							] });
 						})(),
+						strands.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "wb-dismiss-unrenderable",
+							"data-wb-dismiss-unrenderable": "",
+							"data-dismiss-unrenderable-condition": strands[0].condition,
+							role: "alert",
+							children: strands.map((s) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								"data-dismiss-unrenderable-ticket": s.entry.ticketId,
+								children: strandedRefusalLine(s)
+							}, `${s.entry.projectKey}:${s.entry.ticketId}`))
+						}),
 						quarantined.map((q) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-quar-row",
 							"data-wb-quarantine-row": "",

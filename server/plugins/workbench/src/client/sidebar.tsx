@@ -48,7 +48,7 @@
  *       未选项目时中列显占位（不自动选第一个项目——不造隐形缺省）。
  */
 
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef, useSyncExternalStore } from 'react'
 import type { ComponentType, CSSProperties } from 'react'
 // 会话列表快照类型（t260828-02 起只取 displayTitle/current 两字段）：ctx.sessions.list 的面。
 import type { ObservableSnapshot, SessionListState } from '@deepseek-ai/dsh-client-runtime/client'
@@ -111,6 +111,15 @@ import { TicketRowCard } from './ticket-row-card.tsx'
 // t261009-43: the dismissal face readers (dismissed voucher, named note, the
 // order-preserving kept/dismissed split) live in the same pure layer.
 import { sortMergedTickets, isDismissedRow, splitDismissedRows } from './ticket-list-model.ts'
+// t261031-06: the pending/refused dismissal lives OUTSIDE this component (a
+// refusal must survive a re-created prompt); the face line names the condition
+// that stopped the prompt from rendering.
+import {
+  beginPendingDismissal, forgetPendingDismissal, getPendingDismissals,
+  notePendingDismissalRefusal, pendingDismissalKey, setPendingDismissalReason,
+  subscribePendingDismissals,
+} from './dismiss-pending-store.ts'
+import { strandedKeys, strandedRefusalLine, strandedRefusals } from './dismiss-notice-face.ts'
 // t261008-21 (host order 261008 option A): the closed dev-lane dwell window is
 // pinned at 24 h; the window rule lives in sandbar-dwell (pure layer, UT-covered)
 // and this is its only consumer (two-window split below — inspection rows exempt).
@@ -451,6 +460,13 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-order-notice { margin:2px 8px 6px 14px; padding:4px 8px; font-size:10px; line-height:1.5;
   color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
   border:1px solid var(--dsw-derive-warn,#b8860b); border-radius:5px; word-break:break-all; }
+/* t261031-06: a refused dismissal whose prompt slot cannot exist (the group is
+ * gone/collapsed or the row left the face) - one line naming the failed
+ * condition, carrying the engine's refusal verbatim. Same token family as
+ * .wb-order-notice (no new palette). */
+.wb-dismiss-unrenderable { margin:4px 8px 6px 10px; padding:4px 8px; font-size:10px; line-height:1.5;
+  color:var(--dsw-derive-dark-warn-fg,#ffe9c4); background:var(--dsw-derive-dark-warn-bg,#7a4a06);
+  border:1px solid var(--dsw-derive-warn,#b8860b); border-radius:5px; word-break:break-word; flex:none; }
 .wb-group-empty { padding:2px 8px 8px 24px; color:var(--dsw-derive-fg,#666); font-size:11px; }
 /* t260904-17 list v5: ticket entries = compact TicketRowCard — dark-theme
  * overrides: transparent base, inherited text colour, selected violet wash;
@@ -709,6 +725,16 @@ export function WorkbenchSidebar(props: SidebarProps) {
   const [dismissBusy, setDismissBusy] = useState<Record<string, boolean>>({})
   /** Named refusal (ticket id -> verbatim error; '' = none) rendered in the prompt panel. */
   const [dismissNotice, setDismissNotice] = useState<Record<string, string>>({})
+  // t261031-06: the pending dismissal and the engine's refusal are REQUEST state,
+  // not panel state, so they live in a module singleton
+  // (dismiss-pending-store.ts). The reproduced loss: the shell re-registers this
+  // plugin while the answer is in flight (bundle rebuild -> HMR rebuilt frame ->
+  // entry re-register), the whole sidebar subtree is re-created, and the notice
+  // used to disappear with the prompt it renders inside. With the store a
+  // re-created prompt re-opens with the engine's own words, and no second POST
+  // leaves (the entry says the write is still out).
+  const pendingDismissals = useSyncExternalStore(
+    subscribePendingDismissals, getPendingDismissals, getPendingDismissals)
   /** t261009-43: bump to force the data load effect to re-run right after a
    *  successful dismiss/restore (the row leaves / returns on the ENGINE's
    *  payload, never a local flip; the 10 s poll would catch it eventually —
@@ -1054,10 +1080,14 @@ export function WorkbenchSidebar(props: SidebarProps) {
   // 10 s poll).
   const submitDismissal = useCallback(async (projectKey: string, ticketId: string,
     action: 'dismiss' | 'restore', reason: string) => {
+    const target = { projectKey, ticketId, action }
     if (reason.trim() === '') {
       setDismissNotice(m => ({ ...m, [ticketId]: 'a reason is required (recorded with the disposition)' }))
       return
     }
+    // The request is out: the store owns it from here, so a re-created prompt
+    // can restore the typed reason and refuse to send a second POST.
+    beginPendingDismissal(target, reason)
     setDismissBusy(m => ({ ...m, [ticketId]: true }))
     let refused = ''
     try {
@@ -1074,9 +1104,16 @@ export function WorkbenchSidebar(props: SidebarProps) {
     setDismissNotice(m => ({ ...m, [ticketId]: refused }))
     setDismissBusy(m => ({ ...m, [ticketId]: false }))
     if (refused === '') {
+      // Accepted: nothing is left to re-open (a later remount shows no prompt).
+      forgetPendingDismissal(target)
       setDismissPrompt(null)
       setDismissReason('')
       setReloadNonce(n => n + 1)
+    } else {
+      // Refused: the engine's words go to the STORE, not only to this instance.
+      // The answer can land after this subtree is gone; the store is what makes
+      // a re-created prompt show the refusal verbatim.
+      notePendingDismissalRefusal(target, refused)
     }
   }, [])
 
@@ -1177,6 +1214,39 @@ export function WorkbenchSidebar(props: SidebarProps) {
     })
   }, [projects, ticketsByProject, inspectionSplit])
 
+  // t261031-06: the refusal face. A refused dismissal whose prompt slot cannot
+  // exist on the face right now is named on one line (the engine's words stay
+  // verbatim) instead of being dropped with the prompt. The classifier is a pure
+  // model (dismiss-notice-face.ts); everything that CAN render does render.
+  const unownedOnFace = !loading && inspectionSplit.unowned.length > 0
+  const strands = strandedRefusals(pendingDismissals, {
+    groups: groups.map(g => ({
+      projectKey: g.project.key,
+      collapsed: collapsed[g.project.key] === true,
+      ticketIds: g.tickets.map(t => t.id),
+      dismissedIds: g.dismissed.map(t => t.id),
+    })),
+    unownedOnFace,
+    unownedIds: inspectionSplit.unowned.map(t => t.id),
+  })
+  const strandKeySet = strandedKeys(strands)
+  // The prompt slot belongs to the newest pending dismissal that CAN render.
+  // A stranded refusal never takes the slot from a renderable one.
+  const storedPrompt = [...pendingDismissals].reverse().find(entry =>
+    !strandKeySet.has(pendingDismissalKey(entry.projectKey, entry.ticketId))) ?? null
+  const promptTarget = dismissPrompt ?? (storedPrompt === null
+    ? null
+    : { projectKey: storedPrompt.projectKey, ticketId: storedPrompt.ticketId, action: storedPrompt.action })
+  const promptPending = promptTarget === null ? undefined : pendingDismissals.find(entry =>
+    entry.ticketId === promptTarget.ticketId && entry.projectKey === promptTarget.projectKey)
+  // A prompt the person opened (no request out yet) uses the typed reason; a
+  // prompt the STORE re-opened restores the reason the request carried.
+  const promptReason = dismissPrompt !== null ? dismissReason : (promptPending?.reason ?? '')
+  const promptNotice = promptTarget === null ? ''
+    : (dismissNotice[promptTarget.ticketId] || (promptPending?.notice ?? ''))
+  const promptBusy = promptTarget === null ? false
+    : (dismissBusy[promptTarget.ticketId] === true || promptPending?.phase === 'inflight')
+
   // t261005-10 (UI-2): Ws = the overlay + machine-status-head host (no board view).
   // t261008-36: views.routes is gone — Model routes opens from the panel Settings.
   const Ws = views.overlay
@@ -1203,9 +1273,9 @@ export function WorkbenchSidebar(props: SidebarProps) {
   // disabled until the reason is non-blank; a refusal surfaces verbatim
   // (never swallowed); a success closes the prompt and re-reads the face.
   const renderDismissPrompt = () => {
-    if (dismissPrompt === null) return null
-    const p = dismissPrompt
-    const notice = dismissNotice[p.ticketId] ?? ''
+    if (promptTarget === null) return null
+    const p = promptTarget
+    const notice = promptNotice
     return (
       <div ref={dismissPromptRef} className="wb-dismiss-prompt" data-wb-dismiss-prompt=""
         role="dialog" aria-label={`${p.action} ${p.ticketId}`}>
@@ -1215,20 +1285,30 @@ export function WorkbenchSidebar(props: SidebarProps) {
             : `Restore ${p.ticketId} — back on the board`}
         </div>
         <textarea ref={dismissReasonRef} className="wb-dismiss-reason" data-wb-dismiss-reason=""
-          value={dismissReason}
+          value={promptReason}
           placeholder="Reason (required, recorded)"
-          onChange={(e) => setDismissReason(e.target.value)} />
+          onChange={(e) => {
+            setDismissReason(e.target.value)
+            if (promptPending !== undefined) setPendingDismissalReason(p, e.target.value)
+          }} />
         {notice !== '' && (
           <div className="wb-order-notice" data-wb-dismiss-notice="" role="alert">{notice}</div>
         )}
         <div className="wb-dismiss-prompt-actions">
           <button type="button" className="wb-card-btn wb-card-btn-dismiss" data-dismiss-confirm=""
-            disabled={dismissBusy[p.ticketId] === true || dismissReason.trim() === ''}
-            onClick={() => { void submitDismissal(p.projectKey, p.ticketId, p.action, dismissReason) }}>
+            disabled={promptBusy || promptReason.trim() === ''}
+            onClick={() => { void submitDismissal(p.projectKey, p.ticketId, p.action, promptReason) }}>
             {p.action === 'dismiss' ? 'Dismiss' : 'Restore'}
           </button>
           <button type="button" className="wb-card-btn" data-dismiss-cancel=""
-            onClick={() => { setDismissPrompt(null); setDismissReason(''); setDismissNotice(m => ({ ...m, [p.ticketId]: '' })) }}>
+            onClick={() => {
+              // Cancel ends the request too: nothing stays in the store, so a
+              // later remount does not resurrect a prompt the person closed.
+              setDismissPrompt(null)
+              setDismissReason('')
+              setDismissNotice(m => ({ ...m, [p.ticketId]: '' }))
+              forgetPendingDismissal(p)
+            }}>
             Cancel
           </button>
         </div>
@@ -1421,7 +1501,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
                       it into view and focuses the reason box; a long board can
                       no longer push it below the fold). Restore opens from the
                       dismissed fold below but lands in the same slot. */}
-                  {dismissPrompt?.projectKey === g.project.key && renderDismissPrompt()}
+                  {promptTarget?.projectKey === g.project.key && renderDismissPrompt()}
                   {/* Reorder-refusal notice (t261006-18 A7): the engine write face's
                       named refusal verbatim - visible, order untouched (the face
                       re-read restores truth), never silently swallowed. */}
@@ -1494,7 +1574,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
               ))}
               {/* t261011-15: the unowned group's own prompt slot (blank project key
                   — the URL builder omits ?project= for it, no guessing). */}
-              {dismissPrompt?.projectKey === '' && renderDismissPrompt()}
+              {promptTarget?.projectKey === '' && renderDismissPrompt()}
               {/* t261009-43: the unowned group's own dismissed fold (separate
                   boolean from the project-keyed record — no registry key exists
                   here to key it by). */}
@@ -1524,6 +1604,19 @@ export function WorkbenchSidebar(props: SidebarProps) {
             </div>
             )
           })()}
+          {/* t261031-06: the refusal that cannot render in a prompt slot speaks
+              here, by name. One line per stranded refusal: which condition
+              failed (group gone / group collapsed / row gone) plus the engine's
+              own words verbatim - never a silent drop, never "there is no X". */}
+          {strands.length > 0 && (
+            <div className="wb-dismiss-unrenderable" data-wb-dismiss-unrenderable=""
+              data-dismiss-unrenderable-condition={strands[0].condition} role="alert">
+              {strands.map(s => (
+                <div key={`${s.entry.projectKey}:${s.entry.ticketId}`}
+                  data-dismiss-unrenderable-ticket={s.entry.ticketId}>{strandedRefusalLine(s)}</div>
+              ))}
+            </div>
+          )}
           {/* 隔离行（票③验收 11）：装载器隔离的 key 红色一行，点击看原因与修复指路；
               隔离期间无组头无项目设置入口（无装载条目可设置）。 */}
           {quarantined.map(q => (

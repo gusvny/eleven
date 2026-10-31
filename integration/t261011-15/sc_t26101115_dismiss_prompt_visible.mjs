@@ -85,9 +85,10 @@
 // 新故障面登记建议（integration 岗位）：「行内弹层开在滚动容器尾部 ⇒ 折叠线以下
 // 不可见」——老测试用短夹具列表看不见此面；长列表可见性断言必须锚 viewport。
 
-import { bootConsole, teardownOnExit, makeRegistryRoot, writeProjectEntry, makeTicketStub, benchAuthUrl, dismissNotice } from '../t260904-17/lib_fix17.mjs';
+import { bootConsole, teardownOnExit, makeRegistryRoot, writeProjectEntry, makeTicketStub, benchAuthUrl, dismissNotice, copyWorkbenchPlugin } from '../t260904-17/lib_fix17.mjs';
 import { loadPlaywright } from '../lib_pw_deps.mjs';
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -220,6 +221,7 @@ function stubTraceFacts(stubRef) {
 // ---------------------------------------------------------------- boot（离线隔离台）
 
 let BASE = ''
+var WB_DIR = ''
 let bench = null
 const PROJ = 'fixture-dv'   // 长列表主项目（dismiss 脸载体）
 const PROJ2 = 'fixture-rs'  // restore 脸载体（折叠行）
@@ -259,12 +261,40 @@ stub.setCtrl({
   show: {},
 })
 
+// t261031-06: the S6-S9 legs rebuild the panel's bundle to make the console
+// re-register the plugin (the state-loss trigger). That write must land in a
+// TEMP COPY of this tree's package - the shared tree's bundle is watched by every
+// other booted bench, and rebuilding it would re-register their sidebars
+// mid-assertion (the false-red shape t261004-34 forbids).
+// The RED replay seam (t261031-06 acceptance 1). Point the case at a PRE-FIX
+// plugin tree - a temp copy whose src/ and lib/ are the pre-fix panel - and the
+// same S6-S9 legs fail by name on it (S6d/S7b/S7c/S9a/S9b/S9c), because a refusal
+// that lands after the re-register is dropped without a word there. Nothing is
+// switched off for the green run: the seam only chooses WHICH tree is rebuilt.
+//   SANDBAR_T26103106_WORKBENCH_DIR=<pre-fix workbench package> \
+//     node integration/t261011-15/sc_t26101115_dismiss_prompt_visible.mjs
+STEP = 'plugin-copy'
+let SIDEBAR_SRC = ''
+try {
+  const given = String(process.env.SANDBAR_T26103106_WORKBENCH_DIR || '').trim()
+  WB_DIR = given === '' ? copyWorkbenchPlugin('t26101115-wb-').dir : given
+  SIDEBAR_SRC = join(WB_DIR, 'src', 'client', 'sidebar.tsx')
+  if (!existsSync(SIDEBAR_SRC) || !existsSync(join(WB_DIR, 'lib', 'client.js'))) {
+    await benchEnvFail('plugin-copy',
+      `the workbench tree at ${WB_DIR} carries no src/client/sidebar.tsx + lib/client.js`)
+  }
+} catch (e) {
+  await benchEnvFail('plugin-copy', e)
+}
+const shaOf = (f) => createHash('sha256').update(readFileSync(f)).digest('hex')
+let bootBundleSha = shaOf(join(WB_DIR, 'lib', 'client.js'))
+
 STEP = 'bench-boot'
 try {
   const projectsRoot = makeRegistryRoot('t26101115-registry-')
   writeProjectEntry(projectsRoot, PROJ, PROJ, ['/tmp/fx-dv'])
   writeProjectEntry(projectsRoot, PROJ2, PROJ2, ['/tmp/fx-rs'])
-  bench = await bootConsole(projectsRoot, stub)
+  bench = await bootConsole(projectsRoot, stub, { workbenchDir: WB_DIR })
   BASE = bench.base
   await benchAuthUrl(bench)
   teardownOnExit(bench.teardown)
@@ -918,6 +948,349 @@ if (!restoreReady) {
   rec('S4 restore prompt same visibility rule', rIn,
     rIn ? 'restore prompt rect inside the viewport' : 'restore prompt opened off-screen')
 }
+
+// ---------------------------------------------------------------- S6-S9 the panel being re-created (t261031-06)
+// The measured loss of t261031-05 (round run-01M67E2QMRBAR3JRFJ2FP72VFZ) was a
+// refusal the person never saw: the route answered 200/ok:false while the face
+// recorded promptOpen:false / promptSlots:0 / noticeAttached:false and the row
+// still on the board. The refusal renders INSIDE the dismiss prompt, so whatever
+// re-created the panel dropped it. These legs name that condition and drive it:
+// the console's client reload chain (@deepseek-ai/dsh-client-hmr) re-registers a
+// plugin when its built bundle changes, and each reload remounts the plugin with
+// fresh React state (its README: "React state inside the reloaded plugin is
+// lost"). The refusal is held by the fixture (ctrl.delay) so it lands AFTER the
+// swap, and every leg reads the page's own timing instead of assuming an order.
+//
+// The panel must keep the pending dismissal outside the component: a re-created
+// prompt re-opens with the person's reason and the engine's words verbatim, and a
+// refusal whose prompt slot CANNOT exist is named on the face by its condition
+// (group-gone | group-collapsed | row-gone), never dropped in silence.
+const SECOND_ROW = 'fd00'    // still on the board after S5 dismissed TARGET
+const THIRD_ROW = 'fd01'     // the stranded-refusal row
+const REMOUNT_REASON = 'duplicate of fd01 (leg S6)'
+const REMOUNT_MARK = 'fix17' // the isolated bench's engine-channel refusal text
+
+/** Read-modify-write one stub knob (the stub rewrites the same file on accept). */
+function setStubKnobs(knobs) {
+  const cur = JSON.parse(readFileSync(stub.ctrlPath, 'utf8'))
+  stub.setCtrl({ ...cur, ...knobs })
+}
+
+/**
+ * One rebuild of the temp copy's panel, through the plugin's DECLARED build entry
+ * (build-client.sh). The marker rides inside the panel's single CSS template
+ * string: it changes the bundle bytes and nothing the person can see, so the
+ * console's stat poll sees a new revision and swaps the plugin.
+ */
+function markerRebuild(label) {
+  const text = readFileSync(SIDEBAR_SRC, 'utf8')
+  const anchor = 'const CSS = `${DERIVE_TOKENS_CSS}'
+  if (!text.includes(anchor)) {
+    return { ok: false, env: true, why: `swap instrument: the CSS anchor is gone from ${SIDEBAR_SRC}` }
+  }
+  writeFileSync(SIDEBAR_SRC, text.replace(anchor,
+    `${anchor}\n.wb-t26103106-swap-${label}{--t26103106-swap:${label}}`))
+  const r = spawnSync('bash', [join(WB_DIR, 'build-client.sh')], { encoding: 'utf8', timeout: 900000 })
+  const out = `${r.stdout || ''}${r.stderr || ''}`
+  if (r.status !== 0) {
+    const installFailed = out.includes('npm ci')
+    return { ok: false, env: installFailed,
+      why: `build-client.sh exit=${r.status}${installFailed ? ' (toolchain install failed)' : ''}: ${out.slice(-400)}` }
+  }
+  const js = join(WB_DIR, 'lib', 'client.js')
+  const cjs = join(WB_DIR, 'lib', 'client.cjs')
+  return {
+    ok: true,
+    twinsEqual: readFileSync(js).equals(readFileSync(cjs)),
+    sha: shaOf(js),
+    bytes: readFileSync(js).length,
+  }
+}
+
+/** The in-page recorder: the console's reload channel and the wire timing. */
+async function installRemountRecorder() {
+  await page.evaluate(() => {
+    const probe = { frames: [], posts: [], answers: [], es: false }
+    window.__t26103106 = probe
+    try {
+      const es = new EventSource('/plugins/events')
+      es.onmessage = (m) => {
+        try {
+          const f = JSON.parse(m.data)
+          if (f && f.type === 'rebuilt') {
+            probe.frames.push({ id: String(f.id || ''), rev: String(f.rev || ''), at: performance.now() })
+          }
+        } catch { probe.frames.push({ id: 'unreadable', rev: '', at: performance.now() }) }
+      }
+      probe.es = true
+    } catch (e) {
+      probe.es = false
+      probe.esError = String(e).slice(0, 120)
+    }
+    const realFetch = window.fetch.bind(window)
+    window.fetch = (input, init) => {
+      const url = String(typeof input === 'string' ? input : (input && input.url) || '')
+      const isWrite = /\/dismiss(\?|$)|\/restore(\?|$)/.test(url)
+      if (isWrite) probe.posts.push({ url, at: performance.now(), body: String((init && init.body) || '') })
+      const p = realFetch(input, init)
+      if (isWrite) {
+        p.then(async (res) => {
+          let body = ''
+          try { body = await res.clone().text() } catch { body = '(unreadable)' }
+          probe.answers.push({ status: res.status, body: body.slice(0, 400), at: performance.now() })
+        }).catch((e) => probe.answers.push({
+          status: 0, body: '', error: String(e).slice(0, 120), at: performance.now(),
+        }))
+      }
+      return p
+    }
+  })
+}
+
+/**
+ * UI evidence for the delivered change (merge_check reads TOP-LEVEL non-recursive
+ * *.png under <lane>/.sandbar/screenshots, host ruling 261005-B). One fresh shot
+ * per call: the previous file of the same name is removed first, so a failed
+ * capture can never leave a stale image behind (KI-428: no recycled evidence).
+ * The target is scrolled into view, because a long left column can put the
+ * prompt below the fold and a screenshot of the fold would prove nothing.
+ */
+async function shotEvidence(name, selector) {
+  const dir = join(REPO, '.sandbar', 'screenshots')
+  const file = join(dir, name)
+  try {
+    mkdirSync(dir, { recursive: true })
+    if (existsSync(file)) unlinkSync(file)
+    const scrolled = await page.evaluate((sel) => {
+      const el = document.querySelector(sel)
+      if (el === null) return false
+      el.scrollIntoView({ block: 'center' })
+      return true
+    }, selector).catch(() => false)
+    await new Promise((r) => setTimeout(r, 350))
+    await page.screenshot({ path: file, fullPage: false })
+    const size = statSync(file).size
+    const head = readFileSync(file).subarray(0, 8)
+    const isPng = head.length === 8 && head[0] === 0x89 && head[1] === 0x50
+      && head[2] === 0x4e && head[3] === 0x47
+    return { ok: isPng && size > 5000, file, size, isPng, scrolled }
+  } catch (e) {
+    return { ok: false, file, size: 0, isPng: false, error: String(e).slice(0, 200) }
+  }
+}
+
+const remountProbe = () => page.evaluate(() => {
+  const el = document.querySelector('[data-wb-dismiss-notice]')
+  return {
+    frames: window.__t26103106 ? window.__t26103106.frames : [],
+    posts: window.__t26103106 ? window.__t26103106.posts : [],
+    answers: window.__t26103106 ? window.__t26103106.answers : [],
+    prompts: document.querySelectorAll('[data-wb-dismiss-prompt]').length,
+    notice: el ? String(el.textContent || '').trim() : '',
+    reason: document.querySelector('[data-wb-dismiss-reason]')
+      ? String(document.querySelector('[data-wb-dismiss-reason]').value || '') : null,
+    confirmDisabled: document.querySelector('[data-dismiss-confirm]')
+      ? document.querySelector('[data-dismiss-confirm]').disabled === true : null,
+    unrenderable: [...document.querySelectorAll('[data-wb-dismiss-unrenderable]')].map((n) => ({
+      condition: n.getAttribute('data-dismiss-unrenderable-condition') || '',
+      text: String(n.textContent || '').trim().slice(0, 400),
+      tickets: [...n.querySelectorAll('[data-dismiss-unrenderable-ticket]')]
+        .map((x) => x.getAttribute('data-dismiss-unrenderable-ticket') || ''),
+    })),
+  }
+})
+
+// The boot navigation is the one lawful main-frame navigation: every leg below
+// compares against this baseline, so "the panel was re-created" can never be a
+// page reload in disguise.
+const navsAtRemount = mainFrameNavs.length
+STEP = 'reload-chain'
+await installRemountRecorder()
+const chain = await (async () => {
+  try {
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), 4000)
+    try {
+      const r = await fetch(`${BASE}/plugins/events`, { signal: ac.signal })
+      const reader = r.body.getReader()
+      const first = await reader.read()
+      await reader.cancel().catch(() => {})
+      return { status: r.status, head: Buffer.from(first.value || []).toString('utf8').slice(0, 120) }
+    } finally { clearTimeout(timer) }
+  } catch (e) {
+    return { status: 0, head: '', error: String(e && e.message ? e.message : e).slice(0, 140) }
+  }
+})()
+if (chain.status !== 200) {
+  await benchEnvFail('reload-chain',
+    `the console exposes no client reload channel (/plugins/events status=${chain.status}`
+    + ` head=${JSON.stringify(chain.head)} error=${JSON.stringify(chain.error || '')}), so a`
+    + ` plugin re-register cannot be produced on this bench`)
+}
+rec('S6 the console exposes the client reload channel (the trigger premise)', true,
+  `/plugins/events status=${chain.status} first frame=${JSON.stringify(chain.head)};`
+  + ` workbench tree under test=${WB_DIR}`)
+
+// S6b: one write out, held by the fixture, then the panel is re-created.
+const delayMs = 15000
+STEP = 're-register'
+setStubKnobs({ delay: { dismiss: delayMs }, accept: {} })
+const postsBefore = (await remountProbe()).posts.length
+await page.evaluate(`(${FIND_BTN})(${JSON.stringify(SECOND_ROW)}, 'Dismiss:').click()`)
+await prompt.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
+await page.locator('[data-wb-dismiss-reason]').click()
+await page.keyboard.type(REMOUNT_REASON)
+await page.locator('[data-dismiss-confirm]').click()
+const writeOut = await waitFor(async () => (await remountProbe()).posts.length > postsBefore, 8000)
+const beforeRebuild = await remountProbe()
+rec('S6a exactly one dismissal write left the panel and the answer is still out',
+  writeOut && beforeRebuild.posts.length === postsBefore + 1 && beforeRebuild.answers.length === 0,
+  `posts=${JSON.stringify(beforeRebuild.posts.slice(postsBefore).map((x) => x.url.replace(/^https?:\/\/[^/]+/, '')))};`
+  + ` answers so far=${beforeRebuild.answers.length} (the fixture holds the answer ${delayMs}ms)`)
+
+const rebuild1 = markerRebuild('1')
+if (!rebuild1.ok) {
+  if (rebuild1.env === true) await benchEnvFail('swap-build', rebuild1.why)
+  record('S6b the declared build entry produced the rebuilt bundle', 'fail', rebuild1.why)
+} else {
+  rec('S6b the declared build entry produced the rebuilt bundle (twins byte-identical)',
+    rebuild1.twinsEqual === true && rebuild1.sha !== bootBundleSha,
+    `build-client.sh ok; new bundle sha=${rebuild1.sha.slice(0, 12)} (boot ${bootBundleSha.slice(0, 12)}),`
+    + ` ${rebuild1.bytes} bytes; twins byte-identical=${rebuild1.twinsEqual}`)
+}
+const swapped = await waitFor(async () => (await remountProbe()).frames
+  .some((f) => f.id === 'sandbar-workbench'), 30000)
+const afterSwap = await remountProbe()
+rec('S6c the console re-registered the workbench plugin (rebuilt frame, no page reload)',
+  swapped && mainFrameNavs.length === navsAtRemount,
+  `rebuilt frames=${JSON.stringify(afterSwap.frames.slice(-3))};`
+  + ` new main-frame navigations=${mainFrameNavs.length - navsAtRemount}`)
+rec('S6d the re-created panel kept the pending dismissal (prompt back, reason restored, no second send)',
+  afterSwap.prompts === 1 && afterSwap.reason === REMOUNT_REASON && afterSwap.confirmDisabled === true,
+  `promptSlots=${afterSwap.prompts}; reason=${JSON.stringify(afterSwap.reason)};`
+  + ` confirm disabled=${afterSwap.confirmDisabled}; answers so far=${afterSwap.answers.length}`)
+
+// S7: the refusal lands AFTER the reset and must surface verbatim.
+const answerLanded = await waitFor(async () => (await remountProbe()).answers.length > 0, delayMs + 30000)
+const afterAnswer = await remountProbe()
+const refAnswer = afterAnswer.answers[afterAnswer.answers.length - 1] ?? null
+const frameAt = afterSwap.frames.find((f) => f.id === 'sandbar-workbench')?.at ?? null
+rec('S7a the engine answered with a refusal and the reset came FIRST',
+  answerLanded && refAnswer !== null && refAnswer.status === 200
+  && String(refAnswer.body).includes('"ok":false')
+  && frameAt !== null && refAnswer.at > frameAt,
+  `answer=${JSON.stringify(refAnswer)}; rebuilt frame at ${frameAt === null ? 'n/a' : Math.round(frameAt)}ms,`
+  + ` answer at ${refAnswer === null ? 'n/a' : Math.round(refAnswer.at)}ms`)
+const noticeBack = await waitFor(async () => (await remountProbe()).notice.includes(REMOUNT_MARK), 15000)
+const refusalState = await remountProbe()
+rec('S7b the refusal surfaces verbatim after the reset (never dropped silently)',
+  noticeBack && refusalState.notice.includes(REMOUNT_MARK) && refusalState.prompts === 1,
+  `notice=${JSON.stringify(refusalState.notice.slice(0, 160))}; promptSlots=${refusalState.prompts}`)
+rec('S7c the person\'s typed reason came back with the refusal', refusalState.reason === REMOUNT_REASON,
+  `reason box=${JSON.stringify(refusalState.reason)}`)
+const evidence7 = await shotEvidence('t261031-06-s7-refusal-after-reregister.png',
+  '[data-wb-dismiss-notice]')
+rec('S7e UI evidence: the re-created prompt with the engine refusal verbatim is on disk',
+  evidence7.ok, `path=${evidence7.file}; bytes=${evidence7.size}; png=${evidence7.isPng};`
+  + ` targetInView=${evidence7.scrolled}${evidence7.error ? `; error=${evidence7.error}` : ''}`)
+const secondRowStill = fixtureRowFacts(stub).rows > 0
+rec('S7d the refused dismissal changed nothing and only one write left',
+  refusalState.posts.length === postsBefore + 1 && secondRowStill,
+  `posts in the whole run=${refusalState.posts.length} (was ${postsBefore} before this leg)`)
+
+await page.locator('[data-dismiss-cancel]').click().catch(() => {})
+await waitFor(async () => (await remountProbe()).prompts === 0, 5000)
+
+// S8: an ACCEPTED dismissal leaves nothing pending, so a later re-register must
+// not resurrect a prompt. S5 already accepted TARGET and closed its prompt - the
+// face is exactly the state this claim needs. A second rebuild re-registers the
+// plugin once more and the face must stay prompt-free.
+const rebuild2 = markerRebuild('2')
+if (!rebuild2.ok) {
+  if (rebuild2.env === true) await benchEnvFail('swap-build-2', rebuild2.why)
+  record('S8 an accepted dismissal leaves nothing for a re-register to resurrect', 'fail', rebuild2.why)
+} else {
+  const swapAgain = await waitFor(async () => (await remountProbe()).frames
+    .filter((f) => f.id === 'sandbar-workbench').length >= 2, 30000)
+  const afterAgain = await waitFor(async () => {
+    await new Promise((r) => setTimeout(r, 1200))
+    return true
+  }, 3000)
+  const settled = await remountProbe()
+  rec('S8 an accepted dismissal leaves nothing for a re-register to resurrect',
+    swapAgain && afterAgain && settled.prompts === 0 && settled.notice === '',
+    `rebuilt frames=${settled.frames.filter((f) => f.id === 'sandbar-workbench').length};`
+    + ` promptSlots=${settled.prompts}; notice=${JSON.stringify(settled.notice)};`
+    + ` twins equal after rebuild=${rebuild2.twinsEqual}`)
+}
+
+// S9: a refusal whose prompt slot genuinely cannot exist must still speak. The
+// person folds the project block while the write is out: the block stays on the
+// face but its prompt slot is not rendered, so the face must name
+// group-collapsed and carry the engine's words.
+STEP = 'stranded-refusal'
+setStubKnobs({ delay: { dismiss: delayMs }, accept: {} })
+const postsBefore9 = (await remountProbe()).posts.length
+await page.evaluate(`(${FIND_BTN})(${JSON.stringify(THIRD_ROW)}, 'Dismiss:').click()`)
+await prompt.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
+await page.locator('[data-wb-dismiss-reason]').click()
+await page.keyboard.type(REMOUNT_REASON)
+await page.locator('[data-dismiss-confirm]').click()
+await waitFor(async () => (await remountProbe()).posts.length > postsBefore9, 8000)
+const folded = await page.evaluate(() => {
+  const caret = document.querySelector('[data-wb-project-block] .wb-group-caret[title="Collapse"]')
+  if (caret === null) return false
+  caret.click()
+  return true
+})
+if (!folded) {
+  await benchEnvFail('stranded-refusal',
+    `the project block carries no collapse control, so the group-collapsed condition cannot be`
+    + ` produced — ${await pageDomFacts()}`)
+}
+const foldedNow = await waitFor(async () => await page.evaluate(() =>
+  document.querySelector('[data-wb-project-block] .wb-group-caret[title="Expand"]') !== null), 5000)
+if (!foldedNow) {
+  await benchEnvFail('stranded-refusal', `the project block did not fold — ${await pageDomFacts()}`)
+}
+const strandLanded = await waitFor(async () => (await remountProbe()).unrenderable.length > 0,
+  delayMs + 30000)
+const strandState = await remountProbe()
+const strandLine = strandState.unrenderable[0] ?? null
+rec('S9a a refusal whose prompt slot cannot exist is named on the face', strandLanded && strandLine !== null,
+  `unrenderable lines=${JSON.stringify(strandState.unrenderable)}; prompts=${strandState.prompts}`)
+rec('S9b the line names WHICH condition stopped the prompt (group-collapsed)',
+  strandLine !== null && strandLine.condition === 'group-collapsed',
+  `condition=${JSON.stringify(strandLine === null ? null : strandLine.condition)}`
+  + ` (vocabulary: group-gone | group-collapsed | row-gone)`)
+rec('S9c the line carries the condition token, the engine\'s refusal verbatim and the row it belongs to',
+  strandLine !== null && strandLine.text.includes('group-collapsed')
+  && strandLine.text.includes(REMOUNT_MARK) && strandLine.text.includes(THIRD_ROW),
+  `line=${JSON.stringify(strandLine === null ? null : strandLine.text.slice(0, 240))};`
+  + ` tickets=${JSON.stringify(strandLine === null ? [] : strandLine.tickets)}`)
+const evidence9 = await shotEvidence('t261031-06-s9-strand-group-collapsed.png',
+  '[data-wb-dismiss-unrenderable]')
+rec('S9f UI evidence: the stranded-refusal line naming group-collapsed is on disk',
+  evidence9.ok, `path=${evidence9.file}; bytes=${evidence9.size}; png=${evidence9.isPng};`
+  + ` targetInView=${evidence9.scrolled}${evidence9.error ? `; error=${evidence9.error}` : ''}`)
+const expanded = await page.evaluate(() => {
+  const caret = document.querySelector('[data-wb-project-block] .wb-group-caret[title="Expand"]')
+  if (caret === null) return false
+  caret.click()
+  return true
+})
+const healed = expanded && await waitFor(async () => {
+  const st = await remountProbe()
+  return st.prompts === 1 && st.notice.includes(REMOUNT_MARK) && st.unrenderable.length === 0
+}, 10000)
+const healedState = await remountProbe()
+rec('S9d expanding the block re-opens the prompt with the same refusal (nothing dropped)',
+  healed, `promptSlots=${healedState.prompts}; notice=${JSON.stringify(healedState.notice.slice(0, 120))};`
+  + ` unrenderable lines=${healedState.unrenderable.length}`)
+await page.locator('[data-dismiss-cancel]').click().catch(() => {})
+rec('S9e the re-register legs rendered without a page error', pageErrors.length === 0,
+  `pageerrors=${pageErrors.length ? JSON.stringify(pageErrors.slice(-3)) : 'none'};`
+  + ` new main-frame navigations=${mainFrameNavs.length - navsAtRemount}`)
 
 judged = true
 await browser.close()
