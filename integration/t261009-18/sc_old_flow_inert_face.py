@@ -16,7 +16,13 @@ Faces:
   B  reuse direction: the running-flow modules (dev_lane.py, workflows_v2.py,
      agent_activities.py) never reference develop_line -- the dependency is
      one-way, new->existing, so no old-flow code path can reach the new
-     behaviour.
+     behaviour. Since t261101-15 the module carries TWO declared seams: the
+     develop-buffer gate region (t261009-46) and the activity-time
+     declared-line seam (t261031-43, whose legacy merge-phase hand-off is a
+     host-ruled design change, not a leak). The second one is declared by
+     markers, source-locked to a named symbol list, and the hand-off points
+     outside it are declared one by one with a count lock. Four injected
+     violations prove the guard still bites.
   C  landing write-locality: a real landing in a fixture store changes files
      ONLY under the develop area -- every other path in the store snapshot
      is unchanged, and the develop area contains no .sandbar/ coordination
@@ -26,12 +32,15 @@ Three-state exit contract: any FAIL -> exit 1 (module absent = FAIL named,
 the expected TDD signal); git missing = ENV_FAIL exit 2. Temp dir reclaimed
 on exit (L8).
 """
+import ast
+import io
 import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import tokenize
 from pathlib import Path
 
 passed = failed = 0
@@ -74,6 +83,236 @@ def make_repo(root, name):
     git("add", "-A", cwd=path)
     git("-c", "user.email=t@s", "-c", "user.name=t", "commit", "-qm", "base", cwd=path)
     return path
+
+
+# ---- face B2: the declared new-surface seams of agent_activities.py -----------
+# t261101-15. The module declares TWO seams for the new surface:
+#   S1 the develop-buffer gate region (t261009-46): the opt-in activities. No
+#      legacy ticket ever executes it.
+#   S2 the activity-time declared-line seam (t261031-43, delivered by t261101-05):
+#      the LEGACY merge phase resolves the ticket's declared develop line at
+#      activity time and hands it to its two faces. Host ruling 261031-43 makes
+#      the legacy merge phase judge line-landed content, so S2 is a design change
+#      and cannot live inside S1 (S1 is by declaration reachable only behind the
+#      develop-buffer version gate, which a legacy merge_check never passes).
+# S2 is therefore declared the same way S1 is - by name, not by line number:
+#   * a marker region, source-locked in BOTH directions: every module-level
+#     symbol inside it is on the declared list and every declared symbol is
+#     inside it (the region cannot be emptied, and cannot silently grow);
+#   * the region may not swallow the merge-path cores (an old-flow body parked
+#     inside the region would silence the guard);
+#   * outside both regions exactly three hand-off points are lawful, each with a
+#     count lock: one resolver entry called once inside merge_check before the
+#     per-scope loop, and one read of the RECORDED field per face inside
+#     _merge_check_one_scope (the replay lock t261031-43 delivered).
+# Everything else that names the surface outside the seams still reds.
+GATE_BEGIN = "# develop-buffer gate region (t261009-46) -- begin"
+GATE_END = "# develop-buffer gate region (t261009-46) -- end"
+SEAM_BEGIN = "# activity-time declared-line seam (t261031-43) -- begin"
+SEAM_END = "# activity-time declared-line seam (t261031-43) -- end"
+#: S2's module-level symbols, locked in both directions.
+SEAM_SYMBOLS = frozenset((
+    "DEVELOP_LINE_SOURCE_LIVE_META",
+    "DEVELOP_LINE_SOURCE_RECORDED",
+    "DEVELOP_LINE_RESOLUTION_ID",
+    "DEVELOP_LINE_LIVE_META_TIMEOUT_SEC",
+    "_develop_line_precedence",
+    "_develop_line_declaration_probe",
+    "_read_ticket_live_meta",
+    "_develop_line_face_note",
+    "_resolve_merge_check_develop_line",
+    "_merge_args_with_resolved_line",
+    "_line_face_on_fault",
+    "_line_resolution_receipt_row",
+))
+#: the one declared resolver hand-off (name level, called once per merge_check).
+RESOLVER_HANDOFF = "_resolve_merge_check_develop_line"
+#: the declared recorded-field read each face keeps (the t261031-43 replay lock).
+RECORDED_FIELD_READ = 'getattr(args, "develop_line", "")'
+#: old-flow cores the seam region must never swallow.
+MERGE_PATH_CORES = ("async def merge_check(",
+                    "async def _merge_check_one_scope(")
+NEW_SURFACE_NAMES = ("develop_line", "develop_certify")
+
+
+def b2_verdicts(acts_txt):
+    """Judge face B2 on one source text. Returns [(check name, ok, detail)].
+
+    Pure text/AST over the module, so the same function judges the real source and
+    the injected violations below (the guard's teeth are proved, not assumed):
+    blank the two declared regions with the line count preserved, strip comments
+    and docstrings, then every remaining reference to the new surface must be one
+    of the declared hand-off points. Prose never passes and a real reference never
+    hides in a comment.
+    """
+    lines = acts_txt.splitlines()
+    out = []
+
+    def v(name, ok, detail=""):
+        out.append((name, ok, detail))
+
+    def span(begin, end):
+        first, last = acts_txt.find(begin), acts_txt.find(end)
+        if acts_txt.count(begin) != 1 or acts_txt.count(end) != 1 \
+                or not 0 <= first < last:
+            return None
+        return (acts_txt.count("\n", 0, first),
+                acts_txt.count("\n", 0, last + len(end)))
+
+    gate = span(GATE_BEGIN, GATE_END)
+    v("B2-gate-region-markers-present", gate is not None,
+      "the develop-buffer gate-region markers must appear exactly once, begin "
+      "before end, in agent_activities.py")
+    seam = span(SEAM_BEGIN, SEAM_END)
+    v("B2-seam-region-markers-present", seam is not None,
+      "the declared-line seam markers (t261031-43) must appear exactly once, begin "
+      "before end, in agent_activities.py")
+    if gate is None or seam is None:
+        return out  # fail-closed: no declaration, no containment judgement
+    if not (gate[1] <= seam[0] or seam[1] <= gate[0]):
+        v("B2-declared-seams-do-not-overlap", False,
+          "the declared regions overlap (gate %r / seam %r)" % (gate, seam))
+        return out
+
+    seam_txt = "\n".join(lines[seam[0]:seam[1]])
+    try:
+        seam_tree = ast.parse(seam_txt)
+    except SyntaxError as e:
+        seam_tree = None
+        v("B2-seam-source-lock", False,
+          "the seam region does not parse as a module: %s" % e)
+    if seam_tree is not None:
+        names = set()
+        for node in seam_tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef)):
+                names.add(node.name)
+            elif isinstance(node, ast.Assign):
+                names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                names.add(node.target.id)
+        v("B2-seam-source-lock", names == set(SEAM_SYMBOLS),
+          "the seam's module-level symbols must equal the declared list "
+          "(missing: %s; undeclared: %s)"
+          % (sorted(set(SEAM_SYMBOLS) - names), sorted(names - set(SEAM_SYMBOLS))))
+        swallowed = [core for core in MERGE_PATH_CORES if core in seam_txt]
+        v("B2-seam-excludes-the-merge-path-cores", not swallowed,
+          "an old-flow core sits inside the seam region, so the region is widened "
+          "past its declaration: %s" % swallowed)
+
+    region_lines = set(range(*gate)) | set(range(*seam))
+    # blank the regions on WHOLE lines (the declaration spans top-level
+    # statements), so the line count survives and every hit keeps its line number
+    masked = ["" if i in region_lines else ln for i, ln in enumerate(lines)]
+    text = "\n".join(masked)
+    judged_lines = list(lines)
+    doc_lines = set()
+    try:
+        # Comments are cut from their OWN line, never dropped with it: code that
+        # carries a trailing comment is still code (t261101-15 - the injected
+        # proof caught the earlier whole-line drop as a hole).
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                n, col = tok.start
+                if 1 <= n <= len(judged_lines):
+                    ln = judged_lines[n - 1]
+                    judged_lines[n - 1] = ln[:col] + ln[tok.end[1]:]
+        tree = ast.parse(text)
+        for node in ast.walk(tree):
+            if (isinstance(node, (ast.Module, ast.FunctionDef,
+                                 ast.AsyncFunctionDef, ast.ClassDef))
+                    and node.body and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)
+                    and isinstance(node.body[0].value.value, str)):
+                doc_lines.update(range(node.body[0].lineno,
+                                       (node.body[0].end_lineno
+                                        or node.body[0].lineno) + 1))
+    except (tokenize.TokenError, SyntaxError):
+        judged_lines, doc_lines = list(lines), set()  # raw text, fail-closed
+
+    calls, faces = [], []
+    undeclared = []
+    for i, ln in enumerate(judged_lines, 1):
+        if (i - 1) in region_lines or i in doc_lines:
+            continue
+        if not any(w in ln for w in NEW_SURFACE_NAMES):
+            continue
+        if RESOLVER_HANDOFF in ln:
+            calls.append((i, ln.strip()))
+        elif RECORDED_FIELD_READ in ln:
+            faces.append((i, ln.strip()))
+        else:
+            undeclared.append((i, ln.strip()))
+    v("B2-references-confined-to-gate-region", not undeclared,
+      "new-surface reference outside the declared seams (line: text): %r"
+      % (undeclared[:5],))
+
+    def def_line(prefix):
+        for i, ln in enumerate(lines, 1):
+            if ln.startswith(prefix):
+                return i
+        return 0
+
+    scope_def = def_line("async def _merge_check_one_scope(")
+    merge_def = def_line("async def merge_check(")
+    loop_line = 0
+    for i, ln in enumerate(lines, 1):
+        if i > merge_def and ln.strip() == "for sc in scopes:":
+            loop_line = i
+            break
+    v("B2-handoff-resolver-called-once-per-call",
+      len(calls) == 1 and merge_def > 0 and merge_def < calls[0][0] < loop_line,
+      "the resolver entry must be declared exactly once, inside merge_check and "
+      "before the per-scope loop (resolver lines: %r; merge_check line %s; scope "
+      "loop line %s)" % ([c[0] for c in calls], merge_def, loop_line))
+    v("B2-handoff-recorded-field-read-once-per-face",
+      len(faces) == 2 and scope_def > 0
+      and all(scope_def < n < merge_def for n, _ in faces),
+      "each face must read the recorded field exactly once, inside "
+      "_merge_check_one_scope (field-read lines: %r; scope core line %s; "
+      "merge_check line %s)" % ([f[0] for f in faces], scope_def, merge_def))
+    return out
+
+
+def b2_injections():
+    """(label, expected red check, builder) - the guard's teeth, proved.
+
+    Each builder applies ONE violation to a copy of the real source text; the
+    caller judges it through b2_verdicts, the same path as the real file. A source
+    change that removes an anchor raises ValueError, and the caller reds that proof
+    by name - never a silent skip.
+    """
+    def import_in_an_old_flow_body(src):
+        merge_pos = src.index("async def merge_check(")
+        loop_pos = src.index("\n    for sc in scopes:\n", merge_pos) + 1
+        return (src[:loop_pos] + "    import develop_line  # injected violation\n"
+                + src[loop_pos:])
+
+    def extra_face_field_read(src):
+        face_pos = src.index('line_id=str(%s or "")' % RECORDED_FIELD_READ)
+        face_eol = src.index("\n", face_pos) + 1
+        return (src[:face_eol]
+                + '        injected_line = str(%s or "")\n' % RECORDED_FIELD_READ
+                + src[face_eol:])
+
+    def symbol_added_inside_the_seam(src):
+        pos = src.index(SEAM_END)
+        return (src[:pos] + "def _injected_helper():\n    return 1\n\n\n"
+                + src[pos:])
+
+    def reference_outside_both_regions(src):
+        return src + "\n_INJECTED_REF = develop_certify.read_rows\n"
+
+    return [
+        ("import-inside-an-old-flow-body",
+         "B2-references-confined-to-gate-region", import_in_an_old_flow_body),
+        ("extra-face-field-read",
+         "B2-handoff-recorded-field-read-once-per-face", extra_face_field_read),
+        ("symbol-added-inside-the-seam",
+         "B2-seam-source-lock", symbol_added_inside_the_seam),
+        ("reference-outside-both-regions",
+         "B2-references-confined-to-gate-region", reference_outside_both_regions),
+    ]
 
 
 def main():
@@ -133,7 +372,12 @@ def main():
         #       wiring itself; every behaviour sits behind the version gate).
         #       agent_activities and workflows_v2 carry none.
         #   B2  in agent_activities, every textual reference to the new
-        #       surface sits between the declared gate-region markers;
+        #       surface sits in one of the TWO declared seams: the gate-region
+        #       markers, and (t261101-15) the activity-time declared-line seam
+        #       whose region is source-locked to a named symbol list and whose
+        #       hand-off points outside it are declared one by one with a count
+        #       lock — see b2_verdicts above, which also judges four injected
+        #       violations so the guard's teeth are proved, not assumed;
         #   B3  in dev_lane, every AST reference to the new surface sits in
         #       the declared seams (is_develop_buffer_ticket, the _init
         #       intake, the _dev_buffer_* steps, and since t261019-02 the
@@ -170,46 +414,22 @@ def main():
 
         acts_txt = open(os.path.join(engine, "agent_activities.py"),
                         encoding="utf-8", errors="replace").read()
-        BEGIN = "# develop-buffer gate region (t261009-46) -- begin"
-        END = "# develop-buffer gate region (t261009-46) -- end"
-        i0, i1 = acts_txt.find(BEGIN), acts_txt.find(END)
-        check("B2-gate-region-markers-present", 0 <= i0 < i1,
-              "declared gate-region markers missing from agent_activities.py")
-        if 0 <= i0 < i1:
-            outside = acts_txt[:i0] + acts_txt[i1 + len(END):]
-            # t261011-24: the gate checks CODE references, not prose. Since the
-            # shared squash core moved into this module, its docstrings name
-            # develop_line.land_ticket as documentation; strip comments and
-            # docstrings before the containment judgement so a prose mention
-            # never passes and a real reference never hides in a comment.
-            import ast as _ast
-            import io as _io
-            import tokenize as _tokenize
+        for _name, _ok, _detail in b2_verdicts(acts_txt):
+            check(_name, _ok, _detail)
+        # The guard's teeth, proved on the same code path: each injected violation
+        # of the real source text must red its declared check. An anchor that the
+        # source no longer carries reds the proof by name - never a silent skip.
+        for _label, _expect, _build in b2_injections():
             try:
-                toks = list(_tokenize.generate_tokens(
-                    _io.StringIO(outside).readline))
-                drop_lines = set()
-                for tok in toks:
-                    if tok.type == _tokenize.COMMENT:
-                        drop_lines.add(tok.start[0])
-                tree = _ast.parse(outside)
-                for node in _ast.walk(tree):
-                    if (isinstance(node, (_ast.Module, _ast.FunctionDef,
-                                          _ast.AsyncFunctionDef, _ast.ClassDef))
-                            and node.body and isinstance(node.body[0], _ast.Expr)
-                            and isinstance(node.body[0].value, _ast.Constant)
-                            and isinstance(node.body[0].value.value, str)):
-                        drop_lines.update(range(
-                            node.body[0].lineno,
-                            (node.body[0].end_lineno or node.body[0].lineno) + 1))
-                outside = "\n".join(
-                    ln for i, ln in enumerate(outside.splitlines(), 1)
-                    if i not in drop_lines)
-            except (_tokenize.TokenError, SyntaxError):
-                pass  # unparseable source: judge the raw text, fail-closed
-            check("B2-references-confined-to-gate-region",
-                  "develop_line" not in outside and "develop_certify" not in outside,
-                  "new-surface reference outside the declared gate region")
+                _mutant = _build(acts_txt)
+            except ValueError as e:
+                check("B2-self-proof-%s-reds" % _label, False,
+                      "the injection anchor is gone from the source: %s" % e)
+                continue
+            _red = [n for n, ok, _d in b2_verdicts(_mutant) if not ok]
+            check("B2-self-proof-%s-reds" % _label, _expect in _red,
+                  "the injected violation must red %s (red checks: %r)"
+                  % (_expect, _red))
 
         def _new_names(node):
             out = set()

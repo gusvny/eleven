@@ -7072,6 +7072,20 @@ class WriteSetRecordResult:
     error: str = ""
 
 
+# ---- the activity-time declared-line seam (t261031-43) ------------------------
+# activity-time declared-line seam (t261031-43) -- begin
+# This is the SECOND declared new-surface seam of this module (the first is the
+# develop-buffer gate region, t261009-46, further down). It exists because the
+# LEGACY merge phase must judge line-landed content (t261031-34/-43), so the
+# declared line is resolved HERE, at activity time, instead of being read only
+# from the recorded activity argument. Everything that names the new surface lives
+# between these markers, EXCEPT the three hand-off points the replay lock pins
+# outside them: the resolver entry called once in merge_check, and the two faces'
+# literal read of the recorded field. The declared-seam guard
+# (integration/t261009-18/sc_old_flow_inert_face.py, face B2, t261101-15) judges
+# this declaration: the marker region, a source lock on its module-level symbols,
+# and one named lock per hand-off point. Any other reference still reds.
+#
 # ── t261031-43 (KI-447 follow-up, delivered by t261101-05): the declared develop
 # line is resolved AT ACTIVITY TIME ───────────────────────────────────────────
 # The defect (measured on t261031-17 right after t261031-34 landed): t261031-34
@@ -7251,6 +7265,46 @@ async def _resolve_merge_check_develop_line(args: "MergeCheckArgs") -> Dict[str,
         face["decl_note"] = decl_note
     face["note"] = _develop_line_face_note(face)
     return face
+
+
+def _merge_args_with_resolved_line(args: "MergeCheckArgs",
+                                   line_id: Any) -> "MergeCheckArgs":
+    """The args carry the RESOLVED line, so both faces read one value.
+
+    An empty id = no line is declared anywhere: the args stay untouched, which is
+    the pre-t261031-43 caliber byte for byte.
+    """
+    if not line_id:
+        return args
+    return dataclasses.replace(args, develop_line=str(line_id))
+
+
+def _line_face_on_fault(args: "MergeCheckArgs") -> Dict[str, Any]:
+    """The face a faulted resolution leaves behind.
+
+    The recorded argument stands and no receipt row is emitted. The caller names
+    the fault in the log, so a fault is never silent.
+    """
+    return {"line_id": str(getattr(args, "develop_line", "") or ""), "note": ""}
+
+
+def _line_resolution_receipt_row(face: Dict[str, Any]) -> Dict[str, Any]:
+    """The named resolution receipt row (t261031-43).
+
+    The row NAMES the resolution; it never changes the verdict. The reason_code
+    says why the line-content judgment could not run on the id as resolved.
+    """
+    state = str(face.get("state") or "")
+    rc = ("develop_line_declaration_unusable" if state not in ("", "declared")
+          else ("" if face.get("line_id") else "develop_line_meta_unavailable"))
+    row = {"item": "declared develop line resolved at activity time (t261031-43)",
+           "green": True,
+           "detail": str(face["note"]),
+           "id": DEVELOP_LINE_RESOLUTION_ID}
+    if rc:
+        row["reason_code"] = rc
+    return row
+# activity-time declared-line seam (t261031-43) -- end
 
 
 async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
@@ -8789,11 +8843,9 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     _line_face: Dict[str, Any] = {"line_id": "", "note": ""}
     try:
         _line_face = await _resolve_merge_check_develop_line(args)
-        if _line_face.get("line_id"):
-            args = dataclasses.replace(args, develop_line=str(_line_face["line_id"]))
+        args = _merge_args_with_resolved_line(args, _line_face.get("line_id"))
     except Exception as e:  # noqa: BLE001 - fail-named, never fail-silent
-        _line_face = {"line_id": str(getattr(args, "develop_line", "") or ""),
-                      "note": ""}
+        _line_face = _line_face_on_fault(args)
         activity.logger.warning(
             "[%s] develop line resolution faulted (%s: %s) - the recorded activity "
             "argument stands (pre-t261031-43 caliber for this round)",
@@ -8855,20 +8907,10 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     # rehearsal, which must stay checks[-1] (the conflict classification reads
     # checks[:-1] as "not a conflict").
     if _line_face.get("note"):
-        _state = str(_line_face.get("state") or "")
-        # The row NAMES the resolution; it never changes the verdict. An unresolved
-        # declaration or an unreadable live meta is an input fault, not a red of this
-        # ticket: the judgment keeps its caliber and the named reason_code says why it
-        # could not run.
-        _rc = ("develop_line_declaration_unusable" if _state not in ("", "declared")
-               else ("" if _line_face.get("line_id")
-                     else "develop_line_meta_unavailable"))
+        # The row NAMES the resolution; it never changes the verdict. The named
+        # reason_code inside it says why the judgment could not run.
         checks.insert(max(len(checks) - 1, 0),
-                      {"item": "declared develop line resolved at activity time (t261031-43)",
-                       "green": True,
-                       "detail": str(_line_face["note"]),
-                       "id": DEVELOP_LINE_RESOLUTION_ID,
-                       **({"reason_code": _rc} if _rc else {})})
+                      _line_resolution_receipt_row(_line_face))
     # 保险丝B（t260910-03）：多仓写集必须逐仓物化落成，任一成员仓缺失 → 红灯。
     # 插入位置钉死在 rehearsal 项**之前**（rehearsal 必须保持 checks[-1]，冲突分类
     # 把 checks[:-1] 当非冲突类——保险丝红恒为非冲突类，绝不进自动消解回路，

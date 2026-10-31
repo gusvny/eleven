@@ -5012,7 +5012,7 @@
     },
     "integration/t261009-18/sc_old_flow_inert_face.py": {
       "anchor": "behaviour",
-      "note": "t261009-18: coexistence — import writes nothing, one-way dependency source-text face, landing write-locality inside the develop area only",
+      "note": "t261009-18: coexistence — import writes nothing, one-way dependency source-text face, landing write-locality inside the develop area only. t261101-15: the reuse-direction face B2 now declares the TWO new-surface seams of agent_activities.py by name — the develop-buffer gate region markers and the activity-time declared-line seam (t261031-43), the latter source-locked in both directions to a named symbol list and barred from swallowing the merge-path cores, with the three hand-off points outside both regions declared and count-locked; four injected violations must each red, so the guard's teeth are proved. Anchored on declared markers, declared symbol names and the module's public hand-off contract, never on line numbers or branch-internal order",
       "sync_path": ""
     },
     "integration/t261009-19/sc_t26100919_certify_once.py": {
