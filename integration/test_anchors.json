@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 378,
-      "scenarios": 866
+      "engine_tests": 379,
+      "scenarios": 867
     },
     "vocab": [
       "behaviour",
@@ -1861,6 +1861,10 @@
       "anchor": "behaviour",
       "note": "t261031-32 (the empty-fallback wedge, declared evidence path): a rework whose TARGET is a main-chain step lands whatever the caller's fallback is. Measured on t261031-17 / t261031-20 (both parked at merge with 'one more green gate round anchored on the CURRENT lane HEAD' as the named remedy): `_consume_rework` returned an empty landing on a refusal and the main loop took it as `phase`, so the next round handed the empty string to the landing as the fallback and `_auto_rework` refused the VALID target run_integration_tests with 'pure guard, this literal should never appear'. The battery pins the incident shape (a merge-blocked round whose phase went empty still lands on run_integration_tests), the rule (a valid target lands with an empty/unknown fallback and the ticket log names the ignored fallback check instead of a generic landing failure), the preserved guard matrix (invalid target, ui_evidence and done refused by name; a genuinely invalid fallback still refused where it can be returned and never handed back as garbage), the honest receipt (the refuse note carries `_auto_rework`'s own reason), the refused-signal phase restoration and the loop wiring (source locks), and replay discipline: a pre-fix history replays the old branch verbatim with zero commands, the first LIVE round takes the fix, and a later replay of that same history decides identically - the fresh-patch-id-per-round shape (KI-061 memoization), modelled on temporalio 1.18.2 workflow_patch. Offline shells only: no docker, no Temporal, no 3099.",
       "sync_path": "server/engine/dev_lane.py"
+    },
+    "server/engine/tests/test_261031_20_gate_receipt_freshness.py": {
+      "anchor": "behaviour",
+      "note": "t261031-20: the gate receipt must name the tree it judged. A receipt is valid only for the tree it ran on: every gate round anchors `receipt_sha` on the lane HEAD (resolved before the face write, so the face key and the anchor are one fact); main's movement is a NAMED delta (`main_sync`, `merge_check_acts` from the KI-009 self-heal row that only lands on a real commit move, `foreign_repair:<sha>`), never a new identity, so another ticket's merge cannot void this ticket's proof (host order 261009); at the merge_check entry, before the main sync, the guard compares the lane HEAD with the comparison base and a mismatch re-runs the gate (stale: two re-runs, no_receipt: one, unprovable: zero) with the tree judged before the cap; the void counter resets only on a fresh evaluation, `rework` and `retry_qc`, and those two handler writes sit outside `_counter_reset_active` so the pre-anchor population the arm exists for gets its genuine attempt; every new command site sits behind `_gate_receipt_arm` = patched OR the event-gated `enable_gate_receipt_guard` flag (S1: the arm reaches the writes, not only the read); the closing run replaces the face receipt in place and names its surface (full suite / targeted / fast set); the void line names measurements only, never a committer. Offline shells, the real dev_lane main loop with a stubbed activity seam, fixed receipts; no docker/Temporal/3099."
     }
   },
   "scenarios": {
@@ -6142,6 +6146,11 @@
     "integration/t261031-31/sc_t26103131_round_legs_evidence.py": {
       "anchor": "behaviour",
       "note": "t261031-14: a REAL round's persisted record names all 8 planted failing legs of a red case whose bounded tail holds no leg row at all (the emit site reads the case's full output), a green round writes no failed_detail key, and a prose-only red lands as legs_parse=unrecognized with its reason line."
+    },
+    "integration/t261031-20/sc_gate_receipt_freshness.py": {
+      "anchor": "behaviour",
+      "note": "t261031-20: a gate receipt is valid only for the tree it measured - a moved tree voids it and sends the flow back to the gate, a main-sync delta never voids, an unresolvable or malformed anchor is never fresh, the void bound is reachable and a new anchor does not reset it, and the arming rule covers every declared command site; the reader text names both trees without claiming a committer",
+      "sync_path": ""
     }
   }
 }

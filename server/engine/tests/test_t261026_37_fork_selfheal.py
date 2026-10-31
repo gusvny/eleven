@@ -145,6 +145,11 @@ def _mk_wf(machine: FakeMachine):
             return IntegrationRunResult(
                 ran=1, passed=1, failed=0, env_fail=0,
                 details=[{"name": "ut", "cmd": "", "exit": 0, "output_tail": ""}])
+        if name == "lane_head_sha":
+            # t261031-20: the gate-receipt anchor and its merge_check guard probe
+            # the lane HEAD. A fixed sha keeps this journey on one tree, so the
+            # receipt stays fresh and the flow reaches merge_check unchanged.
+            return {"ok": True, "sha": "a" * 40, "error": ""}
         if name == "merge_check":
             raise _MergeCheckReached()   # terminal-success sentinel
         if name in ("concurrency_acquire", "concurrency_renew",

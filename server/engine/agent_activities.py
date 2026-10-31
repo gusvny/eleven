@@ -7147,6 +7147,12 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     # = report it honestly as red, no internal loop.
     auto_settle_note = ""
     clean_gate_refusal: Optional[Dict[str, Any]] = None  # t260915-01 ②：自愈被闸拒的结构化明细
+    # t261031-20: the self-heal row must mark a COMMIT, not an attempt. The note
+    # below is also written on a status failure, a MERGE_HEAD round, a refusal
+    # and an exception, so a row built from the note alone could sit as a green
+    # "self-heal" next to a dirty-worktree red. Resolve the head around the
+    # settle and emit the row only when it really moved.
+    auto_settle_row: Optional[Dict[str, Any]] = None
     try:
         # t260926-02（KI-125）：-uall 与 _settle_worktree_lane 同款——缺省折叠模式把
         # 新未跟踪目录折叠成 `?? dir/`，_dirty_within_write_set 对文件级写集条目判假
@@ -7163,6 +7169,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             elif _dirty_within_write_set(dirty_files, sc["write_set"]):
                 try:
                     heal_refusal: Dict[str, Any] = {}
+                    _hp = _git(["rev-parse", "--verify", "HEAD"], sc["tree"])
+                    _head_before = ((_hp.stdout or "").strip()
+                                    if _hp.returncode == 0 else "")
                     # repo= anchor is mandatory here (KI-01M52NS7A3290FBAWY1XYSBG0E,
                     # the report's section-5 UNRESOLVED item, root-caused): without it
                     # the ownership guard computes _lane_repo_root(member_tree), which
@@ -7183,6 +7192,22 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                     if heal_refusal:
                         clean_gate_refusal = dict(heal_refusal)
                     auto_settle_note = "[auto-settle] %s" % (note or "settle 返回空（见后续复查）")
+                    # The commit evidence: a moved head is the only proof that the
+                    # self-heal landed (t261031-20, S2).
+                    _ha = _git(["rev-parse", "--verify", "HEAD"], sc["tree"])
+                    _head_after = ((_ha.stdout or "").strip()
+                                   if _ha.returncode == 0 else "")
+                    if (_head_before and _head_after
+                            and _head_before != _head_after
+                            and not heal_refusal):
+                        _short = _head_after[:7]
+                        auto_settle_row = {
+                            "item": "merge_check auto-settle (in-write-set residue committed)",
+                            "green": True,
+                            "detail": ("the engine committed in-write-set residue on the "
+                                       "ticket's behalf: %s (%s)"
+                                       % (_short, auto_settle_note))[:600],
+                            "id": "auto_settle"}
                 except Exception as e:
                     auto_settle_note = ("[auto-settle] settle 异常（转红不抛）: %s: %s"
                                         % (type(e).__name__, e))[-300:]
@@ -7792,6 +7817,13 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
         checks.append({"item": "Main worktree has no uncommitted changes (pre-merge dirty check)",
                        "green": False, "detail": "dirty check error: %s" % e,
                        "id": "main_untouched", "reason_code": "main_dirty"})
+
+    # t261031-20: the self-heal commit evidence goes in BEFORE the rehearsal item
+    # (`checks[-1]` must stay the merge rehearsal: the conflict classifier reads
+    # `checks[:-1]` as "not a conflict", so the same slot discipline as the other
+    # insert sites applies). The row appears only when the head really moved.
+    if auto_settle_row is not None:
+        checks.append(auto_settle_row)
 
     # 4. merge-tree 预演无冲突（不落地——只把合并结果写成 tree 对象判冲突，
     #    It changes no workspace/index state; ticket t260826-01: the conflict file
