@@ -13,11 +13,18 @@ Rules under test:
       (`CAUSE_MERGE_WAIT` = "merge-wait"), named on the ticket log and on the
       ledger face (`merge_wait`) so the panel can tell a merge-wait release
       from a zombie holder;
-  (b) leaving the gate (signature, rework, refused signature) re-acquires
-      through the ordinary `_concurrency_gate()` before any further work — the
-      ticket queues behind the existing waiters and never jumps;
-  (c) every OTHER blocked stage keeps holding its slot (rule 3 unchanged: the
-      blocked wait renews to human-hold, it never releases);
+  (b) leaving the gate (signature, rework, refused signature) needs the slot
+      back before any further work. t261031-26 later narrowed this half: the
+      SIGNATURE path now takes a MERGE CLAIM (no work slot, never queued, so a
+      signed merge cannot starve) and only the pre-claim histories still replay
+      the ordinary `_concurrency_gate()` FIFO acquire. Both branches are pinned
+      below, because the replay contract is the older one;
+  (c) every OTHER blocked stage was understood to keep its slot (rule 3). That
+      half is SUPERSEDED by t261031-26 too: a blocked/awaiting-human ticket now
+      releases with its own `blocked-wait` cause (measured 261031: three of four
+      slots held by blocked tickets while two signed merges queued). The rule
+      this file still owns is the REPLAY contract: a history recorded before the
+      t261031-26 marker keeps the human-hold renew it recorded;
   (d) replay safety: the release sits behind `MERGE_SLOT_RELEASE_PATCH_ID` and
       the OLD renew call stays reachable as the else branch, so a history
       recorded before the marker schedules exactly the commands it always did
@@ -201,18 +208,39 @@ def test_the_ticket_face_logs_the_merge_wait_release(monkeypatch):
 
 # ---------- (b) leaving the gate re-acquires (never jumps the queue) ----------
 
-def test_leaving_the_merge_gate_reacquires_the_slot_before_merge_work(monkeypatch):
+def test_leaving_the_merge_gate_claims_the_merge_instead_of_a_work_slot(monkeypatch):
+    """t261031-26 replaced the ordinary re-acquire with a MERGE CLAIM on the
+    signature path (a signed merge queued behind work starved the whole project).
+    What this file still owns: the gate hands the slot back, and the merge runs
+    AFTER an accounting step that names itself - never silently slot-less."""
     wf, recorded = _drive_merge(monkeypatch, _patched_all_but(), park=False)
-    fam = _family(recorded)
-    names = [n for n, _ in fam]
+    names = [n for n, _a in recorded]
     assert "concurrency_release" in names, names
     idx_rel = names.index("concurrency_release")
-    assert names[idx_rel] == "concurrency_release"
-    assert fam[idx_rel][1] == "merge-wait", fam
+    assert getattr(recorded[idx_rel][1], "cause", "") == "merge-wait", names
     assert "merge" in names, "the drive never reached the merge activity: %r" % (names,)
     idx_merge = names.index("merge")
+    assert "concurrency_claim_merge" in names[idx_rel + 1:idx_merge], (
+        "the ticket merged without taking its merge claim first: %r" % (names,))
+    assert "concurrency_acquire" not in names[idx_rel + 1:idx_merge], (
+        "a signed merge still waits for a work slot: %r" % (names,))
+    assert wf.meta.get("stage_state") == "running"
+
+
+def test_a_pre_claim_history_still_takes_the_ordinary_slot(monkeypatch):
+    """The t261022 half stays pinned where it belongs: a history that recorded the
+    FIFO acquire after the signature (marker absent) replays exactly that."""
+    wf, recorded = _drive_merge(monkeypatch,
+                                _patched_all_but(
+                                    dev_lane.MERGE_CLAIM_PATCH_ID),
+                                park=False)
+    names = [n for n, _a in recorded]
+    idx_rel = names.index("concurrency_release")
+    idx_merge = names.index("merge")
     assert "concurrency_acquire" in names[idx_rel + 1:idx_merge], (
-        "the ticket merged WITHOUT taking the slot back first: %r" % (names,))
+        "the recorded FIFO re-acquire disappeared: %r" % (names,))
+    assert "concurrency_claim_merge" not in names, (
+        "an old history scheduled the NEW claim activity: %r" % (names,))
     assert wf.meta.get("stage_state") == "running"
 
 
@@ -242,11 +270,7 @@ def test_the_rework_exit_requeues_at_the_main_loop_gate():
 
 # ---------- (c) every other blocked stage keeps holding its slot ----------
 
-def test_a_blocked_stage_still_renews_its_hold(monkeypatch):
-    recorded = []
-    stub = _make_stub(_patched_all_but(), recorded, park=False)
-    monkeypatch.setattr(dev_lane, "workflow", stub)
-    monkeypatch.setattr(base, "workflow", stub)
+def _blocked_workflow():
     wf = object.__new__(dev_lane.DevLaneWorkflow)
     wf.ticket_id = "t261022ut"
     wf.meta = {"status": "dispatched", "log": [], "project": "proj-alpha",
@@ -259,14 +283,27 @@ def test_a_blocked_stage_still_renews_its_hold(monkeypatch):
     wf._detail_face_on = False
     wf._annex_requests = []
     wf.engine_version = 2
+    return wf
+
+
+def test_an_old_history_still_renews_the_blocked_hold(monkeypatch):
+    """SUPERSEDED RULE, REPLAY HALF (t261031-26): the human-hold renew of a
+    blocked stage is no longer the live rule, but a history recorded before the
+    t261031-26 marker still replays it - so the branch must stay reachable."""
+    recorded = []
+    stub = _make_stub(_patched_all_but(dev_lane.BLOCKED_SLOT_RELEASE_PATCH_ID),
+                      recorded, park=False)
+    monkeypatch.setattr(dev_lane, "workflow", stub)
+    monkeypatch.setattr(base, "workflow", stub)
+    wf = _blocked_workflow()
     asyncio.run(wf._blocked("run_integration_tests", "gate is red"))
     fam = _family(recorded)
     names = [n for n, _ in fam]
     assert "concurrency_renew" in names, (
-        "a blocked stage must keep its hold (rule 3): %r" % (names,))
+        "the pre-t261031-26 command disappeared: %r" % (names,))
     assert fam[names.index("concurrency_renew")][1] == "human-gate", fam
     assert "concurrency_release" not in names, (
-        "a blocked stage released its slot — rule 3 broken: %r" % (names,))
+        "an old history scheduled the NEW release command: %r" % (names,))
 
 
 def test_merge_wait_is_used_by_the_merge_gate_only():
@@ -358,10 +395,15 @@ def test_every_merge_gate_block_is_patch_guarded_and_reacquires():
         for pop_at in pops:
             merge_at = src.find("MergeArgs(", pop_at)
             assert merge_at > pop_at, lane_py
+            # t261031-26: the live path takes the merge claim; the t261022 FIFO
+            # acquire stays reachable as the fallback for recorded histories.
+            claim_at = src.find("await self._concurrency_claim_merge()", pop_at)
             gate_at = src.find("await self._concurrency_gate()", pop_at)
-            assert pop_at < gate_at < merge_at, (
-                "the gate exit does not take the slot back before merging: %s"
+            assert pop_at < claim_at < merge_at, (
+                "the gate exit does not take its merge claim before merging: %s"
                 % lane_py)
+            assert pop_at < gate_at < merge_at, (
+                "the t261022 fallback acquire is no longer reachable: %s" % lane_py)
 
 
 # ---------- the ledger face (why this is not a zombie channel) ----------

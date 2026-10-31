@@ -109,6 +109,10 @@ with workflow.unsafe.imports_passed_through():
         # t261022 (host order 261022): patch id + merge-wait cause of the merge
         # gate's slot hand-back (the release/gate helpers live in the parent).
         MERGE_SLOT_RELEASE_PATCH_ID,
+        # t261031-26: the blocked-wait release and the merge claim, both
+        # single-sourced in dev-lane (the helpers live in the parent class too).
+        BLOCKED_SLOT_RELEASE_PATCH_ID,
+        MERGE_CLAIM_PATCH_ID,
         # t261005-15: replay predicate for the concurrency family (window-(b)
         # time arm); judged against THIS module's workflow facade at the two
         # gate sites below, the shared dev-lane id at the inherited helpers.
@@ -1682,7 +1686,14 @@ class LightLaneWorkflow(DevLaneWorkflow):
                     continue
                 # t261022: take the slot again through the ordinary gate before any
                 # merge work - the ticket queues behind the existing waiters.
-                if workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
+                # t261031-26: the merge step takes a MERGE CLAIM instead - visible on
+                # the ledger, never a work slot, never queued behind work (measured
+                # 261031: a signed merge starved for half an hour). The t261022
+                # branch stays reachable so an older history replays its recorded
+                # command.
+                if workflow.patched(MERGE_CLAIM_PATCH_ID):
+                    await self._concurrency_claim_merge()
+                elif workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
                     await self._concurrency_gate()
                 self.meta["stage_state"] = "running"
                 self._mark("merge", "running", "human signed off (%s) — merging" % sig.who)
@@ -1697,6 +1708,10 @@ class LightLaneWorkflow(DevLaneWorkflow):
                               defer_teardown=True,
                               write_set=list(self.meta.get("write_set") or [])),
                     start_to_close_timeout=MERGE_TO, retry_policy=RETRY)
+                # t261031-26: the claim window is exactly the merge activity, ok
+                # or not (the blocked-wait release below clears the face too).
+                if workflow.patched(MERGE_CLAIM_PATCH_ID):
+                    await self._concurrency_end_merge_claim()
                 mr = raw if isinstance(raw, MergeResult) else MergeResult(
                     ok=bool(raw.get("ok")), action=str(raw.get("action") or ""),
                     merge_commit=str(raw.get("merge_commit") or ""),

@@ -436,5 +436,8 @@ def test_stdlib_only_loader_face_has_no_activities():
     CONCURRENCY_ACTIVITIES is a tuple of named callables."""
     names = [getattr(a, "__name__", "") for a in cc.CONCURRENCY_ACTIVITIES]
     # t261027-10: concurrency_sweep joins the family (dead-holder reclaim).
+    # t261031-26: the merge step's own accounting joins it (a signed merge takes a
+    # merge claim, never a work slot).
     assert names == ["concurrency_acquire", "concurrency_release",
-                     "concurrency_renew", "concurrency_sweep"]
+                     "concurrency_renew", "concurrency_sweep",
+                     "concurrency_claim_merge", "concurrency_end_merge_claim"]

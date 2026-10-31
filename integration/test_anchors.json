@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 371,
+      "engine_tests": 373,
       "scenarios": 860
     },
     "vocab": [
@@ -1830,6 +1830,14 @@
       "anchor": "contract",
       "note": "t261031-23 KI-442: the quickmanual gate round must POINT the ticket's own scenario names, not only exempt them. Measured on t261031-06: the round ran the declared scope alone while own_source.derived named a new own scenario, so the t261025-02 coverage check voided an otherwise green round. The battery pins the union rule (dev_lane.quick_gate_pointed_names = the declared scope union the own names, order-stable, de-duplicated, blank/None never entering, an empty own set unchanged) through the real _quick_gate_round args (pointed face = declared + own, own face kept, un-patched replay sends the declared scope alone, check/battery plans keep their check scope and append the own name, the full plan points nothing), and the receipt face (a new pointed key next to own_source, so shared.own_coverage_error books no violation while the declared-only list books the incident's exact failure). One union writer (closing_pointed_names), behind its own workflow.patched id. Offline, nothing runs, no docker/Temporal/browser/3099.",
       "sync_path": "server/engine/dev_lane.py"
+    },
+    "server/engine/tests/test_t261031_26_blocked_slot_release.py": {
+      "anchor": "contract",
+      "note": "t261031-26 (KI-441/KI-443): a ticket parked in blocked/awaiting-human releases its concurrency slot with its own `blocked-wait` cause (named on the ledger face and the ticket log) and re-acquires through the ordinary FIFO gate; a signed merge takes a MERGE CLAIM (no work slot, never queued) so it can never starve behind work; the fail-closed stance is untouched (unknown liveness keeps the slot) and a blocked-and-released ticket is not a zombie by construction; both rules sit behind their own patch markers with the pre-marker commands still reachable, so existing histories replay unchanged. Assertions are the declared contract of the concurrency ledger + the lane source locks (markers, branch order, claim window), not a snapshot of any production file."
+    },
+    "server/engine/tests/test_t261031_24_blocked_slot_release.py": {
+      "anchor": "contract",
+      "note": "t261031-26: the DECLARED evidence path of the ticket (the `_24_` in the name is the creation-time declaration carried verbatim from the create payload - a payload slip, not a second ticket). It asserts nothing of its own: it re-exports the 18 test functions and the `proj` fixture of server/engine/tests/test_t261031_26_blocked_slot_release.py, so the declared path is a real runnable pytest target over exactly one set of assertions (blocked/awaiting-human releases with `blocked-wait` and re-acquires through FIFO; a signed merge takes a merge claim, not a work slot; fail-closed liveness; marker replay discipline). Read together with the real battery's entry above."
     }
   },
   "scenarios": {

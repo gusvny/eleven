@@ -30,22 +30,36 @@ plan-review checklist:
 
 Slot accounting (decided, tested — see tests/test_t261004_32_concurrency.py):
 the slot unit is the ticket's lane run. Lifetime = acquired before the first
-stage starts, released for real at three points: the ticket is paused, the
-ticket terminates, and the ticket enters the MERGE human gate (t261022, host
-order 261022 — a ticket waiting for the merge signature would otherwise starve
-the queue: seven merge-waiting tickets held all ten slots for hours). The
-remaining rule points (stage end, the human-gate transition of every blocked
-stage) are ATOMIC RENEWALS: the holder record's reason is rewritten in the same
-locked step (running <-> human-hold). There is deliberately no
-between-stages window: a continuing ticket never loses its slot to a queued
-ticket, so no mid-lane demotion race exists; acquire() on an already-holding
-ticket is immediate. A ticket blocked at a stage keeps its slot on purpose
-(rule 3, unchanged by t261022); only the merge gate hands the slot back, and a
-ticket leaving that gate re-acquires through the ordinary FIFO queue (it never
-jumps). The 60 s re-poll backstop
-in the workflow gate protects WAITERS (a missed promotion resolves within one
-poll); it is NOT leak protection — a holder whose workflow died mid-stage is
-cleared by `ticket.py {"op":"concurrency","reconcile":true}` (named output).
+stage starts, released for real at these points: the ticket is paused, the
+ticket terminates, the ticket enters the MERGE human gate (t261022, host order
+261022 — a ticket waiting for the merge signature would otherwise starve the
+queue: seven merge-waiting tickets held all ten slots for hours), and the
+ticket parks in a stage that cannot progress without an outside act (t261031-26
+— `blocked` / `awaiting-human`: three of four slots were held by blocked
+tickets in 261031 while two signed merges queued for half an hour). The
+remaining rule points (stage end, the human-gate transition of every stage that
+still CAN progress by itself) are ATOMIC RENEWALS: the holder record's reason
+is rewritten in the same locked step (running <-> human-hold). There is
+deliberately no between-stages window: a continuing ticket never loses its slot
+to a queued ticket, so no mid-lane demotion race exists; acquire() on an
+already-holding ticket is immediate, and a ticket that left a parked wait takes
+its place in the ordinary FIFO queue again (it never jumps). The 60 s re-poll
+backstop in the workflow gate protects WAITERS (a missed promotion resolves
+within one poll); it is NOT leak protection — a holder whose workflow died
+mid-stage is cleared by `ticket.py {"op":"concurrency","reconcile":true}`
+(named output).
+
+Merge claims (t261031-26, second half): the MERGE STEP itself holds no WORK
+slot. It is a short engine activity (a squash + a commit), it starts no agent
+session, so the resource the project limit protects is not in play; and putting
+it in the work queue deadlocked the whole project (measured 261031: the freeze
+that blocked the merge-waiting holders could only be lifted by a green line
+round, and that round needed a signed merge to land — the queue was waiting on
+itself). A signed merge therefore takes a MERGE CLAIM from the lists below:
+visible on the ledger face (`merge_claims`), never counted against the work
+limit, and never queued behind a work holder or a parked ticket. The claim
+window is exactly the merge activity; a blocking or terminating end releases it
+through the ordinary release path.
 #
 # t261019-31 (KI-01M533EHPA0AYQ2Y2GCNGXS4SD): the terminal-ending leak has two
 # structural closes — (a) the engine-side cancel/terminate/close-out entries in
@@ -89,17 +103,42 @@ CAUSE_STAGE_END = "stage-end"
 CAUSE_TERMINATED = "terminated"
 CAUSE_HUMAN_GATE = "human-gate"
 CAUSE_PAUSED = "paused"
-#: t261022 (host order 261022): the MERGE human gate is the one gate that hands
-#: the slot back while it waits for the signature — a merge-waiting ticket is
-#: not doing work, so holding the slot starves the queue (measured: 7 waiting
-#: tickets held all 10 slots for hours while the delivery line was frozen).
-#: Its own cause word (never `paused`, never `human-gate`) so the ledger, the
-#: panel face and the ticket log can tell a merge-wait release from a zombie
-#: holder. Every other human gate / blocked stage keeps CAUSE_HUMAN_GATE and
-#: keeps holding (rule 3, unchanged).
+#: t261022 (host order 261022): the MERGE human gate hands the slot back while it
+#: waits for the signature — a merge-waiting ticket is not doing work, so holding
+#: the slot starves the queue (measured: 7 waiting tickets held all 10 slots for
+#: hours while the delivery line was frozen). Its own cause word (never `paused`,
+#: never `human-gate`) so the ledger, the panel face and the ticket log can tell a
+#: merge-wait release from a zombie holder. t261031-26 generalised the rule to
+#: every parked state (CAUSE_BLOCKED_WAIT below); the renew word
+#: CAUSE_HUMAN_GATE now belongs only to stages that can still progress by
+#: themselves (the quickmanual lane's parked work stage).
 CAUSE_MERGE_WAIT = "merge-wait"
+#: t261031-26 (KI-441 / KI-443 root cause): a ticket parked in
+#: `stage_state=blocked` or `awaiting-human` CANNOT progress without an outside
+#: act (a retry_qc, a rework, a signature, a remedy). Holding capacity there
+#: protects nothing and starves the work that can progress - measured 261031:
+#: three of four slots held by blocked tickets while two human-signed merges sat
+#: in the queue for over half an hour, and the freeze that blocked two of the
+#: three could only be lifted by a line round that needed one of those merges.
+#: Its own cause word, because `paused` (an operator act) and `terminated` (an
+#: ending) would both be lies here; `merge-wait` stays reserved for the merge
+#: signature wait (t261022) so the two parked faces stay distinguishable.
+#: Leaving the parked state is an ORDINARY acquire: the ticket queues behind
+#: whoever is already waiting (it never jumps back in).
+CAUSE_BLOCKED_WAIT = "blocked-wait"
 REASON_RUNNING = "running"
 REASON_HUMAN_HOLD = "human-hold"
+#: The ledger lists that record a ticket WITHOUT holding a slot. They exist so a
+#: reader can tell "released on purpose, waiting for something outside the
+#: engine" from a leaked holder row (a zombie). None of them is ever counted by
+#: the limit arithmetic, and none of them is a second holder list:
+#:   merge_wait  - parked at the MERGE human gate, waiting for a signature
+#:                 (t261022; the release cause is `merge-wait`).
+#:   blocked_wait- parked in `blocked` / `awaiting-human`, waiting for an outside
+#:                 act (t261031-26; the release cause is `blocked-wait`).
+#:   merge_claims- running the merge step under a MERGE CLAIM (t261031-26): no
+#:                 work slot, never queued behind work.
+PARKED_FACES = ("merge_wait", "blocked_wait", "merge_claims")
 
 # Project key validation mirrors the registry whitelist (shared.PROJECT_KEY_RE)
 # — an invalid key must refuse before any file is touched.
@@ -352,7 +391,11 @@ class AcquireArgs:
 class ReleaseArgs:
     project: str
     ticket: str
-    cause: str               # one of the CAUSE_* four points
+    cause: str               # one of the CAUSE_* release points
+    #: t261031-26: the stage the ticket parked in, recorded on the
+    #: `blocked_wait` face so the release receipt names where the wait happened.
+    #: Empty when the caller has no stage (pause/terminal releases).
+    stage: str = ""
 
 
 def _queue_pos(entries: List[Dict[str, Any]], ticket: str) -> int:
@@ -367,7 +410,10 @@ def _read_state_unlocked(root: str) -> Dict[str, Any]:
         with open(os.path.join(root, STATE_FILE), "r", encoding="utf-8") as f:
             doc = json.load(f)
     except FileNotFoundError:
-        return {"version": STATE_VERSION, "holders": [], "queue": []}
+        fresh = {"version": STATE_VERSION, "holders": [], "queue": []}
+        for face in PARKED_FACES:
+            fresh[face] = []
+        return fresh
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
         raise ValueError(
             "Concurrency slot ledger unreadable/malformed: %s (%s: %s) - "
@@ -380,6 +426,20 @@ def _read_state_unlocked(root: str) -> Dict[str, Any]:
             "Concurrency slot ledger shape broken: %s (version/holders/queue "
             "missing or wrong type) - fail-closed refusal"
             % os.path.join(root, STATE_FILE))
+    # Optional parked faces (t261022 merge-wait, t261031-26 blocked-wait and
+    # merge claims). A ledger written before they existed simply has no key -
+    # that is an empty face, never a malformed one. Any other shape is a named
+    # refusal (the same fail-closed stance as holders/queue above): a face this
+    # module cannot read must never be silently treated as absent.
+    for face in PARKED_FACES:
+        if face not in doc:
+            doc[face] = []
+        elif not isinstance(doc[face], list):
+            raise ValueError(
+                "Concurrency slot ledger face broken: %s key %r must be a list "
+                "(got %s) - fail-closed refusal, never read as an empty face"
+                % (os.path.join(root, STATE_FILE), face,
+                   type(doc[face]).__name__))
     return doc
 
 
@@ -399,7 +459,23 @@ def _face(doc: Dict[str, Any], now: float) -> Dict[str, Any]:
                    "waiting_s": round(now - float(e.get("since") or now), 3)}
                   for e in doc.get("merge_wait", [])
                   if isinstance(e, dict)]
-    return {"holders": holders, "queue": queue, "merge_wait": merge_wait}
+    # t261031-26: the same face for a ticket parked in `blocked` /
+    # `awaiting-human` — the receipt says who released, why (the cause word),
+    # and at which stage, so the wait is auditable instead of being an
+    # unexplained empty slot.
+    blocked_wait = [{"ticket": e.get("ticket"), "since": e.get("since"),
+                     "waiting_s": round(now - float(e.get("since") or now), 3),
+                     "cause": e.get("cause") or CAUSE_BLOCKED_WAIT,
+                     "stage": e.get("stage") or ""}
+                    for e in doc.get("blocked_wait", [])
+                    if isinstance(e, dict)]
+    # t261031-26: merges in flight. Not holders: they consume no work slot.
+    merge_claims = [{"ticket": e.get("ticket"), "since": e.get("since"),
+                     "held_s": round(now - float(e.get("since") or now), 3)}
+                    for e in doc.get("merge_claims", [])
+                    if isinstance(e, dict)]
+    return {"holders": holders, "queue": queue, "merge_wait": merge_wait,
+            "blocked_wait": blocked_wait, "merge_claims": merge_claims}
 
 
 def _locked(root: str):
@@ -462,6 +538,22 @@ def acquire(project_key: str, ticket: str, priority: bool = False) -> Dict[str, 
                for e in doc.get("merge_wait", [])):
             doc["merge_wait"] = [e for e in doc.get("merge_wait", [])
                                  if not (isinstance(e, dict) and e.get("ticket") == t)]
+        # t261031-26: the same discipline for the blocked-wait face — taking the
+        # gate again means the parked wait is over, and the receipt NAMES the wait
+        # it replaces (who released, why, when). The caller logs that line on the
+        # ticket face, so both halves of the round trip (release, re-acquire) are
+        # readable instead of the slot silently coming back.
+        reacquired_from: Optional[Dict[str, Any]] = None
+        for e in doc.get("blocked_wait", []):
+            if isinstance(e, dict) and e.get("ticket") == t:
+                reacquired_from = {"cause": e.get("cause") or CAUSE_BLOCKED_WAIT,
+                                   "since": e.get("since"),
+                                   "stage": e.get("stage") or ""}
+                break
+        if reacquired_from is not None:
+            doc["blocked_wait"] = [e for e in doc.get("blocked_wait", [])
+                                   if not (isinstance(e, dict)
+                                           and e.get("ticket") == t)]
         held = next((h for h in holders if h.get("ticket") == t), None)
         if held is not None:
             # t261019-31: the already-holding early return is also the holder
@@ -474,7 +566,8 @@ def acquire(project_key: str, ticket: str, priority: bool = False) -> Dict[str, 
             return {"granted": True, "already_holding": True,
                     "reason": held.get("reason"), "position": 0,
                     "limit": limit, "holders": len(holders),
-                    "waiting": len(queue)}
+                    "waiting": len(queue),
+                    "reacquired_from": reacquired_from}
         if not any(e.get("ticket") == t for e in queue):
             entry = {"ticket": t, "since": now}
             if priority:
@@ -533,11 +626,13 @@ def acquire(project_key: str, ticket: str, priority: bool = False) -> Dict[str, 
             return {"granted": True, "already_holding": False, "position": 0,
                     "limit": limit, "holders": len(holders), "waiting": len(queue),
                     "dropped_stale": dropped_stale,
-                    "dropped_stale_holders": dropped_stale_holders}
+                    "dropped_stale_holders": dropped_stale_holders,
+                    "reacquired_from": reacquired_from}
         out = {"granted": False, "already_holding": False, "position": pos,
                "limit": limit, "holders": len(holders), "waiting": len(queue),
                "dropped_stale": dropped_stale,
-               "dropped_stale_holders": dropped_stale_holders}
+               "dropped_stale_holders": dropped_stale_holders,
+               "reacquired_from": reacquired_from}
         # t261019-31: name the over-limit state on the gate refusal too, so the
         # gate and the panel face read ONE judgement (never a silent 12/7).
         if not unlimited and len(holders) > limit:
@@ -585,16 +680,18 @@ def renew(project_key: str, ticket: str, reason: str) -> Dict[str, Any]:
 QUEUE_STALE_S = 900
 
 
-def _is_stale(entry: Dict[str, Any], now: float) -> bool:
-    """A queue entry's heartbeat expired (its waiter is gone). A missing or
-    non-numeric `since` counts as stale: an entry that cannot prove it is
-    alive never takes a slot (fail-closed — the same stance reconcile takes
-    for a holder it cannot prove)."""
+def _is_stale(entry: Dict[str, Any], now: float,
+              bound_s: float = QUEUE_STALE_S) -> bool:
+    """A queue entry's (or merge claim's) heartbeat expired (its waiter is gone).
+    A missing or non-numeric `since` counts as stale: an entry that cannot prove
+    it is alive never takes a slot (fail-closed — the same stance reconcile takes
+    for a holder it cannot prove). `bound_s` is the caller's window: the queue
+    window is QUEUE_STALE_S, a merge claim's is MERGE_CLAIM_STALE_S."""
     try:
         since = float(entry.get("since"))
     except (TypeError, ValueError):
         return True
-    return now - since > QUEUE_STALE_S
+    return now - since > bound_s
 
 
 #: How long a RUNNING holder may go without a heartbeat before the next
@@ -614,6 +711,16 @@ def _is_stale(entry: Dict[str, Any], now: float) -> bool:
 #: expiring, so it MAY release a TERMINATED holder parked as human-hold;
 #: a live or unprovable one keeps its slot there.)
 HOLDER_STALE_S = 6 * 3600
+
+#: How long a MERGE CLAIM may sit on the ledger before the next claim treats it
+#: as a corpse (t261031-26). A merge claim is taken once for one merge activity
+#: (a short engine step: squash + commit) and ended by `end_merge_claim`, by a
+#: blocking release, or by a terminal release. The bound is the same generous
+#: six hours as HOLDER_STALE_S on purpose: an over-tight bound would drop a claim
+#: while its merge is still running and let a second merge start on the same main
+#: checkout. The normal reclaim path is reconcile (the workflow is proved gone),
+#: not this bound.
+MERGE_CLAIM_STALE_S = HOLDER_STALE_S
 
 
 def _holder_is_stale(holder: Dict[str, Any], now: float) -> bool:
@@ -938,46 +1045,70 @@ def _promote_live_head(doc: Dict[str, Any], now: float) -> Dict[str, Any]:
     return {"promoted": None, "dropped_stale": dropped}
 
 
-def release(project_key: str, ticket: str, cause: str) -> Dict[str, Any]:
-    """Release the slot at a real release point (paused / terminated / merge-wait)
-    and promote the queue head if the freed slot covers it. Idempotent: releasing
-    a ticket that holds nothing is a no-op receipt, not an error.
+def release(project_key: str, ticket: str, cause: str,
+            stage: str = "") -> Dict[str, Any]:
+    """Release the slot at a real release point (paused / terminated / merge-wait
+    / blocked-wait) and promote the queue head if the freed slot covers it.
+    Idempotent: releasing a ticket that holds nothing is a no-op receipt, not an
+    error.
 
-    `human-gate` is deliberately NOT a freeing cause for a blocked stage (rule 3:
-    a blocked stage HOLDS its slot — design defect finding #1 of the t261004-32
-    test-design stage): that rule point is an atomic renew (see
-    renew/CAUSE_HUMAN_GATE), never a release. Refused here by name so a mis-wired
-    call site is loud.
+    `human-gate` is deliberately NOT a freeing cause: the renewal points of a
+    stage that can still progress by itself (stage end, and the gates t261031-26
+    did not move) are atomic renews (see renew/CAUSE_HUMAN_GATE), never a
+    release. Refused here by name so a mis-wired call site is loud.
 
-    t261022 (host order 261022): the MERGE human gate is the exception and frees
+    t261022 (host order 261022): the MERGE human gate is one exception and frees
     the slot with its OWN cause word (`merge-wait`), so a ticket waiting for a
     merge signature no longer starves the queue. The freed ticket is recorded on
     the ledger's `merge_wait` face (not as a holder) and leaves that face when it
     takes a slot again — the panel can therefore tell a merge-wait release from a
-    zombie holder."""
+    zombie holder.
+
+    t261031-26 (KI-441 / KI-443): the second exception is a ticket parked in
+    `blocked` / `awaiting-human` — a state the engine sets itself when the ticket
+    cannot progress without an outside act. It releases with its own
+    `blocked-wait` cause and is recorded on the `blocked_wait` face (ticket,
+    when, why, which stage), so the release is auditable and the ticket is never
+    read as a zombie. `stage` names the stage it parked in ("" when the caller
+    has none). Every real release clears the ticket from ALL faces (holder, queue,
+    merge-wait, blocked-wait, merge claims): a parked or claimed row can never
+    outlive the release that ends it."""
     k = _check_key(project_key)
     t = str(ticket or "").strip()
-    if cause not in (CAUSE_TERMINATED, CAUSE_PAUSED, CAUSE_MERGE_WAIT):
+    if cause not in (CAUSE_TERMINATED, CAUSE_PAUSED, CAUSE_MERGE_WAIT,
+                     CAUSE_BLOCKED_WAIT):
         raise ValueError(
             "Concurrency slot release refused: cause %r is not in the real-"
-            "release vocabulary (terminated|paused|merge-wait) - a blocked or "
-            "human-gate stage is an atomic renew (it holds the slot on purpose; "
-            "only the MERGE gate releases, with the merge-wait cause), never a "
-            "release point" % cause)
+            "release vocabulary (terminated|paused|merge-wait|blocked-wait) - "
+            "a stage that can still progress renews its hold (an atomic renew, "
+            "never a release point); only a parked state the engine itself set "
+            "(merge signature wait, blocked/awaiting-human) releases its slot"
+            % cause)
     root = os.path.join(str(shared.perkey_projects_root()), k)
     now = time.time()
+    parked_stage = str(stage or "")
     with _locked(root) as g:
         doc = g.doc
         before = len(doc["holders"])
         doc["holders"] = [h for h in doc["holders"] if h.get("ticket") != t]
         doc["queue"] = [e for e in doc["queue"] if e.get("ticket") != t]
-        # Any real release clears the ticket's merge-wait face too (a cancelled or
-        # paused gate waiter must not linger as "waiting for a signature").
-        doc["merge_wait"] = [e for e in doc.get("merge_wait", [])
-                             if not (isinstance(e, dict) and e.get("ticket") == t)]
+        # Any real release clears the ticket's parked faces too (a cancelled or
+        # paused gate waiter must not linger as "waiting for a signature", and a
+        # blocked-then-cancelled ticket must not linger as "waiting for an act").
+        for face in PARKED_FACES:
+            doc[face] = [e for e in doc.get(face, [])
+                         if not (isinstance(e, dict) and e.get("ticket") == t)]
         released = len(doc["holders"]) < before
+        parked: Optional[Dict[str, Any]] = None
         if released and cause == CAUSE_MERGE_WAIT:
             doc["merge_wait"].append({"ticket": t, "since": now})
+            parked = {"face": CAUSE_MERGE_WAIT, "ticket": t, "since": now}
+        elif released and cause == CAUSE_BLOCKED_WAIT:
+            doc["blocked_wait"].append({"ticket": t, "since": now,
+                                        "cause": CAUSE_BLOCKED_WAIT,
+                                        "stage": parked_stage})
+            parked = {"face": CAUSE_BLOCKED_WAIT, "ticket": t, "since": now,
+                      "stage": parked_stage}
         promoted = None
         dropped_stale: List[str] = []
         limit = load_limit(k)
@@ -988,7 +1119,102 @@ def release(project_key: str, ticket: str, cause: str) -> Dict[str, Any]:
             dropped_stale = hop["dropped_stale"]
         return {"released": released, "cause": cause, "promoted": promoted,
                 "dropped_stale": dropped_stale,
-                "holders": len(doc["holders"]), "waiting": len(doc["queue"])}
+                "holders": len(doc["holders"]), "waiting": len(doc["queue"]),
+                "parked": parked}
+
+
+#: t261031-26 (second half): the merge step's own accounting.
+#:
+#: WHY a merge claims instead of taking a work slot: the work limit protects the
+#: resource a lane run actually consumes (a stage with an agent session, a
+#: worktree, a development line). The merge step is a short engine activity - a
+#: squash onto main - and starts no agent. Making it queue for a work slot is
+#: what deadlocked the project on 261031: two human-signed tickets waited over
+#: half an hour behind three blocked holders, the freeze that blocked those
+#: holders could only be lifted by a green line round, and that round needed one
+#: of the queued merges to land. The queue was waiting on itself. So a signed
+#: merge takes a MERGE CLAIM: recorded (who/when) for a reader, never a holder,
+#: never counted by the limit, never queued behind work.
+#:
+#: WHY a claim is still recorded instead of nothing at all: two merges writing
+#: the same main checkout at once race on the git index, so the face must show
+#: which merges are in flight and since when. The claim does not make a merge
+#: WAIT (a merge is never queued: the cap is deliberately absent), it only makes
+#: the merge visible - and reconcile/terminal release clear it by name.
+
+def claim_merge(project_key: str, ticket: str) -> Dict[str, Any]:
+    """Take the MERGE CLAIM for a signed merge (t261031-26).
+
+    Never refuses and never queues: a signed merge must not wait for a work slot
+    (measured cost above). Idempotent — claiming again keeps the original
+    `since`, because the claim records when THIS merge started, not when it was
+    last polled. Taking the claim also ends the ticket's parked faces (the merge
+    signature wait is over, and so is any blocked wait), so the panel never sees
+    a ticket both parked and merging.
+
+    Stale claims (older than MERGE_CLAIM_STALE_S) are dropped in the same locked
+    step and NAMED on the receipt: a claim whose workflow died mid-merge must not
+    linger forever. This is the heartbeat backstop; `reconcile` is the normal
+    janitor."""
+    k = _check_key(project_key)
+    t = str(ticket or "").strip()
+    if not t:
+        raise ValueError("Concurrency merge claim refused: empty ticket id")
+    root = os.path.join(str(shared.perkey_projects_root()), k)
+    now = time.time()
+    with _locked(root) as g:
+        doc = g.doc
+        claims = doc["merge_claims"]
+        for face in ("merge_wait", "blocked_wait"):
+            doc[face] = [e for e in doc.get(face, [])
+                         if not (isinstance(e, dict) and e.get("ticket") == t)]
+        dropped_stale: List[str] = []
+        kept: List[Dict[str, Any]] = []
+        for e in claims:
+            if not isinstance(e, dict):
+                continue
+            if _is_stale(e, now, MERGE_CLAIM_STALE_S):
+                dropped_stale.append(e.get("ticket"))
+                continue
+            kept.append(e)
+        doc["merge_claims"] = claims = kept
+        mine = next((e for e in claims if e.get("ticket") == t), None)
+        already = mine is not None
+        if mine is None:
+            mine = {"ticket": t, "since": now}
+            claims.append(mine)
+        return {"claimed": True, "already": bool(already),
+                "ticket": t, "since": mine.get("since"),
+                "merge_claims": len(claims),
+                "dropped_stale": dropped_stale}
+
+
+def end_merge_claim(project_key: str, ticket: str) -> Dict[str, Any]:
+    """End a merge claim (the merge activity returned, ok or not).
+
+    Idempotent: ending a claim the ticket does not hold is a no-op receipt, not
+    an error (the blocking / terminal release paths end it too). This is NOT a
+    slot release — a merge claim is not a slot — so it does not promote the
+    queue: the merge step never held capacity that a waiter could inherit."""
+    k = _check_key(project_key)
+    t = str(ticket or "").strip()
+    root = os.path.join(str(shared.perkey_projects_root()), k)
+    now = time.time()
+    with _locked(root) as g:
+        doc = g.doc
+        before = len(doc["merge_claims"])
+        held_s = 0.0
+        for e in doc["merge_claims"]:
+            if isinstance(e, dict) and e.get("ticket") == t:
+                try:
+                    held_s = round(now - float(e.get("since")), 3)
+                except (TypeError, ValueError):
+                    held_s = 0.0
+        doc["merge_claims"] = [e for e in doc["merge_claims"]
+                               if not (isinstance(e, dict) and e.get("ticket") == t)]
+        return {"ended": len(doc["merge_claims"]) < before,
+                "ticket": t, "held_s": held_s,
+                "merge_claims": len(doc["merge_claims"])}
 
 
 def reorder(project_key: str, order: List[str]) -> Dict[str, Any]:
@@ -1053,6 +1279,10 @@ def reconcile(project_key: str, alive_tickets: Iterable[str],
     in the same locked step. Named output: exactly which stale holders were
     dropped, and which holders are draining. The `merge_wait` face (t261022) is
     pruned by the same rule: a gate waiter nobody could prove alive leaves it.
+    The `blocked_wait` and `merge_claims` faces (t261031-26) are pruned by that
+    same rule too — and because a parked/claimed ticket holds no slot, it can
+    never be reported in `dropped`: a blocked-and-released ticket is not a
+    zombie by construction.
 
     t261028-06 (KI-378 (a), the proof-of-death form): `dead_tickets` is the
     PROOF set — the holders whose workflow the caller PROVED terminal (the
@@ -1108,6 +1338,37 @@ def reconcile(project_key: str, alive_tickets: Iterable[str],
             else:
                 kept_wait.append(e)
         doc["merge_wait"] = kept_wait
+        # t261031-26: the two new faces follow the SAME rule as merge_wait, so a
+        # parked or merging ticket is never a second zombie channel: a ticket
+        # nobody could prove alive leaves the face, a live/unprovable one keeps
+        # it. A blocked-and-released ticket is NOT a holder, so it can never be
+        # reported in `dropped` — that is the whole point of the release.
+        blocked_wait_dropped: List[str] = []
+        kept_blocked: List[Dict[str, Any]] = []
+        for e in doc.get("blocked_wait", []):
+            if not isinstance(e, dict):
+                continue
+            tid = e.get("ticket")
+            if tid in alive or tid in draining or tid in unknown:
+                kept_blocked.append(e)
+            elif proven_dead is None or tid in proven_dead:
+                blocked_wait_dropped.append(tid)
+            else:
+                kept_blocked.append(e)
+        doc["blocked_wait"] = kept_blocked
+        merge_claims_dropped: List[str] = []
+        kept_claims: List[Dict[str, Any]] = []
+        for e in doc.get("merge_claims", []):
+            if not isinstance(e, dict):
+                continue
+            tid = e.get("ticket")
+            if tid in alive or tid in draining or tid in unknown:
+                kept_claims.append(e)
+            elif proven_dead is None or tid in proven_dead:
+                merge_claims_dropped.append(tid)
+            else:
+                kept_claims.append(e)
+        doc["merge_claims"] = kept_claims
         promoted = None
         dropped_stale: List[str] = []
         limit = load_limit(k)
@@ -1120,6 +1381,8 @@ def reconcile(project_key: str, alive_tickets: Iterable[str],
                 "dropped_stale": dropped_stale,
                 "kept_unclassified": kept_unclassified,
                 "merge_wait_dropped": merge_wait_dropped,
+                "blocked_wait_dropped": blocked_wait_dropped,
+                "merge_claims_dropped": merge_claims_dropped,
                 "draining": [h.get("ticket") for h in doc["holders"]
                              if h.get("ticket") in draining],
                 "holders": len(doc["holders"]), "waiting": len(doc["queue"])}
@@ -1183,12 +1446,25 @@ if activity is not None:
         return renew(args.project, args.ticket, reason)
 
     @activity.defn
+    async def concurrency_claim_merge(args: AcquireArgs) -> Dict[str, Any]:
+        """t261031-26: the merge step's accounting. Reuses AcquireArgs (project +
+        ticket); it is not an admission judgement and it never refuses for lack
+        of capacity — see claim_merge."""
+        return claim_merge(args.project, args.ticket)
+
+    @activity.defn
+    async def concurrency_end_merge_claim(args: AcquireArgs) -> Dict[str, Any]:
+        return end_merge_claim(args.project, args.ticket)
+
+    @activity.defn
     async def concurrency_sweep(args: AcquireArgs) -> Dict[str, Any]:
         """Standalone sweep entry (also callable on demand). Refuses by name
         when no probe is wired — never judges with an absent probe."""
         return await sweep(args.project, _probe_query)
 
     CONCURRENCY_ACTIVITIES = (concurrency_acquire, concurrency_release,
-                              concurrency_renew, concurrency_sweep)
+                              concurrency_renew, concurrency_sweep,
+                              concurrency_claim_merge,
+                              concurrency_end_merge_claim)
 else:  # pragma: no cover
     CONCURRENCY_ACTIVITIES = ()

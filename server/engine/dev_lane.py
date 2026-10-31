@@ -68,18 +68,22 @@ with workflow.unsafe.imports_passed_through():
     # t261004-32 (CL-1 engine half): project-level concurrency cap. The semantic
     # source of truth (fail-closed declaration loading, lock-guarded ledger)
     # lives in concurrency.py - this file only wires it: judge the slot before a
-    # stage, account at the rule points (stage boundary / blocked stage = atomic
-    # renew, pause / terminal = real release; t261022 adds the merge gate = real
-    # release with its own merge-wait cause, then an ordinary FIFO re-acquire),
-    # queue visibility.
+    # stage, account at the rule points (stage boundary = atomic renew, pause /
+    # terminal = real release; t261022 adds the merge gate = real release with its
+    # own merge-wait cause; t261031-26 adds blocked/awaiting-human = real release
+    # with its own blocked-wait cause, and the merge step = a merge CLAIM, not a
+    # work slot), queue visibility.
     from concurrency import (
         AcquireArgs,
+        CAUSE_BLOCKED_WAIT,
         CAUSE_HUMAN_GATE,
         CAUSE_MERGE_WAIT,
         CAUSE_PAUSED,
         CAUSE_TERMINATED,
         ReleaseArgs,
         concurrency_acquire,
+        concurrency_claim_merge,
+        concurrency_end_merge_claim,
         concurrency_release,
         concurrency_renew,
     )
@@ -1132,6 +1136,35 @@ CONCURRENCY_GATE_PATCH_ID = "dev-lane-concurrency-gate-v1"
 #: so a history recorded before it schedules the same command sequence it always
 #: did (TMPRL1100 would otherwise hit every ticket parked at merge today).
 MERGE_SLOT_RELEASE_PATCH_ID = "dev-lane-merge-slot-release-v1"
+
+#: Patch guard BLOCKED_SLOT_RELEASE_PATCH_ID (t261031-26, KI-441 / KI-443): a
+#: ticket parked in `stage_state=blocked` / `awaiting-human` RELEASES its slot
+#: instead of renewing it to human-hold. Blocked is exactly "cannot progress
+#: without an outside act", so holding capacity there protects nothing: measured
+#: 261031, three of four slots were held by blocked tickets while two
+#: human-signed merges queued for over half an hour, and the freeze that blocked
+#: two of those holders could only be lifted by a line round that needed one of
+#: those merges to land. Leaving the parked state (retry_qc / rework / sign) is an
+#: ORDINARY acquire at the next stage boundary - the ticket queues behind the
+#: existing waiters, it never jumps back in.
+#: The old renew call stays reachable as the else branch: a history recorded
+#: before this marker (every in-flight ticket today) keeps its exact command
+#: sequence (renew, no release) - dropping it would break those replays
+#: (TMPRL1100). New runs record the marker and never hold a slot while parked.
+BLOCKED_SLOT_RELEASE_PATCH_ID = "dev-lane-blocked-slot-release-v1"
+
+#: Patch guard MERGE_CLAIM_PATCH_ID (t261031-26, second half): the merge step
+#: takes a MERGE CLAIM instead of an ordinary work slot (concurrency.claim_merge).
+#: A signed merge is a short engine activity that starts no agent session, so the
+#: resource the project limit protects is not in play - and making it queue for a
+#: work slot is what deadlocked the project on 261031 (the queue waited on
+#: itself). The claim is recorded on the ledger (`merge_claims`) so a reader still
+#: sees who is merging and since when, and it never waits behind a work holder or
+#: a blocked ticket. Replay discipline: a history recorded before this marker
+#: replays the t261022 command it recorded - an ordinary `concurrency_acquire`
+#: after the signature - so that branch stays reachable as the `elif` branch,
+#: and such a history never schedules the claim activity it did not record.
+MERGE_CLAIM_PATCH_ID = "dev-lane-merge-claim-v1"
 
 #: t261027-10 (KI-378 ①, prompt arm): the notice-signal handlers
 #: (cancel_notice / close_out_notice, in base.py) set `_terminal_slot_pending`;
@@ -2562,6 +2595,20 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 concurrency_acquire,
                 AcquireArgs(project=proj, ticket=self.ticket_id),
                 start_to_close_timeout=SHORT, retry_policy=RETRY)
+            # t261031-26: name the second half of a parked wait on the ticket
+            # face - the slot that went back while blocked is back in the queue here
+            # (the ledger receipt carries the release time and cause, so the reader
+            # sees who waited, why, and for how long).
+            _back = r.get("reacquired_from")
+            if isinstance(_back, dict):
+                self._log("Blocked-wait accounting: the parked wait is over (%s at "
+                          "stage %s, released %ss ago) - back in the slot queue at "
+                          "position %s"
+                          % (_back.get("cause") or CAUSE_BLOCKED_WAIT,
+                             _back.get("stage") or "(unnamed)",
+                             round(max(0.0, self._now_epoch()
+                                       - float(_back.get("since") or 0)), 1),
+                             r.get("position") or 0))
             if r.get("granted"):
                 if self.meta.get("stage_state") == "queued":
                     self.meta["stage_state"] = "running"
@@ -2612,14 +2659,12 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             self.meta["queue_face"] = None
             self._touch()
 
-    async def _concurrency_release(self, cause: str) -> None:
-        """Real release (paused / terminated / merge-wait) + queue-head
-        promotion. Local no-op without a project key (nothing was ever
-        acquired)."""
-        # t261005-14: pre-CL-1 replay never emitted this command - skip it
-        # entirely (one guard here covers every caller: stage-boundary pause
-        # accounting, terminal release; both lanes share this helper).
-        # t261005-15: predicate adds the window-(b) time arm.
+    async def _concurrency_release(self, cause: str, stage: str = "") -> None:
+        """Real release (paused / terminated / merge-wait / blocked-wait) + queue
+        promotion. `stage` names the stage a blocked-wait release parked in, so the
+        ledger face says WHERE the wait is (t261031-26)."""
+        # t261005-14/-15: a pre-CL-1 replay never emitted this command - the
+        # predicate (marker arm + time arm) skips it, so those histories replay.
         if not _concurrency_gate_active(workflow, CONCURRENCY_GATE_PATCH_ID):
             return
         proj = self._conc_project()
@@ -2627,7 +2672,8 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             return
         r = await workflow.execute_activity(
             concurrency_release,
-            ReleaseArgs(project=proj, ticket=self.ticket_id, cause=cause),
+            ReleaseArgs(project=proj, ticket=self.ticket_id, cause=cause,
+                        stage=str(stage or "")),
             start_to_close_timeout=SHORT, retry_policy=RETRY)
         self.meta["queue_face"] = None
         self._touch()
@@ -2646,6 +2692,75 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                       "wait%s (the ticket re-queues when it leaves the gate)" % (
                           "; queue head %s promoted" % r.get("promoted")
                           if r.get("promoted") else ""))
+        elif cause == CAUSE_BLOCKED_WAIT:
+            # t261031-26: a parked ticket names both halves of the round trip -
+            # that the slot went back here, and later that it came back (see
+            # _concurrency_gate's re-acquire line). A receipt where nothing was
+            # held says so instead of pretending a release happened.
+            if r.get("released"):
+                self._log("Blocked-wait accounting: slot released at stage %s "
+                          "(the ticket cannot progress without an outside act; it "
+                          "re-queues at the next stage boundary)%s"
+                          % (stage or "(unnamed)",
+                             "; queue head %s promoted" % r.get("promoted")
+                             if r.get("promoted") else ""))
+            else:
+                self._log("Blocked-wait accounting: no slot was held at stage %s "
+                          "(the release receipt says released=False, nothing "
+                          "changed)" % (stage or "(unnamed)",))
+
+    async def _concurrency_claim_merge(self) -> None:
+        """t261031-26: take the MERGE CLAIM before the merge step.
+
+        The merge step does not take a work slot (a signed merge queued behind
+        work starved the whole project on 261031: the queue waited on itself). The
+        claim is bookkeeping with visibility - who is merging, since when - so a
+        reader can see the merge in flight on the ledger's `merge_claims` face. It
+        never waits: `claim_merge` has no capacity judgement, and a failure is
+        NAMED on the ticket face and never blocks the merge (a bookkeeping fault
+        must not turn into the starvation this rule removes)."""
+        if not _concurrency_gate_active(workflow, CONCURRENCY_GATE_PATCH_ID):
+            return
+        proj = self._conc_project()
+        if not proj:
+            return
+        try:
+            r = await workflow.execute_activity(
+                concurrency_claim_merge,
+                AcquireArgs(project=proj, ticket=self.ticket_id),
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+        except Exception as e:  # noqa: BLE001 - named, never blocking the merge
+            self._log("Merge accounting: merge claim failed (%s: %s) - the merge "
+                      "runs anyway, no work slot is involved"
+                      % (type(e).__name__, str(e)[:160]))
+            return
+        self.meta["queue_face"] = None
+        self._touch()
+        self._log("Merge accounting: merge claim taken (no work slot consumed; %s "
+                  "merge(s) in flight; the signature wait's parked face is closed)"
+                  % (r.get("merge_claims") if isinstance(r, dict) else "?",))
+
+    async def _concurrency_end_merge_claim(self) -> None:
+        """t261031-26: end the merge claim once the merge activity returned (ok or
+        not). Idempotent and named; a failure is logged, never fatal - the ledger
+        janitor (reconcile) is the backstop for an orphan claim."""
+        if not _concurrency_gate_active(workflow, CONCURRENCY_GATE_PATCH_ID):
+            return
+        proj = self._conc_project()
+        if not proj:
+            return
+        try:
+            r = await workflow.execute_activity(
+                concurrency_end_merge_claim,
+                AcquireArgs(project=proj, ticket=self.ticket_id),
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+        except Exception as e:  # noqa: BLE001 - named, never fatal
+            self._log("Merge accounting: ending the merge claim failed (%s: %s) - "
+                      "concurrency reconcile clears an orphan claim"
+                      % (type(e).__name__, str(e)[:160]))
+            return
+        self._log("Merge accounting: merge claim ended after %ss"
+                  % (r.get("held_s") if isinstance(r, dict) else "?",))
 
     async def _concurrency_release_if_paused(self) -> None:
         """Rule 4: a paused ticket does not hold a slot. Called at the stage
@@ -2683,14 +2798,27 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
     # ---------- blocked wait (retry_qc re-runs this step / rework jumps) ----------
     async def _blocked(self, step_id: str, why: str) -> None:
         self.meta["stage_state"] = "blocked"
-        # t261004-32 (rule 3): blocked = waiting for a human (retry_qc/rework are
-        # both human actions) - holding the slot is deliberate; the ledger says
-        # human-hold (source of the panel's amber dot). A ledger-refresh failure
+        # t261004-32 (rule 3) said a blocked stage holds its slot on purpose. That
+        # rule is WRONG and t261031-26 replaces it: blocked means "cannot progress
+        # without an outside act", so holding capacity there starves the work that
+        # can progress (measured 261031: three of four slots held by blocked
+        # tickets while two human-signed merges queued for half an hour, and the
+        # freeze blocking two of them needed one of those merges to land).
+        # The slot therefore goes back with its own truthful cause (`blocked-wait`,
+        # never `paused` / `terminated`), named on the ledger face and on the
+        # ticket log. Leaving the parked state is an ordinary acquire at the next
+        # stage boundary (the ticket queues, it never jumps).
+        # Replay discipline: the marker guard keeps a history recorded before this
+        # rule on its exact command sequence (a human-hold renew, no release).
         try:
-            await self._concurrency_renew(CAUSE_HUMAN_GATE)
+            if workflow.patched(BLOCKED_SLOT_RELEASE_PATCH_ID):
+                await self._concurrency_release(CAUSE_BLOCKED_WAIT, stage=step_id)
+            else:
+                await self._concurrency_renew(CAUSE_HUMAN_GATE)
         except Exception as e:  # noqa: BLE001
-            self._log("Concurrency ledger renew failed (not blocking the main "
-                      "chain): %s: %s" % (type(e).__name__, e))
+            self._log("Concurrency ledger accounting failed at the blocked wait "
+                      "(not blocking the main chain): %s: %s"
+                      % (type(e).__name__, e))
         # KI-048 (t260911-05): the blocked why is pinned on meta so the snapshot can
         # surface it top-level (blocked_reason / blocked_detail) — the ticket face
         # and the human gate must see WHY without diving into worker logs.
@@ -7613,7 +7741,14 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 # t261022: leaving the merge gate takes the slot again through the
                 # ordinary gate - the ticket queues behind whoever is already
                 # waiting, so it never jumps the queue on the way out.
-                if workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
+                # t261031-26: that re-acquire was the measured starvation (a signed
+                # merge queued behind work, and the work was frozen behind the merge
+                # line). The merge step takes a MERGE CLAIM instead: visible, never a
+                # work slot, never queued. The t261022 branch stays reachable so an
+                # older history replays the command it recorded.
+                if workflow.patched(MERGE_CLAIM_PATCH_ID):
+                    await self._concurrency_claim_merge()
+                elif workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
                     await self._concurrency_gate()
                 self.meta["stage_state"] = "running"
                 self._mark("merge", "running", "human sign-off (%s), executing merge" % sig.who)
@@ -7636,6 +7771,11 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                               # 兼容（保险丝不触发），见 shared.MergeArgs 注释。
                               write_set=list(self.meta.get("write_set") or [])),
                     start_to_close_timeout=MERGE_TO, retry_policy=RETRY)
+                # t261031-26: the claim window is exactly the merge activity, ok
+                # or not (a failed merge ends the claim here and then parks on the
+                # blocked-wait release below, which clears the face as well).
+                if workflow.patched(MERGE_CLAIM_PATCH_ID):
+                    await self._concurrency_end_merge_claim()
                 mr = raw if isinstance(raw, MergeResult) else MergeResult(
                     ok=bool(raw.get("ok")), action=str(raw.get("action") or ""),
                     merge_commit=str(raw.get("merge_commit") or ""),
@@ -9880,7 +10020,12 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                     continue
                 # t261022: take the slot again through the ordinary gate before
                 # any merge work - the ticket queues, it never jumps.
-                if workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
+                # t261031-26: the merge step takes a MERGE CLAIM instead (see the
+                # dev-lane merge site: a signed merge must never wait for a work
+                # slot). The t261022 branch stays reachable for older histories.
+                if workflow.patched(MERGE_CLAIM_PATCH_ID):
+                    await self._concurrency_claim_merge()
+                elif workflow.patched(MERGE_SLOT_RELEASE_PATCH_ID):
                     await self._concurrency_gate()
                 self.meta["stage_state"] = "running"
                 self._mark("merge", "running", "human signed off (%s) - merging"
@@ -9894,6 +10039,11 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                               defer_teardown=True,
                               write_set=list(self.meta.get("write_set") or [])),
                     start_to_close_timeout=MERGE_TO, retry_policy=RETRY)
+                # t261031-26: the claim window is exactly the merge activity, ok
+                # or not (a failed merge ends the claim here and then parks on the
+                # blocked-wait release below, which clears the face as well).
+                if workflow.patched(MERGE_CLAIM_PATCH_ID):
+                    await self._concurrency_end_merge_claim()
                 mr = raw if isinstance(raw, MergeResult) else MergeResult(
                     ok=bool(raw.get("ok")), action=str(raw.get("action") or ""),
                     merge_commit=str(raw.get("merge_commit") or ""),
