@@ -31,10 +31,12 @@ What this battery pins (one case group per ticket deliverable):
      named escape survives; the landing-authored case does not reach it;
   E  the battery-shape decision: option (ii) — the un-patched "declared scope
      alone" case is declared MAIN-SHAPE-ONLY with a NAMED skip at run time, and the
-     behavioural claim stays pinned by a shape-independent case. Both battery files
-     must carry the named skip and the pin, and the pre-patch branch of the real
+     behavioural claim stays pinned by a shape-independent case. Every battery file
+     carries the named skip and the pin, and the pre-patch branch of the real
      `_quick_gate_round` must hand the DECLARED list to the writer (that is what a
-     recorded history replays);
+     recorded history replays). t261101-08 added this file to that set: its payload
+     line is the only shape-dependent assertion here, and it red on every
+     line-shaped lane (measured on t261031-17);
   F  wiring: the real merge_check passes the declared line to verify_lane and to
      the repair population, an old payload defaults to the pre-fix caliber, and an
      automatic conflict resolution that authored a shared engine file is NAMED on
@@ -53,6 +55,8 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 HERE = Path(__file__).resolve().parent
 ENGINE = HERE.parent
@@ -396,14 +400,87 @@ def _load_foreign_write():
     return m
 
 
+def _shape_probe_wf():
+    """The quickmanual shell the single writer needs, without a Temporal runtime."""
+    wf = object.__new__(dev_lane.QuickmanualLaneWorkflow)
+    wf.ticket_id = TID
+    wf.meta = {"worktree": "/tmp/t261031-34", "stage": "run_integration_tests",
+               "workspace": {}, "base_ref": "deadbeef", "log": [],
+               "write_set": list(WRITE_SET)}
+    wf.gate_runs, wf.results, wf._gens = [], {}, {}
+    wf._detail_face_on = False
+    return wf
+
+
+class _ShapeStub:
+    """The activity shell the writer reads: patched() and now() only."""
+
+    def patched(self, pid, *a, **k):
+        # the writer's own rule is the question; THIS ticket's gate is not asked
+        return pid != dev_lane.QUICK_OWN_POINTED_PATCH_ID
+
+    def now(self):
+        return __import__("datetime").datetime(2026, 10, 31, 12, 0, 0)
+
+
+def main_shape_only_reason():
+    """t261101-08 (KI-447): is this tree's single writer MAIN-shaped for the
+    un-patched replay payload?
+
+    The un-patched branch of `_quick_gate_round` hands the DECLARED list to
+    `_integ_run_args` — the single writer. What the payload then carries is the
+    WRITER's rule, and the rule differs by tree shape: main's writer forwards the
+    list unchanged, while a tree that carries t261029-18's line content unions the
+    ticket's own names INSIDE the writer, so the union rides every call site,
+    patched or not. "The un-patched replay sends the declared scope alone" is
+    therefore a claim about a MAIN-SHAPED workflow; on a line-shaped tree the same
+    history recorded the union as well.
+
+    Measured 261101 on the t261031-17 line lane: main's copy of test_e2 reds there
+    in a plain single-file run AND in the gate's whole-suite run alike. The tree
+    shape decides the outcome, not the way the case is run.
+
+    Returns "" on a main-shaped tree and the NAMED reason on a line-shaped one.
+    This is a decision the gate can read, never a silent skip: the behavioural
+    claim stays pinned by `test_e2b_the_unpatched_branch_never_runs_the_union_helper`
+    here and by `test_unpatched_replay_payload_is_what_the_pre_patch_branch_records`
+    in test_t261031_23_own_pointed_gate, on BOTH shapes.
+    """
+    wf = _shape_probe_wf()
+    saved = dev_lane.workflow
+    dev_lane.workflow = _ShapeStub()
+    try:
+        sent = wf._integ_run_args(["probe-declared"], own_names=["probe-own"])
+    except (TypeError, AttributeError):   # an older writer: no union in the writer
+        return ""
+    finally:
+        dev_lane.workflow = saved
+    only = list(getattr(sent, "only_names", []) or [])
+    if only == ["probe-declared"]:
+        return ""
+    return ("main-shape-only (t261031-34, KI-447): this tree's single writer "
+            "_integ_run_args unions the ticket's own names into a pointed list "
+            "(t261029-18 line content), so an un-patched replay of a history "
+            "recorded on THIS shape carries the union too (%r); the main-shaped "
+            "payload claim is pinned by "
+            "test_unpatched_replay_payload_is_what_the_pre_patch_branch_records "
+            "(test_t261031_23_own_pointed_gate) and by "
+            "test_e2b_the_unpatched_branch_never_runs_the_union_helper" % (only,))
+
+
 def test_e1_battery_decision_is_the_named_skip_and_keeps_the_pin():
     """Option (ii), declared in the code the gate runs: the un-patched
     "declared scope alone" payload is a MAIN-SHAPED history claim, so the case is
     skipped with a NAMED reason, and a shape-independent case keeps pinning the
-    behavioural claim (the un-patched branch hands the DECLARED list through)."""
+    behavioural claim (the un-patched branch hands the DECLARED list through).
+
+    t261101-08: this file is the third battery that must carry the named skip. It
+    red on every line-shaped lane (measured on t261031-17) because only its payload
+    line is shape-dependent."""
     pairs = [
         (HERE / "test_t261031_23_own_pointed_gate.py", "pytest.skip(_why)"),
         (HERE / "test_t261024_40_own_scenario_face.py", "self.skipTest(_why)"),
+        (HERE / "test_t261031_34_line_content_write_set.py", "pytest.skip(_why)"),
     ]
     for path, skip_call in pairs:
         src = path.read_text("utf-8")
@@ -414,12 +491,27 @@ def test_e1_battery_decision_is_the_named_skip_and_keeps_the_pin():
         # the behavioural pin lives in the same file, so a skipped case never
         # leaves the claim unasserted
         assert "payload_is_what_the_pre_patch" in src, path.name
+    # in THIS file the named skip must sit before the shape-dependent payload
+    # assertion, so a later re-ordering edit cannot leave that claim unguarded
+    src = (HERE / "test_t261031_34_line_content_write_set.py").read_text("utf-8")
+    i_skip = src.index("_why = main_shape_only_reason()")
+    i_payload = src.index("recorded.only_names) == [declared]")
+    assert i_skip < i_payload, (
+        "the named skip must guard the payload assertion it exists for")
 
 
 def test_e2_the_unpatched_branch_hands_the_declared_list_to_the_writer():
     """The behavioural claim on the real `_quick_gate_round`: an un-patched history
     replays the call it recorded — the DECLARED list reaches the single writer (what
-    the writer then does with it is that tree's own rule, covered by the batteries)."""
+    the writer then does with it is that tree's own rule, covered by the batteries).
+
+    The first assertion is the contract and holds on BOTH code shapes. The payload
+    assertion below it is a MAIN-SHAPED one: a tree that carries t261029-18's line
+    content unions the ticket's own names INSIDE the writer, so the union rides
+    every call site. t261101-08 measured that red on the t261031-17 line lane:
+    main's copy of this case failed there in a plain run and in the gate's
+    whole-suite run alike. The shape-dependent payload line is therefore named
+    apart at run time instead of asserted on a tree that cannot produce it."""
     wf = object.__new__(dev_lane.QuickmanualLaneWorkflow)
     wf.ticket_id = TID
     wf.meta = {"worktree": "/tmp/t261031-34", "stage": "run_integration_tests",
@@ -459,8 +551,70 @@ def test_e2_the_unpatched_branch_hands_the_declared_list_to_the_writer():
         dev_lane.workflow = saved
     assert sent == [[declared]], (
         "the un-patched branch must hand the DECLARED list to the writer: %r" % (sent,))
+    _why = main_shape_only_reason()
+    if _why:
+        pytest.skip(_why)
     assert list(recorded.only_names) == [declared], (
         "on a main-shaped tree the recorded payload is the declared scope alone")
+
+
+def test_e2b_the_unpatched_branch_never_runs_the_union_helper():
+    """The shape-independent pin of the un-patched arm, green on BOTH shapes: a
+    recorded history replays the call it recorded. The DECLARED list reaches the
+    writer and the new union helper never runs. A line-shaped tree unions inside
+    the writer, so the helper is silent there as well — the claim is a contract,
+    not a call-site position, and no skipped case leaves it unasserted."""
+    wf = object.__new__(dev_lane.QuickmanualLaneWorkflow)
+    wf.ticket_id = TID
+    wf.meta = {"worktree": "/tmp/t261031-34", "stage": "run_integration_tests",
+               "workspace": {}, "base_ref": "deadbeef", "log": [],
+               "write_set": list(WRITE_SET)}
+    wf.gate_runs, wf.results, wf._gens = [], {}, {}
+    wf._detail_face_on = False
+    sent, union_calls = [], []
+    real = wf._integ_run_args
+    wf._integ_run_args = lambda only_names=(), own_names=(): (
+        sent.append(list(only_names)) or real(only_names, own_names=own_names))
+    declared, own = "declared-scope", "own-scenario"
+
+    def _union_spy(*a, **k):
+        union_calls.append(repr(a))
+        return ["the union must not run on an un-patched history"]
+
+    class _Stub:
+        def patched(self, pid, *a, **k):
+            return pid != dev_lane.QUICK_OWN_POINTED_PATCH_ID
+
+        def now(self):
+            return __import__("datetime").datetime(2026, 10, 31, 12, 0, 0)
+
+        async def execute_activity(self, _fn, args, **kw):
+            return shared.IntegrationRunResult(
+                ran=1, passed=1, failed=0, env_fail=0, error="",
+                details=[{"name": declared, "cmd": "", "exit": 0,
+                          "output_tail": ""}])
+
+    saved = dev_lane.workflow
+    saved_union = dev_lane.quick_gate_pointed_names
+    dev_lane.workflow = _Stub()
+    dev_lane.quick_gate_pointed_names = _union_spy
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(wf._quick_gate_round(
+            {"mode": "scenario", "names": [declared], "only_names": [declared],
+             "own_names": [own]}))
+        recorded = real([declared], own_names=[own])
+    finally:
+        loop.close()
+        dev_lane.workflow = saved
+        dev_lane.quick_gate_pointed_names = saved_union
+    assert union_calls == [], (
+        "an un-patched history must never route through the union helper: %r"
+        % (union_calls,))
+    assert sent == [[declared]], (
+        "the un-patched branch must hand the DECLARED list to the writer: %r" % (sent,))
+    assert declared in list(recorded.only_names), recorded.only_names
+    assert list(recorded.own_names) == [own], recorded.own_names
 
 
 def test_e3_the_source_keeps_the_pre_patch_branch_reachable():
