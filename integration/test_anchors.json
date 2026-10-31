@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 374,
+      "engine_tests": 375,
       "scenarios": 862
     },
     "vocab": [
@@ -1830,6 +1830,10 @@
       "anchor": "contract",
       "note": "t261031-23 KI-442: the quickmanual gate round must POINT the ticket's own scenario names, not only exempt them. Measured on t261031-06: the round ran the declared scope alone while own_source.derived named a new own scenario, so the t261025-02 coverage check voided an otherwise green round. The battery pins the union rule (dev_lane.quick_gate_pointed_names = the declared scope union the own names, order-stable, de-duplicated, blank/None never entering, an empty own set unchanged) through the real _quick_gate_round args (pointed face = declared + own, own face kept, un-patched replay sends the declared scope alone, check/battery plans keep their check scope and append the own name, the full plan points nothing), and the receipt face (a new pointed key next to own_source, so shared.own_coverage_error books no violation while the declared-only list books the incident's exact failure). One union writer (closing_pointed_names), behind its own workflow.patched id. Offline, nothing runs, no docker/Temporal/browser/3099.",
       "sync_path": "server/engine/dev_lane.py"
+    },
+    "server/engine/tests/test_t261031_31_anchor_merge_regen.py": {
+      "anchor": "behaviour",
+      "note": "t261031-30: the anchors manifest stops being a merge-conflict source - an anchors-only squash conflict is resolved by a JSON union (never markers) that keeps every entry from both sides and recomputes _header.labelled_counts from the real dict lengths, so two tickets that each add one anchor entry both land; a shape that would lose an entry or leave one unlabelled is a NAMED refusal at merge time (same key edited on both sides, entry anchor outside the vocabulary, production-snapshot without sync_path, header prose divergence, a side unreadable or malformed, a wrong recount, a resolver or staging fault) and the three-step cleanup still restores the tree; the merge_check rehearsal runs the SAME resolver read-only, so it judges an anchors-only conflict green only when the union verifies and names the refusal otherwise; the no-conflict path is byte-identical to today; the union is written through integration/lib_registry.write_registry (one writer, read back before staging) and L16/L18 stay the judges (a real two-branch landing through _squash_merge_core passes the real L16). Offline git fixtures in tmp dirs, no docker/Temporal/3099"
     },
     "server/engine/tests/test_t261031_26_blocked_slot_release.py": {
       "anchor": "contract",
@@ -6107,27 +6111,5 @@
       "anchor": "behaviour",
       "note": "t261031-14: a REAL round's persisted record names all 8 planted failing legs of a red case whose bounded tail holds no leg row at all (the emit site reads the case's full output), a green round writes no failed_detail key, and a prose-only red lands as legs_parse=unrecognized with its reason line."
     }
-  },
-  "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {
-    "anchor": "behaviour",
-    "note": "t261019-02 host ruling 261019: a ticket with a landing row on a declared develop line is refused named at the LEGACY merge gate (ruling quoted, line named, both ways out, retry_qc does not clear) through the ONE declared seam DevLaneWorkflow._line_landing_closeout_guard; never-landed passes, line-less project and absent ledger vacuous, corrupt ledger and malformed declaration block named, call-site source lock (after the develop-buffer fork, before prepare_human_gate, behind a unique patch id)",
-    "sync_path": ""
-  },
-  "server/engine/tests/test_t261019_02_line_landing_closeout_guard.py": {
-    "anchor": "behaviour",
-    "note": "t261019-02 developer L1: line_landing_closeout_verdict truth tables - vacuous passes (missing lines.json, absent ledger, no landing row), named blocks (landing row with ruling+line+ways-out+retry_qc wording, per-ticket/per-line isolation, malformed declaration, corrupt-ledger bad face, malformed/empty keys), blank ledger lines are not corruption, patch id literal pinned",
-    "sync_path": ""
-  },
-  "integration/t261024-16/sc_inspection_sign_caller_identity.py": {
-    "anchor": "contract",
-    "note": "t261024-16: the inspection sign channel judges caller identity per identity class after the validate-first reorder - declared foreign caller refused by name and the gate stays closed; agent who refused by name even with a clean own-project caller; absent who refused for its own reason, fail-closed; undeclared bare human sign is record-and-allow (ticket closes, ledger human_gate.who lands, a named record row for the undeclared sign is readable on the face/timeline). Sub-strand of t260915-08-sign-journey, which owns the close chain."
-  },
-  "server/engine/tests/test_t261024_16_inspection_sign_gate.py": {
-    "anchor": "behaviour",
-    "note": "t261024-16 developer L1: direct-handler drives of InspectionPeriodicWorkflow.sign - order authorize -> validate -> cross-project judge -> accept; policy=record at the sign call site books the undeclared record row into the timeline; guards kept (agent refused by name, malformed/absent who fail-closed, declared mismatch refused)."
-  },
-  "integration/t261025-08/sc_t26102508_narrowed_anchor_reach.py": {
-    "anchor": "behaviour",
-    "note": "t261025-08 L3 (KI-356): the enable event reaches an in-flight lane whose patched() memo is closed - a targeted green round then re-anchors the landing face on the CURRENT lane HEAD (narrowed marker, judged by name); inert without the event; idempotent + malformed-payload-safe; zero-run/red/sha-failure stay fail-closed; full rounds unchanged; land_to_line gets past the contains-main guard on a real fixture while a stale anchor still refuses by name"
   }
 }

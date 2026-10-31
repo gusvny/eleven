@@ -882,7 +882,12 @@ def _land_locked(line: DevelopLine, project_key: str, repo_paths: Dict[str, Path
                 # conflict = no MERGE_HEAD; --quit + reset --merge HEAD);
                 # _abort_if_merging is defense in depth only.
                 _abort_if_merging(lane_repo, wt_dir)
-                result.faces[name] = "conflict: bounced back to the lane (no record written)"
+                face = "conflict: bounced back to the lane (no record written)"
+                # t261031-30: an anchors-only conflict that the union refused names
+                # the refusal on the face (never a bare "conflict").
+                if getattr(core, "refusal", ""):
+                    face += "; anchor manifest refused: %s" % core.refusal
+                result.faces[name] = face
                 raise LandingError(
                     "landing of %s onto line %r conflicts in repository %r — the lane "
                     "re-merges the line and lands again: %s"
@@ -917,7 +922,12 @@ def _land_locked(line: DevelopLine, project_key: str, repo_paths: Dict[str, Path
             if not new_sha:
                 raise LandingError("post-commit HEAD unreadable in %r" % name)
             rev_map[name] = new_sha
-            result.faces[name] = "landed at %s" % new_sha[:12]
+            landed_face = "landed at %s" % new_sha[:12]
+            # t261031-30: a landing that resolved the anchors manifest says so; the
+            # union and its recounted header never ride in silently.
+            if getattr(core, "resolution_note", ""):
+                landed_face += " (%s)" % core.resolution_note
+            result.faces[name] = landed_face
         except LandingError:
             # All-or-nothing: roll every repo that still holds MERGE_HEAD back to
             # a merge-clean face, name the faces, no record.

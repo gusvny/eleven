@@ -71,6 +71,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from temporalio import activity
 import agent_runtime  # 容器执行面传输层（t260913-04）：stdlib-only；其内不得 import 本包避免环
+import anchor_merge  # t261031-30: anchor-manifest union at merge time (stdlib-only; writer loaded lazily)
 import integration_discipline  # t260921-04：developer 段集成禁跑执法匹配器（纯函数零 IO，声明=执法同源）
 import authz_gates
 import dsh_pin  # dsh 版本面/钉路径（t260916-24）：stdlib-only 零仓内依赖
@@ -7538,6 +7539,8 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     conflict_files: List[str] = []
     merge_tree_excerpt = ""
     rehearsal_green = False
+    anchor_note = ""
+    anchor_refusal = ""
     try:
         p = _git(["merge-tree", "--write-tree", "main", sc["branch"]], sc["repo"])
         rehearsal_green = p.returncode == 0
@@ -7545,11 +7548,31 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
             out = (p.stdout or "") + ("\n" + p.stderr if p.stderr else "")
             conflict_files = _parse_conflict_files(out)
             merge_tree_excerpt = out.strip()[:1500]
+            # t261031-30: an anchors-only conflict is not a human conflict — the
+            # landing unions the manifest (JSON, never markers). The SAME resolver
+            # the landing uses is run here as a READ-ONLY dry run: green only when
+            # the union verifies, red with the refusal name when it does not.
+            plan = _resolve_anchor_conflict(sc["repo"], "main", sc["branch"],
+                                            conflict_files)
+            if plan.status == "resolved":
+                rehearsal_green = True
+                anchor_note = plan.note
+            elif plan.status == "refused":
+                anchor_refusal = plan.brief()
+        if rehearsal_green and anchor_note:
+            detail = ("no conflict (only %s differs; the landing unions it "
+                      "programmatically: %s)" % (anchor_merge.MANIFEST_PATH, anchor_note))
+        elif rehearsal_green:
+            detail = "no conflict"
+        elif conflict_files:
+            detail = "conflict files: %s" % "、".join(conflict_files)
+        else:
+            detail = (p.stdout or p.stderr or "conflict detected").strip()[-300:]
+        if anchor_refusal:
+            detail += "; anchor manifest refused BY NAME (%s)" % anchor_refusal
         checks.append({"item": "%s (merge-tree main × %s)" % (MERGE_REHEARSAL_ITEM, sc["branch"]),
                        "green": rehearsal_green,
-                       "detail": "no conflict" if rehearsal_green else
-                                 ("conflict files: %s" % "、".join(conflict_files) if conflict_files
-                                  else (p.stdout or p.stderr or "conflict detected").strip()[-300:]),
+                       "detail": detail,
                        "id": "merge_rehearsal",
                        **({} if rehearsal_green else {
                            "reason_code": "merge_conflict",
@@ -9571,6 +9594,12 @@ class SquashOutcome:
         carries the merge output tail for the caller's message;
       - failed: the gitlink pre-gate tripped; `reason` is gitlink_present |
         merge_fault, `files` the gitlink names, `error` the refusal/fault text.
+
+    t261031-30 adds two observability fields, both "" on every pre-existing path:
+      - `resolution_note`: set when a squash conflict was resolved by the
+        anchor-manifest union (the merged receipt says so, never silently);
+      - `refusal`: the anchor-manifest refusal name when that resolution was
+        refused by name (the status stays `conflict`; the name rides along).
     """
 
     def __init__(self, status: str, error: str = "", files=None, raw: str = ""):
@@ -9580,6 +9609,68 @@ class SquashOutcome:
         self.raw = raw
         self.reason = ""
         self.staged_empty = False
+        self.resolution_note = ""
+        self.refusal = ""
+
+
+def _unmerged_paths(repo: Path) -> List[str]:
+    """The conflicted paths from the INDEX (`diff --diff-filter=U`), sorted.
+
+    The authoritative conflict list after a failed `git merge --squash`: the output
+    parse (`_parse_conflict_files`) misses the delete/modify and rename shapes,
+    because git words those lines differently. A read that fails returns [] — the
+    caller then falls back to the parsed list and keeps today's behaviour.
+    """
+    try:
+        p = _git(["diff", "--name-only", "--diff-filter=U"], repo)
+    except Exception:  # noqa: BLE001 — a git fault is not a resolver crash
+        return []
+    if p.returncode != 0:
+        return []
+    return sorted(ln.strip() for ln in (p.stdout or "").splitlines() if ln.strip())
+
+
+def _resolve_anchor_conflict(repo: Path, ours_ref: str, theirs_ref: str,
+                             conflict_files: List[str]):
+    """One seam for the anchor-manifest resolution (t261031-30).
+
+    `integration/test_anchors.json` cannot be marker-merged, so two tickets that
+    each add one entry always conflict. `anchor_merge.resolve_conflict` unions the
+    two sides and recounts the header; it is read-only here (the caller applies the
+    result), so the same seam serves the merge_check rehearsal and the landing.
+    A resolver fault is a NAMED refusal, never an exception out of the activity.
+    """
+    try:
+        return anchor_merge.resolve_conflict(_git, repo, ours_ref, theirs_ref,
+                                             conflict_files)
+    except Exception as e:  # noqa: BLE001
+        return anchor_merge.Resolution("refused", name=anchor_merge.R_RESOLVER,
+                                       detail="%s: %s" % (type(e).__name__, e))
+
+
+def _apply_anchor_resolution(repo: Path, res) -> Tuple[bool, str]:
+    """Write and stage a `resolved` union. Returns `(staged, why)`.
+
+    Three acceptance faces: the canonical writer wrote the verified union; `git add`
+    cleared the unmerged path; and the index holds no unmerged residue (a conflict
+    the output parse did not name would otherwise be staged half-way). Any failure
+    leaves the caller's three-step cleanup to restore the tree.
+    """
+    try:
+        anchor_merge.apply_resolution(repo, res)
+        add = _git(["add", "--", anchor_merge.MANIFEST_PATH], repo)
+        if add.returncode != 0:
+            return False, "git add %s failed: %s" % (
+                anchor_merge.MANIFEST_PATH, (add.stderr or "").strip()[-200:])
+        lu = _git(["ls-files", "-u"], repo)
+        if (lu.stdout or "").strip():
+            return False, ("the index still holds unmerged entries after the union: %s"
+                           % (lu.stdout or "").strip()[:200])
+    except anchor_merge.AnchorRefusal as e:
+        return False, e.brief()
+    except Exception as e:  # noqa: BLE001
+        return False, "%s: %s" % (type(e).__name__, e)
+    return True, ""
 
 
 def _squash_merge_core(repo: Path, branch: str) -> SquashOutcome:
@@ -9591,6 +9682,11 @@ def _squash_merge_core(repo: Path, branch: str) -> SquashOutcome:
         judgement before the merge, so a retry is safe; merge-base/diff faults
         fail closed, never silently skipped;
       - `git merge --squash` (no automatic commit);
+      - the anchor-manifest face (t261031-30): when the ONLY conflicted path is
+        integration/test_anchors.json, the JSON union resolves it (both sides'
+        entries kept, header recounted) and the outcome is `merged` with
+        `resolution_note`; a union that cannot keep every entry is the same
+        `conflict` status as today PLUS `refusal` naming it;
       - the three-step conflict cleanup (git 2.50 measured: a squash conflict
         leaves no MERGE_HEAD, so --abort is unavailable; --quit clears only
         MERGE_MSG, then `reset --merge HEAD` rolls the conflict state back out
@@ -9633,6 +9729,24 @@ def _squash_merge_core(repo: Path, branch: str) -> SquashOutcome:
             return SquashOutcome("refused_unstarted", raw=out[-400:],
                                  error="git merge --squash %s refused before starting: %s"
                                        % (branch, out[-400:]))
+        files = _parse_conflict_files(out)
+        # t261031-30: an anchors-only conflict is resolved by the declared union
+        # (JSON, never markers) BEFORE the cleanup — the cleanup would throw the
+        # merged-in entries away. Any other conflict shape is untouched below.
+        # The index is the authoritative conflict list (it also names a
+        # delete/modify shape, which the output parse cannot see).
+        res = _resolve_anchor_conflict(repo, "HEAD", branch,
+                                       _unmerged_paths(repo) or files)
+        if res.status == "resolved":
+            staged, why = _apply_anchor_resolution(repo, res)
+            if staged:
+                o = SquashOutcome("merged")
+                o.resolution_note = res.note
+                dq = _git(["diff", "--cached", "--quiet"], repo)
+                o.staged_empty = dq.returncode == 0
+                return o
+            res = anchor_merge.Resolution("refused", name=anchor_merge.R_STAGE,
+                                          detail=why)
         leftover: List[str] = []
         _git(["merge", "--quit"], repo, timeout=60)  # only the re-check below matters; its rc is ignored
         rs = _git(["reset", "--merge", "HEAD"], repo, timeout=60)
@@ -9651,11 +9765,14 @@ def _squash_merge_core(repo: Path, branch: str) -> SquashOutcome:
                 leftover.append("status still has unmerged lines: %s"
                                 % ", ".join(unmerged_lines[:5]))
         err = "git merge --squash %s conflict: %s" % (branch, out[-400:])
+        if res.status == "refused":
+            err += "; anchor manifest refused BY NAME (%s)" % res.brief()
         if leftover:
             err += "; cleanup left residue: " + "; ".join(leftover)
-        return SquashOutcome("conflict", error=err,
-                             files=_parse_conflict_files(out)[:MERGE_FILES_CAP],
-                             raw=out[-400:])
+        o = SquashOutcome("conflict", error=err, files=files[:MERGE_FILES_CAP],
+                          raw=out[-400:])
+        o.refusal = res.name if res.status == "refused" else ""
+        return o
     o = SquashOutcome("merged")
     dq = _git(["diff", "--cached", "--quiet"], repo)
     o.staged_empty = dq.returncode == 0
@@ -9762,7 +9879,9 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                                  % (branch, core.raw))
     if core.status == "conflict":
         # A real conflict: the merge started and left a scene (reason code pinned to
-        # the protocol word; the parsed conflict file list rides along when present)
+        # the protocol word; the parsed conflict file list rides along when present).
+        # t261031-30: an anchors-only conflict that the union could not resolve is
+        # still a conflict, and `core.refusal` names why in `core.error`.
         return MergeResult(ok=False, action="conflict", reason="conflict",
                            files=core.files, error=core.error)
 
@@ -9771,6 +9890,10 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
     warns: List[str] = []
     if exempted_note:
         warns.append(exempted_note)
+    if core.resolution_note:
+        # t261031-30: a resolved anchor-manifest conflict is never silent — the
+        # receipt says the union happened and what it recounted.
+        warns.append(core.resolution_note)
     if core.staged_empty:
         head = _git(["rev-parse", "--short", "HEAD"], repo)
         merge_commit = head.stdout.strip() if head.returncode == 0 else ""

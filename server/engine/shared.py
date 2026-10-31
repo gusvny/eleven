@@ -9900,6 +9900,12 @@ CODE_STAMP_MODULES: Tuple[Tuple[str, str], ...] = (
     # lazily imported (develop_certify), so the tripwire's top-level-import scan
     # cannot see it — tracked here explicitly for the same silent-stale reason.
     ("develop_line", "server/engine/develop_line.py"),
+    # t261031-30: anchor_merge decides the anchor-manifest verdict — the
+    # merge_check rehearsal turns green on it and the landing unions the file on
+    # it. A worker whose loaded copy predates the union still refuses every
+    # landing that adds an anchor entry (the measured 261031 block), so its
+    # freshness must be visible on the stamp (tripwire criterion (a)).
+    ("anchor_merge", "server/engine/anchor_merge.py"),
     ("verify_lane", "server/tools/verify_lane.py"),
 )
 
