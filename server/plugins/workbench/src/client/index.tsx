@@ -127,6 +127,15 @@ import {
 // face (queue-model discipline: the UI never computes order, only projects it).
 import { concFaceFromReply, parseConcFace } from './queue-model.ts'
 import { STATE_LABEL, stageDisplayLabel, workflowLabel } from './ui-labels.ts'
+// t261030-35 (epic artifact-face, slice 2): the artifact inventory + frame. The view
+// model is pure (`artifact-face-model.ts`) and is the ONE reader of the declared list
+// — the host's byte route derives its rows through the same function.
+import {
+  buildArtifactFaceView,
+  type ArtifactFrame,
+  type ArtifactRow,
+  type ArtifactStat,
+} from './artifact-face-model.ts'
 // 「文档」视图（t260905-06 立；t260915-10 接壳层 projectKey）：docs/ 定稿库人读视图 +
 // notes/ 观察窗，默认跟随壳层当前项目（页内选择器可手动切且手动优先）。
 // t261005-10 (UI-2): the host Docs view moved into the panel Docs tab (docs.tsx keeps
@@ -1960,6 +1969,143 @@ function EvidenceImages({ ticketId }: { ticketId: string }) {
     </div>
   )
 }
+
+/**
+ * Artifact face (t261030-35, epic artifact-face slice 2): the console's inventory of
+ * the artifacts a ticket declared, plus the frame that the console owns.
+ *
+ * Slice scope: no built-in views yet — every row is metadata plus the original-bytes
+ * link; a row whose kind is unknown, or whose bytes cannot be used, renders the
+ * degrade card. Rounds are not grouped and not compared. Nothing is archived here.
+ *
+ * Frame ownership (epic ruling 3): the frame is drawn only from the host payload and
+ * the ticket's gate receipts. There is no view/plugin channel in this slice, so no
+ * project code can add, hide or reorder a row or restate the machine verdict.
+ *
+ * Fetch failure and an empty declaration are both named: the panel never shows a
+ * silent blank (a blank panel would read as "this ticket has no artifacts").
+ */
+const ARTIFACT_FACE_CSS = `
+.wb-af{display:flex;flex-direction:column;gap:6px;margin:4px 0}
+.wb-af-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:6px 10px;
+  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-surface,#f6f8fa)}
+.wb-af-head .ttl{font-weight:600;font-size:13px}
+.wb-af-count{font-size:12px;color:var(--dsw-derive-muted,#57606a)}
+.wb-af-src{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-af-verdict{font-size:12px;font-weight:600;margin-left:auto}
+.wb-af-verdict[data-green=green]{color:var(--dsw-derive-success,#1a7f37)}
+.wb-af-verdict[data-green=red]{color:var(--dsw-derive-danger,#cf222e)}
+.wb-af-verdict[data-green=none]{color:var(--dsw-derive-muted,#57606a)}
+.wb-af-empty{font-size:12px;color:var(--dsw-derive-muted,#57606a);padding:4px 2px}
+.wb-af-row{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;padding:6px 10px;font-size:12px}
+.wb-af-row[data-card=degrade]{border-style:dashed}
+.wb-af-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
+.wb-af-title{font-weight:600;font-size:13px}
+.wb-af-kind{font-size:11px;padding:0 5px;border-radius:5px;border:1px solid var(--dsw-derive-border,#d0d7de)}
+.wb-af-kind[data-known=false]{border-style:dashed;color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-af-meta{color:var(--dsw-derive-muted,#57606a)}
+.wb-af-tag{font-size:10px;color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:5px;padding:0 4px}
+.wb-af-source{font-family:ui-monospace,monospace;font-size:11px;color:var(--dsw-derive-fg,#1f2328);word-break:break-all}
+.wb-af-note{color:var(--dsw-derive-muted,#57606a)}
+.wb-af-state{color:var(--dsw-derive-warn-deep,#7d4e00);margin-top:2px}
+.wb-af-actions{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px;align-items:baseline}
+.wb-af-actions a{color:var(--dsw-derive-accent,#0969da)}
+.wb-af-nobytes{color:var(--dsw-derive-muted,#57606a)}
+.wb-af-refusal{color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-af-qc{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+`
+
+/** Byte link for one row: the stage and the id are the address, never a path.
+ *  Both segments are percent-encoded once here; the host decodes the path once. */
+function artifactBytesHref(ticketId: string, row: { stage: string; id: string }): string {
+  const path = `${API}/tickets/${encodeURIComponent(ticketId)}/artifacts/`
+    + `${encodeURIComponent(row.stage)}/${encodeURIComponent(row.id)}/bytes`
+  return withProject(path)
+}
+
+interface ArtifactInventoryPayload {
+  rows: ArtifactRow[]
+  stats: Record<string, ArtifactStat>
+  refusals: string[]
+  listSource: 'aggregate' | 'handoffs' | 'handoffs+receipts' | 'receipts'
+}
+
+function ArtifactFace({ detail }: { detail: TicketDetail }) {
+  const ticketId = detail.id
+  const [data, setData] = useState<ArtifactInventoryPayload | null>(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    let cancelled = false
+    setData(null)
+    setErr('')
+    apiGet(`${API}/tickets/${encodeURIComponent(ticketId)}/artifacts`)
+      .then((d) => {
+        if (cancelled) return
+        if (d?.ok === true && d.result) setData(d.result as ArtifactInventoryPayload)
+        else setErr(String(d?.error ?? 'the artifact inventory could not be read'))
+      })
+      .catch((e) => { if (!cancelled) setErr(String(e instanceof Error ? e.message : e)) })
+    return () => { cancelled = true }
+  }, [ticketId])
+  // Nothing to draw while the first read is in flight: the panel is not a claim about
+  // the ticket yet, and a placeholder would read as "no artifacts".
+  if (err !== '') {
+    return <div className="wb-af"><div className="wb-af-empty">Artifacts unavailable: {err}</div></div>
+  }
+  if (data === null || !Array.isArray(data.rows)) return null
+  const frame: ArtifactFrame = buildArtifactFaceView(
+    { rows: data.rows, refusals: data.refusals ?? [], listSource: data.listSource },
+    data.stats,
+    detail,
+  )
+  const verdictTag = frame.verdict.green === null ? 'none' : (frame.verdict.green ? 'green' : 'red')
+  return (
+    <div className="wb-af" data-testid="artifact-face">
+      <style>{ARTIFACT_FACE_CSS}</style>
+      <div className="wb-af-head">
+        <span className="ttl">{frame.title}</span>
+        <span className="wb-af-count">{frame.countText}</span>
+        <span className="wb-af-src">{frame.listSourceText}</span>
+        <span className="wb-af-verdict" data-green={verdictTag} data-source={frame.verdict.source}>
+          {frame.verdict.text}
+        </span>
+      </div>
+      {frame.rows.length === 0 && <div className="wb-af-empty">{frame.emptyText}</div>}
+      {frame.rows.map((r) => (
+        <div className="wb-af-row" data-card={r.card} data-state={r.state} key={r.rowKey}
+          data-testid={`artifact-row-${r.key}`}>
+          <div className="wb-af-line">
+            <span className="wb-af-title">{r.title}</span>
+            <span className="wb-af-kind" data-known={r.kindKnown ? 'true' : 'false'}>{r.kindLabel}</span>
+            <span className="wb-af-meta">
+              {[r.stageLabel, r.roundText, r.repoLabel, r.sizeText, r.timeText].filter(x => x !== '').join(' · ')}
+            </span>
+            {r.optionalText !== '' && <span className="wb-af-tag">{r.optionalText}</span>}
+            {r.legacyText !== '' && <span className="wb-af-tag">{r.legacyText}</span>}
+          </div>
+          <div className="wb-af-source">{r.sourceLabel}</div>
+          {r.note !== '' && <div className="wb-af-note">{r.note}</div>}
+          {r.stateText !== '' && <div className="wb-af-state">{r.stateText}</div>}
+          {r.refusals.map((x) => <div className="wb-af-refusal" key={x}>{x}</div>)}
+          <div className="wb-af-actions">
+            {r.bytesHref !== null
+              ? <a href={artifactBytesHref(ticketId, r)} target="_blank" rel="noreferrer">Open original</a>
+              : <span className="wb-af-nobytes">{r.bytesRefusal === '' ? 'Original bytes unavailable' : r.bytesRefusal}</span>}
+            {r.openHint !== '' && <span className="wb-af-note">Open with: {r.openHint}</span>}
+          </div>
+        </div>
+      ))}
+      {frame.refusals.length > 0 && (
+        <details>
+          <summary>Refused declarations ({frame.refusals.length})</summary>
+          {frame.refusals.map((x, i) => <div className="wb-af-refusal" key={`${i}-${x}`}>{x}</div>)}
+        </details>
+      )}
+      <div className="wb-af-qc">{frame.qcText}</div>
+    </div>
+  )
+}
+
 
 /** 「实时动态」折叠面板（t260825-03）：泳道会话文件尾 30 条事件流（agent 最近在干什么）。
  *  折叠时不轮询；展开后每 8s 拉一次 agent-live。降级（exists=false）显 reason，不报错。 */
@@ -4566,6 +4712,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
               ) })()}
               {/* t260825-03：运行脉搏行 + 实时动态折叠面板（钉在状态行下，所有页签可见） */}
               <PulseLine detail={detail} />
+              {/* t261030-35: the artifact inventory and frame. No views in this slice —
+                  every row is metadata plus the original-bytes link; an unknown kind or
+                  unusable bytes render the degrade card. An inspection ticket has no
+                  artifact face and renders nothing here. */}
+              {detail.kind !== 'inspection' && <ArtifactFace detail={detail} />}
               <AgentLivePanel ticketId={detail.id} />
               <EvidenceImages ticketId={detail.id} />
               <D2Problems detail={detail} />

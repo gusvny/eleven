@@ -71,6 +71,18 @@ const WORKFLOW_TABLE: Record<string, string> = {
   'chore-lane': 'Chore Lane',
 }
 
+/** Artifact view kind → English (truth source: engine shared.ARTIFACT_KINDS, epic
+ *  artifact-face). A kind says what a human does with an artifact, not what it looks
+ *  like; an unknown value falls back to the raw identifier (labelOf rule). */
+const ARTIFACT_KIND_TABLE: Record<string, string> = {
+  image: 'Image',
+  text: 'Text',
+  structure: 'Structure',
+  diff: 'Diff',
+  ledger: 'Ledger',
+  external: 'External',
+}
+
 export const STAGE_LABEL: Record<string, string> = STAGE_TABLE
 export const STATE_LABEL: Record<string, string> = STATE_TABLE
 export const STATUS_LABEL: Record<string, string> = STATUS_TABLE
@@ -80,6 +92,7 @@ export function stageLabel(id: unknown): string { return labelOf(STAGE_TABLE, id
 export function stateLabel(id: unknown): string { return labelOf(STATE_TABLE, id) }
 export function statusLabel(id: unknown): string { return labelOf(STATUS_TABLE, id) }
 export function workflowLabel(id: unknown): string { return labelOf(WORKFLOW_TABLE, id) }
+export function artifactKindLabel(id: unknown): string { return labelOf(ARTIFACT_KIND_TABLE, id) }
 
 /** 段名优先级：拓扑/模板节点自带英文时数据侧已可用；此处只认 id 映射（显示层覆盖，
  *  不改引擎数据——review 260925 裁定：引擎中文 label 数据不动，仅显示层按 id 覆盖）。 */

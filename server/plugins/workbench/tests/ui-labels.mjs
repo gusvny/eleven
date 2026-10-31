@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   labelOf, stageLabel, stateLabel, statusLabel, workflowLabel, stageDisplayLabel,
-  STAGE_LABEL, STATE_LABEL,
+  artifactKindLabel, STAGE_LABEL, STATE_LABEL,
 } from '../src/client/ui-labels.ts'
 import { renderMarkdown } from '../../knowledge/src/client/markdown.ts'
 
@@ -61,6 +61,16 @@ ok(stageDisplayLabel(undefined, undefined) === '', 'stageDisplayLabel：全缺�
 for (const [k, v] of Object.entries(STATE_LABEL)) {
   ok(/^[A-Za-z ()-]+$/.test(v), `STATE_LABEL[${k}] 值全英文 ASCII：${v}`)
 }
+
+/* ---- D2. artifact view kinds (t261030-35, epic artifact-face) ---- */
+ok(artifactKindLabel('image') === 'Image', 'kind image → Image')
+ok(artifactKindLabel('text') === 'Text', 'kind text → Text')
+ok(artifactKindLabel('structure') === 'Structure', 'kind structure → Structure')
+ok(artifactKindLabel('diff') === 'Diff', 'kind diff → Diff')
+ok(artifactKindLabel('ledger') === 'Ledger', 'kind ledger → Ledger')
+ok(artifactKindLabel('external') === 'External', 'kind external → External')
+ok(artifactKindLabel('hologram') === 'hologram', '未知 kind 回落原标识（不造词）')
+ok(artifactKindLabel(null) === '', 'kind null → 空串不抛')
 
 /* ---- E. spec 卡 markdown 安全渲染（渲染器=knowledge renderMarkdown，转义先行） ---- */
 const md = renderMarkdown('# Title\n\n- item\n\n`code`\n\n```bash\nls\n```\n')

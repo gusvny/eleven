@@ -480,12 +480,26 @@ const WORKFLOW_TABLE = {
 	"inspection-lite": "Inspection",
 	"chore-lane": "Chore Lane"
 };
+/** Artifact view kind → English (truth source: engine shared.ARTIFACT_KINDS, epic
+*  artifact-face). A kind says what a human does with an artifact, not what it looks
+*  like; an unknown value falls back to the raw identifier (labelOf rule). */
+const ARTIFACT_KIND_TABLE = {
+	image: "Image",
+	text: "Text",
+	structure: "Structure",
+	diff: "Diff",
+	ledger: "Ledger",
+	external: "External"
+};
 const STATE_LABEL = STATE_TABLE;
 function stageLabel(id) {
 	return labelOf$1(STAGE_TABLE, id);
 }
 function workflowLabel(id) {
 	return labelOf$1(WORKFLOW_TABLE, id);
+}
+function artifactKindLabel(id) {
+	return labelOf$1(ARTIFACT_KIND_TABLE, id);
 }
 /** 段名优先级：拓扑/模板节点自带英文时数据侧已可用；此处只认 id 映射（显示层覆盖，
 *  不改引擎数据——review 260925 裁定：引擎中文 label 数据不动，仅显示层按 id 覆盖）。 */
@@ -14118,6 +14132,171 @@ function timelineRows(timeline) {
 	return out.length > 0 ? out : null;
 }
 //#endregion
+//#region src/client/artifact-face-model.ts
+/**
+* artifact-face-model.ts — the console's artifact inventory and frame (epic
+* artifact-face, slice 2, ticket t261030-35).
+*
+* One reader for the declared artifact list. This module is pure: no IO, no DOM,
+* no node built-ins. The host half (`src/host/artifact-face.ts`) imports it to
+* resolve a row for the byte route, and the console panel imports it to draw the
+* frame. Two copies of these rules would be two readers of one rule.
+*
+* Data source (verified against the engine on `main`):
+*   - the engine normalizes a stage's declared list into descriptors
+*     (`{id,title,kind,kind_known,source,repo,stage,note,open,shape,optional,legacy,round}`)
+*     and writes them per receipt as `results[stage].artifact_descriptors`
+*     (+ `_shape` / `_dropped`), plus `handoffs[].artifact_descriptors`;
+*   - `server/tools/ticket.py::_v2_query` carries `results` into `ticket show`
+*     but does NOT carry the snapshot's flat top-level `artifact_descriptors`.
+*     The model therefore prefers that key when it appears (forward compatible)
+*     and otherwise reads the per-receipt lists. It never re-runs the engine's
+*     aggregation: only what a receipt declared is listed, and a row's round is
+*     the receipt's own `gen` when the descriptor carries no round.
+*
+* The canonical list comes from the HANDOFF history (the engine's own rule,
+* `shared.snapshot_artifact_descriptors`): one entry per round, a declaring handoff
+* trusted (its legacy paths not mirrored), a handoff that declared nothing contributing
+* its `artifacts` paths as guessed descriptors. Reading only the latest receipt lost
+* two things on a live ticket (walkthrough 1): the legacy paths of every stage whose
+* receipt carried the engine's empty list with shape `absent`, and the declarations of
+* an earlier round of a reworked stage. The per-receipt path therefore stays only as
+* the fallback for data with no handoff history, and there it obeys the receipt's
+* `artifact_descriptors_shape`: a non-empty list is trusted; empty/absent/malformed
+* falls back to `deliverables` (the same fallback the canonical rule gives), with the
+* malformed shape named as well.
+*
+* Two rules complete the canonical read (walkthrough 1, A2/A3):
+*   - A stage whose handoff history yields no rows (a mechanical stage such as
+*     `ui_evidence`, which writes a receipt and no handoff, or an entry with no paths) is
+*     read from its receipt, shape rule included. A stage the history already produced
+*     rows for is never also read from its receipt: one stage, one source, no twins.
+*   - Rows are ordered by stage order (the template's), then by the order the source
+*     declared them. The history is chronological, so the raw handoff order interleaves
+*     stages when a reworked stage runs again after the next stage started; the frame
+*     keeps each stage in one block (plan D4/A2).
+*
+* Frame ownership (epic ruling 3): a project view may never decide whether an
+* artifact is listed, in which order, or what the machine verdict is. In this
+* slice no view channel exists yet; the guard is structural: the frame takes
+* only the host payload and the gate receipts, and descriptor keys that could
+* shrink or reorder the list (`hidden`, `visible`, `order`, `view`, `render`)
+* are ignored and named as refused.
+*/
+/** The console's built-in kinds (epic ruling). The engine's list is the truth source. */
+const ARTIFACT_KINDS = [
+	"image",
+	"text",
+	"structure",
+	"diff",
+	"ledger",
+	"external"
+];
+/** Human size. Deterministic, no locale formatting. */
+function formatBytes(n) {
+	if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return "";
+	if (n < 1024) return `${n} B`;
+	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+	return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+/** `YYYY-MM-DD HH:MM` in UTC — the console shows one clock, and tests can pin it. */
+function formatArtifactTime(ms) {
+	if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "";
+	const d = new Date(ms);
+	const p = (x) => String(x).padStart(2, "0");
+	return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
+}
+/** The named sentence for each non-ok state. English, short (host order 260925). */
+function artifactStateText(state, reason) {
+	const r = (reason ?? "").trim();
+	switch (state) {
+		case "ok": return "";
+		case "missing": return `File not found at the declared source${r === "" ? "" : ` (${r})`}`;
+		case "not_a_file": return `The declared source is not a regular file${r === "" ? "" : ` (${r})`}`;
+		case "unreadable": return `The file cannot be read${r === "" ? "" : ` (${r})`}`;
+		case "outside_root": return `The resolved path is outside the ticket workspace; the console does not serve it${r === "" ? "" : ` (${r})`}`;
+		case "repo_root_unknown": return `Declared in another repository, and this ticket has no workspace for it${r === "" ? "" : ` (${r})`}`;
+		case "too_large": return `Too large to open in the page${r === "" ? "" : ` (${r})`}`;
+		case "not_utf8": return `The text is not valid UTF-8, so the console does not show it${r === "" ? "" : ` (${r})`}`;
+		case "external": return `Outside the project, so the console shows metadata only${r === "" ? "" : ` (${r})`}`;
+		case "id_not_servable": return r === "" ? "This row cannot be fetched by id" : r;
+		default: return r;
+	}
+}
+/**
+* The frame view. `stats` is the host's metadata map keyed by row key.
+*
+* A row is never removed and never reordered: the order is the derivation order
+* (stage order, then declaration order), whatever the stats say.
+*/
+function buildArtifactFaceView(derived, stats, detailRaw) {
+	const statOf = (key) => {
+		const s = stats ? stats[key] : void 0;
+		if (s !== void 0 && s !== null && typeof s.state === "string") return s;
+		return {
+			state: "unreadable",
+			reason: "no metadata was read for this row"
+		};
+	};
+	const rows = derived.rows.map((r) => {
+		const st = statOf(r.rowKey);
+		const state = st.state;
+		const stateText = artifactStateText(state, st.reason);
+		const unknownKind = !r.kindKnown || !ARTIFACT_KINDS.includes(r.kind);
+		const servable = r.servable && state === "ok";
+		const bytesRefusal = servable ? "" : r.byteRefusal !== "" ? r.byteRefusal : stateText;
+		return {
+			key: r.key,
+			rowKey: r.rowKey,
+			id: r.id,
+			stage: r.stage,
+			title: r.title,
+			kindLabel: unknownKind ? `${artifactKindLabel(r.kind)} (not recognized)` : artifactKindLabel(r.kind),
+			kindKnown: !unknownKind,
+			sourceLabel: r.source,
+			repoLabel: r.repo === "" ? "" : `repo ${r.repo}`,
+			stageLabel: stageDisplayLabel(r.stage, r.stage),
+			round: r.round,
+			roundText: r.round === null ? "round unknown" : `round ${r.round}`,
+			sizeText: typeof st.sizeBytes === "number" ? formatBytes(st.sizeBytes) : "",
+			timeText: formatArtifactTime(st.mtimeMs),
+			note: r.note,
+			openHint: r.open,
+			optionalText: r.optional ? "optional" : "",
+			legacyText: r.legacy ? "legacy path (kind guessed)" : "",
+			state,
+			stateText,
+			card: unknownKind || state !== "ok" ? "degrade" : "row",
+			bytesHref: servable ? `bytes` : null,
+			bytesRefusal,
+			refusals: r.refusals
+		};
+	});
+	const checks = buildChecksDetail(detailRaw);
+	const newest = checks.length > 0 ? checks[0] : void 0;
+	const verdict = newest === void 0 ? {
+		text: "Machine verdict: no gate run yet",
+		green: null,
+		source: "none",
+		disagreement: false
+	} : {
+		text: `Machine verdict: ${newest.label || newest.stage} ${newest.green ? "green" : "red"}` + (newest.disagreement ? " (the receipt verdict and its rows disagree; both shown verbatim)" : ""),
+		green: newest.green,
+		source: newest.verdictSource,
+		disagreement: newest.disagreement
+	};
+	return {
+		title: "Artifacts",
+		countText: `${rows.length} declared`,
+		listSourceText: derived.listSource === "aggregate" ? "read from the snapshot artifact list" : derived.listSource === "handoffs" ? "read from the handoff history (one entry per round)" : derived.listSource === "handoffs+receipts" ? "read from the handoff history, plus the stage receipts it does not name" : "read from the stage receipts",
+		rows,
+		refusals: derived.refusals,
+		emptyText: "This ticket declares no artifacts.",
+		verdict,
+		qcText: "QC red/green: no data face on this ticket yet."
+	};
+}
+//#endregion
 //#region src/client/terminal-face.ts
 /** 恒定兜底文案（与引擎 face 面语义一致；face 缺失时 UI 侧唯一免责声明源）。 */
 const TERMINAL_FACE_FALLBACKS = {
@@ -16653,6 +16832,206 @@ function EvidenceImages({ ticketId }) {
 				index: evidenceNav(files, open, 0),
 				onClose: () => setOpen(null),
 				onNav: (fs, i, d) => onNav(fs, i, d, setOpen)
+			})
+		]
+	});
+}
+/**
+* Artifact face (t261030-35, epic artifact-face slice 2): the console's inventory of
+* the artifacts a ticket declared, plus the frame that the console owns.
+*
+* Slice scope: no built-in views yet — every row is metadata plus the original-bytes
+* link; a row whose kind is unknown, or whose bytes cannot be used, renders the
+* degrade card. Rounds are not grouped and not compared. Nothing is archived here.
+*
+* Frame ownership (epic ruling 3): the frame is drawn only from the host payload and
+* the ticket's gate receipts. There is no view/plugin channel in this slice, so no
+* project code can add, hide or reorder a row or restate the machine verdict.
+*
+* Fetch failure and an empty declaration are both named: the panel never shows a
+* silent blank (a blank panel would read as "this ticket has no artifacts").
+*/
+const ARTIFACT_FACE_CSS = `
+.wb-af{display:flex;flex-direction:column;gap:6px;margin:4px 0}
+.wb-af-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:6px 10px;
+  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-surface,#f6f8fa)}
+.wb-af-head .ttl{font-weight:600;font-size:13px}
+.wb-af-count{font-size:12px;color:var(--dsw-derive-muted,#57606a)}
+.wb-af-src{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+.wb-af-verdict{font-size:12px;font-weight:600;margin-left:auto}
+.wb-af-verdict[data-green=green]{color:var(--dsw-derive-success,#1a7f37)}
+.wb-af-verdict[data-green=red]{color:var(--dsw-derive-danger,#cf222e)}
+.wb-af-verdict[data-green=none]{color:var(--dsw-derive-muted,#57606a)}
+.wb-af-empty{font-size:12px;color:var(--dsw-derive-muted,#57606a);padding:4px 2px}
+.wb-af-row{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;padding:6px 10px;font-size:12px}
+.wb-af-row[data-card=degrade]{border-style:dashed}
+.wb-af-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
+.wb-af-title{font-weight:600;font-size:13px}
+.wb-af-kind{font-size:11px;padding:0 5px;border-radius:5px;border:1px solid var(--dsw-derive-border,#d0d7de)}
+.wb-af-kind[data-known=false]{border-style:dashed;color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-af-meta{color:var(--dsw-derive-muted,#57606a)}
+.wb-af-tag{font-size:10px;color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:5px;padding:0 4px}
+.wb-af-source{font-family:ui-monospace,monospace;font-size:11px;color:var(--dsw-derive-fg,#1f2328);word-break:break-all}
+.wb-af-note{color:var(--dsw-derive-muted,#57606a)}
+.wb-af-state{color:var(--dsw-derive-warn-deep,#7d4e00);margin-top:2px}
+.wb-af-actions{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px;align-items:baseline}
+.wb-af-actions a{color:var(--dsw-derive-accent,#0969da)}
+.wb-af-nobytes{color:var(--dsw-derive-muted,#57606a)}
+.wb-af-refusal{color:var(--dsw-derive-warn-deep,#7d4e00)}
+.wb-af-qc{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
+`;
+/** Byte link for one row: the stage and the id are the address, never a path.
+*  Both segments are percent-encoded once here; the host decodes the path once. */
+function artifactBytesHref(ticketId, row) {
+	return withProject(`${API}/tickets/${encodeURIComponent(ticketId)}/artifacts/${encodeURIComponent(row.stage)}/${encodeURIComponent(row.id)}/bytes`);
+}
+function ArtifactFace({ detail }) {
+	const ticketId = detail.id;
+	const [data, setData] = (0, react.useState)(null);
+	const [err, setErr] = (0, react.useState)("");
+	(0, react.useEffect)(() => {
+		let cancelled = false;
+		setData(null);
+		setErr("");
+		apiGet(`${API}/tickets/${encodeURIComponent(ticketId)}/artifacts`).then((d) => {
+			if (cancelled) return;
+			if (d?.ok === true && d.result) setData(d.result);
+			else setErr(String(d?.error ?? "the artifact inventory could not be read"));
+		}).catch((e) => {
+			if (!cancelled) setErr(String(e instanceof Error ? e.message : e));
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [ticketId]);
+	if (err !== "") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+		className: "wb-af",
+		children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+			className: "wb-af-empty",
+			children: ["Artifacts unavailable: ", err]
+		})
+	});
+	if (data === null || !Array.isArray(data.rows)) return null;
+	const frame = buildArtifactFaceView({
+		rows: data.rows,
+		refusals: data.refusals ?? [],
+		listSource: data.listSource
+	}, data.stats, detail);
+	const verdictTag = frame.verdict.green === null ? "none" : frame.verdict.green ? "green" : "red";
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-af",
+		"data-testid": "artifact-face",
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: ARTIFACT_FACE_CSS }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-af-head",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "ttl",
+						children: frame.title
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-af-count",
+						children: frame.countText
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-af-src",
+						children: frame.listSourceText
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-af-verdict",
+						"data-green": verdictTag,
+						"data-source": frame.verdict.source,
+						children: frame.verdict.text
+					})
+				]
+			}),
+			frame.rows.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-af-empty",
+				children: frame.emptyText
+			}),
+			frame.rows.map((r) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-af-row",
+				"data-card": r.card,
+				"data-state": r.state,
+				"data-testid": `artifact-row-${r.key}`,
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-af-line",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "wb-af-title",
+								children: r.title
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "wb-af-kind",
+								"data-known": r.kindKnown ? "true" : "false",
+								children: r.kindLabel
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "wb-af-meta",
+								children: [
+									r.stageLabel,
+									r.roundText,
+									r.repoLabel,
+									r.sizeText,
+									r.timeText
+								].filter((x) => x !== "").join(" · ")
+							}),
+							r.optionalText !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "wb-af-tag",
+								children: r.optionalText
+							}),
+							r.legacyText !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "wb-af-tag",
+								children: r.legacyText
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-af-source",
+						children: r.sourceLabel
+					}),
+					r.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-af-note",
+						children: r.note
+					}),
+					r.stateText !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-af-state",
+						children: r.stateText
+					}),
+					r.refusals.map((x) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-af-refusal",
+						children: x
+					}, x)),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-af-actions",
+						children: [r.bytesHref !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
+							href: artifactBytesHref(ticketId, r),
+							target: "_blank",
+							rel: "noreferrer",
+							children: "Open original"
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-af-nobytes",
+							children: r.bytesRefusal === "" ? "Original bytes unavailable" : r.bytesRefusal
+						}), r.openHint !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							className: "wb-af-note",
+							children: ["Open with: ", r.openHint]
+						})]
+					})
+				]
+			}, r.rowKey)),
+			frame.refusals.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("summary", { children: [
+				"Refused declarations (",
+				frame.refusals.length,
+				")"
+			] }), frame.refusals.map((x, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-af-refusal",
+				children: x
+			}, `${i}-${x}`))] }),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-af-qc",
+				children: frame.qcText
 			})
 		]
 	});
@@ -19595,6 +19974,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 							});
 						})(),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(PulseLine, { detail }),
+						detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactFace, { detail }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AgentLivePanel, { ticketId: detail.id }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(EvidenceImages, { ticketId: detail.id }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Problems, { detail }),

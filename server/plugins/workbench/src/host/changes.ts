@@ -531,9 +531,14 @@ async function diffOneTree(treeAbs: string, base: string): Promise<{
   }
 }
 
-/** 票面 repo_worktrees 消毒（M1）：非列表/条目形状非法（缺 name/branch、repo 含 .. 或绝对化）
- *  → 整体视同缺省（返回 undefined），走单仓路径，不 500 不部分采纳。 */
-function sanitizeRepoWorktrees(entries: unknown): RepoWorktreeEntry[] | undefined {
+/** Ticket-face repo_worktrees sanitizer (M1): a non-list value, or an entry whose shape is
+ *  illegal (missing name/branch, a repo that contains `..` or is absolute), makes the whole
+ *  list count as absent (undefined) — the single-repo path is used, nothing 500s, and no
+ *  entry is partly accepted.
+ *  t261030-35: exported so the artifact frame resolves a member-repo root through the
+ *  SAME guard (a second copy would be a second rule for the same ticket field). The
+ *  whole-list refusal rule applies there too: a bad entry means no member root. */
+export function sanitizeRepoWorktrees(entries: unknown): RepoWorktreeEntry[] | undefined {
   if (!Array.isArray(entries) || entries.length === 0) return undefined
   for (const e of entries) {
     if (typeof e !== 'object' || e === null) return undefined
