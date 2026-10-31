@@ -37,6 +37,22 @@
   连写形（`-mpy_compile`，CPython 接受无空格连写）仅对静态白名单成员同样豁免；
   连写执行器模块名（`python3 -mrun_scenarios` 等）走泛化 flag 跳过分支**不判红**
   ——既有已知漏判（与 -c 内联、xargs 同级），非本票引入、本票不收口；
+- static-analyzer family (t261031-28): STATIC_TOOL_MODULES is the union of
+  STATIC_PARSE_TOOLS (py_compile/compileall/ast/tokenize/dis) and STATIC_ANALYZERS
+  (pyflakes/flake8/pycodestyle/pydocstyle/pylint/mypy/ruff). Admission rule: the tool
+  parses or analyzes the target file and does not import it to run its module body.
+  An admitted module exempts the rest of its segment, the same way a parse tool does.
+  A tool outside the table still turns the stage red, so admission stays loud; adding
+  a name costs one set entry plus UT plus docstring text. Executors stay out of the
+  union: pytest, unittest, doctest, runpy, timeit, cProfile, profile, pdb, trace,
+  coverage. `python3 -m pytest <entry>` and `python3 -m unittest <entry>` keep their
+  hits. The external consumer (agent_activities._iter_suite_invocations) reads
+  STATIC_TOOL_MODULES, so one union edit also clears the walkthrough/arbitrate
+  "bare full run" false positive for the space-separated form `-m <analyzer> <file>`.
+  Joined form `-m<analyzer>`: this matcher exempts it, but agent_activities skips
+  `-m<module>` through its generic flag branch and that file is outside this module,
+  so the classifier still reports a suite invocation for it (declared residual,
+  t261031-28; same family as the joined executor miss below);
 - `pytest <目录形>`（如 `pytest integration/`、`pytest integration/tests`）：不判——
   pytest 默认只收集 test_ 前缀文件，目录形实参 basename 不命中入口表
   （integration/tests 是集成库自身单测面）；pytest 仅在实参 basename 命中入口表时判
@@ -113,9 +129,23 @@ SHELL_VERBS = frozenset({"bash", "sh", "zsh", "dash"})
 # 而非被执行——`-m <成员>` 之后本段剩余实参不再参与入口表匹配（误伤收窄）。
 # 只收静态分析面；执行器（pytest/unittest/timeit/cProfile/pdb/runpy…）禁入——
 # 扩展本表须同批带 UT + docstring 落字（声明=执法）。
-STATIC_TOOL_MODULES = frozenset({
+STATIC_PARSE_TOOLS = frozenset({
     "py_compile", "compileall", "ast", "tokenize", "dis",
 })
+# Third-party static analyzers (t261031-28): the same exemption class as the parse
+# tools above. Admission rule: the tool parses or analyzes the target file and does
+# not import it to run its module body, so `python3 -m <name> integration/sc_x.py`
+# reads the scenario and does not run it. Executors stay out of this set (pytest,
+# unittest, doctest, runpy, timeit, cProfile, profile, pdb, trace, coverage): `-m
+# pytest <entry>` and `-m unittest <entry>` keep their hits. A name outside the
+# table stays red (loud, never a silent pass). Extending this set requires UT plus
+# docstring text in the same change (declaration = enforcement).
+STATIC_ANALYZERS = frozenset({
+    "pyflakes", "flake8", "pycodestyle", "pydocstyle", "pylint", "mypy", "ruff",
+})
+# Enforcement surface read outside this module (agent_activities, line ~1943): the
+# union of both static families. Extend the two sets above; never edit this line.
+STATIC_TOOL_MODULES = STATIC_PARSE_TOOLS | STATIC_ANALYZERS
 # node 族静态语法自检 flag（t261004-05）：`node --check <文件>` 只解析不执行，
 # 其后实参不再参与入口表匹配（与 -m 静态白名单 t260922-08 同向豁免）。只收静态
 # 解析面；扩展本表须同批带 UT + docstring 落字（声明=执法）。
@@ -500,6 +530,7 @@ def prompt_clause():
     声明=执法同源，dev_lane.FLOW_BRIEF 注入 create_plan/implement 两键；
     文案改这里，匹配器改入口表，两侧同批）。"""
     entries = "、".join(name for _key, name in FORBIDDEN_ENTRIES)
+    analyzers = ", ".join(sorted(STATIC_ANALYZERS))
     return (
         "验证纪律（宿主令 260921：单测可跑、集成禁跑；声明=执法——本段会话流水"
         "会被机械扫描，执行过集成入口=段结果红+票面点名该命令）。"
@@ -512,4 +543,7 @@ def prompt_clause():
         "【集成禁跑】不得在本段执行集成入口（点名）：" + entries + "——"
         "集成验证由引擎集成闸 run_integration_tests 段机械跑，developer 段只交付、"
         "不自跑集成。"
+        " Read-only static check (t261031-28): python3 -m <analyzer> <file> runs the"
+        " checker, not the scenario (admitted analyzers: " + analyzers + ")."
+        " -m pytest or -m unittest on an integration entry still counts as a run."
     )

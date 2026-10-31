@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 379,
-      "scenarios": 867
+      "engine_tests": 380,
+      "scenarios": 868
     },
     "vocab": [
       "behaviour",
@@ -1865,6 +1865,11 @@
     "server/engine/tests/test_261031_20_gate_receipt_freshness.py": {
       "anchor": "behaviour",
       "note": "t261031-20: the gate receipt must name the tree it judged. A receipt is valid only for the tree it ran on: every gate round anchors `receipt_sha` on the lane HEAD (resolved before the face write, so the face key and the anchor are one fact); main's movement is a NAMED delta (`main_sync`, `merge_check_acts` from the KI-009 self-heal row that only lands on a real commit move, `foreign_repair:<sha>`), never a new identity, so another ticket's merge cannot void this ticket's proof (host order 261009); at the merge_check entry, before the main sync, the guard compares the lane HEAD with the comparison base and a mismatch re-runs the gate (stale: two re-runs, no_receipt: one, unprovable: zero) with the tree judged before the cap; the void counter resets only on a fresh evaluation, `rework` and `retry_qc`, and those two handler writes sit outside `_counter_reset_active` so the pre-anchor population the arm exists for gets its genuine attempt; every new command site sits behind `_gate_receipt_arm` = patched OR the event-gated `enable_gate_receipt_guard` flag (S1: the arm reaches the writes, not only the read); the closing run replaces the face receipt in place and names its surface (full suite / targeted / fast set); the void line names measurements only, never a committer. Offline shells, the real dev_lane main loop with a stubbed activity seam, fixed receipts; no docker/Temporal/3099."
+    },
+    "server/engine/tests/test_t261031_28_integration_discipline_static_analyzer.py": {
+      "anchor": "behaviour",
+      "note": "",
+      "sync_path": ""
     }
   },
   "scenarios": {
@@ -6150,6 +6155,11 @@
     "integration/t261031-20/sc_gate_receipt_freshness.py": {
       "anchor": "behaviour",
       "note": "t261031-20: a gate receipt is valid only for the tree it measured - a moved tree voids it and sends the flow back to the gate, a main-sync delta never voids, an unresolvable or malformed anchor is never fresh, the void bound is reachable and a new anchor does not reset it, and the arming rule covers every declared command site; the reader text names both trees without claiming a committer",
+      "sync_path": ""
+    },
+    "integration/t261031-28/sc_t26103128_static_analyzer_read_only.py": {
+      "anchor": "behaviour",
+      "note": "t261031-28: the `-m <static analyzer>` family reads and never runs - the reported command and every user-typed analyzer over each entry shape settle a developer stage green with no violation row and a byte-identical receipt, while the executor modules (pytest/unittest/doctest/runpy/timeit/cProfile/profile/pdb/coverage/trace) keep one hit each, entry-module/plain forms keep their keys, the exemption stays segment-local and never retroactive, malformed analyzer argv stays green, the walkthrough/arbitrate evidence face still lands one drift row for a bare full run and keeps a targeted run green, and the agent-facing clause never advertises an analyzer the gate rejects. Joined form -m<analyzer> is declared, not asserted (classifier residual outside the write set).",
       "sync_path": ""
     }
   }
