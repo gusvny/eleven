@@ -31,6 +31,17 @@
  *   The gate stays honest: a boot failure is still a failure — the bench lib
  *   never converts a rejection into a resolution, and a boot that fails before
  *   any log exists rejects NAMED with zero fabricated survivor files.
+ *   Locality of that judgement: this case counts only files that a process
+ *   running this case can write. It points os.tmpdir() at a temp root of its own
+ *   for the whole run, so "no new survivor" is a statement about THIS case's
+ *   evidence. A FOREIGN file is any fix17-console-* name in the machine-shared
+ *   temp root: another process wrote it (a concurrent case that boots a console
+ *   leaves fix17-console-ready-<ts>-<pid>.log there), so this case neither
+ *   claims nor counts it. Judging the shared root instead booked this leg red in
+ *   a concurrent round while it passed standalone on the same tree (KI-438).
+ *   The claim keeps its full strength: a real fabrication still goes through this
+ *   case's own evidence path, still lands in this case's root, and still reds —
+ *   the non-vacuity leg G proves the judged root can see such a file.
  *
  * Face: the PUBLIC exports of integration/t260916-26/lib_t260916_26_bench.mjs
  * (the evidence seam `attachBootEvidence(err, logPath, label)` pinned by the
@@ -88,8 +99,37 @@ function makeHome(logContent) {
   return { tmpHome, logPath };
 }
 
+// The machine-shared tmp root, read once before this case touches os.tmpdir().
+// A file here belongs to whoever wrote it — never to this case.
+const SHARED_TMP = os.tmpdir();
+
+// ---- the evidence scope this case owns (KI-438) ------------------------------
+// os.tmpdir() is shared by every process on this machine, and every case that
+// boots a console leaves a fix17-console-ready-<ts>-<pid>.log in it. A before/
+// after difference over that directory therefore judges the neighbours: the
+// 22:15Z round booked this leg red with a foreign file while the same case
+// passed standalone on the same tree. This case now retargets os.tmpdir() to a
+// temp root of its own BEFORE any evidence is produced, so every survivor this
+// case can write lands in SCOPE_ROOT and survivorsNow() reads only SCOPE_ROOT.
+// The survivor-location contract itself is untouched (the lib still copies into
+// os.tmpdir()); this changes WHOSE files are counted, never WHETHER a real one is
+// checked. Leg G guards the scope against going blind, and the mutation run in
+// the handoff shows a genuine fabrication through this case's path still reds.
+const SCOPE_ROOT = (() => {
+  try {
+    return mkdtempSync(path.join(SHARED_TMP, 't26091626-boot-evidence-scope-'));
+  } catch (e) {
+    // A missing precondition is a NAMED environment failure, never a leg verdict.
+    console.error(`ENV_FAIL: cannot create this case's evidence scope under ${SHARED_TMP}: ${e}`);
+    process.exit(2);
+  }
+})();
+process.env.TMPDIR = SCOPE_ROOT; // os.tmpdir() follows TMPDIR on POSIX: from here on, "tmp" is ours
+process.on('exit', () => { try { rmSync(SCOPE_ROOT, { recursive: true, force: true }); } catch { /* best effort */ } });
+
+/** Survivor-shaped files this case's own processes could have written. */
 function survivorsNow() {
-  return new Set(readdirSync(os.tmpdir()).filter((n) => n.startsWith('fix17-console-')));
+  return new Set(readdirSync(SCOPE_ROOT).filter((n) => n.startsWith('fix17-console-')));
 }
 
 // ---- B + reclamation invariant: annotation carries tail + living survivor ----
@@ -115,6 +155,10 @@ function survivorsNow() {
     if (!survivor) misses.push('message names no existing survivor path outside the reclaimed temp home');
     else if (!readFileSync(survivor, 'utf8').includes(TAIL_MARK)) {
       misses.push('survivor file exists but lost the log content');
+    } else if (!survivor.startsWith(SCOPE_ROOT + path.sep)) {
+      // the named survivor must be this case's own artifact, so a foreign file in
+      // the shared temp root can never stand in for evidence this case produced
+      misses.push(`the survivor the message names is not in this case's own scope (${survivor})`);
     }
   }
   record('lane-bench-boot-annotates-and-survives', misses.length ? 'fail' : 'pass',
@@ -179,9 +223,46 @@ for (const [label, content] of [['missing', undefined], ['empty', ''],
   rmSync(tmpHome, { recursive: true, force: true });
 }
 
+// ---- G: the judged scope sees this case's own evidence (non-vacuity) --------
+// Scoping the survivor set must never be bought with a blind scope. If the
+// production evidence path stopped writing into this case's root, F's "no new
+// survivor" would be true by construction and would guard nothing. This leg
+// writes one survivor through the production seam, requires the judging scope to
+// see it, and removes it again — so the scope is proven live on every run.
+{
+  const canaryLog = path.join(SCOPE_ROOT, 'canary-console.log');
+  writeFileSync(canaryLog, 'scope canary: stage console last words\n');
+  const misses = [];
+  try { seam(new Error('scope canary'), canaryLog, 'scope-canary'); }
+  catch (e) { misses.push(`the production evidence seam threw: ${e}`); }
+  const seen = [...survivorsNow()].filter((n) => n.startsWith('fix17-console-scope-canary-'));
+  if (!seen.length) {
+    misses.push(`the judged scope (${SCOPE_ROOT}) shows no survivor for a file written through the `
+      + "production evidence path, so the no-fabrication claim in F would be vacuous — re-derive the scope");
+  }
+  rmSync(canaryLog, { force: true });
+  for (const n of seen) rmSync(path.join(SCOPE_ROOT, n), { force: true });
+  record('lane-bench-survivor-scope-sees-own-evidence', misses.length ? 'fail' : 'pass',
+    misses.length ? misses.join('; ')
+      : 'the judged survivor scope is this case\'s own root and it sees a survivor written through the production evidence path',
+    `scopeRoot=${SCOPE_ROOT} canarySurvivors=${seen.join(',') || 'none'}`);
+}
+
 // ---- F: pre-log boot failure stays a NAMED failure, zero fabricated evidence -
+// The attacked window (KI-438): a sibling case that boots a console writes its own
+// fix17-console-ready-<ts>-<pid>.log into the machine-shared tmp root while this
+// boot attempt runs. The decoy below stands in for that sibling: a microtask
+// plants it, so it exists AFTER the "before" snapshot and BEFORE the "after"
+// snapshot — the collision itself, with no timing luck involved. The leg also
+// states that the decoy really landed: an attack that never fired would make the
+// no-fabrication claim vacuous.
 {
   const before = survivorsNow();
+  const foreignName = `fix17-console-ready-${Date.now()}-${process.pid + 1}.log`;
+  const foreignPath = path.join(SHARED_TMP, foreignName);
+  queueMicrotask(() => {
+    try { writeFileSync(foreignPath, 'foreign case: stage console ready\n'); } catch { /* named below */ }
+  });
   const hostileHome = mkdtempSync(path.join(os.tmpdir(), 't26100973-hostile-'));
   const prev = process.env.FIX17_MAIN_ROOT;
   process.env.FIX17_MAIN_ROOT = path.join(hostileHome, 'no-such-main-tree');
@@ -192,13 +273,24 @@ for (const [label, content] of [['missing', undefined], ['empty', ''],
     if (prev === undefined) delete process.env.FIX17_MAIN_ROOT; else process.env.FIX17_MAIN_ROOT = prev;
   }
   const after = survivorsNow();
+  const decoyLanded = existsSync(foreignPath);
+  rmSync(foreignPath, { force: true });
   const fabricated = [...after].filter((n) => !before.has(n));
   const msg = err ? String(err.message || err) : '(resolved)';
-  const ok = err && !msg.includes('log tail:') && fabricated.length === 0;
-  record('lane-bench-pre-log-failure-named-no-fabrication', ok ? 'pass' : 'fail',
-    ok ? 'boot failure before any log exists rejects named, quoting nothing, fabricating no survivor'
-       : `resolved=${!err} evidenceQuotedWithoutLog=${msg.includes('log tail:')} fabricatedSurvivors=${fabricated.join(',') || 'none'} msg=${msg.slice(0, 160)}`,
-    `msg=${JSON.stringify(msg.slice(0, 240))} fabricated=${fabricated.length}`);
+  const misses = [];
+  if (!err) misses.push('a pre-log boot failure RESOLVED (a boot failure must stay a failure)');
+  if (!decoyLanded) {
+    misses.push('the foreign decoy never landed inside the window, so the collision this leg guards was not exercised');
+  }
+  if (msg.includes('log tail:')) misses.push('the message quotes a log tail although no log ever existed');
+  if (msg.includes('full log preserved at:')) misses.push('the message names a preserved log although none exists');
+  if (fabricated.length) misses.push(`this case is booked as having fabricated survivor files: ${fabricated.join(',')}`);
+  const structured = `fabricatedSurvivors=${fabricated.join(',') || 'none'} foreignDecoyLanded=${decoyLanded} resolved=${!err}`;
+  record('lane-bench-pre-log-failure-named-no-fabrication', misses.length ? 'fail' : 'pass',
+    misses.length ? `${misses.join('; ')} — ${structured} msg=${msg.slice(0, 160)}`
+      : 'boot failure before any log exists rejects named, quoting nothing, fabricating no survivor '
+        + '(a foreign fix17-console-* file planted in the shared tmp root during the window is not counted)',
+    `${structured} msg=${JSON.stringify(msg.slice(0, 240))}`);
   rmSync(hostileHome, { recursive: true, force: true });
 }
 
