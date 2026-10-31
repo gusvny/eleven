@@ -34,10 +34,25 @@ high-level steps：
 装载链三方一致（软链指向），t260907-04 sc_naming_grep_assert 守 suyou 旧名 token——本条
 守 v6 目录结构齐整与路径残留，不同面。Hermetic：纯文件读，零端口零 spawn，cwd=仓库根，
 秒级。**implement 落地前红属预期（TDD 信号），arbitrate/merge 期必须绿。**
+
+Scope note (t261101-12). C judges the committed tree at the revision under
+verification: git lists the files, and only those files are scanned. Untracked
+runtime scratch (out/, .sandbar/, a temp dir, a per-lane worktree leftover, a
+file that appears while the round runs) is not part of the delivered tree, so
+it can not red this case. A tree with scratch only is green. If git can not
+list the tree, the case reports ENV_FAIL: the tree can not be judged.
+
+Rule ③ (probe pair) also covers a wrapped candidate list. The same fallback
+tuple may break over two lines: the old path and the v6 path stay in one
+candidate list, so neither line is a live pointer. A wrapped list needs both
+paths; an old path alone is still a hit.
 """
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 INTEG = os.path.dirname(HERE)
@@ -121,14 +136,101 @@ def _hit(line):
                 or RE_SEG_REV.search(line))
 
 
-def scan():
-    """返回 (真残留 [(rel, lineno, line)], 二进制跳过 [rel])。"""
-    hits, binaries = [], []
-    for dirpath, dirnames, filenames in os.walk(REPO):
+# v6 target literals: the path a fallback probe reads FIRST (rule ③).
+RE_V6_TARGET = re.compile(r"server/engine|[\"']server[\"']\s*/\s*[\"']engine[\"']")
+# A wrapped candidate list continues while the line above ends with a comma.
+_PROBE_LOOKBACK = 3
+
+
+def _probe_pair_wrapped(lines, idx):
+    """True when line idx sits in a candidate list that also names the v6 path.
+
+    Rule ③ covers the one-line form. This covers the same structure wrapped
+    over two or more lines:
+        for cand in (REPO / "server/engine/.venv/bin/python",
+                     REPO / "server/dsh/temporal-poc/.venv/bin/python"):
+    The old path is a probe candidate, not a live pointer. Require an opener,
+    a comma continuation above the hit, and the v6 path on ANOTHER line.
+    """
+    block = [lines[idx]]
+    prev = idx - 1
+    while prev >= 0 and idx - prev <= _PROBE_LOOKBACK:
+        tail = lines[prev].rstrip()
+        if not tail.endswith((",", "(", "[")):
+            break
+        block.insert(0, lines[prev])
+        prev -= 1
+        if tail.endswith(("(", "[")):
+            break  # the candidate list opens on this line
+    chain = block[:-1]
+    if not chain:
+        return False
+    if not any(("(" in ln or "[" in ln) for ln in block):
+        return False
+    return any(RE_V6_TARGET.search(ln) for ln in chain)
+
+
+def _scan_lines(rel, lines):
+    """Hits in one file: [(rel, lineno, line)] after every exemption."""
+    hits = []
+    for i, line in enumerate(lines):
+        if not _hit(line):
+            continue
+        if _exempt(rel, line):
+            continue
+        if _probe_pair_wrapped(lines, i):
+            continue
+        hits.append((rel, i + 1, line.strip()[:110]))
+    return hits
+
+
+# ---------------------------------------------------------------- scope ----
+# A seconds-scale bound with a name. A local `git ls-files` read returns at
+# once; the bound only stops a hung git, so the case never waits minutes.
+_GIT_LIST_TIMEOUT_S = 60
+
+
+def tracked_paths(root):
+    """Tracked paths at the revision under verification (None = git unusable).
+
+    The v6 layout claim is about committed content. Runtime scratch is not
+    part of the tree under verification, so it can never red this case.
+    """
+    try:
+        proc = subprocess.run(["git", "-C", root, "ls-files", "-z"],
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              timeout=_GIT_LIST_TIMEOUT_S)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    raw = proc.stdout.decode("utf-8", "surrogateescape")
+    return set(p for p in raw.split("\0") if p)
+
+
+def scan(root=None, tracked=None):
+    """Scan the tracked tree only.
+
+    Returns (residue [(rel, lineno, line)], skipped binaries [rel],
+    scratch [rel]). A path that is not tracked is scratch: it belongs to the
+    run, not to the delivered tree, so it is counted and never scanned.
+    """
+    root = root or REPO
+    if tracked is None:
+        tracked = tracked_paths(root)
+        if tracked is None:
+            tracked = set()  # caller reports ENV_FAIL: no tree can be judged
+    hits, binaries, scratch = [], [], []
+    for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         for fn in filenames:
+            if fn == ".git":
+                continue  # a worktree root keeps .git as a file, not a dir
             path = os.path.join(dirpath, fn)
-            rel = os.path.relpath(path, REPO)
+            rel = os.path.relpath(path, root)
+            if rel not in tracked:
+                scratch.append(rel)
+                continue
             ext = os.path.splitext(fn)[1]
             if ext and ext not in TEXT_EXT:
                 if not ext in (".png", ".jpg", ".ico", ".zstd", ".gif", ".woff",
@@ -137,12 +239,12 @@ def scan():
                 continue
             try:
                 with open(path, "r", encoding="utf-8") as f:
-                    for i, line in enumerate(f, 1):
-                        if _hit(line) and not _exempt(rel, line):
-                            hits.append((rel, i, line.strip()[:110]))
+                    lines = f.read().splitlines()
             except (OSError, UnicodeDecodeError):
                 binaries.append(rel)
-    return hits, binaries
+                continue
+            hits.extend(_scan_lines(rel, lines))
+    return hits, binaries, scratch
 
 
 def main():
@@ -180,13 +282,24 @@ def main():
             "B server/dsh 目录不存在")
 
     print("== C 全仓旧路径零残留（连写＋段式杂糅，列名豁免逐处归类）")
-    hits, binaries = scan()
-    r.check(not hits, "C 真残留 %d 处%s" % (
-        len(hits), ("；首 8：" + " | ".join("%s:%d %s" % h for h in hits[:8])) if hits else ""))
+    tracked = tracked_paths(REPO)
+    if tracked is None:
+        # The tree can not be judged: this is an environment red, not a pass.
+        r.env_fail("git ls-files unusable in %s: the committed tree can not be "
+                   "listed, so the layout claim can not be judged" % REPO)
+        hits, binaries, scratch = [], [], []
+    else:
+        hits, binaries, scratch = scan(REPO, tracked)
+        r.check(not hits, "C 真残留 %d 处%s" % (
+            len(hits), ("；首 8：" + " | ".join("%s:%d %s" % h for h in hits[:8])) if hits else ""))
     if binaries:
         print("  INFO 二进制/跳过 %d 个（列名不吞命中）：%s%s" % (
             len(binaries), ", ".join(binaries[:5]),
             " …" if len(binaries) > 5 else ""))
+    if scratch:
+        print("  INFO 未跟踪/运行时暂存不在判据内 %d 个（t261101-12：判的是受控树）"
+              "：%s%s" % (len(scratch), ", ".join(sorted(scratch)[:5]),
+                          " …" if len(scratch) > 5 else ""))
 
     print("== D 扫描器自证红绿")
     r.check(_hit('cmd: PY=server/dsh/temporal-poc/.venv/bin/python'),
@@ -207,6 +320,58 @@ def main():
             "D DSH_HOME 型隔离目录名不误报（绿）")
     r.check(not _hit('docker services ["dsh", "temporal"]'),
             "D docker 服务名 dsh 不误报（绿）")
+
+    # == D3 wrapped candidate list (t261101-12): rule ③ spans two lines ──────
+    # The measured red: a landed scenario file holds the fallback probe as a
+    # wrapped tuple. The same structure on one line is exempt (rule ③), so the
+    # wrapped form must be exempt too. An old path WITHOUT the v6 sibling in
+    # one candidate list stays a hit.
+    _wrapped = ["    for cand in (REPO / \"server/engine/.venv/bin/python\",",
+                "                 REPO / \"server/dsh/temporal-poc/.venv/bin/python\"):"]
+    r.check(_scan_lines("x.py", _wrapped) == [],
+            "D3 跨行回落探测对（v6 在前、旧路径在后）豁免（绿）〔t261101-12 实测形态〕")
+    _wrapped_open = ["    cands = (",
+                     "        REPO / \"server/engine/bin\",",
+                     "        REPO / \"server/dsh/engine/bin\",",
+                     "    )"]
+    r.check(_scan_lines("x.py", _wrapped_open) == [],
+            "D3 跨行探测对（开括号独占一行，三行超链）豁免（绿）")
+    _dangling = ['    load("server/engine/shared.py")',
+                '    load("server/dsh/engine/base.py")']
+    r.check(len(_scan_lines("x.py", _dangling)) == 1,
+            "D3 旧路径无 v6 同候选表配对仍是残留（红）〔不因邻行有 server/engine 放行〕")
+    _far = ['    load("server/engine/shared.py")',
+            "",
+            "",
+            "",
+            "",
+            '    load("server/dsh/engine/base.py")']
+    r.check(len(_scan_lines("x.py", _far)) == 1,
+            "D3 超窗（v6 行在窗口外）仍是残留（红）")
+
+    # == D4 scope (t261101-12): the scan judges the tracked tree only ───────
+    # Runtime scratch must never red this case, and the scan must still bite on
+    # a tracked file. Both legs run in a temp tree; the real tree is untouched.
+    _tmp = tempfile.mkdtemp(prefix="sc_layout_scope_")
+    try:
+        with open(os.path.join(_tmp, "live.py"), "w", encoding="utf-8") as f:
+            f.write('PY = "server/dsh/temporal-poc/.venv/bin/python"\n')
+        with open(os.path.join(_tmp, "scratch.py"), "w", encoding="utf-8") as f:
+            f.write('OUT = "server/dsh/temporal-poc/out"\n')
+        s_hits, _s_bin, s_scratch = scan(_tmp, {"live.py"})
+        r.check([h[0] for h in s_hits] == ["live.py"],
+                "D4 受控文件仍被扫到（红）、未跟踪暂存不扫（绿）：hits=%s scratch=%s"
+                % ([h[0] for h in s_hits], sorted(s_scratch)))
+        r.check(sorted(s_scratch) == ["scratch.py"],
+                "D4 未跟踪文件逐个点名计入暂存（不静默吞）")
+        only_scratch = os.path.join(_tmp, "scratch_only")
+        os.makedirs(only_scratch)
+        with open(os.path.join(only_scratch, "leftover.py"), "w", encoding="utf-8") as f:
+            f.write('LEGACY = "server/dsh/engine/base.py"\n')
+        r.check(scan(only_scratch, set())[0] == [],
+                "D4 只有暂存的树全绿＝不需要干净树（t261101-12 口径）")
+    finally:
+        shutil.rmtree(_tmp, ignore_errors=True)
 
     # == D2 L10 --no-open 启动面闸机制自证（t260929-09：字面量盲区翻车）────────
     # 260929 宿主实报浏览器弹窗：真凶 bench 用变量二进制（dshCmd）＋ argv 带
