@@ -74,6 +74,10 @@ export default {}\n`)
   // t261008-01：sessions.ts 新增 charter-title 依赖（isCharterRawTitle）——同款纪律，
   // 漏拷即 ERR_MODULE_NOT_FOUND。
   cp('src/shared/charter-title.ts')
+  // t261031-33: session-entry.tsx now imports the fixed executor handle
+  // (EXECUTOR_HANDLE from shared/session-handles.ts) so a rename never mirrors
+  // a derived executor row into the project file - the same copy-list rule.
+  cp('src/shared/session-handles.ts')
   cp('src/host/session-charter.ts')
 
   const mod = await import(pathToFileURL(join(tmp, 'src/client/session-entry.ts')).href)

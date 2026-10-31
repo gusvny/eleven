@@ -31,6 +31,19 @@
  *        color dot / right-rail color band anchors), top-row retirement inversion (the
  *        wb-sessTop family absent), the confirm text without the ↺ wording;
  *      - the lib artifact carries the same batch (the anchors are present in lib/client.js too).
+ *
+ * Rename legs (t261031-33): R1 double-click inline name edit on the tab.
+ *   S12 source-text face: the data-wb-psess-rename input anchor, the dblclick hook,
+ *       the pure arbitration wired in (tabClickStep + RENAME_CLICK_WINDOW_MS), the
+ *       prefill from the shown label, the TITLE_MAX_LEN clamp, the handle kept in the
+ *       tooltip, the action-layer wiring (setEntryTitle -> handleRename -> onRename)
+ *       and the same batch in lib/client.js.
+ *   S13 live journey over the REAL modules with a stub localStorage: render a tab
+ *       (handle label), commit a typed name, see the name win on the tab while the
+ *       id/handle/seq stay put, reload the module (a fresh instance reads the cache
+ *       back), clear on an empty commit and see today's handle label return, close
+ *       and re-register the same id with its name, and prove the name does not leak
+ *       into another project's tab row.
  */
 
 import { readFileSync } from 'node:fs'
@@ -44,7 +57,20 @@ import {
   pickProjectTabs,
   backfillProjectSeqs,
   nextProjectSeq,
+  setEntryTitle,
+  tabLabelOf,
+  TITLE_MAX_LEN,
+  LEDGER_CAP,
 } from '../src/shared/sessions.ts'
+// Rename arbitration (t261031-33): pure, no React, safe to import here.
+import {
+  RENAME_CLICK_WINDOW_MS,
+  initialTabClickState,
+  renameCommitOf,
+  renameDraftOf,
+  tabClickStep,
+} from '../src/client/psess-rename.ts'
+import { sessionHandle } from '../src/shared/session-handle.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const srcRow = join(here, '..', 'src', 'client', 'project-session-row.tsx')
@@ -389,6 +415,172 @@ section('S11 UI-5（t261005-06）：句柄标签 + 执行器投影门 + 项目�
   const host = readFileSync(join(here, '..', 'src', 'host', 'session-ledger-file.ts'), 'utf8')
   ok(host.includes('executor-grants.json') && host.includes('executor_sessions'),
     '执行器可见性=grants 合并门（派生显示，不动工作区索引）在场')
+}
+
+/* ── Rename face (t261031-33, R1-R6) ─────────────────────────────────────── */
+
+section('S12 rename render face (t261031-33: inline input + pure arbitration wiring + action layer)')
+{
+  const row = readFileSync(srcRow, 'utf8')
+  const lib = readFileSync(libClient, 'utf8')
+  // R6: the new semantic anchor for the inline name editor (source + artifact).
+  ok(row.includes('data-wb-psess-rename='), 'src: the inline input anchor data-wb-psess-rename is present')
+  ok(lib.includes('data-wb-psess-rename'), 'lib: the artifact of the same rebuild carries the same anchor')
+  ok(row.includes('onDoubleClick='), 'src: a double click opens the editor (onDoubleClick present)')
+  // R1: the pure machine decides the switch, so one double click never switches.
+  ok(row.includes('tabClickStep(') && row.includes('RENAME_CLICK_WINDOW_MS') && row.includes('\'switch-due\''),
+    'src: a single click goes through the pure arbitration (tabClickStep + switch-due + the window constant), so a double click never switches')
+  ok(!/onClick=\{\(\) => \{ setConfirmId\(null\); onOpen\(t\.id\) \}/.test(row),
+    'src: the old inline "click switches at once" handler is gone (a switch must pass the arbitration)')
+  // R1/R3: prefill = the shown label; commit decision is pure; the clamp matches the file schema.
+  ok(row.includes('renameDraftOf(tab?.customTitle') && row.includes('renameCommitOf('),
+    'src: the editor preloads the shown name and the commit decision is a pure function')
+  ok(row.includes('maxLength={TITLE_MAX_LEN}') && row.includes('TITLE_MAX_LEN'),
+    `src: the input limit is ${TITLE_MAX_LEN} (the same source as the sessions.json slice)`)
+  ok(row.includes("'Escape'") && row.includes("'Enter'") && row.includes('onBlur={() => finishEdit(true)}'),
+    'src: Enter commits, Esc cancels and blur commits (a click elsewhere never drops the typed name)')
+  // R2: the handle stays reachable in the tooltip, and the label rule is the shared pure one.
+  ok(/title=\{`\$\{projectName\} session #\$\{handleOf\.get\(t\.id\) \|\| t\.seq\} \(seq \$\{t\.seq\}\): \$\{t\.title\}/.test(row),
+    'src: the tab tooltip still carries the handle, the full name and the session id (a rename never swallows the handle)')
+  ok(row.includes('tabLabelOf(t.customTitle') && row.includes('wb-psess-name'),
+    'src: the label rule is tabLabelOf (the name wins, else the handle) and a long name is cut with .wb-psess-name ellipsis')
+  ok(!/\[class\*=|\[class\$=/.test(row), 'src: the zero factory-class-matching rule holds on the rename face too')
+  // The action layer: pure transform -> store write -> project-file mirror.
+  const entrySrc = readFileSync(srcEntry, 'utf8')
+  ok(entrySrc.includes('setEntryTitle(') && entrySrc.includes('handleRename'),
+    'session-entry: the rename goes through the setEntryTitle transform (the handleRename action)')
+  ok(/pushSessionEntry\(\{[\s\S]{0,400}title: entry\.title/.test(entrySrc),
+    'session-entry: the name is mirrored into the project file (otherwise the file-wins refresh wipes it)')
+  ok(entrySrc.includes('EXECUTOR_HANDLE'), 'session-entry: an executor projection is never written into the project file (derived display is not persisted)')
+  ok(entrySrc.includes('stays valid in this browser until the next reload'),
+    'session-entry: a file write failure gives a precise inline notice (the name is never dropped silently)')
+  const sidebarSrc = readFileSync(srcSidebar, 'utf8')
+  ok(sidebarSrc.includes('onRename={(id, name) => { void projectSessions.handleRename(id, name) }}'),
+    'sidebar: onRename is wired to the handleRename action')
+  const storeSrc = readFileSync(join(here, '..', 'src', 'client', 'session-ledger-store.ts'), 'utf8')
+  ok(storeSrc.includes('handle?: string') && storeSrc.includes('...(typeof entry.handle === \'string\''),
+    'store: pushSessionEntry carries the handle (the merge never re-derives a code, so the handle stays)')
+}
+
+section('S13 rename journey (t261031-33 R3/R4/R5: render -> commit -> reload -> clear -> close and reopen -> no cross-project leak)')
+{
+  /* localStorage stub (the ledger's only IO face) + the REAL module store. The
+   * store's top-level has no IO, so the stub is installed before the first
+   * snapshot read. Nothing else about the store is replaced. */
+  const lsData = new Map()
+  globalThis.localStorage = {
+    getItem: k => (lsData.has(String(k)) ? lsData.get(String(k)) : null),
+    setItem: (k, v) => { lsData.set(String(k), String(v)) },
+    removeItem: k => { lsData.delete(String(k)) },
+    clear: () => { lsData.clear() },
+    key: i => [...lsData.keys()][i] ?? null,
+    get length() { return lsData.size },
+  }
+  const storeUrl = new URL('../src/client/session-ledger-store.ts', import.meta.url).href
+  const store = await import(storeUrl)
+  const handleFor = e => (typeof e.handle === 'string' && e.handle !== '' ? e.handle : sessionHandle(e.id, []))
+  const labelOf = (ledger, project, id) => {
+    const tabs = pickProjectTabs(ledger, { project })
+    const tab = tabs.find(t => t.id === id)
+    if (!tab) return null
+    const e = ledger.find(x => x.id === id)
+    return tabLabelOf(tab.customTitle, handleFor(e ?? {}))
+  }
+  /** One UI rename action = the pure pair the row and the action layer use. */
+  const renderAndCommit = (ledger, project, id, draft) => {
+    const tabs = pickProjectTabs(ledger, { project })
+    const tab = tabs.find(t => t.id === id)
+    const entry = ledger.find(x => x.id === id)
+    const prefill = renameDraftOf(tab?.customTitle, handleFor(entry ?? {}))
+    const decision = renameCommitOf(draft, prefill)
+    if (decision.kind === 'none') return { ledger, wrote: false, prefill }
+    return { ledger: setEntryTitle(ledger, id, decision.name), wrote: true, prefill }
+  }
+
+  // Seed: two sandbar sessions + one suyou session, through the real store.
+  const seed = backfillProjectSeqs(parseLedger(JSON.stringify([
+    { id: 'session-0eca1111-aaaa', project: 'sandbar', cwd: '/repo/sandbar', lastOpenedAt: 10, seq: 1 },
+    { id: 'session-e6b32222-bbbb', project: 'sandbar', cwd: '/repo/sandbar', lastOpenedAt: 20, seq: 2 },
+    { id: 'session-77cc3333-cccc', project: 'suyou', cwd: '/repo/suyou', lastOpenedAt: 30, seq: 1 },
+  ])))
+  store.persistLedger(seed)
+  const target = seed.find(e => e.project === 'sandbar' && e.seq === 2)
+  const targetHandle = handleFor(target)
+
+  // 1 render: no name yet -> the tab label is today's handle short code.
+  ok(labelOf(store.getLedgerSnapshot(), 'sandbar', target.id) === targetHandle,
+    `render: with no name the tab label is the handle short code (${targetHandle}, byte-identical to today)`)
+
+  // 2 commit a typed name (Enter path: the draft goes through the same pair).
+  const first = renderAndCommit(store.getLedgerSnapshot(), 'sandbar', target.id, 'Ledger cap work')
+  ok(first.wrote === true, 'commit: a typed name produces one write')
+  ok(first.prefill === targetHandle, `commit: the editor preloads the shown name (the handle ${targetHandle})`)
+  store.persistLedger(first.ledger)
+  ok(labelOf(store.getLedgerSnapshot(), 'sandbar', target.id) === 'Ledger cap work',
+    'render: the name wins and the tab label changes to it (R5)')
+  const renamed = store.getLedgerSnapshot().find(e => e.id === target.id)
+  ok(renamed.id === target.id && renamed.handle === target.handle && renamed.seq === target.seq
+    && renamed.lastOpenedAt === target.lastOpenedAt && renamed.project === target.project,
+    'commit: id / handle / seq / registration time / project stay as they were (R2)')
+  ok(typeof renamed.title === 'string' && renamed.title === 'Ledger cap work', 'commit: the ledger stores the trimmed name')
+
+  // 3 reload: a FRESH module instance reads the cache back (localStorage only).
+  const reloaded = await import(storeUrl + '?reload=1')
+  const afterReload = reloaded.getLedgerSnapshot()
+  ok(afterReload.find(e => e.id === target.id)?.title === 'Ledger cap work',
+    'reload: a fresh module instance reads the name back from localStorage (a page reload keeps it, R4)')
+  ok(labelOf(afterReload, 'sandbar', target.id) === 'Ledger cap work', 'reload: the tab still shows the name after the reload')
+  // The name also went to the project file, so the file-wins refresh keeps it:
+  // the source-text wire is asserted in S12; here the cache copy is proven.
+  ok(typeof store.persistLedger === 'function', 'store: the write face exists (persistLedger)')
+
+  // 4 an unchanged commit writes nothing (a bare double click + blur).
+  const noop = renderAndCommit(afterReload, 'sandbar', target.id, 'Ledger cap work')
+  ok(noop.wrote === false && noop.ledger === afterReload,
+    'commit: an unchanged name writes nothing (a stray double click never stores a name)')
+
+  // 5 clear: an empty commit restores today's handle label (R3).
+  const cleared = renderAndCommit(afterReload, 'sandbar', target.id, '   ')
+  ok(cleared.wrote === true && cleared.ledger !== afterReload, 'clear: an empty commit is a write, not a no-op')
+  reloaded.persistLedger(cleared.ledger)
+  const afterClear = reloaded.getLedgerSnapshot().find(e => e.id === target.id)
+  ok(!('title' in afterClear), 'clear: the title field is removed (never an empty string)')
+  ok(labelOf(reloaded.getLedgerSnapshot(), 'sandbar', target.id) === targetHandle,
+    `clear: the tab label falls back to the handle short code (${targetHandle}, today behaviour)`)
+
+  // 6 close + re-register the same id: the name is not lost earlier than the entry.
+  const withName = setEntryTitle(reloaded.getLedgerSnapshot(), target.id, 'Named again')
+  reloaded.persistLedger(withName)
+  const closed = removeEntry(withName, target.id)
+  ok(!closed.some(e => e.id === target.id), 'close: the whole entry leaves (the name goes with the entry, never earlier)')
+  ok(pickProjectTabs(closed, { project: 'sandbar' }).every(t => t.customTitle === undefined),
+    'close: the closed entry leaves no name residue in the tab row')
+  // Restore path shape: the same id re-registers with its remembered name
+  // (touchEntry accepts title; a reopen is the same entry, not a new one).
+  const reopened = touchEntry(closed, { id: target.id, project: 'sandbar', cwd: '/repo/sandbar', lastOpenedAt: 40, seq: target.seq, title: 'Named again' })
+  ok(labelOf(reopened, 'sandbar', target.id) === 'Named again',
+    'reopen: the same id registered again carries its name back (same id, same entry, R4)')
+
+  // 7 no leak across projects: the other project's tabs never carry this name.
+  const cross = setEntryTitle(reopened, target.id, 'sandbar only')
+  ok(pickProjectTabs(cross, { project: 'suyou' }).every(t => t.customTitle === undefined),
+    'isolation: the name never leaks into another project tab row')
+  ok(pickProjectTabs(cross, { project: 'suyou' }).map(t => t.id).join(',') === 'session-77cc3333-cccc',
+    'isolation: the other project tab row is unchanged')
+
+  // 8 cap: a rename never shortens the entry's life under the ledger cap.
+  const many = []
+  let capped = many
+  for (let i = 1; i <= LEDGER_CAP; i++) {
+    capped = touchEntry(capped, { id: `session-c${i}0000-x`, project: 'sandbar', cwd: '/repo/sandbar', lastOpenedAt: i, seq: i })
+  }
+  const oldestId = capped[capped.length - 1].id
+  const named = setEntryTitle(capped, oldestId, 'oldest named')
+  ok(named.length === capped.length && named[named.length - 1].id === oldestId,
+    'cap: a rename changes neither the length nor the order (the name is never lost before the entry)')
+  const evicted = touchEntry(named, { id: 'session-new00-x', project: 'sandbar', cwd: '/repo/sandbar', lastOpenedAt: 999, seq: 99 })
+  ok(evicted.length === LEDGER_CAP && !evicted.some(e => e.id === oldestId),
+    'cap: eviction still takes whole entries (a rename does not change the cap rule)')
 }
 
 console.log(`\n${passed} passed, ${failed} failed`)

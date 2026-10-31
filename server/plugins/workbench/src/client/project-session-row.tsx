@@ -38,12 +38,33 @@
  * (seq stays history-only); the executor session (fixed handle executor)
  * enters this row's data through the session-ledger-file grants-merge door
  * (derived display; the grants file stays the single source of who runs).
+ *
+ * Rename face (t261031-33, R1-R6). A double click on a tab opens an inline name
+ * editor in place of the label; the arbitration and the commit decision are
+ * pure (./psess-rename.ts), the transform is setEntryTitle (shared/sessions.ts)
+ * and this component stays zero-IO: it calls the onRename action the sidebar
+ * injected. A set name wins over the handle code (R5). The handle stays
+ * reachable: the tab tooltip still carries it, together with the full name and
+ * the session id. New semantic anchor: data-wb-psess-rename (the editor input),
+ * plus data-editing on the tab and data-named on a named label. The zero
+ * CSS-class matching rule holds (own .wb-psess-* names only).
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { pickProjectTabs } from '../shared/sessions.ts'
+import { pickProjectTabs, tabLabelOf, TITLE_MAX_LEN } from '../shared/sessions.ts'
 import type { OpenedEntry, TitleRowLike } from '../shared/sessions.ts'
+// Rename arbitration (t261031-33): double-click the tab -> inline name editor.
+// The pure machine decides who switches and when (see its own header); this
+// component only owns the timer, the draft text and the focus.
+import {
+  RENAME_CLICK_WINDOW_MS,
+  initialTabClickState,
+  renameCommitOf,
+  renameDraftOf,
+  tabClickStep,
+} from './psess-rename.ts'
+import type { TabClickState } from './psess-rename.ts'
 // Session handles, composed union of both landed intents:
 //   - UI-1 (t261005-09, main): the display fallback derives the short code from
 //     the session id (sessionHandle; beyond-6 tail fallback; seq stays in
@@ -85,6 +106,10 @@ export interface ProjectSessionRowProps {
   onOpen: (id: string) => void
   /** 关闭（确认后调用；handleClose=剔入口+入最近关闭，不删数据）。 */
   onClose: (id: string) => void
+  /** Rename (t261031-33): write the display name through the ledger transform.
+   *  '' clears it. The action layer (useSessionEntry.handleRename) owns the
+   *  store write and the project-file mirror; this row stays zero-IO. */
+  onRename: (id: string, name: string) => void
 }
 
 /* 自有样式（随组件 <style> 注入；.wb-psess-* 前缀与出厂类名零交叉）。
@@ -129,6 +154,18 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   /* gen8：同上，回归 45% 锁定派生（同 t260904-05 契约）。 */
   color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); }
 .wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
+/* Rename face (t261031-33, R3/R6). A set name wins over the handle short code.
+   A very long name is cut VISIBLY here (ellipsis at 96px) and the full text
+   stays in the tab tooltip: rejecting it by name would need a second error face
+   inside a 24px tab and would drop what the user typed, while the ledger keeps
+   the whole (clamped) text either way. The inline editor uses the same width. */
+.wb-psess-name { max-width:96px; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; font-family:inherit; }
+.wb-psess-rename { box-sizing:border-box; width:96px; height:20px; padding:0 4px;
+  font:inherit; font-size:11.5px; line-height:1; border-radius:3px;
+  border:1px solid color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 55%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
+  background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff));
+  color:var(--dsw-alias-label-primary,#1f2328); outline:none; }
 /* Session-row project badge (UI-5, color channel only; shapes belong to UI-4): an 8px square in the project color, inline in the tab. */
 .wb-psess-dot { width:8px; height:8px; flex:none; border-radius:2px;
   background:var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)); }
@@ -165,7 +202,7 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
 export function ProjectSessionRow(props: ProjectSessionRowProps) {
   const {
     projectKey, projectName, projectDir, ledger, current, byId,
-    creating, notice, noticeProject, onNew, onOpen, onClose,
+    creating, notice, noticeProject, onNew, onOpen, onClose, onRename,
   } = props
   const tabs = useMemo(
     () => pickProjectTabs(ledger, { project: projectKey, current, byId }),
@@ -196,6 +233,98 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
   /** 正在确认的 tab 锚（ref 回调按 confirmId 条件挂到对应 tab 上）。 */
   const tabRef = useRef<HTMLDivElement | null>(null)
   const popRef = useRef<HTMLDivElement | null>(null)
+
+  /* ── Rename (t261031-33, R1): double click the tab -> inline name editor ──
+   * The click arbitration is pure (./psess-rename.ts). This block owns only the
+   * timer, the draft text and the focus. A DOUBLE click performs zero switches
+   * and opens one editor; a SINGLE click switches after RENAME_CLICK_WINDOW_MS.
+   * Enter and BLUR commit (blur commits so a click elsewhere never silently
+   * drops a typed name); Esc cancels; a trimmed-empty commit CLEARS the name. */
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const clickState = useRef<TabClickState>(initialTabClickState())
+  /** Mirror of editingId for synchronous reads: a blur can arrive after the
+   *  commit that closed the editor, and the ref makes a commit idempotent. */
+  const editingRef = useRef<string | null>(null)
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  const clearClickTimer = useCallback(() => {
+    if (clickTimer.current !== null) { clearTimeout(clickTimer.current); clickTimer.current = null }
+  }, [])
+  // Timer reclamation: unmount is a terminal path too.
+  useEffect(() => () => clearClickTimer(), [clearClickTimer])
+
+  /** Name the editor opens with: the set name, else today's label (the handle). */
+  const prefillOf = (id: string): string => {
+    const tab = tabs.find(t => t.id === id)
+    return renameDraftOf(tab?.customTitle, handleOf.get(id) ?? '')
+  }
+
+  const beginEdit = (id: string) => {
+    editingRef.current = id
+    setConfirmId(null)
+    setEditingId(id)
+    setDraft(prefillOf(id))
+  }
+
+  const onTabClick = (id: string) => {
+    const step = tabClickStep(clickState.current, { type: 'click', id })
+    clickState.current = step.state
+    clearClickTimer()
+    const pending = step.state.pending
+    if (pending === null) return
+    clickTimer.current = setTimeout(() => {
+      clickTimer.current = null
+      const due = tabClickStep(clickState.current, { type: 'switch-due', id: pending })
+      clickState.current = due.state
+      if (due.switchTo === null) return
+      setConfirmId(null)
+      onOpen(due.switchTo)
+    }, RENAME_CLICK_WINDOW_MS)
+  }
+
+  const onTabDoubleClick = (id: string) => {
+    const step = tabClickStep(clickState.current, { type: 'dblclick', id })
+    clickState.current = step.state
+    if (step.openEditor === null) return
+    clearClickTimer()
+    beginEdit(step.openEditor)
+  }
+
+  const finishEdit = (commit: boolean) => {
+    const id = editingRef.current
+    if (id === null) return
+    editingRef.current = null
+    clickState.current = tabClickStep(clickState.current, { type: 'close-editor' }).state
+    setEditingId(null)
+    const typed = draft
+    setDraft('')
+    if (!commit) return
+    const decision = renameCommitOf(typed, prefillOf(id))
+    if (decision.kind === 'set') onRename(id, decision.name)
+  }
+
+  // Focus and select-all when the editor opens (layout phase: no flash; typing
+  // replaces the old name).
+  useLayoutEffect(() => {
+    if (editingId === null) return
+    const el = inputRef.current
+    if (!el) return
+    el.focus()
+    el.select()
+  }, [editingId])
+
+  // The edited tab can vanish (entry closed, project switched). Never keep an
+  // editor for a tab that is gone.
+  useEffect(() => {
+    const id = editingRef.current
+    if (id === null || tabs.some(t => t.id === id)) return
+    editingRef.current = null
+    clickState.current = tabClickStep(clickState.current, { type: 'close-editor' }).state
+    setEditingId(null)
+    setDraft('')
+  }, [tabs])
 
   /** 摆位：锚矩形 → 视口钳制（左右不出界）+ 底部放不下向上翻。 */
   const place = useCallback(() => {
@@ -273,40 +402,83 @@ export function ProjectSessionRow(props: ProjectSessionRowProps) {
         aria-label={`New ${projectName} session`}
         onClick={onNew}
       >{tabs.length === 0 ? '＋ New session' : '+'}</button>
-      {tabs.map(t => (
-        <div
-          key={t.id}
-          ref={confirmId === t.id ? tabRef : undefined}
-          className={`wb-psess-tab ${t.active ? 'active' : ''}`}
-          data-wb-psess-tab=""
-          data-active={t.active}
-          role="button"
-          tabIndex={0}
-          title={`${projectName} session #${handleOf.get(t.id) || t.seq} (seq ${t.seq}): ${t.title}\n${t.id}`}
-          onClick={() => { setConfirmId(null); onOpen(t.id) }}
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault()
-              setConfirmId(null)
-              onOpen(t.id)
-            }
-          }}
-        >
-          <span className="wb-psess-num" data-wb-psess-handle="">{handleOf.get(t.id) || t.seq}</span>
-          {/* Project badge color block (design 2.5, the session-row badge's
-              minimal face: color channel only; the shape channel belongs to
-              the UI-4 project-identity ticket). */}
-          <span aria-hidden className="wb-psess-dot" data-wb-psess-dot="" />
-          <button
-            type="button"
-            className="wb-psess-close"
-            data-wb-psess-close=""
-            title="Close this session entry (needs confirmation; session content is not deleted)"
-            aria-label={`Close session entry ${handleOf.get(t.id) || t.seq}`}
-            onClick={e => { e.stopPropagation(); setConfirmId(t.id) }}
-          >×</button>
-        </div>
-      ))}
+      {tabs.map(t => {
+        const editing = editingId === t.id
+        // R5: a set name wins over the handle short code; with no name this is
+        // exactly today's label (the composed handle, seq only as last resort).
+        const label = tabLabelOf(t.customTitle, handleOf.get(t.id) || String(t.seq))
+        return (
+          <div
+            key={t.id}
+            ref={confirmId === t.id ? tabRef : undefined}
+            className={`wb-psess-tab ${t.active ? 'active' : ''}`}
+            data-wb-psess-tab=""
+            data-active={t.active}
+            data-editing={editing}
+            role={editing ? undefined : 'button'}
+            tabIndex={editing ? -1 : 0}
+            title={`${projectName} session #${handleOf.get(t.id) || t.seq} (seq ${t.seq}): ${t.title}\n${t.id}`}
+            onClick={() => onTabClick(t.id)}
+            onDoubleClick={() => onTabDoubleClick(t.id)}
+            onKeyDown={e => {
+              // The editor owns its own keys (Space must type a space, not switch).
+              if (editing) return
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setConfirmId(null)
+                onOpen(t.id)
+              }
+            }}
+          >
+            {editing ? (
+              <input
+                ref={inputRef}
+                type="text"
+                className="wb-psess-rename"
+                data-wb-psess-rename=""
+                value={draft}
+                maxLength={TITLE_MAX_LEN}
+                aria-label={`Rename session ${handleOf.get(t.id) || t.seq}`}
+                onChange={e => setDraft(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    finishEdit(true)
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    finishEdit(false)
+                  }
+                }}
+                // Blur commits (R1). finishEdit is idempotent, so the blur that
+                // can follow a commit closes nothing twice.
+                onBlur={() => finishEdit(true)}
+              />
+            ) : (
+              <span
+                className={t.customTitle === undefined ? 'wb-psess-num' : 'wb-psess-num wb-psess-name'}
+                data-wb-psess-handle=""
+                data-named={t.customTitle === undefined ? undefined : true}
+              >{label}</span>
+            )}
+            {/* Project badge color block (design 2.5, the session-row badge's
+                minimal face: color channel only; the shape channel belongs to
+                the UI-4 project-identity ticket). */}
+            <span aria-hidden className="wb-psess-dot" data-wb-psess-dot="" />
+            {!editing && (
+              <button
+                type="button"
+                className="wb-psess-close"
+                data-wb-psess-close=""
+                title="Close this session entry (needs confirmation; session content is not deleted)"
+                aria-label={`Close session entry ${handleOf.get(t.id) || t.seq}`}
+                onClick={e => { e.stopPropagation(); setConfirmId(t.id) }}
+              >×</button>
+            )}
+          </div>
+        )
+      })}
       {confirmTab && (
         <div
           className="wb-psess-confirm"

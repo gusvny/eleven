@@ -157,12 +157,18 @@ export async function fetchProjectLedger(project: string): Promise<OpenedEntry[]
  * registration failure is never silent, plan step 3 acceptance). A failure does
  * not roll back the local ledger entry (the cache and the file diverge briefly
  * and converge on the next fetch - declared behavior).
+ *
+ * `handle` (t261031-33): the caller may pass the handle it already displays.
+ * The file keeps it, so a rename write never re-derives a code and never
+ * changes the handle of the entry it renames (R2). Leave it out and the host
+ * assigns a code from the id, exactly as before.
  */
 export async function pushSessionEntry(entry: {
   id: string
   project: string
   cwd?: string
   title?: string
+  handle?: string
   lastOpenedAt?: number
 }): Promise<string> {
   const res = await fetch(SESSIONS_API_PATH + (entry.project ? `?project=${encodeURIComponent(entry.project)}` : ''), {
@@ -172,6 +178,7 @@ export async function pushSessionEntry(entry: {
       session_id: entry.id,
       cwd: entry.cwd,
       ...(entry.title !== undefined ? { title: entry.title } : {}),
+      ...(typeof entry.handle === 'string' && entry.handle !== '' ? { handle: entry.handle } : {}),
       ...(entry.lastOpenedAt !== undefined ? { lastOpenedAt: entry.lastOpenedAt } : {}),
       opened_at: entry.lastOpenedAt,
       last_opened_at: entry.lastOpenedAt,

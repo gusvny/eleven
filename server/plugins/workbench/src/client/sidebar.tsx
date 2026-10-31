@@ -1433,6 +1433,7 @@ export function WorkbenchSidebar(props: SidebarProps) {
                     onNew={() => { void projectSessions.handleNew({ key: g.project.key, dir: g.project.primary }) }}
                     onOpen={(id) => { void projectSessions.handleOpen(id) }}
                     onClose={projectSessions.handleClose}
+                    onRename={(id, name) => { void projectSessions.handleRename(id, name) }}
                   />
                   {g.tickets.length === 0 ? (
                     <div className="wb-group-empty">No active tickets</div>

@@ -36,6 +36,13 @@
  * 生命周期与宿主进程无关，刷新页面与重启 console 都不丢（设计§4：记账存放
  * 需刷新/重启不丢）。ctx.sessions.list 仍被订阅，但只取两个字段：
  * displayTitle（行标签）与 current（活跃高亮）。
+ *
+ * Rename face (t261031-33). The rest of the R8 retirement stands: the top row
+ * and its double-click rename stayed gone, and the data (OpenedEntry.title) was
+ * kept. This ticket brings back only the ENTRY POINT, on the project-session
+ * tab. The transform is setEntryTitle (rename/clear, one function), the label
+ * rule is tabLabelOf (name wins, else the handle short code), and the click
+ * arbitration lives in src/client/psess-rename.ts (pure, unit-tested).
  */
 
 /** 账册条目：一次「UI 主动打开/新建」的登记。 */
@@ -71,6 +78,10 @@ export interface ProjectTab {
   seq: number
   /** 提示用标题（自定义 title → displayTitle → id 三级兜底）。 */
   title: string
+  /** Set custom name, trimmed (t261031-33). Absent = no name, so the tab label
+   *  falls back to the handle short code (R5). The tooltip face keeps the raw
+   *  `title`; this field is the name the user typed and the rename editor preloads. */
+  customTitle?: string
   /** 是否右栏当前会话（高亮；全局 current 唯一 → 至多一个 true）。 */
   active: boolean
 }
@@ -113,6 +124,18 @@ export function rowLabelOf(row: TitleRowLike | undefined, id: string, handle?: u
   const label = labelOf(row, id)
   if (!isCharterRawTitle(label)) return label
   return typeof handle === 'string' && handle !== '' ? handle : id
+}
+
+/**
+ * Project-session tab main label (t261031-33, R5): a set custom name wins over
+ * the handle short code (that is the point of the rename); with no name the
+ * label is the handle short code — byte-identical to the pre-rename behavior
+ * (UI-5, t261005-06). A missing handle label yields '' and the caller falls
+ * back (it passes the seq text as today's last resort).
+ */
+export function tabLabelOf(customTitle: unknown, handleLabel: unknown): string {
+  if (typeof customTitle === 'string' && customTitle.trim() !== '') return customTitle.trim()
+  return typeof handleLabel === 'string' ? handleLabel : ''
 }
 
 /**
@@ -191,6 +214,57 @@ export function removeEntry(entries: OpenedEntry[], id: string): OpenedEntry[] {
   return (Array.isArray(entries) ? entries : []).filter(e => e && e.id !== id)
 }
 
+/**
+ * Stored custom-name limit in UTF-16 units (t261031-33). It equals the host
+ * slice in src/host/session-ledger-file.ts (title.slice(0, 500)), so the local
+ * cache and sessions.json can never disagree about a long name. The label is
+ * cut visually by CSS (ellipsis) and the full stored text stays in the tooltip.
+ */
+export const TITLE_MAX_LEN = 500
+
+/**
+ * Rename one ledger entry by display name: the ledger transform behind the
+ * project-session tab rename (t261031-33, R3/R7).
+ *
+ * Contract:
+ *   - the name is trimmed, then clamped to TITLE_MAX_LEN;
+ *   - an empty/whitespace-only name CLEARS the custom title (the field is
+ *     removed, never stored as an empty string, so the tab falls back to the
+ *     handle label);
+ *   - only `title` changes. The id, project, cwd, lastOpenedAt, seq and handle
+ *     are untouched, and the array order is kept, so a rename never moves the
+ *     entry, never re-registers it and never shortens its lifetime under the
+ *     ledger cap;
+ *   - an unknown id is a no-op (a rename never inserts an entry), and so is a
+ *     ticket- id (those never sit in the ledger);
+ *   - a non-string name is refused, not obeyed: a malformed call must never
+ *     destroy a name the user set. Only a string sets or clears;
+ *   - a duplicate id (hand-edited ledger) renames every copy - one id has one
+ *     name, never a half state;
+ *   - when nothing changes the INPUT REFERENCE comes back, so the caller skips
+ *     the write (the backfillProjectSeqs convention);
+ *   - otherwise a new array comes back; the input is never mutated.
+ */
+export function setEntryTitle(entries: OpenedEntry[], id: unknown, name: unknown): OpenedEntry[] {
+  const list = Array.isArray(entries) ? entries : []
+  if (typeof id !== 'string' || id === '') return list
+  if (typeof name !== 'string') return list
+  const trimmed = name.trim().slice(0, TITLE_MAX_LEN)
+  const next: string | undefined = trimmed === '' ? undefined : trimmed
+  let changed = false
+  const out = list.map(e => {
+    if (!e || e.id !== id) return e
+    const cur = typeof e.title === 'string' ? e.title : undefined
+    if (cur === next) return e
+    changed = true
+    const copy: OpenedEntry = { ...e }
+    if (next === undefined) delete copy.title
+    else copy.title = next
+    return copy
+  })
+  return changed ? out : list
+}
+
 /* ───────────────── 项目内会话区（第 3 面①，R2/R4/R6 + 拍板 1/2）─────────────────
  * 口径真源 notes/epics/session-entry.md：数据源=本账册按 project 过滤；编号=项目内
  * 登记顺序、关闭不回收（seq 存条目 + 每项目计数器续号，见 session-entry.tsx
@@ -219,12 +293,19 @@ export function pickProjectTabs(
   return (Array.isArray(entries) ? entries : [])
     // 工单会话不进 tab（防御纵深：touchEntry 已挡一层，这里再挡一层）
     .filter(e => e && typeof e.id === 'string' && isGlobalSessionId(e.id) && e.project === project)
-    .map(e => ({
-      id: e.id,
-      seq: typeof e.seq === 'number' && Number.isFinite(e.seq) && e.seq >= 1 ? Math.floor(e.seq) : 0,
-      title: typeof e.title === 'string' && e.title.trim() !== '' ? e.title : labelOf(byId[e.id], e.id),
-      active: e.id === current,
-    }))
+    .map(e => {
+      // Trimmed copy of the user name (t261031-33): present only when a name is
+      // set, so the row can tell "name wins" from "handle label" without
+      // re-reading the ledger.
+      const custom = typeof e.title === 'string' && e.title.trim() !== '' ? e.title.trim() : undefined
+      return {
+        id: e.id,
+        seq: typeof e.seq === 'number' && Number.isFinite(e.seq) && e.seq >= 1 ? Math.floor(e.seq) : 0,
+        title: typeof e.title === 'string' && e.title.trim() !== '' ? e.title : labelOf(byId[e.id], e.id),
+        ...(custom === undefined ? {} : { customTitle: custom }),
+        active: e.id === current,
+      }
+    })
     // 缺号/坏号条目不显示（backfill 先行的不变式；显示缺号条目=数字无意义）
     .filter(t => t.seq >= 1)
     .sort((a, b) => a.seq - b.seq)

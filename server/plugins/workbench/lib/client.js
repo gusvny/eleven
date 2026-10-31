@@ -480,26 +480,12 @@ const WORKFLOW_TABLE = {
 	"inspection-lite": "Inspection",
 	"chore-lane": "Chore Lane"
 };
-/** Artifact view kind → English (truth source: engine shared.ARTIFACT_KINDS, epic
-*  artifact-face). A kind says what a human does with an artifact, not what it looks
-*  like; an unknown value falls back to the raw identifier (labelOf rule). */
-const ARTIFACT_KIND_TABLE = {
-	image: "Image",
-	text: "Text",
-	structure: "Structure",
-	diff: "Diff",
-	ledger: "Ledger",
-	external: "External"
-};
 const STATE_LABEL = STATE_TABLE;
 function stageLabel(id) {
 	return labelOf$1(STAGE_TABLE, id);
 }
 function workflowLabel(id) {
 	return labelOf$1(WORKFLOW_TABLE, id);
-}
-function artifactKindLabel(id) {
-	return labelOf$1(ARTIFACT_KIND_TABLE, id);
 }
 /** 段名优先级：拓扑/模板节点自带英文时数据侧已可用；此处只认 id 映射（显示层覆盖，
 *  不改引擎数据——review 260925 裁定：引擎中文 label 数据不动，仅显示层按 id 覆盖）。 */
@@ -2633,6 +2619,17 @@ function rowLabelOf(row, id, handle) {
 	return typeof handle === "string" && handle !== "" ? handle : id;
 }
 /**
+* Project-session tab main label (t261031-33, R5): a set custom name wins over
+* the handle short code (that is the point of the rename); with no name the
+* label is the handle short code — byte-identical to the pre-rename behavior
+* (UI-5, t261005-06). A missing handle label yields '' and the caller falls
+* back (it passes the seq text as today's last resort).
+*/
+function tabLabelOf(customTitle, handleLabel) {
+	if (typeof customTitle === "string" && customTitle.trim() !== "") return customTitle.trim();
+	return typeof handleLabel === "string" ? handleLabel : "";
+}
+/**
 * 账册反序列化（localStorage → OpenedEntry[]）：坏 JSON、非数组、脏条目
 * （缺 id/project、lastOpenedAt 非有限数）一律容错剔除，全脏则空册——
 * 不抛不崩，宁可列表空也不让侧栏挂掉。同 id 重复条目只留最靠前的一份。
@@ -2697,6 +2694,47 @@ function removeEntry(entries, id) {
 	return (Array.isArray(entries) ? entries : []).filter((e) => e && e.id !== id);
 }
 /**
+* Rename one ledger entry by display name: the ledger transform behind the
+* project-session tab rename (t261031-33, R3/R7).
+*
+* Contract:
+*   - the name is trimmed, then clamped to TITLE_MAX_LEN;
+*   - an empty/whitespace-only name CLEARS the custom title (the field is
+*     removed, never stored as an empty string, so the tab falls back to the
+*     handle label);
+*   - only `title` changes. The id, project, cwd, lastOpenedAt, seq and handle
+*     are untouched, and the array order is kept, so a rename never moves the
+*     entry, never re-registers it and never shortens its lifetime under the
+*     ledger cap;
+*   - an unknown id is a no-op (a rename never inserts an entry), and so is a
+*     ticket- id (those never sit in the ledger);
+*   - a non-string name is refused, not obeyed: a malformed call must never
+*     destroy a name the user set. Only a string sets or clears;
+*   - a duplicate id (hand-edited ledger) renames every copy - one id has one
+*     name, never a half state;
+*   - when nothing changes the INPUT REFERENCE comes back, so the caller skips
+*     the write (the backfillProjectSeqs convention);
+*   - otherwise a new array comes back; the input is never mutated.
+*/
+function setEntryTitle(entries, id, name) {
+	const list = Array.isArray(entries) ? entries : [];
+	if (typeof id !== "string" || id === "") return list;
+	if (typeof name !== "string") return list;
+	const trimmed = name.trim().slice(0, 500);
+	const next = trimmed === "" ? void 0 : trimmed;
+	let changed = false;
+	const out = list.map((e) => {
+		if (!e || e.id !== id) return e;
+		if ((typeof e.title === "string" ? e.title : void 0) === next) return e;
+		changed = true;
+		const copy = { ...e };
+		if (next === void 0) delete copy.title;
+		else copy.title = next;
+		return copy;
+	});
+	return changed ? out : list;
+}
+/**
 * 算项目内会话 tab：账册按 project 精确过滤 → 只留有合法 seq（≥1 有限数）的
 * 条目 → seq 升序（=登记顺序）→ 标题/高亮装配。无上限（拍板 2）；缺 seq 条目
 * 不显示（迁移过渡态——消费方挂载时先走 backfillProjectSeqs 补号，防御纵深）。
@@ -2708,12 +2746,16 @@ function pickProjectTabs(entries, opts) {
 	if (project === "") return [];
 	const byId = opts?.byId ?? {};
 	const current = opts?.current;
-	return (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e.id === "string" && isGlobalSessionId(e.id) && e.project === project).map((e) => ({
-		id: e.id,
-		seq: typeof e.seq === "number" && Number.isFinite(e.seq) && e.seq >= 1 ? Math.floor(e.seq) : 0,
-		title: typeof e.title === "string" && e.title.trim() !== "" ? e.title : labelOf(byId[e.id], e.id),
-		active: e.id === current
-	})).filter((t) => t.seq >= 1).sort((a, b) => a.seq - b.seq);
+	return (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e.id === "string" && isGlobalSessionId(e.id) && e.project === project).map((e) => {
+		const custom = typeof e.title === "string" && e.title.trim() !== "" ? e.title.trim() : void 0;
+		return {
+			id: e.id,
+			seq: typeof e.seq === "number" && Number.isFinite(e.seq) && e.seq >= 1 ? Math.floor(e.seq) : 0,
+			title: typeof e.title === "string" && e.title.trim() !== "" ? e.title : labelOf(byId[e.id], e.id),
+			...custom === void 0 ? {} : { customTitle: custom },
+			active: e.id === current
+		};
+	}).filter((t) => t.seq >= 1).sort((a, b) => a.seq - b.seq);
 }
 /**
 * 存量编号迁移（幂等）：账册里缺 seq 的条目（第 3 面① 之前登记的存量）按
@@ -2777,6 +2819,25 @@ function nextProjectSeq(entries, project, counterMax, closed) {
 		}
 	}
 	return max + 1;
+}
+/**
+* Short code of a dsh session id: strip the `session-` prefix, take the first N
+* hex chars. Non-`session-` shapes (ticket sessions, bare uuids, malformed) take
+* the first 4 chars too — the code is a reference, not a classifier, so the shape
+* is lenient (classification lives in isGlobalSessionId at the ledger entrance).
+* Non-string / empty returns '' (the caller treats it as unassigned; no fake code).
+*/
+function shortCodeOf(sessionId, len = 4) {
+	if (typeof sessionId !== "string" || sessionId === "") return "";
+	return (sessionId.startsWith("session-") ? sessionId.slice(8) : sessionId).slice(0, Math.max(1, Math.floor(len)));
+}
+/** Display handle of an entry: the assigned one, else a temporary short code
+*  (display only, never persisted — assignment lands on the register path, the
+*  display layer never blocks on "unassigned"). */
+function displayHandle(e) {
+	if (!e || typeof e.session_id !== "string" || e.session_id === "") return "";
+	if (typeof e.handle === "string" && e.handle !== "") return e.handle;
+	return shortCodeOf(e.session_id);
 }
 //#endregion
 //#region src/client/session-ledger-store.ts
@@ -2904,6 +2965,11 @@ async function fetchProjectLedger(project) {
 * registration failure is never silent, plan step 3 acceptance). A failure does
 * not roll back the local ledger entry (the cache and the file diverge briefly
 * and converge on the next fetch - declared behavior).
+*
+* `handle` (t261031-33): the caller may pass the handle it already displays.
+* The file keeps it, so a rename write never re-derives a code and never
+* changes the handle of the entry it renames (R2). Leave it out and the host
+* assigns a code from the id, exactly as before.
 */
 async function pushSessionEntry(entry) {
 	const res = await fetch(SESSIONS_API_PATH + (entry.project ? `?project=${encodeURIComponent(entry.project)}` : ""), {
@@ -2913,6 +2979,7 @@ async function pushSessionEntry(entry) {
 			session_id: entry.id,
 			cwd: entry.cwd,
 			...entry.title !== void 0 ? { title: entry.title } : {},
+			...typeof entry.handle === "string" && entry.handle !== "" ? { handle: entry.handle } : {},
 			...entry.lastOpenedAt !== void 0 ? { lastOpenedAt: entry.lastOpenedAt } : {},
 			opened_at: entry.lastOpenedAt,
 			last_opened_at: entry.lastOpenedAt
@@ -3083,6 +3150,17 @@ function resolveStartSession(candidates) {
 * 项目行消费同一账册（模块级共享 store）与同一组动作。行内通知带归属项目
 * （noticeProject）：项目行只显示自己项目的失败提示。BO-1：nextProjectSeq
 * 兜底号域纳入「最近关闭」，计数器丢失时不再重发已关最大号。
+*
+* Rename entry point returns (t261031-33), and what that history means. R8
+* (t260904-05) retired the old top row TOGETHER WITH its double-click rename,
+* and the rename pure function went with it. The DATA was never removed:
+* OpenedEntry.title stayed, parseLedger/touchEntry kept accepting it, and
+* ProjectTab.title kept resolving custom title -> displayTitle -> id. So this
+* ticket brings back the ENTRY POINT only, on the surface that lists sessions
+* today (the project-session tab): handleRename writes the display name through
+* setEntryTitle (shared/sessions.ts) and mirrors it into the project ledger
+* file so a reload cannot wipe it (fetchProjectLedger is file-wins). The session
+* id, the handle, the ledger id and the server session stay untouched.
 */
 /**
 * 出厂「⊕ New Session」钮的语义锚（aria-label 全集）：dsh-client-ui-sidebar 的
@@ -3480,8 +3558,164 @@ function useSessionEntry({ sessions, workspaces, getService, slotOpen, projectKe
 			persist,
 			sessions
 		]),
+		handleRename: (0, react.useCallback)(async (id, name) => {
+			const before = getLedgerSnapshot();
+			const next = setEntryTitle(before, id, name);
+			if (next === before) return;
+			persist(next);
+			const entry = next.find((e) => e && e.id === id);
+			if (!entry) return;
+			if (entry.handle === "executor") return;
+			try {
+				await pushSessionEntry({
+					id,
+					project: entry.project,
+					cwd: entry.cwd,
+					...typeof entry.title === "string" && entry.title !== "" ? { title: entry.title } : {},
+					...typeof entry.handle === "string" && entry.handle !== "" ? { handle: entry.handle } : {},
+					lastOpenedAt: entry.lastOpenedAt
+				});
+			} catch (err) {
+				console.error("[workbench] session rename: the project ledger file refused the write (the browser cache kept the name):", id, err);
+				notify("Session name not saved to the project ledger file (see the console); it stays valid in this browser until the next reload", entry.project);
+			}
+		}, [persist, notify]),
 		closedList,
 		listState
+	};
+}
+//#endregion
+//#region src/client/psess-rename.ts
+/**
+* sandbar-workbench · project-session tab rename: click arbitration and commit
+* decision (t261031-33, R1/R3). Pure functions, zero IO, zero DOM, no React
+* import - node runs this file directly (smoke and the L1 battery do).
+*
+* Why a state machine instead of inline handlers: a browser fires click, click,
+* dblclick for one double click. R1 forbids two switches, and a switch plus a
+* detached editor. So the tab's click does NOT switch at once - it arms a
+* pending switch for RENAME_CLICK_WINDOW_MS. The pair's second click arrives
+* inside that window and cancels it, so a double click performs ZERO switches
+* and ONE editor open; a single click performs exactly ONE switch when its
+* timer fires. The timer itself is host IO (window.setTimeout in
+* project-session-row.tsx); every decision below is pure and testable.
+*
+* States:
+*   pending - tab id whose switch is armed (null = none);
+*   editing - tab id whose inline name editor is open (null = none).
+*
+* Transitions (see tabClickStep):
+*   click(id)          edit open on id -> drop the armed switch, nothing else
+*                                      (a click inside the editor is the
+*                                      editor's own business);
+*                      otherwise       -> arm the switch for id (latest click
+*                                      wins; the host clears the old timer);
+*   dblclick(id)       edit open on id -> no-op (a double click in the input is
+*                                      word selection, never a re-open that
+*                                      would reset the typed draft);
+*                      otherwise       -> cancel the armed switch, open the
+*                                      editor;
+*   switch-due(id)     pending === id  -> exactly one switch to id;
+*                      otherwise       -> stale timer, no-op;
+*   close-editor       -> editor closed, nothing armed.
+*/
+/** Fresh state: nothing armed, no editor. */
+function initialTabClickState() {
+	return {
+		pending: null,
+		editing: null
+	};
+}
+/** Malformed events and malformed ids are no-ops (never a guessed switch). */
+function noop(state) {
+	return {
+		state,
+		switchTo: null,
+		openEditor: null
+	};
+}
+/** Apply one event. Pure: the input state object is never mutated. */
+function tabClickStep(state, event) {
+	const cur = state && typeof state === "object" ? {
+		pending: typeof state.pending === "string" ? state.pending : null,
+		editing: typeof state.editing === "string" ? state.editing : null
+	} : initialTabClickState();
+	const type = event && typeof event === "object" ? event.type : void 0;
+	const id = event && typeof event === "object" && "id" in event ? event.id : void 0;
+	const validId = typeof id === "string" && id !== "";
+	switch (type) {
+		case "click":
+			if (!validId) return noop(cur);
+			if (cur.editing === id) return {
+				state: {
+					pending: null,
+					editing: cur.editing
+				},
+				switchTo: null,
+				openEditor: null
+			};
+			return {
+				state: {
+					pending: id,
+					editing: cur.editing
+				},
+				switchTo: null,
+				openEditor: null
+			};
+		case "dblclick":
+			if (!validId) return noop(cur);
+			if (cur.editing === id) return noop(cur);
+			return {
+				state: {
+					pending: null,
+					editing: id
+				},
+				switchTo: null,
+				openEditor: id
+			};
+		case "switch-due":
+			if (!validId) return noop(cur);
+			if (cur.pending === null || cur.pending !== id) return noop(cur);
+			return {
+				state: {
+					pending: null,
+					editing: cur.editing
+				},
+				switchTo: id,
+				openEditor: null
+			};
+		case "close-editor": return {
+			state: {
+				pending: null,
+				editing: null
+			},
+			switchTo: null,
+			openEditor: null
+		};
+		default: return noop(cur);
+	}
+}
+/**
+* Text the inline editor opens with (R1: "prefilled with the current name"):
+* the set custom name, else the label the tab shows today (the handle short
+* code). Same rule as the rendered label, so the user edits what they see.
+*/
+function renameDraftOf(customTitle, handleLabel) {
+	return tabLabelOf(customTitle, handleLabel);
+}
+/**
+* Decide a commit (Enter, or blur - the row commits on blur so a click
+* elsewhere never silently drops a typed name; Esc is the cancel path).
+* An unchanged draft writes nothing, so a bare double click followed by a blur
+* cannot turn the handle label into a stored name. A trimmed-empty draft
+* returns name '' = clear.
+*/
+function renameCommitOf(draft, prefill) {
+	const d = typeof draft === "string" ? draft.trim() : "";
+	if (d === (typeof prefill === "string" ? prefill.trim() : "")) return { kind: "none" };
+	return {
+		kind: "set",
+		name: d
 	};
 }
 //#endregion
@@ -4349,6 +4583,16 @@ body[data-ds-dark-theme]{${DERIVE_DECL}}`;
 * (seq stays history-only); the executor session (fixed handle executor)
 * enters this row's data through the session-ledger-file grants-merge door
 * (derived display; the grants file stays the single source of who runs).
+*
+* Rename face (t261031-33, R1-R6). A double click on a tab opens an inline name
+* editor in place of the label; the arbitration and the commit decision are
+* pure (./psess-rename.ts), the transform is setEntryTitle (shared/sessions.ts)
+* and this component stays zero-IO: it calls the onRename action the sidebar
+* injected. A set name wins over the handle code (R5). The handle stays
+* reachable: the tab tooltip still carries it, together with the full name and
+* the session id. New semantic anchor: data-wb-psess-rename (the editor input),
+* plus data-editing on the tab and data-named on a named label. The zero
+* CSS-class matching rule holds (own .wb-psess-* names only).
 */
 const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
 .wb-psess { display:flex; flex-wrap:wrap; align-items:center; gap:4px;
@@ -4385,6 +4629,18 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
   /* gen8：同上，回归 45% 锁定派生（同 t260904-05 契约）。 */
   color:color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 45%,var(--dsw-alias-label-primary,#1f2328)); }
 .wb-psess-num { line-height:1; font-family:var(--ds-font-family-code,monospace); }
+/* Rename face (t261031-33, R3/R6). A set name wins over the handle short code.
+   A very long name is cut VISIBLY here (ellipsis at 96px) and the full text
+   stays in the tab tooltip: rejecting it by name would need a second error face
+   inside a 24px tab and would drop what the user typed, while the ledger keeps
+   the whole (clamped) text either way. The inline editor uses the same width. */
+.wb-psess-name { max-width:96px; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; font-family:inherit; }
+.wb-psess-rename { box-sizing:border-box; width:96px; height:20px; padding:0 4px;
+  font:inherit; font-size:11.5px; line-height:1; border-radius:3px;
+  border:1px solid color-mix(in srgb,var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)) 55%,var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff)));
+  background:var(--dsw-alias-bg-primary,var(--dsw-alias-bg-base,#fff));
+  color:var(--dsw-alias-label-primary,#1f2328); outline:none; }
 /* Session-row project badge (UI-5, color channel only; shapes belong to UI-4): an 8px square in the project color, inline in the tab. */
 .wb-psess-dot { width:8px; height:8px; flex:none; border-radius:2px;
   background:var(--wb-psess-color, var(--dsw-alias-label-primary,#1f2328)); }
@@ -4418,7 +4674,7 @@ const PSESS_STYLES = `${DERIVE_TOKENS_CSS}
 * 纯展示/交互组件，状态只有 confirmId（哪个 tab 在等确认）。
 */
 function ProjectSessionRow(props) {
-	const { projectKey, projectName, projectDir, ledger, current, byId, creating, notice, noticeProject, onNew, onOpen, onClose } = props;
+	const { projectKey, projectName, projectDir, ledger, current, byId, creating, notice, noticeProject, onNew, onOpen, onClose, onRename } = props;
 	const tabs = (0, react.useMemo)(() => pickProjectTabs(ledger, {
 		project: projectKey,
 		current,
@@ -4446,6 +4702,89 @@ function ProjectSessionRow(props) {
 	/** 正在确认的 tab 锚（ref 回调按 confirmId 条件挂到对应 tab 上）。 */
 	const tabRef = (0, react.useRef)(null);
 	const popRef = (0, react.useRef)(null);
+	const [editingId, setEditingId] = (0, react.useState)(null);
+	const [draft, setDraft] = (0, react.useState)("");
+	const clickState = (0, react.useRef)(initialTabClickState());
+	/** Mirror of editingId for synchronous reads: a blur can arrive after the
+	*  commit that closed the editor, and the ref makes a commit idempotent. */
+	const editingRef = (0, react.useRef)(null);
+	const clickTimer = (0, react.useRef)(null);
+	const inputRef = (0, react.useRef)(null);
+	const clearClickTimer = (0, react.useCallback)(() => {
+		if (clickTimer.current !== null) {
+			clearTimeout(clickTimer.current);
+			clickTimer.current = null;
+		}
+	}, []);
+	(0, react.useEffect)(() => () => clearClickTimer(), [clearClickTimer]);
+	/** Name the editor opens with: the set name, else today's label (the handle). */
+	const prefillOf = (id) => {
+		return renameDraftOf(tabs.find((t) => t.id === id)?.customTitle, handleOf.get(id) ?? "");
+	};
+	const beginEdit = (id) => {
+		editingRef.current = id;
+		setConfirmId(null);
+		setEditingId(id);
+		setDraft(prefillOf(id));
+	};
+	const onTabClick = (id) => {
+		const step = tabClickStep(clickState.current, {
+			type: "click",
+			id
+		});
+		clickState.current = step.state;
+		clearClickTimer();
+		const pending = step.state.pending;
+		if (pending === null) return;
+		clickTimer.current = setTimeout(() => {
+			clickTimer.current = null;
+			const due = tabClickStep(clickState.current, {
+				type: "switch-due",
+				id: pending
+			});
+			clickState.current = due.state;
+			if (due.switchTo === null) return;
+			setConfirmId(null);
+			onOpen(due.switchTo);
+		}, 250);
+	};
+	const onTabDoubleClick = (id) => {
+		const step = tabClickStep(clickState.current, {
+			type: "dblclick",
+			id
+		});
+		clickState.current = step.state;
+		if (step.openEditor === null) return;
+		clearClickTimer();
+		beginEdit(step.openEditor);
+	};
+	const finishEdit = (commit) => {
+		const id = editingRef.current;
+		if (id === null) return;
+		editingRef.current = null;
+		clickState.current = tabClickStep(clickState.current, { type: "close-editor" }).state;
+		setEditingId(null);
+		const typed = draft;
+		setDraft("");
+		if (!commit) return;
+		const decision = renameCommitOf(typed, prefillOf(id));
+		if (decision.kind === "set") onRename(id, decision.name);
+	};
+	(0, react.useLayoutEffect)(() => {
+		if (editingId === null) return;
+		const el = inputRef.current;
+		if (!el) return;
+		el.focus();
+		el.select();
+	}, [editingId]);
+	(0, react.useEffect)(() => {
+		const id = editingRef.current;
+		if (id === null || tabs.some((t) => t.id === id)) return;
+		editingRef.current = null;
+		clickState.current = tabClickStep(clickState.current, { type: "close-editor" }).state;
+		setEditingId(null);
+		setDraft("");
+	}, [tabs]);
 	/** 摆位：锚矩形 → 视口钳制（左右不出界）+ 底部放不下向上翻。 */
 	const place = (0, react.useCallback)(() => {
 		const pop = popRef.current;
@@ -4516,50 +4855,76 @@ function ProjectSessionRow(props) {
 				onClick: onNew,
 				children: tabs.length === 0 ? "＋ New session" : "+"
 			}),
-			tabs.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				ref: confirmId === t.id ? tabRef : void 0,
-				className: `wb-psess-tab ${t.active ? "active" : ""}`,
-				"data-wb-psess-tab": "",
-				"data-active": t.active,
-				role: "button",
-				tabIndex: 0,
-				title: `${projectName} session #${handleOf.get(t.id) || t.seq} (seq ${t.seq}): ${t.title}\n${t.id}`,
-				onClick: () => {
-					setConfirmId(null);
-					onOpen(t.id);
-				},
-				onKeyDown: (e) => {
-					if (e.key === "Enter" || e.key === " ") {
-						e.preventDefault();
-						setConfirmId(null);
-						onOpen(t.id);
-					}
-				},
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-psess-num",
-						"data-wb-psess-handle": "",
-						children: handleOf.get(t.id) || t.seq
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						"aria-hidden": true,
-						className: "wb-psess-dot",
-						"data-wb-psess-dot": ""
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: "wb-psess-close",
-						"data-wb-psess-close": "",
-						title: "Close this session entry (needs confirmation; session content is not deleted)",
-						"aria-label": `Close session entry ${handleOf.get(t.id) || t.seq}`,
-						onClick: (e) => {
-							e.stopPropagation();
-							setConfirmId(t.id);
-						},
-						children: "×"
-					})
-				]
-			}, t.id)),
+			tabs.map((t) => {
+				const editing = editingId === t.id;
+				const label = tabLabelOf(t.customTitle, handleOf.get(t.id) || String(t.seq));
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					ref: confirmId === t.id ? tabRef : void 0,
+					className: `wb-psess-tab ${t.active ? "active" : ""}`,
+					"data-wb-psess-tab": "",
+					"data-active": t.active,
+					"data-editing": editing,
+					role: editing ? void 0 : "button",
+					tabIndex: editing ? -1 : 0,
+					title: `${projectName} session #${handleOf.get(t.id) || t.seq} (seq ${t.seq}): ${t.title}\n${t.id}`,
+					onClick: () => onTabClick(t.id),
+					onDoubleClick: () => onTabDoubleClick(t.id),
+					onKeyDown: (e) => {
+						if (editing) return;
+						if (e.key === "Enter" || e.key === " ") {
+							e.preventDefault();
+							setConfirmId(null);
+							onOpen(t.id);
+						}
+					},
+					children: [
+						editing ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							ref: inputRef,
+							type: "text",
+							className: "wb-psess-rename",
+							"data-wb-psess-rename": "",
+							value: draft,
+							maxLength: 500,
+							"aria-label": `Rename session ${handleOf.get(t.id) || t.seq}`,
+							onChange: (e) => setDraft(e.target.value),
+							onKeyDown: (e) => {
+								if (e.key === "Enter") {
+									e.preventDefault();
+									e.stopPropagation();
+									finishEdit(true);
+								} else if (e.key === "Escape") {
+									e.preventDefault();
+									e.stopPropagation();
+									finishEdit(false);
+								}
+							},
+							onBlur: () => finishEdit(true)
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: t.customTitle === void 0 ? "wb-psess-num" : "wb-psess-num wb-psess-name",
+							"data-wb-psess-handle": "",
+							"data-named": t.customTitle === void 0 ? void 0 : true,
+							children: label
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							"aria-hidden": true,
+							className: "wb-psess-dot",
+							"data-wb-psess-dot": ""
+						}),
+						!editing && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "wb-psess-close",
+							"data-wb-psess-close": "",
+							title: "Close this session entry (needs confirmation; session content is not deleted)",
+							"aria-label": `Close session entry ${handleOf.get(t.id) || t.seq}`,
+							onClick: (e) => {
+								e.stopPropagation();
+								setConfirmId(t.id);
+							},
+							children: "×"
+						})
+					]
+				}, t.id);
+			}),
 			confirmTab && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "wb-psess-confirm",
 				"data-wb-psess-confirm": "",
@@ -4613,25 +4978,6 @@ function ProjectSessionRow(props) {
 			})
 		]
 	});
-}
-/**
-* Short code of a dsh session id: strip the `session-` prefix, take the first N
-* hex chars. Non-`session-` shapes (ticket sessions, bare uuids, malformed) take
-* the first 4 chars too — the code is a reference, not a classifier, so the shape
-* is lenient (classification lives in isGlobalSessionId at the ledger entrance).
-* Non-string / empty returns '' (the caller treats it as unassigned; no fake code).
-*/
-function shortCodeOf(sessionId, len = 4) {
-	if (typeof sessionId !== "string" || sessionId === "") return "";
-	return (sessionId.startsWith("session-") ? sessionId.slice(8) : sessionId).slice(0, Math.max(1, Math.floor(len)));
-}
-/** Display handle of an entry: the assigned one, else a temporary short code
-*  (display only, never persisted — assignment lands on the register path, the
-*  display layer never blocks on "unassigned"). */
-function displayHandle(e) {
-	if (!e || typeof e.session_id !== "string" || e.session_id === "") return "";
-	if (typeof e.handle === "string" && e.handle !== "") return e.handle;
-	return shortCodeOf(e.session_id);
 }
 //#endregion
 //#region src/client/visibility-state.ts
@@ -10605,7 +10951,10 @@ function WorkbenchSidebar(props) {
 									onOpen: (id) => {
 										projectSessions.handleOpen(id);
 									},
-									onClose: projectSessions.handleClose
+									onClose: projectSessions.handleClose,
+									onRename: (id, name) => {
+										projectSessions.handleRename(id, name);
+									}
 								}),
 								g.tickets.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 									className: "wb-group-empty",
@@ -14132,171 +14481,6 @@ function timelineRows(timeline) {
 	return out.length > 0 ? out : null;
 }
 //#endregion
-//#region src/client/artifact-face-model.ts
-/**
-* artifact-face-model.ts — the console's artifact inventory and frame (epic
-* artifact-face, slice 2, ticket t261030-35).
-*
-* One reader for the declared artifact list. This module is pure: no IO, no DOM,
-* no node built-ins. The host half (`src/host/artifact-face.ts`) imports it to
-* resolve a row for the byte route, and the console panel imports it to draw the
-* frame. Two copies of these rules would be two readers of one rule.
-*
-* Data source (verified against the engine on `main`):
-*   - the engine normalizes a stage's declared list into descriptors
-*     (`{id,title,kind,kind_known,source,repo,stage,note,open,shape,optional,legacy,round}`)
-*     and writes them per receipt as `results[stage].artifact_descriptors`
-*     (+ `_shape` / `_dropped`), plus `handoffs[].artifact_descriptors`;
-*   - `server/tools/ticket.py::_v2_query` carries `results` into `ticket show`
-*     but does NOT carry the snapshot's flat top-level `artifact_descriptors`.
-*     The model therefore prefers that key when it appears (forward compatible)
-*     and otherwise reads the per-receipt lists. It never re-runs the engine's
-*     aggregation: only what a receipt declared is listed, and a row's round is
-*     the receipt's own `gen` when the descriptor carries no round.
-*
-* The canonical list comes from the HANDOFF history (the engine's own rule,
-* `shared.snapshot_artifact_descriptors`): one entry per round, a declaring handoff
-* trusted (its legacy paths not mirrored), a handoff that declared nothing contributing
-* its `artifacts` paths as guessed descriptors. Reading only the latest receipt lost
-* two things on a live ticket (walkthrough 1): the legacy paths of every stage whose
-* receipt carried the engine's empty list with shape `absent`, and the declarations of
-* an earlier round of a reworked stage. The per-receipt path therefore stays only as
-* the fallback for data with no handoff history, and there it obeys the receipt's
-* `artifact_descriptors_shape`: a non-empty list is trusted; empty/absent/malformed
-* falls back to `deliverables` (the same fallback the canonical rule gives), with the
-* malformed shape named as well.
-*
-* Two rules complete the canonical read (walkthrough 1, A2/A3):
-*   - A stage whose handoff history yields no rows (a mechanical stage such as
-*     `ui_evidence`, which writes a receipt and no handoff, or an entry with no paths) is
-*     read from its receipt, shape rule included. A stage the history already produced
-*     rows for is never also read from its receipt: one stage, one source, no twins.
-*   - Rows are ordered by stage order (the template's), then by the order the source
-*     declared them. The history is chronological, so the raw handoff order interleaves
-*     stages when a reworked stage runs again after the next stage started; the frame
-*     keeps each stage in one block (plan D4/A2).
-*
-* Frame ownership (epic ruling 3): a project view may never decide whether an
-* artifact is listed, in which order, or what the machine verdict is. In this
-* slice no view channel exists yet; the guard is structural: the frame takes
-* only the host payload and the gate receipts, and descriptor keys that could
-* shrink or reorder the list (`hidden`, `visible`, `order`, `view`, `render`)
-* are ignored and named as refused.
-*/
-/** The console's built-in kinds (epic ruling). The engine's list is the truth source. */
-const ARTIFACT_KINDS = [
-	"image",
-	"text",
-	"structure",
-	"diff",
-	"ledger",
-	"external"
-];
-/** Human size. Deterministic, no locale formatting. */
-function formatBytes(n) {
-	if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return "";
-	if (n < 1024) return `${n} B`;
-	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-	return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-/** `YYYY-MM-DD HH:MM` in UTC — the console shows one clock, and tests can pin it. */
-function formatArtifactTime(ms) {
-	if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "";
-	const d = new Date(ms);
-	const p = (x) => String(x).padStart(2, "0");
-	return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
-}
-/** The named sentence for each non-ok state. English, short (host order 260925). */
-function artifactStateText(state, reason) {
-	const r = (reason ?? "").trim();
-	switch (state) {
-		case "ok": return "";
-		case "missing": return `File not found at the declared source${r === "" ? "" : ` (${r})`}`;
-		case "not_a_file": return `The declared source is not a regular file${r === "" ? "" : ` (${r})`}`;
-		case "unreadable": return `The file cannot be read${r === "" ? "" : ` (${r})`}`;
-		case "outside_root": return `The resolved path is outside the ticket workspace; the console does not serve it${r === "" ? "" : ` (${r})`}`;
-		case "repo_root_unknown": return `Declared in another repository, and this ticket has no workspace for it${r === "" ? "" : ` (${r})`}`;
-		case "too_large": return `Too large to open in the page${r === "" ? "" : ` (${r})`}`;
-		case "not_utf8": return `The text is not valid UTF-8, so the console does not show it${r === "" ? "" : ` (${r})`}`;
-		case "external": return `Outside the project, so the console shows metadata only${r === "" ? "" : ` (${r})`}`;
-		case "id_not_servable": return r === "" ? "This row cannot be fetched by id" : r;
-		default: return r;
-	}
-}
-/**
-* The frame view. `stats` is the host's metadata map keyed by row key.
-*
-* A row is never removed and never reordered: the order is the derivation order
-* (stage order, then declaration order), whatever the stats say.
-*/
-function buildArtifactFaceView(derived, stats, detailRaw) {
-	const statOf = (key) => {
-		const s = stats ? stats[key] : void 0;
-		if (s !== void 0 && s !== null && typeof s.state === "string") return s;
-		return {
-			state: "unreadable",
-			reason: "no metadata was read for this row"
-		};
-	};
-	const rows = derived.rows.map((r) => {
-		const st = statOf(r.rowKey);
-		const state = st.state;
-		const stateText = artifactStateText(state, st.reason);
-		const unknownKind = !r.kindKnown || !ARTIFACT_KINDS.includes(r.kind);
-		const servable = r.servable && state === "ok";
-		const bytesRefusal = servable ? "" : r.byteRefusal !== "" ? r.byteRefusal : stateText;
-		return {
-			key: r.key,
-			rowKey: r.rowKey,
-			id: r.id,
-			stage: r.stage,
-			title: r.title,
-			kindLabel: unknownKind ? `${artifactKindLabel(r.kind)} (not recognized)` : artifactKindLabel(r.kind),
-			kindKnown: !unknownKind,
-			sourceLabel: r.source,
-			repoLabel: r.repo === "" ? "" : `repo ${r.repo}`,
-			stageLabel: stageDisplayLabel(r.stage, r.stage),
-			round: r.round,
-			roundText: r.round === null ? "round unknown" : `round ${r.round}`,
-			sizeText: typeof st.sizeBytes === "number" ? formatBytes(st.sizeBytes) : "",
-			timeText: formatArtifactTime(st.mtimeMs),
-			note: r.note,
-			openHint: r.open,
-			optionalText: r.optional ? "optional" : "",
-			legacyText: r.legacy ? "legacy path (kind guessed)" : "",
-			state,
-			stateText,
-			card: unknownKind || state !== "ok" ? "degrade" : "row",
-			bytesHref: servable ? `bytes` : null,
-			bytesRefusal,
-			refusals: r.refusals
-		};
-	});
-	const checks = buildChecksDetail(detailRaw);
-	const newest = checks.length > 0 ? checks[0] : void 0;
-	const verdict = newest === void 0 ? {
-		text: "Machine verdict: no gate run yet",
-		green: null,
-		source: "none",
-		disagreement: false
-	} : {
-		text: `Machine verdict: ${newest.label || newest.stage} ${newest.green ? "green" : "red"}` + (newest.disagreement ? " (the receipt verdict and its rows disagree; both shown verbatim)" : ""),
-		green: newest.green,
-		source: newest.verdictSource,
-		disagreement: newest.disagreement
-	};
-	return {
-		title: "Artifacts",
-		countText: `${rows.length} declared`,
-		listSourceText: derived.listSource === "aggregate" ? "read from the snapshot artifact list" : derived.listSource === "handoffs" ? "read from the handoff history (one entry per round)" : derived.listSource === "handoffs+receipts" ? "read from the handoff history, plus the stage receipts it does not name" : "read from the stage receipts",
-		rows,
-		refusals: derived.refusals,
-		emptyText: "This ticket declares no artifacts.",
-		verdict,
-		qcText: "QC red/green: no data face on this ticket yet."
-	};
-}
-//#endregion
 //#region src/client/terminal-face.ts
 /** 恒定兜底文案（与引擎 face 面语义一致；face 缺失时 UI 侧唯一免责声明源）。 */
 const TERMINAL_FACE_FALLBACKS = {
@@ -16832,206 +17016,6 @@ function EvidenceImages({ ticketId }) {
 				index: evidenceNav(files, open, 0),
 				onClose: () => setOpen(null),
 				onNav: (fs, i, d) => onNav(fs, i, d, setOpen)
-			})
-		]
-	});
-}
-/**
-* Artifact face (t261030-35, epic artifact-face slice 2): the console's inventory of
-* the artifacts a ticket declared, plus the frame that the console owns.
-*
-* Slice scope: no built-in views yet — every row is metadata plus the original-bytes
-* link; a row whose kind is unknown, or whose bytes cannot be used, renders the
-* degrade card. Rounds are not grouped and not compared. Nothing is archived here.
-*
-* Frame ownership (epic ruling 3): the frame is drawn only from the host payload and
-* the ticket's gate receipts. There is no view/plugin channel in this slice, so no
-* project code can add, hide or reorder a row or restate the machine verdict.
-*
-* Fetch failure and an empty declaration are both named: the panel never shows a
-* silent blank (a blank panel would read as "this ticket has no artifacts").
-*/
-const ARTIFACT_FACE_CSS = `
-.wb-af{display:flex;flex-direction:column;gap:6px;margin:4px 0}
-.wb-af-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:6px 10px;
-  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-af-head .ttl{font-weight:600;font-size:13px}
-.wb-af-count{font-size:12px;color:var(--dsw-derive-muted,#57606a)}
-.wb-af-src{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
-.wb-af-verdict{font-size:12px;font-weight:600;margin-left:auto}
-.wb-af-verdict[data-green=green]{color:var(--dsw-derive-success,#1a7f37)}
-.wb-af-verdict[data-green=red]{color:var(--dsw-derive-danger,#cf222e)}
-.wb-af-verdict[data-green=none]{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-empty{font-size:12px;color:var(--dsw-derive-muted,#57606a);padding:4px 2px}
-.wb-af-row{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;padding:6px 10px;font-size:12px}
-.wb-af-row[data-card=degrade]{border-style:dashed}
-.wb-af-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
-.wb-af-title{font-weight:600;font-size:13px}
-.wb-af-kind{font-size:11px;padding:0 5px;border-radius:5px;border:1px solid var(--dsw-derive-border,#d0d7de)}
-.wb-af-kind[data-known=false]{border-style:dashed;color:var(--dsw-derive-warn-deep,#7d4e00)}
-.wb-af-meta{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-tag{font-size:10px;color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:5px;padding:0 4px}
-.wb-af-source{font-family:ui-monospace,monospace;font-size:11px;color:var(--dsw-derive-fg,#1f2328);word-break:break-all}
-.wb-af-note{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-state{color:var(--dsw-derive-warn-deep,#7d4e00);margin-top:2px}
-.wb-af-actions{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px;align-items:baseline}
-.wb-af-actions a{color:var(--dsw-derive-accent,#0969da)}
-.wb-af-nobytes{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-refusal{color:var(--dsw-derive-warn-deep,#7d4e00)}
-.wb-af-qc{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
-`;
-/** Byte link for one row: the stage and the id are the address, never a path.
-*  Both segments are percent-encoded once here; the host decodes the path once. */
-function artifactBytesHref(ticketId, row) {
-	return withProject(`${API}/tickets/${encodeURIComponent(ticketId)}/artifacts/${encodeURIComponent(row.stage)}/${encodeURIComponent(row.id)}/bytes`);
-}
-function ArtifactFace({ detail }) {
-	const ticketId = detail.id;
-	const [data, setData] = (0, react.useState)(null);
-	const [err, setErr] = (0, react.useState)("");
-	(0, react.useEffect)(() => {
-		let cancelled = false;
-		setData(null);
-		setErr("");
-		apiGet(`${API}/tickets/${encodeURIComponent(ticketId)}/artifacts`).then((d) => {
-			if (cancelled) return;
-			if (d?.ok === true && d.result) setData(d.result);
-			else setErr(String(d?.error ?? "the artifact inventory could not be read"));
-		}).catch((e) => {
-			if (!cancelled) setErr(String(e instanceof Error ? e.message : e));
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [ticketId]);
-	if (err !== "") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "wb-af",
-		children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "wb-af-empty",
-			children: ["Artifacts unavailable: ", err]
-		})
-	});
-	if (data === null || !Array.isArray(data.rows)) return null;
-	const frame = buildArtifactFaceView({
-		rows: data.rows,
-		refusals: data.refusals ?? [],
-		listSource: data.listSource
-	}, data.stats, detail);
-	const verdictTag = frame.verdict.green === null ? "none" : frame.verdict.green ? "green" : "red";
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "wb-af",
-		"data-testid": "artifact-face",
-		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: ARTIFACT_FACE_CSS }),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-af-head",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "ttl",
-						children: frame.title
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-af-count",
-						children: frame.countText
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-af-src",
-						children: frame.listSourceText
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-af-verdict",
-						"data-green": verdictTag,
-						"data-source": frame.verdict.source,
-						children: frame.verdict.text
-					})
-				]
-			}),
-			frame.rows.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-af-empty",
-				children: frame.emptyText
-			}),
-			frame.rows.map((r) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-af-row",
-				"data-card": r.card,
-				"data-state": r.state,
-				"data-testid": `artifact-row-${r.key}`,
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "wb-af-line",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-af-title",
-								children: r.title
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-af-kind",
-								"data-known": r.kindKnown ? "true" : "false",
-								children: r.kindLabel
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-af-meta",
-								children: [
-									r.stageLabel,
-									r.roundText,
-									r.repoLabel,
-									r.sizeText,
-									r.timeText
-								].filter((x) => x !== "").join(" · ")
-							}),
-							r.optionalText !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-af-tag",
-								children: r.optionalText
-							}),
-							r.legacyText !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-af-tag",
-								children: r.legacyText
-							})
-						]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-af-source",
-						children: r.sourceLabel
-					}),
-					r.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-af-note",
-						children: r.note
-					}),
-					r.stateText !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-af-state",
-						children: r.stateText
-					}),
-					r.refusals.map((x) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-af-refusal",
-						children: x
-					}, x)),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "wb-af-actions",
-						children: [r.bytesHref !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
-							href: artifactBytesHref(ticketId, r),
-							target: "_blank",
-							rel: "noreferrer",
-							children: "Open original"
-						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "wb-af-nobytes",
-							children: r.bytesRefusal === "" ? "Original bytes unavailable" : r.bytesRefusal
-						}), r.openHint !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-							className: "wb-af-note",
-							children: ["Open with: ", r.openHint]
-						})]
-					})
-				]
-			}, r.rowKey)),
-			frame.refusals.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("summary", { children: [
-				"Refused declarations (",
-				frame.refusals.length,
-				")"
-			] }), frame.refusals.map((x, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-af-refusal",
-				children: x
-			}, `${i}-${x}`))] }),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-af-qc",
-				children: frame.qcText
 			})
 		]
 	});
@@ -19974,7 +19958,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 							});
 						})(),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(PulseLine, { detail }),
-						detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactFace, { detail }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AgentLivePanel, { ticketId: detail.id }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(EvidenceImages, { ticketId: detail.id }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Problems, { detail }),

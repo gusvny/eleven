@@ -52,6 +52,17 @@
  * 项目行消费同一账册（模块级共享 store）与同一组动作。行内通知带归属项目
  * （noticeProject）：项目行只显示自己项目的失败提示。BO-1：nextProjectSeq
  * 兜底号域纳入「最近关闭」，计数器丢失时不再重发已关最大号。
+ *
+ * Rename entry point returns (t261031-33), and what that history means. R8
+ * (t260904-05) retired the old top row TOGETHER WITH its double-click rename,
+ * and the rename pure function went with it. The DATA was never removed:
+ * OpenedEntry.title stayed, parseLedger/touchEntry kept accepting it, and
+ * ProjectTab.title kept resolving custom title -> displayTitle -> id. So this
+ * ticket brings back the ENTRY POINT only, on the surface that lists sessions
+ * today (the project-session tab): handleRename writes the display name through
+ * setEntryTitle (shared/sessions.ts) and mirrors it into the project ledger
+ * file so a reload cannot wipe it (fetchProjectLedger is file-wins). The session
+ * id, the handle, the ledger id and the server session stay untouched.
  */
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
@@ -68,8 +79,12 @@ import {
   removeEntry,
   backfillProjectSeqs,
   nextProjectSeq,
+  setEntryTitle,
 } from '../shared/sessions.ts'
 import type { OpenedEntry } from '../shared/sessions.ts'
+// The fixed executor handle (t261031-33): an executor row is DERIVED display,
+// never persisted into sessions.json, so its name is never mirrored there.
+import { EXECUTOR_HANDLE } from '../shared/session-handles.ts'
 // 账册模块级共享 store：同页跨实例同步。persist 落盘 + 广播收口于此。
 import {
   LEDGER_KEY,
@@ -615,5 +630,54 @@ export function useSessionEntry({ sessions, workspaces, getService, slotOpen, pr
   // handleReopen（↺ 恢复）已随 R8 顶部行退役（拍板 2）：closed 只出不进，
   // 数据保留作 BO-1 号域。persistClosed 仍被 handleClose 使用。
 
-  return { ledger, creating, entryNotice, noticeProject, handleNew, handleOpen, handleClose, closedList, listState }
+  /* ── Rename (t261031-33, R2/R3/R4/R7): display name only ──
+   * The ledger transform does the work (setEntryTitle: trim, clamp, empty =
+   * clear, unknown id = no-op, unchanged = same reference). Nothing else in the
+   * entry moves, so the session id, the handle, the ledger id, the seq and the
+   * server session stay as they are (R2), and the entry keeps its lifetime under
+   * the ledger cap (R4).
+   *
+   * Two writes, one name:
+   *   1. the module store (localStorage cache + broadcast) - any other view of
+   *      the ledger sees the new name in the same frame;
+   *   2. the project ledger file (sessions.json). This step is NOT optional: the
+   *      client refresh is file-wins (fetchProjectLedger), so a name kept only
+   *      in the cache would disappear on the next reload. The entry's own handle
+   *      is sent along, so the merge never re-derives a different code.
+   * A file write failure is named inline and the cache keeps the name; the two
+   * faces converge on the next fetch (declared, not silent).
+   * The executor row is the one exception: that entry is derived display from
+   * executor-grants.json and is never persisted into sessions.json, so its name
+   * lives in this browser's cache only. Declared limitation, not a defect path.
+   */
+  const handleRename = useCallback(async (id: string, name: string) => {
+    const before = getLedgerSnapshot()
+    const next = setEntryTitle(before, id, name)
+    // Same reference = nothing to write (unknown id, unchanged name, malformed
+    // name). Never a write, never a notice: there is no failed action here.
+    if (next === before) return
+    persist(next)
+    const entry = next.find(e => e && e.id === id)
+    if (!entry) return
+    if (entry.handle === EXECUTOR_HANDLE) return
+    try {
+      await pushSessionEntry({
+        id,
+        project: entry.project,
+        cwd: entry.cwd,
+        // title undefined = clear: the merge replaces the whole entry, so the
+        // file entry loses its name exactly as the cache does.
+        ...(typeof entry.title === 'string' && entry.title !== '' ? { title: entry.title } : {}),
+        ...(typeof entry.handle === 'string' && entry.handle !== '' ? { handle: entry.handle } : {}),
+        // The registration time, not now: a rename must not reorder the entry
+        // (t260831-06 - lastOpenedAt is written on the registration path only).
+        lastOpenedAt: entry.lastOpenedAt,
+      })
+    } catch (err) {
+      console.error('[workbench] session rename: the project ledger file refused the write (the browser cache kept the name):', id, err)
+      notify('Session name not saved to the project ledger file (see the console); it stays valid in this browser until the next reload', entry.project)
+    }
+  }, [persist, notify])
+
+  return { ledger, creating, entryNotice, noticeProject, handleNew, handleOpen, handleClose, handleRename, closedList, listState }
 }
