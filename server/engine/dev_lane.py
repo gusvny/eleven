@@ -817,6 +817,27 @@ REWORK_STAGE_ALIASES: Dict[str, Tuple[str, str]] = {
 # 唯一通道=环境变量（worker 构造时生效）。置 1 = 旧静默回落行为（复现 t260916-11
 # 死结的相一）；不置 = 修后行为。
 SANDBAR_TEST_DISABLE_REWORK_ESCAPE = bool(os.environ.get("SANDBAR_TEST_DISABLE_REWORK_ESCAPE"))
+# t261031-32 (the empty-fallback wedge). Measured on t261031-17 / t261031-20: both were
+# parked at merge with "one more green gate round anchored on the CURRENT lane HEAD" as
+# the named remedy. The rework that carries the remedy was refused twice; the second
+# refusal record reads `want='rework(run_integration_tests) fallback()'` and
+# `why='fallback is not in the rework vocabulary (pure guard...)'`. Two causes:
+#   1) `_consume_rework` returns an EMPTY landing on a refusal, and the main loop took
+#      that value as `phase`; the next round's `fb = ... else phase` therefore handed
+#      "" to the landing machinery, and the fallback guard refused a VALID target.
+#   2) `_auto_rework` validated the fallback although that value is returned ONLY when
+#      the TARGET is refused - a valid target never needs it.
+# Fix: the loop top repairs an unusable `fb` from the parked phase, a refused signal
+# keeps the round's own phase, and `_auto_rework` lands a valid target while naming the
+# ignored fallback. The pure guard still bites where the fallback can be returned.
+# Replay discipline: one FRESH patch id per evaluation round ("#wake<n>" at the loop
+# top, "#land<n>" in the landing). A fixed id would be poisoned: the SDK memoizes the
+# first patched() verdict per id (temporalio/worker/_workflow_instance.py
+# workflow_patch), so replaying a pre-fix history yields False forever and the parked
+# tickets would never reach the repair (KI-061). The counters advance identically on
+# replay, so every pre-fix round keeps the old branch verbatim and the first LIVE round
+# after the deploy takes the fix.
+REWORK_LANDING_FALLBACK_PATCH_ID = "dev-lane-rework-landing-fallback-v1"
 # t260916-28: a failed StageResult carrying a lane_dsh_* gate_refusal（spawn 前的
 # 泳道 .dsh 自洽预检拒绝）必须在全部 agent 段消费点直落 blocked「agent 报失败」——
 # arbitrate 的 verdict 循环、acceptance 打回循环与 parallel_impl_design 汇合边的
@@ -1867,6 +1888,11 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         # failed walkthrough round, so an in-flight ticket reaches the new rule on its
         # next live round; a fixed id would be frozen False by the replay).
         self._acc_verdict_seq: int = 0
+        # t261031-32: same memoization reason - one fresh patch id per pending-rework
+        # round (the loop-top fallback repair) and per landing (the fallback guard
+        # relaxation), so a parked ticket reaches the fix on its next live round.
+        self._rework_landing_seq: int = 0
+        self._rework_land_seq: int = 0
         self._gens: Dict[str, int] = {}                   # activity name → entry count
         # t260915-01：详情数据面门缓存位（唯一求值点在 _init；缺省 False=UT 壳/异常
         # 形态走旧分支；所有使用点读 getattr 防御，@query 内禁调 workflow.patched）。
@@ -4180,13 +4206,44 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                   % (candidates, REWORK_PHASE_FALLBACK))
         return REWORK_PHASE_FALLBACK
 
+    def _rework_fallback_phase(self, phase: str) -> str:
+        """The "stay put" phase a rework consume may land on (t261031-32).
+
+        The value is a hint only: the landing helpers return it when the signal lands
+        nowhere, so it must always be a real main-chain phase. Measured fault: a
+        refused signal left the loop's `phase` empty, the next round passed that empty
+        string as the fallback, and the landing guard then refused a VALID target
+        (t261031-17 / t261031-20 parked at merge forever). Repair: use the phase the
+        refusal parked the ticket on (meta["stage"]); a broken meta clamps loudly.
+
+        The one gate of the round is evaluated here and cached on
+        `self._rework_landing_on`: it also lets a refusal keep the round's own phase.
+        Replay discipline: one fresh patch id per pending-rework round (a fixed id would
+        be frozen False by the first replay — see the constant's note). A False verdict
+        issues no command and takes the old path verbatim.
+        """
+        fb = "implement" if phase == "parallel_impl_design" else phase
+        n = getattr(self, "_rework_landing_seq", 0) + 1
+        self._rework_landing_seq = n
+        self._rework_landing_on = workflow.patched(
+            "%s#wake%d" % (REWORK_LANDING_FALLBACK_PATCH_ID, n))
+        if fb in PHASE_MAIN_CHAIN or not self._rework_landing_on:
+            return fb
+        parked = str(self.meta.get("stage") or "")
+        self._log("rework landing: the round phase %r is not a usable fallback - "
+                  "using the parked phase %r instead (the target decides the landing)"
+                  % (fb, parked))
+        return self._safe_phase(parked, "implement")
+
     def _auto_rework(self, target: str, note: str, who: str, fallback: str) -> str:
-        """Internal/unified send-back landing: validates target/fallback ∈
-        PHASE_MAIN_CHAIN (except done). Valid → the five meta fields + _touch + _log +
-        _mark(target,'rework'), returns target; refused → refused bookkeeping + log,
-        returns fallback (if fallback is invalid too, fall back to the current meta
-        value — an invalid value must never flow back into the main loop, or "unknown
-        stage" would raise).
+        """Internal/unified send-back landing: validates the TARGET ∈ PHASE_MAIN_CHAIN
+        (except done). Valid target → the five meta fields + _touch + _log +
+        _mark(target,'rework'), returns target. The fallback is validated only where it
+        can be returned, i.e. on a refused target (t261031-32): a valid target lands
+        whatever the caller's fallback is, and an empty/unknown fallback is named on the
+        ticket log. Refused target → refused bookkeeping + log, returns fallback (if the
+        fallback is invalid too, fall back to the current meta value — an invalid value
+        must never flow back into the main loop, or "unknown stage" would raise).
         role uses the explicit PHASE_MAIN_ROLES mapping, **never _step(target)** (the
         three vocabulary values outside STAGES would make _step raise and wedge the
         workflow)."""
@@ -4201,13 +4258,35 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             return fallback if fallback in PHASE_MAIN_CHAIN else \
                 str(self.meta.get("stage") or fallback)
         if fallback == "done" or fallback not in PHASE_MAIN_CHAIN:
-            self.refused.append({"who": who,
-                                 "want": "rework(%s) fallback(%s)" % (target, fallback),
-                                 "why": "fallback is not in the rework vocabulary (pure guard, this literal should never appear)"})
-            self._log("rework 拒绝：fallback %r 非法，停 meta 现步（%s）" % (fallback, who))
-            if workflow.patched(UNKNOWN_PHASE_BLOCK_PATCH_ID):
-                return self._safe_phase(str(self.meta.get("stage") or ""), fallback)
-            return str(self.meta.get("stage") or fallback)
+            _ln = getattr(self, "_rework_land_seq", 0) + 1
+            self._rework_land_seq = _ln
+            if workflow.patched("%s#land%d" % (REWORK_LANDING_FALLBACK_PATCH_ID, _ln)):
+                # t261031-32: a valid TARGET never needs the fallback. That value is
+                # returned only by the refusal branch above, so it cannot block this
+                # landing. Record the failed fallback check BY NAME (the old copy said
+                # "pure guard, this literal should never appear" and hid the cause; a
+                # valid target refused because of it cost a measurement hour).
+                # Garbage still never flows into the loop: the target-refusal branch
+                # above clamps through `_safe_phase`.
+                self._log("rework landing: target %s is a main-chain step and lands; "
+                          "the caller's fallback %r is empty or not a phase - the "
+                          "fallback is used only by a refused target (t261031-32)"
+                          % (target, fallback))
+            else:
+                self.refused.append({"who": who,
+                                     "want": "rework(%s) fallback(%s)" % (target, fallback),
+                                     "why": "the target %s is a valid main-chain step "
+                                            "but the caller's fallback %r is %s: the "
+                                            "fallback is only returned when the TARGET "
+                                            "is refused" % (
+                                                target, fallback,
+                                                "empty" if not fallback
+                                                else "not a phase")})
+                self._log("rework refused: the fallback %r is not a phase, so the "
+                          "round stays on the parked phase (%s)" % (fallback, who))
+                if workflow.patched(UNKNOWN_PHASE_BLOCK_PATCH_ID):
+                    return self._safe_phase(str(self.meta.get("stage") or ""), fallback)
+                return str(self.meta.get("stage") or fallback)
         self.meta["stage"] = target
         self.meta["role"] = PHASE_MAIN_ROLES[target]
         self.meta["status"] = "rework"
@@ -4293,10 +4372,15 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             return "", None, ("[rework refused] target %s cannot be sent back: %s" % (target, why))
         new_phase = self._auto_rework(target, req.note, req.who, fallback)
         if new_phase != target:
-            # 防御：_auto_rework 拒绝（fallback 非法等内部形态）——同款显式拒收，
-            # 拒收记录已由 _auto_rework 落账。
-            return "", None, ("[rework refused] target %s cannot be sent back (landing "
-                              "validation failed, see refused records)" % target)
+            # t261031-32: name the check that refused the landing. `_auto_rework`
+            # records the exact reason on its refused entry; the old copy here was a
+            # generic landing failure and hid the cause (the measurement that produced
+            # this ticket cost an hour to the same hiding). The refused record is owned
+            # by `_auto_rework` (single writer), never duplicated here.
+            _why = str((self.refused[-1].get("why") if self.refused else "") or "")
+            return "", None, ("[rework refused] target %s cannot be sent back: %s"
+                              % (target, _why or "the landing check refused it "
+                                                 "(see refused records)"))
         return target, None, ""
 
     def _gate_refusal_repeat_suffix(self, files: Any) -> str:
@@ -5281,7 +5365,8 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             # t260928-13：主相循环每轮先冲账（同步 signal 里的迁移由本边界冲走）
             await self._ledger_flush()
             if self._rework is not None:
-                fb = "implement" if phase == "parallel_impl_design" else phase
+                # t261031-32: a hint that is not a phase is repaired before use.
+                fb = self._rework_fallback_phase(phase)
                 # KI-212 (t261009-47): a rework must not be consumed by a round
                 # that cannot act on it. A non-agent phase in the running state
                 # builds no stage prompt, so the note it swallowed could never be
@@ -5327,8 +5412,15 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                         # left pending), blocked names the reason and waits for
                         # retry_qc or a new rework; never silently fall back to fb
                         # and re-judge in place (t260916-11 deadlock's observed root).
+                        _round_phase = phase
                         phase, edge, refusal_note = self._consume_rework(fb)
                         if refusal_note:
+                            if getattr(self, "_rework_landing_on", False):
+                                # t261031-32: a refused signal lands nowhere, so the round
+                                # keeps its own phase. Taking the consume path's empty
+                                # landing used to blank `phase`, and the next wake surfaced
+                                # it as "unknown internal phase" (t261031-17's timeline).
+                                phase = _round_phase
                             await self._blocked(fb, refusal_note)
                             continue
                         if edge == "design":

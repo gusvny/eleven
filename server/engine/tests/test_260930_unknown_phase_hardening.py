@@ -94,16 +94,22 @@ def test_auto_rework_never_hands_back_an_empty_phase(new_history):
     got = s._auto_rework("未知步", "note", "who", "")
     assert got == dl.REWORK_PHASE_FALLBACK, "旧行为返回空串，那会打断工作流实例"
     assert s.refused, "拒绝 + 夹相位都要记账"
-    # 既有设计（不是本修法引入）：**合法目标 + 非法 fallback** 走 fallback 拒收分支、停在现步
-    # ——现步为空串时就是那条会产出空相位的路，故必须被夹到合法值（下面这条即其回归锁）。
+    # t261031-32 changed ONE row of this table: a VALID target with an invalid or empty
+    # fallback now lands (the fallback is returned only when the TARGET is refused, so it
+    # cannot block a valid landing). The invariant this test carries is unchanged: no path
+    # hands an empty or unknown phase back to the main loop - a valid target is a legal
+    # landing, so it satisfies the invariant. The refusal rows stay the regression lock
+    # for the clamp.
     s2 = _Stub(stage="")
-    assert s2._auto_rework("implement", "note", "who", "") == dl.REWORK_PHASE_FALLBACK
+    assert s2._auto_rework("implement", "note", "who", "") == "implement", \
+        "valid target lands with an empty fallback (t261031-32); never an empty phase"
+    assert s2.meta["stage"] == "implement"
     s3 = _Stub(stage="arbitrate")
-    assert s3._auto_rework("implement", "note", "who", "") == "arbitrate", \
-        "现步合法时就停在现步（旧语义逐字保留）"
+    assert s3._auto_rework("unknown_step", "note", "who", "") == "arbitrate", \
+        "invalid target + empty fallback still clamps to a legal phase (stays put)"
     s4 = _Stub(stage="arbitrate")
     assert s4._auto_rework("implement", "note", "who", "arbitrate") == "implement", \
-        "目标与 fallback 都合法 ⇒ 照旧直达目标"
+        "valid target + valid fallback lands on the target (unchanged)"
 
 
 # ---------------- ③提示词表 ----------------

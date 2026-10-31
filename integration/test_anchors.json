@@ -2,7 +2,7 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 373,
+      "engine_tests": 374,
       "scenarios": 862
     },
     "vocab": [
@@ -1838,6 +1838,11 @@
     "server/engine/tests/test_t261031_24_blocked_slot_release.py": {
       "anchor": "contract",
       "note": "t261031-26: the DECLARED evidence path of the ticket (the `_24_` in the name is the creation-time declaration carried verbatim from the create payload - a payload slip, not a second ticket). It asserts nothing of its own: it re-exports the 18 test functions and the `proj` fixture of server/engine/tests/test_t261031_26_blocked_slot_release.py, so the declared path is a real runnable pytest target over exactly one set of assertions (blocked/awaiting-human releases with `blocked-wait` and re-acquires through FIFO; a signed merge takes a merge claim, not a work slot; fail-closed liveness; marker replay discipline). Read together with the real battery's entry above."
+    },
+    "server/engine/tests/test_t261031_40_rework_merge_fallback.py": {
+      "anchor": "behaviour",
+      "note": "t261031-32 (the empty-fallback wedge, declared evidence path): a rework whose TARGET is a main-chain step lands whatever the caller's fallback is. Measured on t261031-17 / t261031-20 (both parked at merge with 'one more green gate round anchored on the CURRENT lane HEAD' as the named remedy): `_consume_rework` returned an empty landing on a refusal and the main loop took it as `phase`, so the next round handed the empty string to the landing as the fallback and `_auto_rework` refused the VALID target run_integration_tests with 'pure guard, this literal should never appear'. The battery pins the incident shape (a merge-blocked round whose phase went empty still lands on run_integration_tests), the rule (a valid target lands with an empty/unknown fallback and the ticket log names the ignored fallback check instead of a generic landing failure), the preserved guard matrix (invalid target, ui_evidence and done refused by name; a genuinely invalid fallback still refused where it can be returned and never handed back as garbage), the honest receipt (the refuse note carries `_auto_rework`'s own reason), the refused-signal phase restoration and the loop wiring (source locks), and replay discipline: a pre-fix history replays the old branch verbatim with zero commands, the first LIVE round takes the fix, and a later replay of that same history decides identically - the fresh-patch-id-per-round shape (KI-061 memoization), modelled on temporalio 1.18.2 workflow_patch. Offline shells only: no docker, no Temporal, no 3099.",
+      "sync_path": "server/engine/dev_lane.py"
     }
   },
   "scenarios": {
