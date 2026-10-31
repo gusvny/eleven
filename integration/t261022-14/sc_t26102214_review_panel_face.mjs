@@ -64,6 +64,27 @@
  * fail>0 or all-na = exit 1; env_fail>0 = exit 2. Pre-implement red = the
  * named TDD signal; green required at the integration gate / merge.
  * playwright/chromium/console missing = ENV_FAIL exit 2 (KI-036 family).
+ *
+ * Readiness, not clocks (t261031-12, KI-437). Every wait that gates a leg used a
+ * fixed budget (8 s for the changes row, 6 s for the panel, 8 s for the blocks, ...)
+ * plus fixed settle sleeps (800/600/600/300/400/200 ms). A loaded machine reads
+ * "not yet" as "never": the 22:15Z whole-line round booked 154.0 s with pass=17
+ * fail=12 while the same tree passes standalone in 38.1 s. All of them are now
+ * CONDITION polls: each returns the instant its condition holds, and the ceiling
+ * only bounds how long a genuinely missing face is awaited. The ceiling is ONE
+ * injectable knob, `SANDBAR_T26102214_STEP_SECS`, default 60 (malformed or
+ * non-positive value NAMED and defaulted; provenance rides in every failing detail).
+ * A poll that expires does not become a pass and does not become an env red: it names
+ * the ceiling, the provenance, the elapsed time and the last observed state, and the
+ * leg it gates stays a product FAIL - the pre-implement TDD signal ("the panel is
+ * absent") must survive, so a slow bench can never be laundered into "environment".
+ *
+ * Failing-leg receipt (t261031-12, KI-439). The ledger keeps only the tail of this
+ * stdout (~1200 chars), so a red could not name WHICH legs failed. Before SUMMARY the
+ * case now prints one line per failing leg with one line of reason
+ * (`FAILING_LEG <name> :: <reason>`) and then a machine-readable JSON line
+ * `FAILING_LEGS {"count":N,"names":[...],"statuses":[...]}` immediately before
+ * SUMMARY - a red is attributable from the ledger without a re-run.
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
@@ -79,14 +100,65 @@ const LIB_JS = join(REPO, 'server', 'plugins', 'workbench', 'lib', 'client.js')
 const PROJ = 'fixt26102214'
 const TICKET_ID = 't26102214fixture'
 
+/* ---------------------------------------------------------------- step ceiling (t261031-12)
+ * The ONE clock this matrix owns. Provenance is never silent: an unreadable knob is
+ * named and falls BACK to the default, so a typo can never shorten a wait into a
+ * false red. */
+const STEP_SECS_ENV = 'SANDBAR_T26102214_STEP_SECS'
+// 60 s is ~2x the worst wait this matrix ever needs under the measured 4x load
+// (the slowest leg's own budget was 8 s and the whole journey ran 154 s in the
+// 22:15Z round), while staying small enough that a panel that is genuinely broken
+// still lands its failing-leg receipt inside the runner's 900 s entry ceiling - a
+// receipt-less red would recreate the very KI this ticket closes.
+const DEFAULT_STEP_CEILING_S = 60
+const STEP_POLL_MS = 200
+
+function stepCeiling() {
+  const fallback = { ms: DEFAULT_STEP_CEILING_S * 1000, provenance: 'default' }
+  const raw = String(process.env[STEP_SECS_ENV] ?? '').trim()
+  if (raw === '') return fallback
+  const secs = Number(raw)
+  if (!Number.isFinite(secs)) {
+    return { ms: fallback.ms, provenance: `malformed ${JSON.stringify(raw)} -> default` }
+  }
+  if (!(secs > 0)) {
+    return { ms: fallback.ms, provenance: `non-positive ${JSON.stringify(raw)} -> default` }
+  }
+  return { ms: Math.round(secs * 1000), provenance: `env ${JSON.stringify(raw)}` }
+}
+
+const STEP = stepCeiling()
+
+const results = []
 let passed = 0, failed = 0, envFail = 0, na = 0
 function record(name, status, detail = '') {
+  results.push({ name, status, detail })
   if (status === 'pass') { passed++; console.log(`  ok ${name}${detail ? ' — ' + detail : ''}`) }
   else if (status === 'env_fail') { envFail++; console.log(`  ENV_FAIL ${name} — ${detail}`) }
   else if (status === 'na') { na++; console.log(`  N/A ${name} — ${detail}`) }
   else { failed++; console.log(`  FAIL ${name} — ${detail}`) }
 }
+function oneLine(text, max = 160) {
+  const flat = String(text ?? '').replace(/\s+/g, ' ').trim()
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat
+}
+
+// The failing-leg receipt (KI-439): the ledger keeps only the tail of this stdout,
+// so the machine-readable line goes LAST, immediately before SUMMARY, and every
+// failing leg also gets its own greppable one-line reason above it.
+function failingLegsReceipt() {
+  const bad = results.filter((r) => r.status === 'fail' || r.status === 'env_fail')
+  if (bad.length === 0) return
+  for (const r of bad) console.log(`FAILING_LEG ${r.name} :: ${oneLine(r.detail || r.status)}`)
+  console.log(`FAILING_LEGS ${JSON.stringify({
+    count: bad.length,
+    names: bad.map((r) => r.name),
+    statuses: bad.map((r) => r.status),
+  })}`)
+}
+
 function summarize() {
+  failingLegsReceipt()
   console.log(`SUMMARY pass=${passed} fail=${failed} env_fail=${envFail} na=${na}`)
   process.exit(failed > 0 || passed + failed + na + envFail === 0 ? 1 : envFail > 0 ? 2 : 0)
 }
@@ -205,13 +277,34 @@ async function launchBrowser(pw) {
   }
   return null
 }
-async function waitFor(cond, ms) {
-  const t0 = Date.now()
-  while (Date.now() - t0 < ms) {
-    try { if (await cond()) return true } catch { /* poll */ }
-    await new Promise((r) => setTimeout(r, 200))
+// Condition poll on the ONE named ceiling (t261031-12). Returns
+// { held, waitedMs, rounds, last } - the verdict and the receipt come from here, so
+// an expiry always names the ceiling, the provenance and what was last seen. Errors
+// inside a probe are data (the poll keeps trying). No duration is ever judged: a
+// poll that holds on its first round costs one round, not the ceiling.
+async function waitCond(cond, ceilingMs = STEP.ms) {
+  const started = Date.now()
+  let rounds = 0
+  let last = null
+  for (;;) {
+    rounds += 1
+    try { last = await cond() } catch (e) { last = { error: String(e && e.message ? e.message : e).slice(0, 140) } }
+    if (last && last.held === true) {
+      return { held: true, rounds, waitedMs: Date.now() - started, last }
+    }
+    const elapsed = Date.now() - started
+    if (elapsed >= ceilingMs) {
+      return { held: false, rounds, waitedMs: elapsed, last, ceilingMs }
+    }
+    await new Promise((r) => setTimeout(r, Math.min(STEP_POLL_MS, Math.max(0, ceilingMs - elapsed))))
   }
-  try { return await cond() } catch { return false }
+}
+
+// The named reason an expired ceiling leaves in the receipt: the ceiling, its
+// provenance, the elapsed time, the observed state - never a bare "did not appear".
+function expired(fact, wait) {
+  return `${fact} within the ${wait.ceilingMs}ms ceiling (${STEP.provenance}): `
+    + `elapsed=${wait.waitedMs}ms probes=${wait.rounds} last=${oneLine(JSON.stringify(wait.last ?? null), 160)}`
 }
 
 async function stubFaces(route) {
@@ -244,22 +337,40 @@ if (!browser) { record('browser-launch', 'env_fail', 'no chromium/chrome launcha
 mkdirSync(OUT_DIR, { recursive: true })
 
 /* journey helpers shared by both themes */
+// Returns { ok, state, wait } - the state word and the expired wait ride into the
+// leg's receipt, so "the panel is absent" is always named with what was observed.
 async function openReviewer(page) {
   // the changes section is a lazy <details> fold — keep it OPEN while waiting:
   // a re-render can reset the details element, so re-arm it inside the wait
   const fold = page.locator('[data-testid="fold-changes"]').first()
   const row = page.locator(`button:has-text("${DOC_PATH}")`).first()
-  const appeared = await waitFor(async () => {
-    if (await fold.count()) await fold.evaluate((el) => { el.open = true }).catch(() => {})
-    return row.count().then((n) => n > 0)
-  }, 8000)
-  if (!appeared) return 'row-missing'
+  let lastArmMs = 0
+  const appeared = await waitCond(async () => {
+    const folds = await fold.count().catch(() => 0)
+    if (folds) await fold.evaluate((el) => { el.open = true }).catch(() => {})
+    const rows = await row.count().catch(() => 0)
+    // The drawer is not open at all (no fold, no changed-file row): the ticket
+    // click was swallowed - by a late first-run overlay, or by a handler that was
+    // not attached yet. Re-arm it, at most every 2 s so a re-render is never
+    // fighting a click storm. A swallowed click is re-armed, never judged.
+    if (folds === 0 && rows === 0 && Date.now() - lastArmMs > 2000) {
+      lastArmMs = Date.now()
+      const cont = page.locator('button:has-text("Continue")').first()
+      if (await cont.count().catch(() => 0)) await cont.click().catch(() => {})
+      const ticketRow = page.locator(`text=${TICKET_ID}`).first()
+      if (await ticketRow.count().catch(() => 0)) await ticketRow.click().catch(() => {})
+    }
+    return { held: rows > 0, rows, folds }
+  })
+  if (!appeared.held) return { ok: false, state: 'row-missing', wait: appeared }
   await row.click({ timeout: 5000 }).catch(() => {})
-  const up = await waitFor(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => n > 0), 6000)
-  if (!up) return 'panel-not-up'
+  const up = await waitCond(() => page.locator('[data-testid="reviewer-panel"]').count()
+    .then((n) => ({ held: n > 0, panels: n })))
+  if (!up.held) return { ok: false, state: 'panel-not-up', wait: up }
   // the document face loads async (diff fetch + block build) — wait for blocks
-  const blocksUp = await waitFor(() => page.locator('[data-testid="reviewer-block"]').count().then((n) => n > 0), 8000)
-  return blocksUp ? true : 'blocks-not-loaded'
+  const blocksUp = await waitCond(() => page.locator('[data-testid="reviewer-block"]').count()
+    .then((n) => ({ held: n > 0, blocks: n })))
+  return blocksUp.held ? { ok: true, state: true, wait: blocksUp } : { ok: false, state: 'blocks-not-loaded', wait: blocksUp }
 }
 async function commentOnBlock(page, needle, text) {
   // two attempts: the composer click races the block's own thread re-render
@@ -268,11 +379,13 @@ async function commentOnBlock(page, needle, text) {
     if (!(await block.count())) continue
     await block.locator('button.wb-rv-addc').first().click({ timeout: 4000 }).catch(() => {})
     const ta = block.locator('[data-testid="composer"] textarea').first()
-    const visible = await ta.waitFor({ state: 'visible', timeout: 3000 }).then(() => true).catch(() => false)
-    if (!visible) continue
+    const composer = await waitCond(() => ta.isVisible().catch(() => false).then((v) => ({ held: v === true, visible: v })))
+    if (!composer.held) continue
     await ta.fill(text).catch(() => {})
     await block.locator('[data-testid="composer"] button.wb-rv-primary').click({ timeout: 4000 }).catch(() => {})
-    if (await waitFor(() => page.locator(`[data-testid="thread"]`, { hasText: text }).count().then((n) => n > 0), 6000)) return true
+    const landed = await waitCond(() => page.locator(`[data-testid="thread"]`, { hasText: text }).count()
+      .then((n) => ({ held: n > 0, threads: n })))
+    if (landed.held) return true
   }
   return false
 }
@@ -295,11 +408,17 @@ for (const theme of ['light', 'dark']) {
   const page = await ctx.newPage()
   page.on('pageerror', () => { pageerrors++ })
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(800)
-  // dismiss the first-run notice overlay if it is up (its mask intercepts clicks)
-  const cont = page.locator('button:has-text("Continue")').first()
-  if (await cont.count()) await cont.click().catch(() => {})
-  await page.waitForTimeout(600)
+  // Readiness, not a settle tick (t261031-12): the board is ready when the fixture
+  // ticket is on it. A late first-run notice overlay intercepts clicks, so it is
+  // re-armed inside the poll instead of being assumed dismissed once.
+  const board = await waitCond(async () => {
+    const rows = await page.locator(`text=${TICKET_ID}`).count().catch(() => 0)
+    // the first-run overlay's mask intercepts clicks: keep re-arming it while we
+    // wait, even after the row shows (it can arrive late)
+    const cont = page.locator('button:has-text("Continue")').first()
+    if (await cont.count().catch(() => 0)) await cont.click().catch(() => {})
+    return { held: rows > 0, rows }
+  })
 
   // open the fixture ticket's detail
   const row = page.locator(`text=${TICKET_ID}`).first()
@@ -308,14 +427,18 @@ for (const theme of ['light', 'dark']) {
     // direct-detail fallback: some console shapes take the id in the URL
     await page.goto(`${BASE}/${TICKET_ID}`, { waitUntil: 'domcontentloaded' }).catch(() => {})
   }
-  await page.waitForTimeout(600)
 
   // P1 doc click opens the reviewer in block mode (the code-file click → line
   // mode half is probe P1b, at the end of the journey)
   const opened = await openReviewer(page)
-  record(`P1/${theme} md-click opens reviewer`, opened ? 'pass' : 'fail',
-    opened ? '' : 'notes.md row not found or panel did not appear (pre-implement red expected)')
-  if (opened) {
+  // The decisive state leads the reason: the failing-leg receipt truncates a long
+  // line, and a reader must see WHICH check failed and what was observed first
+  // (t261031-12; the "never appeared" wording before it was a diagnosis trap).
+  record(`P1/${theme} md-click opens reviewer`, opened.ok ? 'pass' : 'fail',
+    opened.ok ? '' : `${opened.state}: ${expired('the reviewer face never came up', opened.wait)}; `
+      + `boardReady=${board.held} boardRows=${board.last?.rows ?? 'n/a'} pageerrors=${pageerrors} `
+      + `(pre-implement red expected: the notes.md row or the panel is absent)`)
+  if (opened.ok) {
     const panel = page.locator('[data-testid="reviewer-panel"]')
 
     const blocks = page.locator('[data-testid="reviewer-block"]')
@@ -336,13 +459,14 @@ for (const theme of ['light', 'dark']) {
       const defaultOff = !(await hideRemoved.isChecked())
       const removedShownByDefault = removedVisible
       await hideRemoved.check({ timeout: 4000 }).catch(() => {})
-      await page.waitForTimeout(300)
-      const removedAfter = await removedSel.count()
+      const hidden = await waitCond(() => removedSel.count().then((n) => ({ held: n === 0, removed: n })))
+      const removedAfter = hidden.last?.removed ?? (await removedSel.count())
       await hideRemoved.uncheck({ timeout: 4000 }).catch(() => {})
-      await page.waitForTimeout(200)
+      await waitCond(() => removedSel.count().then((n) => ({ held: n >= 1, removed: n })))
       record(`P2/${theme} hide-removed default off, on hides removed`,
         defaultOff && removedShownByDefault >= 1 && removedAfter === 0 ? 'pass' : 'fail',
-        `defaultOff=${defaultOff} removedByDefault=${removedVisible} removedAfterHide=${removedAfter}`)
+        `defaultOff=${defaultOff} removedByDefault=${removedVisible} removedAfterHide=${removedAfter}`
+        + (hidden.held ? '' : ` (${expired('removed blocks never hidden', hidden)})`))
     }
 
     // P3 comments on four block kinds persist + survive reload
@@ -364,60 +488,88 @@ for (const theme of ['light', 'dark']) {
     // P4 reply nests; resolve leaves Open filter; reopen restores
     const root = page.locator('[data-testid="thread"]').filter({ hasText: 'comment on heading' }).first()
     let p4 = false
+    let p4Facts = 'root thread absent'
     if (await root.count()) {
       await root.locator('[data-testid="reply-btn"]').click({ timeout: 4000 }).catch(() => {})
       await root.locator('textarea').fill('a nested reply').catch(() => {})
       await root.locator('button.wb-rv-primary').click({ timeout: 4000 }).catch(() => {})
-      const nested = await waitFor(() => page.locator('[data-testid="thread"]').filter({ hasText: 'a nested reply' }).count().then((n) => n > 0), 4000)
+      const nestedWait = await waitCond(() => page.locator('[data-testid="thread"]')
+        .filter({ hasText: 'a nested reply' }).count().then((n) => ({ held: n > 0, threads: n })))
+      const nested = nestedWait.held
       await root.locator('[data-testid="resolve"]').click({ timeout: 4000 }).catch(() => {})
-      await page.waitForTimeout(400)
-      const resolvedFace = (await page.locator('[data-testid="thread"]').filter({ hasText: 'comment on heading' }).filter({ hasNot: page.locator('[data-testid="resolve"]') }).count()) === 0 || (await page.locator('[data-testid="thread"]').filter({ hasText: 'comment on heading' }).count()) === 0
+      // the resolved face is a CONDITION: the thread loses its Resolve control or
+      // leaves the document list - never a settle sleep
+      const resolvedWait = await waitCond(async () => {
+        const withResolve = await page.locator('[data-testid="thread"]')
+          .filter({ hasText: 'comment on heading' })
+          .filter({ hasNot: page.locator('[data-testid="resolve"]') }).count()
+        const total = await page.locator('[data-testid="thread"]').filter({ hasText: 'comment on heading' }).count()
+        return { held: withResolve === 0 || total === 0, withResolve, total }
+      })
+      const resolvedFace = resolvedWait.held
       // filter face: Resolved shows it, Open hides it
       const filterBox = page.locator('[data-testid="comment-filter"]')
       let openHides = false
+      let railFacts = 'filter box absent'
       if (await filterBox.count()) {
         await filterBox.locator('button:has-text("Resolved"), button:has-text("resolved")').first().click().catch(() => {})
-        await page.waitForTimeout(300)
-        const inResolved = (await page.locator('[data-testid="rail-thread"]').count()) >= 1
+        const resolvedRail = await waitCond(() => page.locator('[data-testid="rail-thread"]').count()
+          .then((n) => ({ held: n >= 1, rail: n })))
+        const inResolved = resolvedRail.held
         await filterBox.locator('button:has-text("Open"), button:has-text("open")').first().click().catch(() => {})
-        await page.waitForTimeout(300)
-        openHides = (await page.locator('[data-testid="rail-thread"]').filter({ hasText: 'comment on heading' }).count()) === 0
+        const hiddenRail = await waitCond(() => page.locator('[data-testid="rail-thread"]')
+          .filter({ hasText: 'comment on heading' }).count().then((n) => ({ held: n === 0, rail: n })))
+        openHides = hiddenRail.held
         p4 = nested && resolvedFace && inResolved && openHides
+        railFacts = `resolvedRail=${inResolved}(${resolvedRail.last?.rail}) openHides=${openHides}`
+          + (hiddenRail.held ? '' : ` [${expired('the thread never left the Open filter', hiddenRail)}]`)
       }
       // reopen restores (from the doc thread box)
       const resolvedBox = page.locator('[data-testid="thread"]').filter({ hasText: 'comment on heading' }).first()
       if (await resolvedBox.count()) {
         await resolvedBox.locator('[data-testid="reopen"]').click({ timeout: 4000 }).catch(() => {})
-        await page.waitForTimeout(300)
-        p4 = p4 && (await page.locator('[data-testid="thread"]').filter({ hasText: 'comment on heading' }).filter({ hasText: 'Resolve' }).count()) > 0
+        const reopened = await waitCond(() => page.locator('[data-testid="thread"]')
+          .filter({ hasText: 'comment on heading' }).filter({ hasText: 'Resolve' }).count()
+          .then((n) => ({ held: n > 0, threads: n })))
+        p4 = p4 && reopened.held
+        if (!reopened.held) railFacts += ` [${expired('the thread never came back after reopen', reopened)}]`
       }
+      p4Facts = `nested=${nested} resolvedFace=${resolvedFace} ${railFacts}`
+      if (!nestedWait.held) p4Facts += ` [${expired('the nested reply never rendered', nestedWait)}]`
+      if (!resolvedWait.held) p4Facts += ` [${expired('the thread never showed the resolved face', resolvedWait)}]`
     }
-    record(`P4/${theme} reply nests, resolve/reopen + Open filter`, p4 ? 'pass' : 'fail', '')
+    record(`P4/${theme} reply nests, resolve/reopen + Open filter`, p4 ? 'pass' : 'fail', p4Facts)
 
     // P5 edit-after-comment: mutate the stubbed diff face (block + neighbour), reopen
     diffFiles[0].blocks[0].newText = 'Reviewer design rewritten'
     diffFiles[0].blocks[0].oldText = 'Reviewer design rewritten'
     diffFiles[0].blocks[1].newText = 'The lane file is the SINGLE store for all review comments.'
     await page.locator('[data-testid="reviewer-panel"] button[aria-label="Close reviewer"]').click({ timeout: 4000 }).catch(() => {})
-    await waitFor(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => n === 0), 4000)
-    await openReviewer(page)
+    await waitCond(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => ({ held: n === 0, panels: n })))
+    const p5Reopen = await openReviewer(page)
     const outdated = await page.locator('[data-testid="outdated-thread"]').count()
     const stillVisible = (await page.locator('[data-testid="thread"], [data-testid="outdated-thread"]').filter({ hasText: 'comment on paragraph' }).count()) >= 1
     record(`P5/${theme} edited block: thread survives or is outdated`, (outdated >= 1 || stillVisible) ? 'pass' : 'fail',
-      `outdated threads: ${outdated}, paragraph thread still rendered: ${stillVisible}`)
+      `outdated threads: ${outdated}, paragraph thread still rendered: ${stillVisible}`
+      + (p5Reopen.ok ? '' : ` [${expired('the reviewer never reopened after the edit: ' + p5Reopen.state, p5Reopen.wait)}]`))
 
     // P6 minimap marks + counts + click opens the thread
     const marks = page.locator('[data-testid="minimap-mark"]')
     const markCount = await marks.count()
     const counted = await page.locator('[data-testid="minimap-mark"] .wb-rv-mcount').count()
     let nav = false
+    let markFacts = ''
     if (markCount > 0) {
       await marks.first().click().catch(() => {})
-      await page.waitForTimeout(300)
-      nav = (await page.locator('[data-testid="thread"]').count()) >= 0 // click accepted; thread face intact
+      // the click is accepted when the thread face is reachable afterwards: a
+      // condition, not a 300 ms settle tick (t261031-12)
+      const afterNav = await waitCond(() => page.locator('[data-testid="thread"]').count()
+        .then((n) => ({ held: n >= 0, threads: n })))
+      nav = afterNav.held // click accepted; thread face intact
+      markFacts = ` threadsAfterClick=${afterNav.last?.threads}`
     }
     record(`P6/${theme} minimap marks + open counts + click`, markCount >= 1 && counted >= 1 && nav ? 'pass' : 'fail',
-      `marks: ${markCount}, count badges: ${counted}`)
+      `marks: ${markCount}, count badges: ${counted}${markFacts}`)
 
     // P7 TOC h1/h2
     const tocEntries = page.locator('[data-testid="toc-entry"]')
@@ -438,9 +590,11 @@ for (const theme of ['light', 'dark']) {
       record(`P9/${theme} rail collapse control`, 'fail', 'rail-toggle missing')
     } else {
       await toggle.first().click({ timeout: 4000 }).catch(() => {})
-      await page.waitForTimeout(400)
-      const docVisible = await page.locator('[data-testid="reviewer-doc"]').isVisible().catch(() => false)
-      record(`P9/${theme} collapsed rail keeps document visible`, docVisible ? 'pass' : 'fail', '')
+      // the collapse effect is a CONDITION: the document face is visible again
+      const docUp = await waitCond(() => page.locator('[data-testid="reviewer-doc"]').isVisible()
+        .catch(() => false).then((v) => ({ held: v === true, docVisible: v })))
+      record(`P9/${theme} collapsed rail keeps document visible`, docUp.held ? 'pass' : 'fail',
+        docUp.held ? '' : expired('the document face was never visible after the rail collapse', docUp))
     }
 
     // P1b code-kind click opens the reviewer in LINE mode (t261028-23 routing,
@@ -450,15 +604,18 @@ for (const theme of ['light', 'dark']) {
     // the code file lives in the changes tab behind the reviewer overlay: close
     // the doc panel first so the click target is reachable
     await page.locator('[data-testid="reviewer-panel"] button[aria-label="Close reviewer"]').click({ timeout: 4000 }).catch(() => {})
-    await waitFor(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => n === 0), 4000)
+    await waitCond(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => ({ held: n === 0, panels: n })))
     let lineOk = false
     let lineDetail = 'changes row missing'
     if (await codeBtn.count()) {
       await codeBtn.click({ timeout: 5000 }).catch(() => {})
-      const panelUp = await waitFor(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => n > 0), 6000)
-      const rowsUp = panelUp
-        ? await waitFor(() => page.locator('[data-testid="diff-line"]').count().then((n) => n > 0), 8000)
-        : false
+      const panelWait = await waitCond(() => page.locator('[data-testid="reviewer-panel"]').count()
+        .then((n) => ({ held: n > 0, panels: n })))
+      const panelUp = panelWait.held
+      const rowsWait = panelUp
+        ? await waitCond(() => page.locator('[data-testid="diff-line"]').count().then((n) => ({ held: n > 0, rows: n })))
+        : { held: false, last: null }
+      const rowsUp = rowsWait.held
       const statUp = (await page.locator('[data-testid="diff-stat"]').count()) > 0
       const pathNamed = (await page.locator('[data-testid="reviewer-panel"]').filter({ hasText: CODE_PATH }).count()) > 0
       const ticketNamed = (await page.locator('[data-testid="review-ticket-id"]').filter({ hasText: TICKET_ID }).count()) > 0
@@ -466,6 +623,8 @@ for (const theme of ['light', 'dark']) {
       lineOk = panelUp && rowsUp && statUp && pathNamed && ticketNamed && !rawViewer
       lineDetail = `panel=${panelUp} rows=${await page.locator('[data-testid="diff-line"]').count()} stat=${statUp}`
         + ` path=${pathNamed} ticket=${ticketNamed} rawViewer=${rawViewer}`
+      if (!panelWait.held) lineDetail += ` [${expired('the line-mode panel never came up', panelWait)}]`
+      else if (!rowsWait.held) lineDetail += ` [${expired('the diff rows never rendered', rowsWait)}]`
       // a comment on one row renders as a thread UNDER that row and reaches the
       // lane file with a line anchor (reader-side disk read, never a receipt)
       if (lineOk) {
@@ -473,46 +632,53 @@ for (const theme of ['light', 'dark']) {
         const rowIdx = await row.getAttribute('data-row-index').catch(() => null)
         await row.locator('[data-testid="line-comment-btn"]').click({ timeout: 4000 }).catch(() => {})
         const ta = row.locator('[data-testid="composer"] textarea').first()
-        const taUp = await ta.waitFor({ state: 'visible', timeout: 3000 }).then(() => true).catch(() => false)
+        const taWait = await waitCond(() => ta.isVisible().catch(() => false).then((v) => ({ held: v === true, visible: v })))
+        const taUp = taWait.held
         if (taUp) {
           await ta.fill('comment on a code line').catch(() => {})
           await row.locator('[data-testid="composer"] button.wb-rv-primary').click({ timeout: 4000 }).catch(() => {})
         }
-        const underRow = rowIdx !== null && (await waitFor(() => page.locator(
+        const underWait = await waitCond(() => page.locator(
           `[data-testid="diff-line"][data-row-index="${rowIdx}"] [data-testid="thread"]`)
-          .filter({ hasText: 'comment on a code line' }).count().then((n) => n > 0), 6000))
+          .filter({ hasText: 'comment on a code line' }).count().then((n) => ({ held: n > 0, threads: n })))
+        const underRow = rowIdx !== null && underWait.held
         const disk = laneDisk()
         const anchored = Array.isArray(disk?.threads) && disk.threads.some((t) => t?.path === CODE_PATH
           && t?.anchor?.kind === 'line' && (t.anchor.side === 'new' || t.anchor.side === 'old')
           && typeof t.anchor.line === 'number' && typeof t.anchor.contextHash === 'string' && t.anchor.contextHash !== '')
         lineOk = lineOk && underRow && anchored
         lineDetail += ` threadUnderRow=${underRow} lineAnchorOnDisk=${anchored}`
+        if (!underRow) lineDetail += ` [${expired('no thread appeared under the commented row (row index ' + rowIdx + ')', underWait)}]`
+        if (!taUp) lineDetail += ` [${expired('the line composer never opened', taWait)}]`
       }
       // close the reviewer so it cannot mask the rest of the journey
       await page.locator('[data-testid="reviewer-panel"] button[aria-label="Close reviewer"]').click({ timeout: 4000 }).catch(() => {})
-      await waitFor(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => n === 0), 4000)
+      await waitCond(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => ({ held: n === 0, panels: n })))
     }
     record(`P1b/${theme} code-click opens the reviewer line mode`, lineOk ? 'pass' : 'fail', lineDetail)
     // full panel reload: close the reviewer and open it again — the component
     // refetches diff + comments on mount, so the threads must come back
     await page.locator('[data-testid="reviewer-panel"] button[aria-label="Close reviewer"]').click({ timeout: 4000 }).catch(() => {})
-    await waitFor(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => n === 0), 4000)
+    await waitCond(() => page.locator('[data-testid="reviewer-panel"]').count().then((n) => ({ held: n === 0, panels: n })))
     // the drawer itself can be gone by this point (navigation during the journey):
     // re-open the ticket detail first if the changes fold is not mounted
     if (!(await page.locator('[data-testid="fold-changes"]').count())) {
       const rowBack = page.locator(`text=${TICKET_ID}`).first()
       if (await rowBack.count()) await rowBack.click({ timeout: 4000 }).catch(() => {})
-      await page.waitForTimeout(800)
     }
     const reopened2 = await openReviewer(page)
     // acceptance (d): an outdated thread counts as "still appears" — it renders
     // at the end of the document under its own testid, never dropped
     const threadBoxes = () => page.locator('[data-testid="thread"], [data-testid="outdated-thread"]').count()
-    const survived = reopened2 === true
-      ? await waitFor(() => threadBoxes().then((n) => (n >= 4 ? n : 0)), 8000)
-      : 0
-    const survivedOk = survived === true || survived >= 4
-    record(`P3/${theme} threads survive reload + re-open`, survivedOk ? 'pass' : 'fail', `reopen=${JSON.stringify(reopened2)} threads visible after reload: ${survived}; mirror threads in memory: ${threads.length}; disk: ${laneDisk() ? laneDisk().threads.length : 'none'}`)
+    const survivedWait = reopened2.ok
+      ? await waitCond(() => threadBoxes().then((n) => ({ held: n >= 4, boxes: n })))
+      : { held: false, last: null }
+    const survived = survivedWait.held ? survivedWait.last.boxes : (await threadBoxes().catch(() => 0))
+    record(`P3/${theme} threads survive reload + re-open`, survivedWait.held ? 'pass' : 'fail',
+      `reopen=${JSON.stringify(reopened2.state)} threads visible after reload: ${survived}; mirror threads in memory: ${threads.length}; disk: ${laneDisk() ? laneDisk().threads.length : 'none'}`
+      + (survivedWait.held ? '' : reopened2.ok
+        ? ` [${expired('the threads never came back after the reload', survivedWait)}]`
+        : ` [${expired('the reviewer never reopened after the reload: ' + reopened2.state, reopened2.wait)}]`))
 
     // P10 capture (KI-055)
     try {
