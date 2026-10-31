@@ -681,6 +681,13 @@ SANDBAR_TEST_DISABLE_KI061 = os.environ.get("SANDBAR_TEST_DISABLE_KI061") == "1"
 # → visible red + warning, write set left untouched (no more silent no-op).
 # Same-shaped boolean gate (see the first PATCH_ID note).
 WRITE_SET_FAULT_PATCH_ID = "dev-lane-write-set-fault"
+#: t261031-34 (KI-447): landed line content is not a write-set violation. The
+#: JUDGMENT is activity-side (the foreign-repair population and verify_lane read
+#: it), so no recorded command sequence changes; this marker guards only the new
+#: activity ARGUMENT that carries the ticket's declared develop line to those two
+#: faces. An old history evaluates it un-patched, passes no line id, and replays
+#: the recorded call byte for byte (the pre-t261031-34 caliber).
+LINE_CONTENT_PATCH_ID = "dev-lane-line-content-not-foreign-v1"
 # t261021-15: the plan-side write-set gap gate. Unique id per entry (the SDK
 # memoizes the first patched() verdict per id), so an in-flight ticket replaying
 # across this code change never sees the gate: existing tickets already past
@@ -1022,15 +1029,6 @@ TARGETED_RERUN_PATCH_ID = "dev-lane-targeted-rerun-v1"
 # 空/畸形）→ fail-closed 恒全跑。同构布尔门：旧历史（无本 marker）走 v1 判据逐字
 # 旧行为，在途票不追溯。
 TARGETED_RERUN_FILE_RADIUS_PATCH_ID = "dev-lane-targeted-rerun-file-radius-v1"
-# t261029-18: the branch name of EVERY lane scope goes onto the ticket face (an
-# additive key). The collector now resolves one name per scope (a multi-repo lane's
-# meta.branch is the placeholder `lane/<id>`, while the root tree is on
-# `lane/<id>-root`). The resolve result lands in
-# meta["file_blast_radius_trace"]["resolved_branches"], so "which name was measured"
-# stays readable after the log rolls over (the ticket asks the degrade to reach the gate
-# log; the log face is the activity logger, the ticket face is this key). Same boolean
-# gate as the family: an old history writes no such key and keeps the old behavior.
-CHANGED_FILES_BRANCH_TRACE_PATCH_ID = "dev-lane-changed-files-branches-v1"
 # t260930-02（宿主裁 260930「先 B」）：面计划——快反馈面从「只有上轮红名」扩成
 # 「本次改动面 ∪ 上轮红名」。旧判据的缺口是实打实的：定点轮只跑上轮红名，于是**这次
 # 改动新碰坏了什么**在快反馈里看不见，只能等收口全量跑才发现（白烧一轮）。判定面
@@ -1399,203 +1397,6 @@ def _counter_reset_active(wf) -> bool:
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
     return start >= E9DAA05_LANDED_AT
-
-
-# ---- t261031-20: the gate receipt must name its tree ----------------------------
-# Root cause (measured on three tickets): the suite receipt carries no tree
-# identity. `arbitrate` and `acceptance_walkthrough` commit their own writes
-# after the round, so the ticket enters merge_check with a receipt for a tree
-# that is no longer the merged tree. The only mechanical tree check on this
-# line (the KI-220 green-run item) was removed by the host order of 261009.
-#
-# The rule: a receipt is valid only for the tree it ran on. The anchor records
-# the measured sha. Main's movement is recorded as a NAMED delta, never as a
-# new identity, so a merge from main never voids a ticket's proof (the 261009
-# ruling stays intact). At the merge_check entry, before the main sync, the
-# engine compares the lane HEAD with the comparison base. A mismatch re-runs
-# the gate, so the receipt and the merged tree become one fact again.
-#
-# Replay discipline (KI-061): every new activity command sits behind
-# `_gate_receipt_arm`, which is `patched(...) or <arm flag>`. The arm flag can
-# only be set by the `enable_gate_receipt_guard` signal, and that event cannot
-# exist in a pre-fix history, so an UNARMED replay emits no command. An armed
-# lane schedules the commands at its live continuation, after the arm event.
-GATE_RECEIPT_FRESHNESS_PATCH_ID = "t261031-20-gate-receipt-freshness-v1"
-#: The replay-safe arm for a long-lived in-flight lane (same shape as
-#: ENABLE_NARROWED_ANCHOR_SIGNAL, KI-356). A new signal name cannot exist in a
-#: pre-fix history, so the handler only runs when the event is really there.
-ENABLE_GATE_RECEIPT_GUARD_SIGNAL = "enable_gate_receipt_guard"
-#: Two gate re-runs are allowed for a receipt that a real tree move made stale.
-#: The third stale state stops for a human without spending another round.
-MAX_GATE_RECEIPT_RERUNS_STALE = 2
-#: A missing anchor gets ONE round, which mints it. A second miss stops.
-MAX_GATE_RECEIPT_RERUNS_NO_RECEIPT = 1
-GATE_RECEIPT_STATE_FRESH = "fresh"
-GATE_RECEIPT_STATE_STALE = "stale"
-GATE_RECEIPT_STATE_NO_RECEIPT = "no_receipt"
-GATE_RECEIPT_STATE_UNPROVABLE = "unprovable"
-
-
-def _gate_receipt_arm(wf, wf_self) -> bool:
-    """Is the gate-receipt guard armed on this lane? (pure, replay-safe)
-
-    True when the patch marker exists, or when the operator sent
-    ENABLE_GATE_RECEIPT_GUARD_SIGNAL (a history event a pre-fix lane cannot
-    have). Read with `getattr` so a UT shell built with `object.__new__` and an
-    old replay shell both answer False without raising.
-    """
-    if wf.patched(GATE_RECEIPT_FRESHNESS_PATCH_ID):
-        return True
-    return bool(getattr(wf_self, "_gate_receipt_guard_enabled", False))
-
-
-def gate_receipt_freshness(receipt: Any, head_sha: Any,
-                           base_sha: Any = None,
-                           note: Any = None) -> Tuple[str, str]:
-    """Judge whether a gate receipt still covers the tree being merged (pure).
-
-    Returns (state, reason). States:
-      fresh       the lane HEAD equals the comparison base;
-      stale       a receipt exists and the lane HEAD moved;
-      no_receipt  the ticket recorded no anchor, and no miss note either;
-      unprovable  the anchor or the HEAD probe cannot be trusted (fail-closed).
-
-    `base_sha` is the comparison base: the last delta's `to`, else the receipt's
-    own `receipt_sha`. An empty or malformed value falls back to the receipt's
-    sha. `note` is `meta["gate_receipt_note"]`, the anchor-miss record.
-    Malformed input never raises and never reads as fresh.
-    """
-    if isinstance(note, dict) and note.get("recorded") is False:
-        return GATE_RECEIPT_STATE_UNPROVABLE, (
-            "no gate-receipt anchor (the head resolver failed: %s)"
-            % str(note.get("error") or note.get("reason") or "unknown"))
-    head = head_sha.strip() if isinstance(head_sha, str) else ""
-    if not head:
-        return GATE_RECEIPT_STATE_UNPROVABLE, (
-            "lane HEAD sha unavailable (query failed): the receipt cannot be "
-            "tied to the merged tree")
-    if receipt is None or (isinstance(receipt, dict) and not receipt):
-        return GATE_RECEIPT_STATE_NO_RECEIPT, (
-            "no gate-receipt anchor recorded for this ticket (no gate round ran "
-            "under this guard)")
-    if not isinstance(receipt, dict):
-        return GATE_RECEIPT_STATE_UNPROVABLE, (
-            "malformed gate-receipt face (type %s) — fail closed"
-            % type(receipt).__name__)
-    r_sha = receipt.get("receipt_sha")
-    r_sha = r_sha.strip() if isinstance(r_sha, str) else ""
-    if not r_sha:
-        return GATE_RECEIPT_STATE_UNPROVABLE, (
-            "malformed gate-receipt face (receipt_sha missing) — fail closed")
-    base = base_sha.strip() if isinstance(base_sha, str) else ""
-    if not base:
-        base = r_sha
-    if head == base:
-        return GATE_RECEIPT_STATE_FRESH, ""
-    return GATE_RECEIPT_STATE_STALE, (
-        "the lane HEAD moved after the receipt round (receipt %s, comparison "
-        "base %s, lane HEAD %s)" % (r_sha[:12], base[:12], head[:12]))
-
-
-def gate_receipt_void_text(state: str, reason: str, receipt_sha: str,
-                           head_sha: str, last_stage: str, round_no: int,
-                           cap: int, conflict_rounds: int = 0) -> str:
-    """The named copy for a voided gate receipt (pure, English).
-
-    Two exits, always named: `rework(to_stage=implement)` reaches a stable tree,
-    and `retry_qc` gives the guard one more window after the lane is fixed. The
-    text states only what the guard measured; it never claims who committed.
-
-    `conflict_rounds` names the OTHER counter on this loop (`_conflict_rounds`),
-    so a reader can tell which loop is spinning: a conflict round also moves the
-    tree and therefore also voids a receipt, but its own cap is independent.
-    """
-    _r = (receipt_sha or "none")[:12]
-    _h = (head_sha or "unknown")[:12]
-    _s = last_stage or "unknown"
-    try:
-        _cr = int(conflict_rounds or 0)
-    except (TypeError, ValueError):
-        _cr = 0
-    _cr_txt = (" Conflict-resolution rounds in this attempt: %d (their own cap "
-               "is separate)." % _cr) if _cr > 0 else ""
-    if state == GATE_RECEIPT_STATE_UNPROVABLE:
-        return (
-            "Cannot tie the gate receipt to the merged tree: %s (receipt %s, "
-            "lane HEAD %s, last stage entered: %s). The engine does not spend a "
-            "suite round here: a round cannot repair the resolver. Remedy: fix "
-            "the lane or the git condition, then send retry_qc (the guard "
-            "re-evaluates), or send rework(to_stage=implement).%s"
-            % (reason, _r, _h, _s, _cr_txt))
-    if round_no > cap:
-        return (
-            "Gate receipt VOID (%d voids, cap %d in this attempt): %s (receipt "
-            "%s, lane HEAD %s, last stage entered: %s).%s The engine stops "
-            "re-running the gate. Remedy: send rework(to_stage=implement) to "
-            "reach a tree the rounds stop moving, or fix the lane and send "
-            "retry_qc for one more window."
-            % (round_no, cap, reason, _r, _h, _s, _cr_txt))
-    return (
-        "Gate receipt VOID: %s (receipt %s, lane HEAD %s, last stage entered: "
-        "%s). Round %d of %d: the gate re-runs before merge_check, so the "
-        "signature rests on a receipt for the merged tree.%s If the lane keeps "
-        "moving, send rework(to_stage=implement) or retry_qc after a fix."
-        % (reason, _r, _h, _s, round_no, cap, _cr_txt))
-
-
-def gate_receipt_surface(*, closing: bool, targeted: Any = None,
-                         fast_set: bool = False) -> str:
-    """The surface a round judged (pure). One vocabulary, stated on the face:
-    'full suite', 'targeted: N scenario(s)', 'fast set (closing)',
-    'full suite (closing)'. A malformed targeted list counts as 0.
-    """
-    try:
-        # only a real list/tuple names a targeted face: a bare string is a
-        # malformed receipt, not a list of six scenario names
-        n = len(targeted) if isinstance(targeted, (list, tuple)) else 0
-    except TypeError:
-        n = 0
-    if closing:
-        return "fast set (closing)" if fast_set else "full suite (closing)"
-    if n > 0:
-        return "targeted: %d scenario(s)" % n
-    return "full suite"
-
-
-def gate_receipt_delta_causes(main_sync_this_pass: Any,
-                              checks: Any) -> List[str]:
-    """Which merge-line acts moved the tree since the receipt (pure).
-
-    Reads only what the merge_check activity reported. The `auto_settle` row is
-    emitted only when the in-write-set self-heal really committed, so the row is
-    commit evidence, not an attempt. A repair row carries its commit id. A main
-    sync counts only when THIS pass wrote a new main-sync receipt. Returns []
-    when nothing names a move: the caller then compares the shas and writes a
-    delta only when they differ.
-    """
-    out: List[str] = []
-    if main_sync_this_pass:
-        out.append("main_sync")
-    for c in (checks if isinstance(checks, list) else []):
-        if not isinstance(c, dict):
-            continue
-        if str(c.get("id") or "") == "auto_settle":
-            out.append("merge_check_acts")
-        fr = c.get("foreign_repair")
-        if isinstance(fr, dict):
-            _c = str(fr.get("repair_commit") or "").strip()
-            if _c:
-                out.append("foreign_repair:%s" % _c)
-    seen = set()
-    deduped: List[str] = []
-    for _x in out:
-        _k = _x.split(":", 1)[0]
-        if _k in seen:
-            continue
-        seen.add(_k)
-        deduped.append(_x)
-    return deduped
-
 
 # prepare_ui_evidence activity timeout: must be **clearly larger** than the subprocess
 # timeout inside the activity (agent_activities.UI_CAPTURE_TIMEOUT_SEC=240s), otherwise
@@ -2115,13 +1916,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         # Read with getattr at the use site so old replay shells / UT stubs that
         # bypass __init__ never AttributeError.
         self._narrowed_anchor_enabled: bool = False
-        # t261031-20: the gate-receipt guard. The arm flag is set only by the
-        # ENABLE_GATE_RECEIPT_GUARD_SIGNAL handler (event-gated, replay-safe).
-        # The void counter is an instance attribute so the two human signal
-        # handlers can reset it; it is initialised here so a signal that arrives
-        # before run() initialises the loop state cannot raise.
-        self._gate_receipt_guard_enabled: bool = False
-        self._receipt_void_rounds: int = 0
         self.timeline: List[Dict[str, Any]] = []
         self.human_context: Dict[str, Any] = {}
         self.engine_version: int = ENGINE_VERSION_V2
@@ -3119,37 +2913,10 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
 
     # ---------- t260923 D：收口全量跑（串行/平行两分支共用） ----------
     def _integ_run_args(self, only_names=(), own_names=()):
-        """Build the integration-run arguments (the single writer collected by the
-        t260913-03 single-station lock, 260923 D): the apply_skip_pools policy value is
-        set explicitly here only (the literal statement is the lock's criterion); the
-        main run passes the pointed face (may be empty), the closing run passes empty =
-        full run. attempt = this generation's caliber, equal element-wise to the
-        existing call sites.
-
-        t261029-18 (arbitration round 4): a pointed face MUST carry the ticket's
-        declared own scenario names. The runner executes exactly the pointed list; an
-        own name only gets an exemption from pool/roster drops and is never injected
-        (integration/run_scenarios.py own_kept). So "declared own, not in the pointed
-        list" always trips the own-coverage guard
-        (agent_activities.own_coverage_error) with a startup-level error, and that
-        round's pass verdict is voided. The own proof obligation belongs in the run list
-        itself. The union lives in this single writer, so the main run, the closing arm
-        and the quick gate cannot drift apart. An empty only list = the full run, where
-        own names run anyway."""
-        only_names = list(only_names or [])
-        if only_names:
-            # t261029-18 (arbitration round 4): the runner runs EXACTLY the pointed
-            # list and only EXEMPTS own names from pool/roster drops; it never injects
-            # one that the caller left out (integration/run_scenarios.py own_kept).
-            # A pointed round that omits the ticket's own scenario therefore trips the
-            # own-coverage guard (agent_activities own_coverage_error) with a
-            # startup-level error, and every pass of that round is voided. The own proof
-            # obligation belongs IN the run list. The union lives in this one writer, so
-            # the main run, the closing arm and the quick gate cannot drift apart. An
-            # empty only list = the full run, where own names run anyway.
-            for _n in (own_names or ()):
-                if _n not in only_names:
-                    only_names.append(_n)
+        """集成跑入参构造（t260913-03 唯一真站锁的单写者收拢，260923 D）：
+        apply_skip_pools 策略值只此一处显式置位（语句字面量唯一命中=锁的判据）；
+        主跑传定点面（可空），收口跑传空=全量。attempt=本代数口径与既有调用点
+        逐元素等值。"""
         return IntegrationRunArgs(
             ticket_id=self.ticket_id,
             worktree=str(self.meta.get("worktree") or ""),
@@ -3439,284 +3206,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                      ", no_scenarios" if face.get("no_scenarios") else "",
                      ", narrowed (not a full close)" if face.get("narrowed") else "",
                      str(face["sha"])[:12]))
-
-    # ---------- t261031-20: the gate receipt anchor, the guard, the deltas ----------
-    async def _lane_head(self) -> Tuple[bool, str, str]:
-        """Resolve the lane branch HEAD: (ok, sha, error).
-
-        One call site for the `lane_head_sha` activity (same shape as
-        `_ki220_record_green_run`). The activity answers `ok=False` with a named
-        error instead of raising; a transport fault is caught here and becomes
-        the same named shape. Callers must treat a failure as fail-closed.
-        """
-        try:
-            raw = await workflow.execute_activity(
-                "lane_head_sha",
-                args=[LaneHeadShaArgs(ticket_id=self.ticket_id,
-                                      worktree=str(self.meta.get("worktree") or ""),
-                                      branch=str(self.meta.get("branch") or ""))],
-                start_to_close_timeout=SHORT, retry_policy=RETRY)
-            res = raw if isinstance(raw, LaneHeadShaResult) else LaneHeadShaResult(
-                ok=bool(raw.get("ok")), sha=str(raw.get("sha") or ""),
-                error=str(raw.get("error") or ""))
-        except Exception as e:  # noqa: BLE001 — a named failure, never a raise
-            return False, "", "%s: %s" % (type(e).__name__, e)
-        if not getattr(res, "ok", False) or not getattr(res, "sha", ""):
-            return False, "", str(getattr(res, "error", "") or "unknown lane_head_sha failure")
-        return True, str(res.sha), ""
-
-    async def _record_gate_receipt_anchor(self, receipt, *, closing: bool,
-                                          surface: str) -> Dict[str, Any]:
-        """Record the tree a gate round judged (t261031-20).
-
-        Resolves the lane HEAD FIRST, then writes `meta["gate_receipt"]`, then
-        returns the face keys. The receipt literal consumes the returned values,
-        so the face key and the anchor's `receipt_sha` are one fact.
-
-        Fail-closed: a resolver failure writes `meta["gate_receipt_note"]` and
-        records no anchor. It never mints a receipt identity from an unresolved
-        sha (same stance as the green-run recorder). A later success clears the
-        note.
-
-        It does NOT reset the void counter: every void produces a new anchor, so
-        a reset here would make the cap unreachable.
-        """
-        ok, sha, err = await self._lane_head()
-        if not ok or not sha:
-            self.meta["gate_receipt_note"] = {
-                "face": "gate_receipt", "recorded": False,
-                "reason": "lane_head_sha failed", "error": err,
-                "at": self._now_epoch()}
-            self._log("gate-receipt anchor not recorded: %s" % (err or "unknown"))
-            return {"receipt_sha": "", "receipt_at": 0, "surface": str(surface or "")}
-        try:
-            ran = int(getattr(receipt, "ran", 0) or 0)
-            failed = int(getattr(receipt, "failed", 0) or 0)
-            env_fail = int(getattr(receipt, "env_fail", 0) or 0)
-        except (TypeError, ValueError):
-            ran = failed = env_fail = 0
-        _at = self._now_epoch()
-        self.meta["gate_receipt"] = {
-            "receipt_sha": sha,
-            "deltas": [],
-            "gen": self._gen("run_integration_tests"),
-            "ran": ran, "failed": failed, "env_fail": env_fail,
-            "green": not bool(getattr(receipt, "error", "")) and failed == 0,
-            "closing": bool(closing),
-            "surface": str(surface or ""),
-            "at": _at,
-            "merge_face": {}}
-        self.meta.pop("gate_receipt_note", None)
-        self._log("gate-receipt anchor recorded (sha=%s, surface=%s%s)"
-                  % (sha[:12], str(surface or "unknown"),
-                     ", closing" if closing else ""))
-        return {"receipt_sha": sha, "receipt_at": _at, "surface": str(surface or "")}
-
-    async def _gate_receipt_guard(self) -> str:
-        """Prove the gate receipt covers the tree that is about to merge.
-
-        Returns the caller's action:
-          ""             the receipt is fresh; the flow continues to merge_check;
-          "rerun_gate"   the caller sets `phase = "run_integration_tests"` and
-                         continues (a void, or an over-cap wake that gets one
-                         genuine re-run);
-          "stopped"      an `unprovable` stop: the caller continues and the guard
-                         re-evaluates at the next merge_check entry (retry_qc
-                         re-arms it without a wasted suite round).
-
-        Order: the tree is judged FIRST and the cap second, so a fresh
-        evaluation always proceeds, even when the counter sits at the cap, and
-        it resets the counter. `unprovable` never spends a suite round.
-        """
-        # The raw meta value goes to the pure judge: a malformed anchor must read
-        # as `unprovable` (fail-closed), never as a fresh receipt or a silent
-        # `no_receipt` that spends a round on a shape we could not read.
-        _raw_rec = self.meta.get("gate_receipt")
-        rec = _raw_rec if isinstance(_raw_rec, dict) else {}
-        deltas = [d for d in (rec.get("deltas") or [])
-                  if isinstance(d, dict) and str(d.get("to") or "").strip()]
-        base = str(deltas[-1].get("to") or "") if deltas else str(rec.get("receipt_sha") or "")
-        ok, sha, err = await self._lane_head()
-        state, reason = gate_receipt_freshness(
-            _raw_rec, sha if ok else "", base_sha=base,
-            note=self.meta.get("gate_receipt_note"))
-        # F2 (acceptance round 1): a live head-probe failure must NAME its error,
-        # not only report "unavailable". The anchor-note path already carries its
-        # own error; this covers the probe that fails at the guard itself. The
-        # reader cannot fix a resolver it cannot see.
-        _probe_err = "" if ok else str(err or "").strip()
-        if (_probe_err and state == GATE_RECEIPT_STATE_UNPROVABLE
-                and _probe_err not in reason):
-            reason = ("%s | live head probe: %s" % (reason, _probe_err)
-                      if reason else "the live head probe failed: %s" % _probe_err)
-        receipt_sha = str(rec.get("receipt_sha") or "")
-        last_stage = str(self.meta.get("stage") or "")
-        if state == GATE_RECEIPT_STATE_FRESH:
-            _at = self._now_epoch()
-            rec["verified_sha"] = sha
-            rec["verified_at"] = _at
-            rec["merge_face"] = {
-                "receipt_sha": receipt_sha,
-                "land_sha": sha,
-                "surface": str(rec.get("surface") or ""),
-                "deltas": list(deltas),
-                "void": None,
-                "verified_at": _at}
-            self.meta["gate_receipt"] = rec
-            self.meta.pop("gate_receipt_void", None)
-            self._receipt_void_rounds = 0
-            _delta_txt = ""
-            if deltas:
-                _d = deltas[-1]
-                _delta_txt = " (%s delta %s -> %s)" % (
-                    str(_d.get("cause") or "named"), str(_d.get("from") or "")[:12],
-                    str(_d.get("to") or "")[:12])
-            _line = ("gate receipt verified: measured %s; merge tree %s%s "
-                     "(surface: %s)" % (receipt_sha[:12] or "none", sha[:12],
-                                        _delta_txt, str(rec.get("surface") or "unknown")))
-            self._log(_line)
-            self._handoff("run_integration_tests", _line)
-            return ""
-        _cap = (MAX_GATE_RECEIPT_RERUNS_STALE
-                if state == GATE_RECEIPT_STATE_STALE
-                else MAX_GATE_RECEIPT_RERUNS_NO_RECEIPT)
-        self._receipt_void_rounds = int(getattr(self, "_receipt_void_rounds", 0) or 0) + 1
-        _n = self._receipt_void_rounds
-        _void = {"state": state, "reason": reason, "receipt_sha": receipt_sha,
-                 "head_sha": sha, "last_stage": last_stage, "round": _n,
-                 "cap": _cap, "at": self._now_epoch()}
-        self.meta["gate_receipt_void"] = _void
-        if rec:
-            rec["merge_face"] = {
-                "receipt_sha": receipt_sha,
-                "land_sha": str(rec.get("verified_sha") or receipt_sha),
-                "surface": str(rec.get("surface") or ""),
-                "deltas": list(deltas),
-                "void": dict(_void),
-                "verified_at": int(rec.get("verified_at") or 0)}
-            self.meta["gate_receipt"] = rec
-        _text = gate_receipt_void_text(state, reason, receipt_sha, sha,
-                                       last_stage, _n, _cap,
-                                       conflict_rounds=int(getattr(
-                                           self, "_conflict_rounds", 0) or 0))
-        self._log(_text)
-        self._handoff("run_integration_tests", _text)
-        if state == GATE_RECEIPT_STATE_UNPROVABLE:
-            # Never spend a suite round here: a round cannot repair the resolver.
-            # After the wake the counter resets and the guard re-evaluates
-            # (retry_qc re-arms it without a wasted round).
-            await self._blocked("merge_check", _text)
-            self._receipt_void_rounds = 0
-            return "stopped"
-        if _n > _cap:
-            # The cap is spent: stop for a human. After the wake the counter
-            # resets, so retry_qc gets one genuine attempt (a gate round).
-            await self._blocked("merge_check", _text)
-            self._receipt_void_rounds = 0
-            return "rerun_gate"
-        return "rerun_gate"
-
-    async def _record_merge_line_delta(self, checks: Any,
-                                       main_sync_this_pass: bool) -> None:
-        """Record a move the merge line itself made, as a NAMED delta.
-
-        Causes: `main_sync` (this pass merged main), `merge_check_acts` (the
-        in-write-set self-heal committed) and `foreign_repair:<sha>` (the
-        out-of-write-set repair committed). A delta is written ONLY when the
-        head actually moved, so a note that fired without a commit (a status
-        failure, a MERGE_HEAD round, a refusal, an exception) never mints one.
-
-        This keeps the 261009 ruling: another ticket's merge must not void this
-        ticket's proof. The face's `land_sha` is refreshed to the new head (K2),
-        so the tree the merge will land is named truthfully.
-        """
-        rec = self.meta.get("gate_receipt")
-        if not isinstance(rec, dict) or not rec:
-            return
-        deltas = [d for d in (rec.get("deltas") or []) if isinstance(d, dict)]
-        base = (str(deltas[-1].get("to") or "") if deltas
-                else str(rec.get("receipt_sha") or ""))
-        ok, sha, err = await self._lane_head()
-        if not ok or not sha:
-            self._log("merge-line delta not recorded (head unresolved): %s"
-                      % (err or "unknown"))
-            return
-        if base and sha == base:
-            return
-        causes = gate_receipt_delta_causes(main_sync_this_pass, checks)
-        _at = self._now_epoch()
-        deltas.append({"from": base, "to": sha,
-                       "cause": "+".join(causes) or "unnamed",
-                       "at": _at})
-        rec["deltas"] = deltas
-        _mf = rec.get("merge_face") if isinstance(rec.get("merge_face"), dict) else {}
-        _mf["land_sha"] = sha
-        _mf["deltas"] = [dict(d) for d in deltas]
-        _mf["verified_at"] = int(_mf.get("verified_at") or 0) or _at
-        rec["merge_face"] = _mf
-        self.meta["gate_receipt"] = rec
-        _line = ("gate receipt delta: %s -> %s (%s); the receipt still measured %s"
-                 % (str(base or "none")[:12], sha[:12],
-                    "+".join(causes) or "unnamed",
-                    str(rec.get("receipt_sha") or "none")[:12]))
-        self._log(_line)
-        self._handoff("run_integration_tests", _line)
-
-    def _refresh_integ_receipt_face(self, receipt, *, surface: str,
-                                    why: str) -> None:
-        """Replace the receipt face with the run that decided the pass.
-
-        In place: the ONE AST-visible `self.results["run_integration_tests"] = {`
-        assignment must stay unique (`test_260929_integ_gate_settlement.py`
-        parses it). The status rule is unchanged: an environment red never fails
-        the stage.
-        """
-        face = self.results.get("run_integration_tests")
-        if not isinstance(face, dict):
-            return
-        try:
-            ran = int(getattr(receipt, "ran", 0) or 0)
-            passed = int(getattr(receipt, "passed", 0) or 0)
-            failed = int(getattr(receipt, "failed", 0) or 0)
-            env_fail = int(getattr(receipt, "env_fail", 0) or 0)
-        except (TypeError, ValueError):
-            ran = passed = failed = env_fail = 0
-        err = str(getattr(receipt, "error", "") or "")
-        face["status"] = "failed" if (err or failed) else "ok"
-        face["summary"] = ("integration gate closing run (%s): %d ran / %d passed / "
-                           "%d failed / %d env-red%s | surface: %s"
-                           % (why, ran, passed, failed, env_fail,
-                              (" | " + err) if err else "", surface))
-        try:
-            face["evidence"] = json.dumps(list(getattr(receipt, "details", None) or []),
-                                          ensure_ascii=False)[:4000]
-        except (TypeError, ValueError):
-            pass
-        face["closing"] = True
-        face["surface"] = surface
-        face["gen"] = self._gen("run_integration_tests")
-
-    async def _accept_closing_receipt(self, receipt) -> None:
-        """The closing run became the pass basis: make the face and the anchor say so.
-
-        Without this the ticket merges on a receipt face written by an earlier
-        round (the reported "a failed receipt was the signature basis" shape).
-        Armed-only, same rule as every other new command site.
-        """
-        if not _gate_receipt_arm(workflow, self):
-            return
-        _surface = gate_receipt_surface(
-            closing=True, fast_set=is_develop_buffer_ticket(self.meta))
-        self._refresh_integ_receipt_face(receipt, surface=_surface,
-                                        why="the pass basis")
-        _anchor = await self._record_gate_receipt_anchor(receipt, closing=True,
-                                                        surface=_surface)
-        # the face key follows the anchor, so the receipt identity on the face
-        # is the tree this closing run measured (state-only write)
-        _face = self.results.get("run_integration_tests")
-        if isinstance(_face, dict):
-            _face["receipt_sha"] = str(_anchor.get("receipt_sha") or "")
-            _face["receipt_at"] = int(_anchor.get("receipt_at") or 0)
 
     def _tests_env_red_names(self, cur_integ):
         """B2（宿主 260929 令）环境红**具名**名单读面——唯一认的通道=闸回执的
@@ -6519,17 +6008,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                         _cf_err = str(getattr(_cf, "error", "") or "")
                         self.meta["file_blast_radius_trace"] = {
                             "changed_files": _cf_files, "error": _cf_err}
-                        if workflow.patched(CHANGED_FILES_BRANCH_TRACE_PATCH_ID):
-                            # t261029-18: which branch each scope was measured on. A
-                            # placeholder that had to fall back to the root-tree name is
-                            # then readable on the ticket face after the worker log rolls.
-                            _cf_resolved = [str(x) for x in
-                                            (getattr(_cf, "resolved", None) or [])]
-                            self.meta["file_blast_radius_trace"]["resolved_branches"] = \
-                                _cf_resolved
-                            if _cf_resolved:
-                                self._log("changed-files resolved branches: %s"
-                                          % ", ".join(_cf_resolved))
                         if _cf_err:
                             # fail-closed 留痕：清单不可得 ≠ 无改动，恒全跑
                             self._log("文件级爆炸半径：改动清单不可得（%s）——恒全跑"
@@ -6871,18 +6349,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 _wf_ident = str(getattr(ir, "worker_identity", "") or "")
                 _wf_stamp = getattr(ir, "code_stamp", None) or {}
                 _wf_line = shared.worker_verified_line(_wf_ident, _wf_stamp)
-                # t261031-20: anchor the receipt on the tree this round judged.
-                # The anchor is resolved BEFORE the face write, so the face key
-                # and `meta.gate_receipt.receipt_sha` are one fact. Armed-only
-                # (patched, or the operator arm): an unarmed replay emits no
-                # command here (KI-061).
-                _rec_face: Dict[str, Any] = {"receipt_sha": "", "receipt_at": 0,
-                                            "surface": ""}
-                if _gate_receipt_arm(workflow, self):
-                    _rec_face = await self._record_gate_receipt_anchor(
-                        ir, closing=False,
-                        surface=gate_receipt_surface(closing=False,
-                                                     targeted=run_only))
                 self.results["run_integration_tests"] = {
                     "status": "failed" if (ir.error or ir.failed) else "ok",
                     "summary": "集成测试：%d 跑 / %d 过 / %d 败 / %d 环境红%s%s%s%s%s%s"
@@ -6894,11 +6360,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     "evidence": _ms_evi + json.dumps(ir.details, ensure_ascii=False)[:4000],
                     "worker_identity": _wf_ident,
                     "code_stamp": _wf_stamp,
-                    # t261031-20: additive receipt identity + surface. The status
-                    # rule above is unchanged (L11 pins that literal).
-                    "receipt_sha": str(_rec_face.get("receipt_sha") or ""),
-                    "receipt_at": int(_rec_face.get("receipt_at") or 0),
-                    "surface": str(_rec_face.get("surface") or ""),
                     "gen": 0}
                 self._finish("run_integration_tests", by="run_integration_tests",
                              evidence="; ".join("%s:%s" % (d.get("name"),
@@ -7074,9 +6535,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                        % (",".join(_new_red) or "启动级 error"))
                             continue
                         self._log("收口全量跑零新增红——pass 判决成立（放行只认全量）")
-                        # t261031-20: the pass basis is now the closing run; the
-                        # face and the anchor must say so (armed-only).
-                        await self._accept_closing_receipt(closing)
                     # t260917-09：连续语义复位点——pass=收敛，tests-fault 连续计数清零
                     # （留痕要求②）；门关=旧历史逐字旧行为。
                     if workflow.patched(TESTS_STREAK_PATCH_ID):
@@ -7506,9 +6964,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                    % (",".join(_new_red) or "启动级 error"))
                         continue
                     self._log("收口全量跑零新增红——pass 判决成立（放行只认全量）")
-                    # t261031-20: the pass basis is now the closing run; the face
-                    # and the anchor must say so (armed-only).
-                    await self._accept_closing_receipt(closing)
                 if verdict == "pass" or authz_advance:
                     # t260917-09：连续语义复位点——pass=收敛、人工接受判决=收敛
                     # （authz_advance 两面都复位；R2 伪 verdict 复用 tests_round_step）。
@@ -7901,18 +7356,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
 
             # 4) merge_check (programmatic, no agent)
             if phase == "merge_check":
-                # t261031-20: the last mechanical door. The guard runs BEFORE
-                # `_enter` and BEFORE the main sync on purpose: it judges this
-                # ticket's own stages, never main's movement. A void returns to
-                # the gate, so the receipt and the merged tree are one fact.
-                # Armed-only: an unarmed replay schedules no command here.
-                if _gate_receipt_arm(workflow, self):
-                    _g_act = await self._gate_receipt_guard()
-                    if _g_act == "rerun_gate":
-                        phase = "run_integration_tests"
-                        continue
-                    if _g_act == "stopped":
-                        continue
                 self._enter("merge_check")
                 # t261002-10：重并 main 再重跑在检（retry_qc 在 merge_check 唤醒的路径
                 # 由此到达；首轮到达时已追平=is-ancestor 快路径零动作幂等）。否则开票后
@@ -7922,24 +7365,12 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 # 冲突 → 既有消解回路（rework 回 implement）；不可达/非冲突失败 → 响亮
                 # blocked（step_id 点名 merge_check），绝不静默跳过同步继续检查。
                 # **判据零改动**：只改被检查的树，merge_check 四项判定一字不放宽。
-                # t261031-20: capture the main-sync receipt object BEFORE the call.
-                # `_main_sync_before_gate` replaces meta["main_sync"] with a new
-                # dict on every sync, so identity tells "this pass merged main"
-                # apart from a stale receipt left by an earlier pass.
-                _ms_prev = self.meta.get("main_sync")
                 if workflow.patched(MAIN_SYNC_AT_MERGE_CHECK_PATCH_ID):
                     _ms = await self._main_sync_before_gate(step_id="merge_check")
                     if _ms.get("phase"):
                         phase = str(_ms["phase"])
                     if _ms.get("stop"):
                         continue
-                _ms_this_pass = False
-                if _gate_receipt_arm(workflow, self):
-                    _ms_now = self.meta.get("main_sync")
-                    _ms_this_pass = (
-                        isinstance(_ms_now, dict)
-                        and _ms_now is not _ms_prev
-                        and str(_ms_now.get("mode") or "") == "merged")
                 raw = await workflow.execute_activity(
                     merge_check,
                     MergeCheckArgs(ticket_id=self.ticket_id,
@@ -7955,6 +7386,14 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                                    # degrades to the old caliber, byte for byte
                                    # (legacy).
                                    base_other_ref=self._dev_buffer_write_set_other_side(),
+                                   # t261031-34 (KI-447): the declared develop line, so
+                                   # the write-set item and the foreign-repair population
+                                   # can tell landed line content from this ticket's write.
+                                   # Patched: an old history passes no line id (pre-fix
+                                   # caliber, byte for byte).
+                                   develop_line=(str(self.meta.get("develop_line") or "")
+                                                 if workflow.patched(LINE_CONTENT_PATCH_ID)
+                                                 else ""),
                                    write_set=self._effective_write_set(),
                                    path_gate=bool(self.meta.get("path_gate")),
                                    path_gate_rules=dict(self.meta.get("path_gate_rules") or {}),
@@ -7989,14 +7428,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     conflict_files=[str(x) for x in (raw.get("conflict_files") or [])],
                     merge_tree_excerpt=str(raw.get("merge_tree_excerpt") or ""),
                     write_set_history=[str(x) for x in (raw.get("write_set_history") or [])])
-                # t261031-20: the merge line itself may have moved the tree after
-                # the receipt (a main sync, the in-write-set self-heal, the
-                # out-of-write-set repair). Record that as a NAMED delta, never as
-                # a new receipt identity, and only when the head really moved.
-                # This keeps the 261009 ruling: another ticket's merge never
-                # voids this ticket's proof.
-                if _gate_receipt_arm(workflow, self):
-                    await self._record_merge_line_delta(mc.checks, _ms_this_pass)
                 # t261009-58: the write-set history rides on the ticket face (who
                 # widened, why, when) — a reviewer never reconstructs it from the
                 # quarantine diffs.
@@ -8757,13 +8188,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         if _counter_reset_active(workflow):
             self._conflict_rounds = 0
             self._prev_conflict_files = []
-        # t261031-20: a human send-back opens a new gate-receipt window. This
-        # write stays OUTSIDE the gate above on purpose: `_counter_reset_active`
-        # is False for a lane that started before E9DAA05_LANDED_AT, which is
-        # exactly the population the arm exists for, and `rework` is one of the
-        # two exits its stop text names. The write is state-only (no command),
-        # so it cannot change a command sequence on replay.
-        self._receipt_void_rounds = 0
         self._log("rework request: %s -> %s (%s); conflict-round counter reset"
                   % (req.note, req.target_stage or "(default target)", req.who))
 
@@ -8778,10 +8202,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         if _counter_reset_active(workflow):
             self._conflict_rounds = 0
             self._prev_conflict_files = []
-        # t261031-20: same rule as rework — a retry_qc opens a new gate-receipt
-        # window, and the write stays outside `_counter_reset_active` so the
-        # pre-anchor (armed) population gets its genuine attempt. State-only.
-        self._receipt_void_rounds = 0
         self.timeline.append(
             {"at": self._now_iso(), "stage": str(self.meta.get("stage") or ""),
              "state": "retry-requested",
@@ -8815,36 +8235,6 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                   "targeted gate round records a narrowed last_green_run face "
                   "(a landing anchor, never a full close)"
                   % (str(who or "?")))
-        self._touch()
-
-    @workflow.signal
-    def enable_gate_receipt_guard(self, who: str = "") -> None:
-        """t261031-20: event-gated arm for the gate-receipt guard on an IN-FLIGHT lane.
-
-        The guard sits behind `workflow.patched(GATE_RECEIPT_FRESHNESS_PATCH_ID)`,
-        and the SDK memoizes the first `patched()` verdict per instance object.
-        A lane whose first evaluation happened on replay before this code reads
-        False forever, so the patch gate cannot reach it (the population the
-        three measured tickets sit in). A NEW signal name cannot exist in a
-        pre-fix history, so the handler only runs when the event is really there:
-        an old replay is byte-identical and never arms anything.
-
-        The flag is the ONLY replayed branch input, and `_gate_receipt_arm` reads
-        it at EVERY command site the guard depends on (the anchor recorder, the
-        guard probe, the delta recorder and the closing-run face refresh). An
-        armed lane therefore mints anchors, records deltas and refreshes faces
-        exactly like a patched lane.
-
-        Idempotent: re-delivery changes nothing. The payload is coerced and never
-        raises. State-only: this handler schedules no command.
-        """
-        self._gate_receipt_guard_enabled = True
-        self.meta["gate_receipt_guard_arm"] = {
-            "enabled": True, "who": str(who or ""), "at": self._now_epoch()}
-        self._log("gate-receipt guard ARMED on this in-flight lane (who=%s): the "
-                  "next gate round records an anchor and the merge_check entry "
-                  "re-runs a receipt whose tree moved"
-                  % (str(who or "?") or "?"))
         self._touch()
 
     @workflow.signal
@@ -10067,6 +9457,12 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
                            authorizations=self._protected_authz_records(),
                            no_file_changes=bool(self.meta.get("no_file_changes")),
                            last_green_run=dict(self.meta.get("last_green_run") or {}),
+                           # t261031-34 (KI-447): the declared develop line for the
+                           # landed-line-content judgment (same marker as dev-lane;
+                           # un-patched histories pass no line id).
+                           develop_line=(str(self.meta.get("develop_line") or "")
+                                         if workflow.patched(LINE_CONTENT_PATCH_ID)
+                                         else ""),
                            # t261022 (KI-332): the foreign-repair population split
                            # (same marker as dev-lane; un-patched histories keep the
                            # legacy argument and the pre-split face verbatim).

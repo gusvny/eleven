@@ -11,9 +11,17 @@ predicates; the IO (git restore/rm/commit) lives in agent_activities
 (_repair_foreign_files), so both faces (merge_check and conflict resolution)
 judge through this one source.
 
+t261031-34 (KI-447) adds the authorship channel of the same judgment: the line is
+not a lane, and a path whose content a LANDING commit of the ticket's declared
+develop line authored is line content (`line_landing_verdict`). The hash channel
+(`line_owned`) cannot decide a path a main sync merged, and both faces used to
+hand that shape to a human. One predicate, two faces: the foreign-repair
+population in agent_activities and the write-set whitelist in verify_lane.
+
 Style follows path_gates.py: zero IO, zero subprocess, injected predicates —
 unit-testable without a repo.
 """
+import re
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 # Runtime/coordination prefixes never judged foreign here (same set as
@@ -190,6 +198,108 @@ def line_owned(path: str, own_hash: str,
         if isinstance(h, str) and h.strip() and h == own_hash:
             return True
     return False
+
+
+# ---- t261031-34 (KI-447): landed LINE content decided by authorship ----------
+# The shape: a lane based on the develop line carries line content. The line is
+# not a lane, so "main does not have it" never means "this ticket wrote it". The
+# content-hash rule (`line_owned`) decides the paths whose content is still
+# byte-identical to the line ref. It cannot decide a path whose content a main
+# sync merged (the resolution writes a third blob), and both faces then said "a
+# human decides". The decisive evidence is authorship: a commit whose subject is
+# a landing of the ticket's declared line authored this path, so the content is
+# line content. One judgment, two faces (the foreign-repair population in
+# agent_activities and the write-set whitelist in verify_lane).
+LINE_LANDING = "line_landing"
+LINE_LANDING_AMBIGUOUS = "line_landing_ambiguous"
+LINE_LANDING_NONE = "no_line_landing"
+
+#: The landing act's commit subject (develop_line.land_ticket): the line ID is the
+#: identity, the branch is not. Anchored, because a subject that merely mentions
+#: a landing elsewhere is not authorship evidence.
+LANDING_SUBJECT_RE = re.compile(
+    r"^landing\s+(?P<ticket>\S+)\s+onto\s+line\s+(?P<line>.+?)\s+"
+    r"\((?P<repo>[^)]*)\)\s*:\s*rev\s+(?P<rev>\S+)\s*$")
+
+
+def landing_subject_parts(subject: Any) -> Optional[Dict[str, str]]:
+    """The parts of a landing commit subject, or None.
+
+    Shape: `landing <ticket> onto line <line-id> (<repo>): rev <sha>`. None covers
+    every other subject (a normal commit), a malformed landing-shaped subject, and
+    non-str/blank input — the caller decides what an undecidable subject means; it
+    is never guessed into a line here.
+    """
+    if not isinstance(subject, str) or not subject.strip():
+        return None
+    m = LANDING_SUBJECT_RE.match(subject.strip())
+    if not m:
+        return None
+    parts = {k: (v or "").strip() for k, v in m.groupdict().items()}
+    if not parts.get("line") or not parts.get("ticket"):
+        return None
+    return parts
+
+
+def line_landing_verdict(subjects: Iterable, line_id: str = "") -> Tuple[str, str]:
+    """Is this path's content landed LINE content? (verdict, evidence)
+
+    `subjects` are the commit subjects that authored the path inside this lane's
+    history; `line_id` is the ticket's declared develop line. Verdicts:
+      LINE_LANDING            a landing commit of the DECLARED line authored the
+                              path: the content is line content, decided — never
+                              this ticket's write, never foreign;
+      LINE_LANDING_AMBIGUOUS  landing authorship exists but the evidence cannot
+                              name the population (no declared line, a landing of
+                              another line, a landing-shaped subject that does not
+                              parse): a human decides, and the reason says why;
+      LINE_LANDING_NONE       no landing commit authored the path: the caller
+                              keeps its own caliber (this predicate never widens
+                              a verdict by silence).
+    Malformed entries (non-str) are ambiguous, never skipped silently — a subject
+    the evidence cannot read is exactly the "cannot decide" shape.
+    """
+    declared = str(line_id or "").strip()
+    landed: List[Dict[str, str]] = []
+    shaped = 0
+    malformed = 0
+    for s in subjects or ():
+        if not isinstance(s, str) or not s.strip():
+            malformed += 1
+            continue
+        parts = landing_subject_parts(s)
+        if parts is None:
+            if s.strip().startswith("landing "):
+                shaped += 1        # a landing-shaped subject that does not parse
+            continue
+        landed.append(parts)
+    if landed:
+        if not declared:
+            return (LINE_LANDING_AMBIGUOUS,
+                    "landing commit(s) %s authored this path, but the ticket "
+                    "declares no develop line, so the line cannot be named"
+                    % ", ".join(sorted({p["ticket"] for p in landed})[:4]))
+        hit = [p for p in landed if p["line"] == declared]
+        if hit:
+            return (LINE_LANDING,
+                    "authored by landing commit(s) of the declared line %s: %s"
+                    % (declared,
+                       ", ".join(sorted({"%s (%s)" % (p["ticket"], p["rev"][:7])
+                                         for p in hit})[:4])))
+        return (LINE_LANDING_AMBIGUOUS,
+                "landing commit(s) authored this path but for line(s) %s, not the "
+                "declared line %s"
+                % (", ".join(sorted({p["line"] for p in landed})[:4]), declared))
+    if shaped:
+        return (LINE_LANDING_AMBIGUOUS,
+                "%d landing-shaped commit subject(s) authored this path but did "
+                "not parse (expected 'landing <ticket> onto line <line> (<repo>): "
+                "rev <sha>')" % shaped)
+    if malformed:
+        return (LINE_LANDING_NONE,
+                "%d malformed authoring subject(s) read as no landing evidence"
+                % malformed)
+    return LINE_LANDING_NONE, "no landing commit authored this path"
 
 
 def importers_remain(tree_root, module_paths: Iterable,

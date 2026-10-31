@@ -63,6 +63,16 @@ lane=code（代码道，泳道）——**全配置驱动（t260901-08，契约�
       or a failed tip diff, judges nothing and reds by name
       (`other_tip_unresolved` / `other_tip_diff_failed`). Absent `base_other_tip`
       = the pre-t261029-64 caliber, byte for byte.
+      t261031-34 (KI-447, landed line content): the caller may pass `develop_line`,
+      the ID of the develop line a develop-buffer ticket lands on. A file whose
+      content a LANDING commit of THAT line authored is line content — the line is
+      not a lane — so it is never judged as this ticket's out-of-write-set write;
+      the skip is NAMED with the landing commits. The decision is
+      foreign_write.line_landing_verdict (one judgment, also read by the engine's
+      foreign-repair population). The ticket's own non-merge commit wins, so the
+      rule is no amnesty for a later out-of-write-set write, and authorship the
+      evidence cannot name stays AMBIGUOUS, judged, with the reason on the item.
+      Absent = the pre-t261031-34 caliber, byte for byte.
       判据优先级=调用方 write_set
      （工单精判，空列表=零写集，任何改动即红）> verify.yaml write_allow（粗判据）；
      协调目录（.sandbar/ 老 .suyou/）与 .dsh/ 引擎运行时目录一律不判（与 merge_check SETTLE_PATHSPEC 同口径）。  # naming-compat
@@ -90,6 +100,7 @@ from shared import (  # noqa: E402
     SUPPLY_FAIL_SIG, SUPPLY_SIDE_SIG, SUPPLY_STAGE_TIMEOUT_SIG, SUPPLY_TIMEOUT_SIG,
 )
 import path_gates  # noqa: E402  # t261004-25: ticket-test-face predicate (stdlib-only, single source)
+import foreign_write  # noqa: E402  # t261031-34: landed-line-content judgment (one source, shared with the repair face)
 
 
 def _ws_refuse(f, judge, ticket_id):
@@ -142,6 +153,16 @@ TOOL = {
                                               '(base == base_other) is always named on the record. Fail-closed: an unresolvable tip '
                                               'or a failed tip diff is a NAMED red and judges nothing (other_tip_unresolved / '
                                               'other_tip_diff_failed). Absent/empty = the pre-t261029-64 caliber, byte for byte.'},
+            'develop_line': {'type': 'string',
+                             'description': 'code lane (t261031-34, KI-447): the ID of the develop line this ticket lands '
+                                            'on (for example develop-buffer). When present, a file whose content a LANDING '
+                                            'commit of that line authored (subject "landing <ticket> onto line <line> '
+                                            '(<repo>): rev <sha>") is line content and is never judged as this ticket\'s '
+                                            'out-of-write-set write — the line is not a lane. The skip is NAMED on the '
+                                            'record with the landing commits, and a file this ticket\'s own non-merge commit '
+                                            'also authored is judged as usual. Authorship the evidence cannot name (another '
+                                            'line, an unparsable landing subject, no declared line) is named AMBIGUOUS and '
+                                            'still judged. Absent/empty = the pre-t261031-34 caliber, byte for byte.'},
             'write_set': {'type': 'array', 'items': {'type': 'string'},
                           'description': 'code 道：当前工单声明写集（文件或目录前缀）；提供时优先于 verify.yaml write_allow，空列表=零写集。integ 道：票面写集——宿主 260914 口径下**不再**参与排除例外分支判定，仅用于旧口径命中面留痕（回执 pool_exclude.former_force_assets）'},
             'apply_skip_pools': {'type': 'boolean',
@@ -356,6 +377,80 @@ def _diff_names(base, root):
     八进制转义串，任何写集前缀都匹配不上，中文名文件必被误判越界）。
     crop=None：本清单逐行判写集，裁剪即假红+漏检（KI-015），不许裁。"""
     return _sh(['git', '-c', 'core.quotepath=false', 'diff', '--name-only', base + '...HEAD'], root, crop=None)
+
+# ---- t261031-34 (KI-447): landed line content is decided by AUTHORSHIP ------
+# A lane based on the develop line carries line content. The line is not a lane, so
+# "main does not have it" never means "this ticket wrote it". The content-hash rule
+# (foreign_write.line_owned) decides the paths still byte-identical to the line ref;
+# the tip rule (t261029-64) decides the paths the line's tip already carries. Neither
+# decides a path a main sync MERGED: the resolution writes a third blob, so the path
+# reads as this ticket's write while its content is line content (measured on
+# t261031-17: server/engine/dev_lane.py, authored by landing bb6635b of line
+# develop-buffer). The decisive evidence is authorship, and the judgment itself is
+# foreign_write.line_landing_verdict - the same one the foreign-repair population
+# reads, so the two faces never disagree.
+
+def _line_exclude_refs(root, refs):
+    """The refs that resolve among `refs` (order kept, de-duplicated).
+
+    `main` and the other side's tip are the two baselines this ticket's OWN commits
+    are measured against. An unresolvable ref is dropped, never guessed: the
+    authorship query then answers for the refs the repo really has."""
+    out = []
+    for r in refs:
+        ref = str(r or '').strip()
+        if not ref or ref in out:
+            continue
+        rc, _o = _sh(['git', 'rev-parse', '--verify', '--quiet', ref + '^{commit}'], root)
+        if rc == 0:
+            out.append(ref)
+    return out
+
+
+def _line_content_verdict(root, path, line_id, exclude_refs=()):
+    """Is this path's content landed LINE content? -> (verdict, evidence).
+
+    The whitelist asks "did THIS TICKET write this file?". A path the declared
+    line's landing commits authored is line content, not this ticket's write. Two
+    guards keep the answer honest:
+      - the ticket's OWN non-merge commits win: a path this ticket's own commit
+        authored as well is judged as usual, so a landing in the past is never an
+        amnesty for a later out-of-write-set write. Merge commits never vote - a
+        worker-settled conflict resolution is the merge act, not the ticket's
+        write, and the merge receipt names those on their own item.
+      - an evidence query that cannot run answers AMBIGUOUS, and the caller keeps
+        its own caliber (fail-closed to the pre-fix verdict) while naming why.
+    Answers (foreign_write.LINE_LANDING_NONE, '') whenever the pre-t261031-34
+    caliber must stay in charge."""
+    line_id = str(line_id or '').strip()
+    if not line_id or not str(path or '').strip():
+        return foreign_write.LINE_LANDING_NONE, ''
+    own_cmd = ['git', '-c', 'core.quotepath=false', 'log', '--no-merges',
+               '--format=%s', 'HEAD']
+    nots = [r for r in exclude_refs if str(r or '').strip()]
+    if nots:
+        own_cmd += ['--not'] + nots
+    own_cmd += ['--', path]
+    rc_own, out_own = _sh(own_cmd, root, crop=None)
+    if rc_own != 0:
+        return (foreign_write.LINE_LANDING_AMBIGUOUS,
+                'the authorship query failed (%s), so landed line content cannot '
+                'be told apart from this ticket\'s write'
+                % (out_own or '').strip()[-160:])
+    # A landing commit is never the ticket's own write, whatever the excluded refs
+    # happened to be (a caller that passed no other-side tip still gets the right
+    # answer here instead of reading the line's landed commits as the ticket's).
+    _own = [ln for ln in (out_own or '').splitlines() if ln.strip()]
+    if any(foreign_write.landing_subject_parts(s) is None for s in _own):
+        return foreign_write.LINE_LANDING_NONE, ''   # this ticket wrote it: judge
+    rc, out = _sh(['git', '-c', 'core.quotepath=false', 'log', '--format=%s',
+                   'HEAD', '--', path], root, crop=None)
+    if rc != 0:
+        return (foreign_write.LINE_LANDING_AMBIGUOUS,
+                'the landing-authorship query failed (%s)'
+                % (out or '').strip()[-160:])
+    return foreign_write.line_landing_verdict(
+        [ln for ln in (out or '').splitlines() if ln.strip()], line_id)
 
 
 # ---------------- content 道 ----------------
@@ -738,6 +833,9 @@ def _code(a):
         tip_skipped = []       # files byte-identical to the other side's tip
         tip_sha = ''           # the tip the content rule compared against (receipts)
         differs_from_tip = None  # set of paths whose content moved between tip and HEAD
+        landing_skipped = []   # t261031-34: files authored by a landing of the declared line
+        landing_evidence = {}  # path -> evidence of the landing that authored it
+        landing_ambiguous = {}  # path -> why the authorship evidence cannot decide
         if rc != 0:
             items.append({'detail': 'git diff 失败: %s' % out[-200:]})
         else:
@@ -792,6 +890,13 @@ def _code(a):
                           'reason_code': 'baseline_diff_empty'})
         if basis_err:          # unusable basis: judge nothing (never a partial pass)
             entries = []
+        # t261031-34 (KI-447): the declared develop line's landed content is settled
+        # by authorship. Only a develop-line ticket passes the line ID; absent = the
+        # pre-t261031-34 caliber, byte for byte (legacy tickets and every replay that
+        # recorded no line).
+        line_id = str(a.get('develop_line') or '').strip()
+        line_not_refs = (_line_exclude_refs(root, ['main', tip_sha])
+                         if line_id else [])
         if entries:
             if has_ws:
                 judge, judge_src = ws, '工单 write_set'
@@ -817,6 +922,25 @@ def _code(a):
                     # notes/ is not this ticket's notes/ write either.
                     tip_skipped.append(f)
                     continue
+                if line_id:
+                    _lverdict, _lwhy = _line_content_verdict(
+                        root, f, line_id, line_not_refs)
+                    if _lverdict == foreign_write.LINE_LANDING:
+                        # t261031-34 (KI-447): a landing commit of the declared line
+                        # authored this path, so its content is line content - the
+                        # line is not a lane, and "main does not have it" is not
+                        # authorship. Decided here (the audit trail is named on the
+                        # record and on the merge receipt), never handed to a human.
+                        landing_skipped.append(f)
+                        landing_evidence[f] = _lwhy
+                        continue
+                    if _lverdict == foreign_write.LINE_LANDING_AMBIGUOUS:
+                        # The evidence cannot name the population (another line, an
+                        # unparsable landing subject, no declared line, an
+                        # unreadable query): the pre-fix caliber keeps judging, and
+                        # the reason rides on the red item so a human decides with
+                        # the facts in hand.
+                        landing_ambiguous[f] = _lwhy
                 # 宿主令 260904 机械闸：dev-lane 工单禁写 notes/（票据/知识库账本归
                 # main 侧直管）。独立于写集判定——声明了 notes/ 也拦（防自授权）；
                 # D 同拦（删账=丢账：notes 是账本，不是运行时残留，不适用清退放行）。
@@ -834,7 +958,17 @@ def _code(a):
                         items.append({'detail': '敏感/运行时路径入库（必须 untrack）：' + f})
                     continue
                 if not _in_write_set(f, judge) and _ws_refuse(f, judge, ticket_id)[0]:
-                    items.append({'detail': '越界写: %s（判据=%s：%s）' % (f, judge_src, '、'.join(judge[:6]))})
+                    _item = {'detail': '越界写: %s（判据=%s：%s）'
+                                       % (f, judge_src, '、'.join(judge[:6]))}
+                    if f in landing_ambiguous:
+                        # t261031-34: a named escape, not a guess - the evidence
+                        # could not decide, so the verdict stays red and the
+                        # reason is readable by the person who must decide.
+                        _item['detail'] += (' | t261031-34 landing authorship '
+                                            'AMBIGUOUS: %s - a human decides'
+                                            % landing_ambiguous[f])
+                        _item['reason_code'] = 'landing_authorship_ambiguous'
+                    items.append(_item)
                     continue
                 if not _in_write_set(f, judge):
                     # t261004-25: out of the write set but on the ticket test face —
@@ -854,6 +988,22 @@ def _code(a):
                          % (len(tip_skipped), tip_sha[:12], ', '.join(tip_skipped[:6]),
                             '' if len(tip_skipped) <= 6
                             else ' (+%d more, all named by count)' % (len(tip_skipped) - 6)))
+        if landing_skipped:
+            notes.append('t261031-34: %d file(s) read as LANDED content of the declared '
+                         'line %s (a landing commit of that line authored them; the line '
+                         'is not a lane) and not judged: %s%s | decided by: %s'
+                         % (len(landing_skipped), line_id,
+                            ', '.join(landing_skipped[:6]),
+                            '' if len(landing_skipped) <= 6
+                            else ' (+%d more, all named by count)' % (len(landing_skipped) - 6),
+                            '; '.join('%s: %s' % (k, landing_evidence[k])
+                                      for k in landing_skipped[:3])))
+        if landing_ambiguous:
+            notes.append('t261031-34: %d file(s) carry landing authorship the evidence '
+                         'cannot decide - a human decides: %s'
+                         % (len(landing_ambiguous),
+                            '; '.join('%s: %s' % (k, v)
+                                      for k, v in list(landing_ambiguous.items())[:4])))
         if base_other and base_other == base:
             # t261029-64: a degenerate basis is a FACT on the record, never a
             # silent degradation. What decided the skips is named too, so a

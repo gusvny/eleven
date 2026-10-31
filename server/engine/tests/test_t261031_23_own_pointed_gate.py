@@ -51,6 +51,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 HERE = Path(__file__).resolve().parent
 ENGINE = HERE.parent
 sys.path.insert(0, str(ENGINE))
@@ -119,6 +121,45 @@ def _run(coro):
         return loop.run_until_complete(coro)
     finally:
         loop.close()
+
+
+def main_shape_only_reason():
+    """t261031-34 (KI-447): is this tree's single writer MAIN-shaped for the
+    un-patched replay payload?
+
+    The un-patched branch of `_quick_gate_round` hands the DECLARED list to
+    `_integ_run_args` — the single writer. What the payload then carries is the
+    WRITER's rule, and the rule differs by tree shape: main's writer forwards the
+    list unchanged, while a tree carrying t261029-18's line content unions the
+    ticket's own names INSIDE the writer, so the union rides every call site,
+    patched or not. "The un-patched replay sends the declared scope alone" is
+    therefore a claim about a MAIN-SHAPED workflow; on a line-shaped tree the same
+    history already recorded the union.
+
+    Returns "" on a main-shaped tree and the NAMED reason on a line-shaped one.
+    This is a decision the gate can read (pytest prints the reason), never a silent
+    skip: the behavioural claim stays pinned by
+    `test_unpatched_replay_payload_is_what_the_pre_patch_branch_records` on BOTH
+    shapes.
+    """
+    wf = _wf()
+    saved = dev_lane.workflow
+    dev_lane.workflow = _StubWorkflow(_ir())   # the writer reads patched()/now() only
+    try:
+        sent = wf._integ_run_args([DECLARED], own_names=[OWN])
+    except (TypeError, AttributeError):   # an older writer: no union in the writer
+        return ""
+    finally:
+        dev_lane.workflow = saved
+    if list(getattr(sent, "only_names", []) or []) == [DECLARED]:
+        return ""
+    return ("main-shape-only (t261031-34, KI-447): this tree's single writer "
+            "_integ_run_args unions the ticket's own names into a pointed list "
+            "(t261029-18 line content), so an un-patched replay of a history "
+            "recorded on THIS shape carries the union too (%r); the main-shaped "
+            "payload claim is pinned by "
+            "test_unpatched_replay_payload_is_what_the_pre_patch_branch_records"
+            % (list(getattr(sent, "only_names", []) or []),))
 
 
 def _drive(scope, result=None, union_patched=True):
@@ -245,10 +286,51 @@ class TestRoundSendsUnion:
 
     def test_unpatched_replay_sends_the_declared_scope_alone(self):
         # an in-flight history evaluates the new gate un-patched: the recorded
-        # byte shape (declared scope only, own face as before) must come back
+        # byte shape (declared scope only, own face as before) must come back.
+        # t261031-34 (KI-447): this payload is a MAIN-SHAPED history's record — the
+        # union of a line-shaped tree lives in the single writer, not at the call
+        # site. The case is NAMED-skipped on such a tree, and the behavioural
+        # claim stays pinned by the shape-independent case below.
+        _why = main_shape_only_reason()
+        if _why:
+            pytest.skip(_why)
         args = _drive(_scope(), union_patched=False)
         assert args.only_names == [DECLARED]
         assert args.own_names == [OWN]
+
+    def test_unpatched_replay_payload_is_what_the_pre_patch_branch_records(self):
+        """The behavioural claim of the un-patched arm, pinned on BOTH code shapes.
+
+        A history recorded before this ticket's gate replays exactly the call it
+        recorded: the un-patched branch hands the DECLARED list to the single
+        writer and never routes through the new union helper. The payload is then
+        whatever that same tree's writer makes of that list — main's writer: the
+        declared scope alone; a line-shaped writer: the same union it applied when
+        the history was recorded. Either way this is a replay, not a new decision.
+        """
+        wf = _wf()
+        sent = []
+        real = wf._integ_run_args
+
+        def _spy(only_names=(), own_names=()):
+            sent.append(list(only_names))
+            return real(only_names, own_names=own_names)
+
+        wf._integ_run_args = _spy
+        stub = _StubWorkflow(_ir(), union_patched=False)
+        saved = dev_lane.workflow
+        dev_lane.workflow = stub
+        try:
+            _run(wf._quick_gate_round(_scope()))
+            recorded = real([DECLARED], own_names=[OWN])
+        finally:
+            dev_lane.workflow = saved
+        assert sent == [[DECLARED]], (
+            "the un-patched branch must hand the DECLARED list to the writer, "
+            "never the union helper's output")
+        assert stub.calls[0][1].only_names == list(recorded.only_names), (
+            "the payload is exactly what this tree recorded for the same call")
+        assert stub.calls[0][1].own_names == [OWN]
 
 
 # ======================================================================

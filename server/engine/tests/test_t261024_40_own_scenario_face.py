@@ -114,7 +114,8 @@ class ClosingPointedUnion(unittest.TestCase):
     exactly why the gap stayed invisible for two closing attempts).
     """
 
-    def _drive(self, own_members, union_patched=True, own_patched=True):
+    def _drive(self, own_members, union_patched=True, own_patched=True,
+               spy=None):
         calls = []
 
         class _Stub:
@@ -155,6 +156,15 @@ class ClosingPointedUnion(unittest.TestCase):
             wf.ticket_id = "t-ut"
             wf._gens = {"run_integration_tests": 1}
             wf.timeline = []
+            if spy is not None:
+                # t261031-34: record what the call site hands the single writer
+                _real = wf._integ_run_args
+
+                def _wrap(only_names=(), own_names=(), _real=_real):
+                    spy.append(list(only_names))
+                    return _real(only_names, own_names=own_names)
+
+                wf._integ_run_args = _wrap
             asyncio.run(wf._closing_full_run())
         finally:
             dev_lane.workflow = old
@@ -179,11 +189,87 @@ class ClosingPointedUnion(unittest.TestCase):
         args, _face = self._drive(["own-1", "fast-a"])
         self.assertEqual(args.only_names, ["fast-a", "fast-b", "own-1"])
 
+    def _main_shape_only_reason(self):
+        """t261031-34 (KI-447): is this tree's single writer MAIN-shaped?
+
+        The un-patched branch hands the DECLARED fast set to `_integ_run_args` —
+        the single writer. Main's writer forwards the list; a tree carrying
+        t261029-18's line content unions the own names INSIDE the writer, so the
+        union rides every call site, patched or not. "The un-patched replay passes
+        the fast set alone" is a claim about a MAIN-SHAPED workflow, and the skip
+        that carries it is NAMED (a reason the gate prints), never silent. The
+        behavioural claim stays pinned by the shape-independent case below.
+        """
+        wf = object.__new__(dev_lane.DevLaneWorkflow)
+        wf.ticket_id = "t-ut"
+        wf.meta = {"lane_version": "develop-buffer-v1", "worktree": "/tmp/wt",
+                   "log": [], "stage": "run_integration_tests",
+                   "write_set": ["server/engine/dev_lane.py"], "handoffs": []}
+        wf._gens = {"run_integration_tests": 1}
+        old_wf = dev_lane.workflow
+        dev_lane.workflow = SimpleNamespace(
+            patched=lambda *a, **k: True, now=lambda: NOW,
+            logger=SimpleNamespace(info=_NOOP, warning=_NOOP, warn=_NOOP),
+            upsert_memo=lambda *a, **k: None, sleep=lambda *a, **k: None)
+        try:
+            sent = wf._integ_run_args(["fast-a", "fast-b"], own_names=["own-1"])
+        except (TypeError, AttributeError):
+            return ""
+        finally:
+            dev_lane.workflow = old_wf
+        if list(getattr(sent, "only_names", []) or []) == ["fast-a", "fast-b"]:
+            return ""
+        return ("main-shape-only (t261031-34, KI-447): this tree's single writer "
+                "_integ_run_args unions the own names into a pointed list "
+                "(t261029-18 line content), so an un-patched replay of a history "
+                "recorded on THIS shape carries the union too (%r); the main-shaped "
+                "payload claim is pinned by "
+                "test_unpatched_replay_payload_is_what_the_pre_patch_call_recorded"
+                % (list(getattr(sent, "only_names", []) or []),))
+
     def test_unpatched_replay_passes_the_fast_set_alone(self):
         # an in-flight history evaluates the new gate un-patched: the recorded
         # byte shape (fast set only) must come back
+        _why = self._main_shape_only_reason()
+        if _why:
+            self.skipTest(_why)
         args, _face = self._drive(["own-1"], union_patched=False)
         self.assertEqual(args.only_names, ["fast-a", "fast-b"])
+        self.assertEqual(args.own_names, ["own-1"])
+
+    def test_unpatched_replay_payload_is_what_the_pre_patch_call_recorded(self):
+        """The behavioural claim of the un-patched arm, pinned on BOTH code shapes.
+
+        A history recorded before this ticket's closing gate replays exactly the
+        call it recorded: the un-patched branch hands the DECLARED fast set to the
+        single writer and never routes through the new union helper. The payload is
+        then whatever that same tree's writer makes of that list — main's writer:
+        the fast set alone; a line-shaped writer: the same union it applied when the
+        history was recorded. Either way a replay, never a new decision.
+        """
+        sent = []
+        args, _face = self._drive(["own-1"], union_patched=False, spy=sent)
+        self.assertEqual(sent, [["fast-a", "fast-b"]],
+                         "the un-patched branch must hand the fast set to the writer")
+        # the payload is what THIS tree's writer records for the same call
+        probe = object.__new__(dev_lane.DevLaneWorkflow)
+        probe.ticket_id = "t-ut"
+        probe.meta = {"lane_version": "develop-buffer-v1", "worktree": "/tmp/wt",
+                      "log": [], "stage": "run_integration_tests",
+                      "write_set": ["server/engine/dev_lane.py"], "handoffs": []}
+        probe._gens = {"run_integration_tests": 1}
+        old_wf = dev_lane.workflow
+        dev_lane.workflow = SimpleNamespace(
+            patched=lambda *a, **k: True, now=lambda: NOW,
+            logger=SimpleNamespace(info=_NOOP, warning=_NOOP, warn=_NOOP),
+            upsert_memo=lambda *a, **k: None, sleep=lambda *a, **k: None)
+        try:
+            recorded = probe._integ_run_args(["fast-a", "fast-b"],
+                                             own_names=["own-1"])
+        finally:
+            dev_lane.workflow = old_wf
+        self.assertEqual(args.only_names, list(recorded.only_names),
+                         "the payload is what this tree recorded for the same call")
         self.assertEqual(args.own_names, ["own-1"])
 
     def test_history_without_the_own_gate_keeps_both_faces_empty(self):
