@@ -6480,6 +6480,12 @@ class MergeCheckArgs:
     # of that line authored is landed line content) and the in-lane verify_lane
     # whitelist (which receives it as `develop_line`). Defaulted EMPTY so an old event
     # payload decodes unchanged and the activity keeps the pre-t261031-34 caliber.
+    # t261031-43 (KI-447 follow-up): this recorded value is the FALLBACK. The activity
+    # resolves the line from the ticket's LIVE meta first, because a running workflow's
+    # recorded arguments hold the fields its history captured at start - a field added
+    # later reads as empty forever, so the recorded value alone never reaches a ticket
+    # that was already running when the field was introduced. The field shape and its
+    # default stay as they are: every replay decodes the same bytes.
     develop_line: str = ""
 
 

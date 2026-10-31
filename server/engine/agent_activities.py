@@ -59,6 +59,7 @@ import subprocess
 import shutil
 import tempfile
 import time
+import dataclasses
 from dataclasses import dataclass, field
 
 # 260927 code_stamp：本模块被 worker 载入的时刻（shared.worker_code_stamp 读它判 stale——
@@ -6445,6 +6446,13 @@ def _foreign_repair_split_face(tree: Path, base: str, write_set: Any,
         "repair_commit": "",
         "repair_commit_paths": [],
     }
+    # t261031-43 (KI-447 follow-up): the line id this classification ran with rides on
+    # the record, so a reader can compare it with the develop_line the write-set item
+    # was judged with - the two faces must share ONE id and must not disagree. Only a
+    # ticket that declares a line carries the key: a no-line ticket's record keeps its
+    # pre-t261031-43 shape byte for byte.
+    if str(line_id or "").strip():
+        record["line_id"] = str(line_id).strip()
     # A write set the repair face cannot use makes ANY population verdict
     # meaningless (with no usable set every changed path reads foreign):
     # fail closed with the named reason and repair nothing, exactly as the
@@ -7064,6 +7072,187 @@ class WriteSetRecordResult:
     error: str = ""
 
 
+# ── t261031-43 (KI-447 follow-up, delivered by t261101-05): the declared develop
+# line is resolved AT ACTIVITY TIME ───────────────────────────────────────────
+# The defect (measured on t261031-17 right after t261031-34 landed): t261031-34
+# threaded the line into the merge_check payload from the RECORDED activity
+# argument. A running workflow's recorded arguments are what its history captured
+# when it started, so a field added later decodes as an empty string forever. The
+# fix was correct but unreachable for every ticket that was already running (the
+# same shape as KI-444, which recorded the patch-marker version of this).
+#
+# So the line is resolved here, once per merge_check call, from the ticket's LIVE
+# meta (the workflow snapshot the launcher wrote) with the recorded argument as the
+# fallback. Both faces then read one value: the write-set item (the verify_lane
+# payload) and the foreign-repair population. A ticket with no declared line
+# resolves to the empty id and keeps the pre-t261031-34 caliber byte for byte: no
+# new git work, no new receipt row, no behavior change.
+#
+# Replay discipline: only activity code changes. The workflow still records the same
+# argument, MergeCheckArgs keeps its shape and its empty default, and no command
+# sequence moves for any recorded history.
+DEVELOP_LINE_SOURCE_LIVE_META = "live-meta"
+"""Where the resolved id came from: the ticket's live meta."""
+DEVELOP_LINE_SOURCE_RECORDED = "recorded-args"
+"""Where the resolved id came from: the recorded activity argument."""
+DEVELOP_LINE_RESOLUTION_ID = "develop_line_resolution"
+"""Receipt item id of the named resolution row (t261031-43)."""
+DEVELOP_LINE_LIVE_META_TIMEOUT_SEC = 8
+"""Upper bound of the live meta query (same budget as the credential lookup read,
+which uses the same snapshot query)."""
+
+
+def _develop_line_precedence(recorded: Any, live: Any) -> Tuple[str, str]:
+    """(line id, source). The live meta wins; the recorded argument is the fallback.
+
+    Both empty answers ('', '') = the ticket declares no line, and the caller keeps
+    today's caliber exactly.
+    """
+    live_id = str(live or "").strip()
+    recorded_id = str(recorded or "").strip()
+    if live_id:
+        return live_id, DEVELOP_LINE_SOURCE_LIVE_META
+    if recorded_id:
+        return recorded_id, DEVELOP_LINE_SOURCE_RECORDED
+    return "", ""
+
+
+def _develop_line_declaration_probe(project_key: Any, line_id: Any) -> Tuple[str, str]:
+    """(state, note): is the resolved id a DECLARED line of this project?
+
+    States: 'declared' (note empty), 'undeclared' (the id is not in the project's
+    line declaration), 'unreadable' (the declaration itself could not be read, so
+    the id could not be checked), 'unchecked' (no usable project key). An id this
+    probe cannot confirm is NAMED by the caller, never silently read as "no line".
+    """
+    key = str(project_key or "").strip()
+    line = str(line_id or "").strip()
+    if not key:
+        return "unchecked", ("the project key is not readable, so the line "
+                             "declaration of %r could not be checked" % line)
+    try:
+        import develop_line  # lazy: develop_line imports this module at module level
+        lines = develop_line.load_lines(key)
+    except Exception as e:  # noqa: BLE001 - an unreadable declaration is a NAMED state
+        return "unreadable", ("the line declaration of project %s could not be read "
+                              "(%s: %s), so %r could not be checked"
+                              % (key, type(e).__name__, str(e)[:200], line))
+    if line not in lines:
+        return "undeclared", ("line %r is not declared for project %s (declared: %s)"
+                              % (line, key, ", ".join(sorted(lines)) or "(none)"))
+    return "declared", ""
+
+
+async def _read_ticket_live_meta(ticket_id: Any) -> Tuple[Optional[Dict[str, Any]], str]:
+    """(live meta, diag) of this ticket, read at activity time.
+
+    None = no live source exists in this context (not inside an activity: a direct
+    call or a unit test has no live meta, so the recorded payload is the only face,
+    and the caller emits no row). {} = the read was attempted and failed; `diag`
+    names why. Soft failure on purpose: a meta read must never break the merge gate.
+    """
+    tid = str(ticket_id or "").strip()
+    if not tid:
+        return None, ""
+    if not activity.in_activity():
+        return None, ""
+    try:
+        from client import _connect
+        client = await _connect()
+        snap = await asyncio.wait_for(
+            client.get_workflow_handle(tid).query("snapshot"),
+            timeout=DEVELOP_LINE_LIVE_META_TIMEOUT_SEC)
+    except Exception as e:  # noqa: BLE001 - soft failure, named by the caller
+        diag = "the live meta query failed (%s: %s)" % (type(e).__name__, str(e)[:200])
+        try:
+            activity.logger.warning("[%s] develop line: %s", tid, diag)
+        except Exception:  # noqa: BLE001 - logging never breaks the gate
+            pass
+        return {}, diag
+    meta = (snap or {}).get("meta") if isinstance(snap, dict) else None
+    if not isinstance(meta, dict):
+        return {}, ("the live meta snapshot carried no meta object, so the declared "
+                    "develop line could not be read")
+    return dict(meta), ""
+
+
+def _develop_line_face_note(face: Dict[str, Any]) -> str:
+    """The NAMED resolution text, or "" when there is nothing to say.
+
+    Silence is deliberate for the ordinary shapes: a ticket that declares no line at
+    all, and a ticket whose recorded argument and live meta carry the same declared
+    line (today's behavior, unchanged). Only a fact worth telling the merge human
+    produces a row.
+    """
+    line_id = str(face.get("line_id") or "")
+    source = str(face.get("source") or "")
+    recorded = str(face.get("recorded") or "")
+    live = str(face.get("live") or "")
+    live_state = face.get("live_state")
+    state = str(face.get("state") or "")
+    diag = str(face.get("live_diag") or "")
+    facts: List[str] = []
+    if source == DEVELOP_LINE_SOURCE_LIVE_META and not recorded:
+        facts.append("the recorded activity args carry no develop line (an in-flight "
+                     "history records the fields it started with, so a field added "
+                     "later reads as empty forever), so the live meta supplies it")
+    elif source == DEVELOP_LINE_SOURCE_LIVE_META and recorded != live:
+        facts.append("the recorded activity args name %r; the live meta wins"
+                     % recorded)
+    elif source == DEVELOP_LINE_SOURCE_RECORDED and live_state is True:
+        facts.append("the live meta declares no develop line; the recorded activity "
+                     "argument is used")
+    if source == DEVELOP_LINE_SOURCE_RECORDED and diag and line_id:
+        facts.append("%s; the recorded activity argument is used" % diag)
+    if not line_id and diag:
+        facts.append("%s, and the recorded activity args carry no develop line: the "
+                     "line-content judgment cannot run this round, so landed line "
+                     "content is judged as this ticket's write" % diag)
+    if state == "undeclared":
+        facts.append("%s - the line-content judgment cannot run with an undeclared "
+                     "line, so its files are judged as this ticket's write; fix "
+                     "meta.develop_line or declare the line"
+                     % str(face.get("decl_note") or ""))
+    elif state in ("unreadable", "unchecked"):
+        facts.append("%s - the line-content judgment runs on the id as given, so a "
+                     "file the line landed can still read as this ticket's write"
+                     % str(face.get("decl_note") or ""))
+    if not facts:
+        return ""
+    if not line_id:
+        return "; ".join(facts)
+    return "; ".join(["develop line %r resolved from the %s"
+                      % (line_id,
+                         "ticket's live meta" if source == DEVELOP_LINE_SOURCE_LIVE_META
+                         else "recorded activity argument")] + facts)
+
+
+async def _resolve_merge_check_develop_line(args: "MergeCheckArgs") -> Dict[str, Any]:
+    """Resolve this call's develop line from the live meta (recorded args fallback).
+
+    Returns {line_id, source, recorded, live, live_state, live_diag, project_key,
+    state, decl_note, note}. `line_id` empty = no line declared anywhere: the caller
+    keeps today's caliber byte for byte and `note` stays empty.
+    """
+    recorded = str(getattr(args, "develop_line", "") or "").strip()
+    meta, diag = await _read_ticket_live_meta(getattr(args, "ticket_id", ""))
+    live = str((meta or {}).get("develop_line") or "").strip()
+    line_id, source = _develop_line_precedence(recorded, live)
+    face: Dict[str, Any] = {
+        "line_id": line_id, "source": source, "recorded": recorded, "live": live,
+        "live_state": None if meta is None else bool(meta),
+        "live_diag": diag,
+        "project_key": str((meta or {}).get("project") or ""),
+        "state": "", "decl_note": "", "note": "",
+    }
+    if line_id:
+        state, decl_note = _develop_line_declaration_probe(face["project_key"], line_id)
+        face["state"] = state
+        face["decl_note"] = decl_note
+    face["note"] = _develop_line_face_note(face)
+    return face
+
+
 async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                                  lane_root: Path, multi: bool) -> Dict[str, Any]:
     """Single-scope merge_check core (extracted from merge_check in ticket B
@@ -7166,6 +7355,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
     foreign_own_items: List[Dict[str, Any]] = []
     foreign_record: Optional[Dict[str, Any]] = None
     try:
+        # t261031-43: the id is resolved once per merge_check call (live meta first,
+        # recorded args as the fallback); this face and the verify_lane payload below
+        # therefore read the SAME value and cannot disagree.
         _fr = _foreign_repair_check_item(
             sc["tree"], str(sc.get("branch") or ""), sc.get("write_set"),
             str(getattr(args, "ticket_id", "") or ""),
@@ -7440,6 +7632,9 @@ async def _merge_check_one_scope(args: "MergeCheckArgs", sc: Dict[str, Any],
                             # line content, not this ticket's write (the same judgment
                             # the foreign-repair population above reads). Empty = the
                             # pre-t261031-34 caliber, byte for byte.
+                            # t261031-43: the field is already RESOLVED (live meta
+                            # first, this recorded value as the fallback) by merge_check
+                            # before this scope ran, so both faces read one id.
                             "develop_line": str(getattr(args, "develop_line", "") or ""),
                             "write_set": list(eff_ws),
                             # t261004-25: pass the ticket id down — verify_lane's
@@ -8583,6 +8778,26 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
     scope_commit_counts: Dict[str, int] = {}  # t260921-09：逐仓 commit 计数（-1=查询失败）
     foreign_own_reds: List[Dict[str, Any]] = []   # t261022: per-scope refusal items
     foreign_records: List[Dict[str, Any]] = []     # t261022: the classification records
+    # t261031-43 (KI-447 follow-up): resolve the declared develop line ONCE for this
+    # call, from the ticket's live meta with the recorded argument as the fallback
+    # (see _resolve_merge_check_develop_line). The resolved id REPLACES the recorded
+    # field on the args object, so both faces - the verify_lane payload's develop_line
+    # and the foreign-repair population's line id - read one value and cannot
+    # disagree. Nothing resolved (both sources empty) leaves the args untouched: a
+    # ticket with no declared line keeps today's caliber byte for byte.
+    # A fault in the resolution never blocks the chain: the recorded argument stands.
+    _line_face: Dict[str, Any] = {"line_id": "", "note": ""}
+    try:
+        _line_face = await _resolve_merge_check_develop_line(args)
+        if _line_face.get("line_id"):
+            args = dataclasses.replace(args, develop_line=str(_line_face["line_id"]))
+    except Exception as e:  # noqa: BLE001 - fail-named, never fail-silent
+        _line_face = {"line_id": str(getattr(args, "develop_line", "") or ""),
+                      "note": ""}
+        activity.logger.warning(
+            "[%s] develop line resolution faulted (%s: %s) - the recorded activity "
+            "argument stands (pre-t261031-43 caliber for this round)",
+            args.ticket_id, type(e).__name__, str(e)[:200])
     for sc in scopes:
         core = await _merge_check_one_scope(args, sc, wt, multi)
         sc_checks = core["checks"]
@@ -8629,6 +8844,31 @@ async def merge_check(args: MergeCheckArgs) -> MergeCheckResult:
                 "; ".join("%s=%s" % (p, (v or {}).get("population"))
                           for p, v in (rec.get("files") or {}).items()))
                 for rec in foreign_records)[:2000])
+    # t261031-43 (KI-447 follow-up): the develop-line resolution is a NAMED receipt
+    # row when there is something to say - an in-flight ticket whose recorded args
+    # carry no line while the live meta declares one (the incident shape), a live
+    # meta that disagrees with the recorded args, a live meta read that failed, or a
+    # line id the project declaration cannot confirm. Nothing to say (no line
+    # declared anywhere, or args and meta carry the same declared line) = no row, so
+    # the receipt of every no-line and every ordinary line ticket is unchanged.
+    # Position: the same slot discipline as fuse B below - before the merge
+    # rehearsal, which must stay checks[-1] (the conflict classification reads
+    # checks[:-1] as "not a conflict").
+    if _line_face.get("note"):
+        _state = str(_line_face.get("state") or "")
+        # The row NAMES the resolution; it never changes the verdict. An unresolved
+        # declaration or an unreadable live meta is an input fault, not a red of this
+        # ticket: the judgment keeps its caliber and the named reason_code says why it
+        # could not run.
+        _rc = ("develop_line_declaration_unusable" if _state not in ("", "declared")
+               else ("" if _line_face.get("line_id")
+                     else "develop_line_meta_unavailable"))
+        checks.insert(max(len(checks) - 1, 0),
+                      {"item": "declared develop line resolved at activity time (t261031-43)",
+                       "green": True,
+                       "detail": str(_line_face["note"]),
+                       "id": DEVELOP_LINE_RESOLUTION_ID,
+                       **({"reason_code": _rc} if _rc else {})})
     # 保险丝B（t260910-03）：多仓写集必须逐仓物化落成，任一成员仓缺失 → 红灯。
     # 插入位置钉死在 rehearsal 项**之前**（rehearsal 必须保持 checks[-1]，冲突分类
     # 把 checks[:-1] 当非冲突类——保险丝红恒为非冲突类，绝不进自动消解回路，
