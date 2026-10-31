@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 373,
-      "scenarios": 860
+      "scenarios": 862
     },
     "vocab": [
       "behaviour",
@@ -6093,6 +6093,14 @@
     "integration/t261030-33/sc_t261030_33_artifact_declaration_faults.py": {
       "anchor": "behaviour",
       "note": "t261030-33 L3 fault surface: a malformed declaration never blocks and every refusal is named - a non-list declaration refused as a whole, junk elements and unusable sources refused by index while good entries survive, a string deliverables value never becoming one artifact per character, an old receipt reading as absent, an old worker's result dict (no new keys) reading as absent while the legacy paths still show, a corrupted handoff history named without an exception, the generic template face serving the two keys with an unknown round, a refusal leaving the stage status and gate surface untouched, and the existing snapshot keys keeping their values. Offline, zero docker/Temporal-server/browser, never touches 3099/7233"
+    },
+    "integration/t261031-31/sc_t26103131_failing_leg_record.py": {
+      "anchor": "behaviour",
+      "note": "t261031-14 (KI-439): a red case's persisted record NAMES every failing leg with one reason line, read back from the ledger file, while the bounded evidence tail keeps its 1200-char bound; a green round carries no failed_detail key; an unparseable red records legs_parse=unrecognized by name and never an empty list; an ENV_FAIL case rides the same shape with its reason line; the leg list stays at the store's bound with omitted rows counted."
+    },
+    "integration/t261031-31/sc_t26103131_round_legs_evidence.py": {
+      "anchor": "behaviour",
+      "note": "t261031-14: a REAL round's persisted record names all 8 planted failing legs of a red case whose bounded tail holds no leg row at all (the emit site reads the case's full output), a green round writes no failed_detail key, and a prose-only red lands as legs_parse=unrecognized with its reason line."
     }
   },
   "integration/t261019-02/sc_t261019_02_line_landing_closeout_guard.py": {

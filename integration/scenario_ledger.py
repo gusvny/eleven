@@ -97,8 +97,10 @@ RUN_HEADER_OPTIONAL_NUMBER_FIELDS = ("prelude_s",)
 #: t261026-15: ADDITIVE OPTIONAL header field (same run-ledger-v1 shape — no
 #: version bump; a header without it is exactly as valid as before). A header
 #: carrying ``failed_detail`` must MEASURE it: one entry per content-red case,
-#: each entry exactly {"evidence", "dur_s"} with the evidence tail bounded by
-#: DETAIL_TAIL_CHARS. Absence stays the honest shape of a run with nothing to
+#: each entry the pair {"evidence", "dur_s"} (evidence tail bounded by
+#: DETAIL_TAIL_CHARS) plus, from t261031-14, the optional structured leg face
+#: (DETAIL_ENTRY_OPTIONAL_LEG_FIELDS: which legs failed and why one short line
+#: says). Absence stays the honest shape of a run with nothing to
 #: report (a green round, or a writer predating the field) — never a fabricated
 #: empty map. The reserved marker key DETAIL_TRUNCATED_KEY carries the counted
 #: truncation note when more red cases than DETAIL_MAX_CASES went red.
@@ -113,6 +115,36 @@ DETAIL_MAX_CASES = 20
 #: case entry under this exact name; the builder reroutes such a case's detail
 #: into the counted truncation note instead — collision guard, review comment 2).
 DETAIL_TRUNCATED_KEY = "__truncated__"
+#: t261031-14 (KI-439): ADDITIVE OPTIONAL keys inside one case's detail entry —
+#: the STRUCTURED failing-leg face. The measured gap: the t261022-14 round
+#: booked SUMMARY pass=17 fail=12 and its retained evidence was the last 1200
+#: characters of the case log, all "ok" lines, so not one red leg could be
+#: named. A tail cannot name twelve legs; the entry also carries the leg names
+#: plus one short reason line each, read from the case's own output.
+#: ``legs_parse`` is the named outcome — never a clean-looking empty list:
+#:   parsed        leg rows were read; ``legs`` carries them.
+#:   summary_only  the case's own SUMMARY counts failing legs but no leg row
+#:                 survived; ``legs_note`` names the count.
+#:   unrecognized  no leg row and no agreeing SUMMARY; ``legs_note`` names what
+#:                 was looked for and what the output held.
+#:   env_fail      the case failed on its environment; ``legs_note`` carries
+#:                 the ENV_FAIL reason line (same entry shape, no leg list).
+DETAIL_LEG_PARSE_KEY = "legs_parse"
+DETAIL_LEGS_KEY = "legs"
+DETAIL_LEG_NOTE_KEY = "legs_note"
+DETAIL_LEG_OMITTED_KEY = "legs_omitted"
+DETAIL_ENTRY_OPTIONAL_LEG_FIELDS = (DETAIL_LEG_PARSE_KEY, DETAIL_LEGS_KEY,
+                                    DETAIL_LEG_NOTE_KEY,
+                                    DETAIL_LEG_OMITTED_KEY)
+DETAIL_LEG_PARSE_OUTCOMES = ("parsed", "summary_only", "unrecognized",
+                             "env_fail")
+#: How many leg rows one case may name (t261022-14's own incident count is 12;
+#: a red storm must not unbound the record) and the per-field bounds that keep
+#: the additive face smaller than the tail it rides beside.
+DETAIL_LEG_MAX = 16
+DETAIL_LEG_NAME_CHARS = 80
+DETAIL_LEG_REASON_CHARS = 100
+DETAIL_LEG_NOTE_CHARS = 240
 RUN_CASE_FIELDS = ("ran", "passed", "failed", "env_failed")
 
 
@@ -634,7 +666,11 @@ def _check_failed_detail(fd):
                     and "more failing case tails omitted" in e):
                 return "failed_detail_reserved_key:%s" % k
             continue
-        if not isinstance(v, dict) or set(v) != {"evidence", "dur_s"}:
+        # t261031-14: the entry is the t261026-15 pair PLUS the optional
+        # structured leg face — any other key still refuses by name.
+        allowed = {"evidence", "dur_s"} | set(DETAIL_ENTRY_OPTIONAL_LEG_FIELDS)
+        if not isinstance(v, dict) or not {"evidence", "dur_s"} <= set(v) \
+                or set(v) - allowed:
             return "failed_detail_entry_invalid:%s" % k
         e = v["evidence"]
         if not isinstance(e, str) or not e.strip() \
@@ -644,6 +680,57 @@ def _check_failed_detail(fd):
         if d is not None and (isinstance(d, bool)
                               or not isinstance(d, (int, float)) or d < 0):
             return "failed_detail_dur_s_invalid:%s" % k
+        why = _check_detail_legs(v, k)
+        if why:
+            return why
+    return None
+
+
+def _check_detail_legs(entry, key):
+    """t261031-14: the additive structured leg face of one detail entry.
+    Absent = a t261026-15 entry, still valid. Present = a NAMED outcome, and a
+    ``parsed`` outcome MUST carry at least one leg with a non-empty reason —
+    an empty list is exactly the clean-looking lie this face exists to prevent
+    (KI-439). Every refusal names the case key and the fact that failed."""
+    if DETAIL_LEG_PARSE_KEY not in entry:
+        orphan = [f for f in (DETAIL_LEGS_KEY, DETAIL_LEG_NOTE_KEY,
+                              DETAIL_LEG_OMITTED_KEY) if f in entry]
+        if orphan:
+            return "failed_detail_legs_orphan:%s:%s" % (key, orphan[0])
+        return None
+    outcome = entry[DETAIL_LEG_PARSE_KEY]
+    if outcome not in DETAIL_LEG_PARSE_OUTCOMES:
+        return "failed_detail_legs_parse_invalid:%s" % key
+    # an omission count is lawful on any outcome, and it is always a count
+    if DETAIL_LEG_OMITTED_KEY in entry:
+        om = entry[DETAIL_LEG_OMITTED_KEY]
+        if isinstance(om, bool) or not isinstance(om, int) or om < 0:
+            return "failed_detail_legs_omitted_invalid:%s" % key
+    note = entry.get(DETAIL_LEG_NOTE_KEY)
+    if note is not None and (not isinstance(note, str) or not note.strip()
+                             or len(note) > DETAIL_LEG_NOTE_CHARS):
+        return "failed_detail_legs_note_invalid:%s" % key
+    if outcome != "parsed":
+        if DETAIL_LEGS_KEY in entry:
+            return "failed_detail_legs_for_unparsed:%s" % key
+        if note is None:
+            return "failed_detail_legs_note_missing:%s" % key
+        return None
+    legs = entry.get(DETAIL_LEGS_KEY)
+    if not isinstance(legs, list) or not legs:
+        return "failed_detail_legs_empty:%s" % key
+    if len(legs) > DETAIL_LEG_MAX:
+        return "failed_detail_legs_too_many:%s" % key
+    for row in legs:
+        if not isinstance(row, dict) or set(row) != {"leg", "reason"}:
+            return "failed_detail_leg_row_invalid:%s" % key
+        name, reason = row["leg"], row["reason"]
+        if not isinstance(name, str) or not name.strip() \
+                or len(name) > DETAIL_LEG_NAME_CHARS:
+            return "failed_detail_leg_name_invalid:%s" % key
+        if not isinstance(reason, str) or not reason.strip() \
+                or len(reason) > DETAIL_LEG_REASON_CHARS:
+            return "failed_detail_leg_reason_invalid:%s" % key
     return None
 
 

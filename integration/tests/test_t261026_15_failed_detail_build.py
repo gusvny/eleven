@@ -179,8 +179,17 @@ def test_malformed_rows_skipped_never_raise(specs, timings):
     detail = rs.build_failed_detail(specs, timings)
     assert isinstance(detail, dict)
     for k, v in detail.items():
-        assert set(v) == {"evidence", "dur_s"}
+        # t261031-14 added the structured leg face to every entry. The key set
+        # is still CLOSED — this pins the full lawful set, never a loose subset.
+        assert set(v) <= {"evidence", "dur_s", "legs_parse", "legs",
+                          "legs_note", "legs_omitted"}, set(v)
+        assert {"evidence", "dur_s"} <= set(v)
         assert isinstance(v["evidence"], str) and len(v["evidence"]) <= 1200
+        # an unreadable tail is NAMED, never a clean-looking empty leg list
+        assert v.get("legs_parse") in (None, "parsed", "summary_only",
+                                       "unrecognized", "env_fail")
+        if v.get("legs_parse") != "parsed":
+            assert "legs" not in v
 
 
 def test_bare_case_without_any_tail_is_honestly_absent():

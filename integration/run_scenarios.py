@@ -270,6 +270,14 @@ SCENARIOS = [
     ("t261026-15-failed-detail-evidence",
      "A red round leaves its evidence in the persisted run record and a green round leaves none (ticket t261026-15, incident 261026: two red rounds in one night could only be answered 'flaky, evidence: none' because the record carried the failing case NAME and nothing else - the assertion text and the observed value died with the temp tree and two tickets stayed frozen on a red nobody could characterise; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a private real git fixture tree with an injected one-entry mode-switchable registry, the run-scoped ledger projected through SANDBAR_SCENARIO_LEDGER_DIR, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE INCIDENT CHAIN, POSITIVE - a round whose single case FAILS with a planted assertion line and an observed value persists a header whose per-case detail carries that line and that value VERBATIM, read back from the ledger FILE (reader side, never the writer's return value), with an honest duration, and the REAL header validator accepts the red header with the detail; B THE GREEN CONTROL - the same round with a passing case persists a header with NO per-case tails at all (absence, never an empty map), validator-clean; C THE SIZE BOUND - a failing case that prints megabytes contributes a bounded tail (0 < len <= 1200, the bound the timings face already uses): the end marker present, the megabyte head marker ABSENT - a tail, not the log. Intent split (no intent-level duplication): the builder/validator truth tables (malformed shapes, oversized evidence, bad dur_s, bool exclusion, >20-case truncation, malformed-input battery) belong to developer L1; the round-shape chain (run id minting, relay acceptance, narrowed-round honesty) belongs to t261013-04-line-round-run-record and its family - the fixture technique is shared, shared steps are not shared intent; THIS entry uniquely owns the operator-facing promise: the persisted record answers 'why was it red' for a planted red, stays silent for green, and stays bounded for a loud red. Pre-implement tree: A/C red = the named TDD signal; green required at the integration gate/merge; git or the suite modules missing = ENV_FAIL exit 2; tier: the write-persist-relay seam no single-component contract can express - only an end-to-end round proves the evidence survives to the ledger file the operator reads; cost: seconds",
      "sh integration/py_interp.sh integration/t261026-15/sc_t26102615_failed_detail_evidence.py", "ro"),
+    # ---- t261031-14 (KI-439): the retained evidence must NAME the red legs,
+    # not only quote the log tail ----
+    ("t261031-14-failing-leg-record",
+     "A red case's persisted record NAMES every failing leg with one reason line, and a green run still carries no detail (ticket t261031-14, incident = the 22:15Z round booked t261022-14-review-panel-face red with SUMMARY pass=17 fail=12 and the retained evidence was that case's last 1200 log characters, every line an ok line, so not one of the 12 red legs could be named from the record; KI-439 records the gap; grey-box L3, the REAL write path (run_scenarios.parse_case_legs / build_failed_detail through write_run_record) over a real scenario_ledger store on a tmp dir via SANDBAR_SCENARIO_LEDGER_DIR, every assertion read back FROM THE LEDGER FILE, fixed stub spec and timing rows so the proof is deterministic, no suite subprocess, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A1 THE INCIDENT SHAPE - a red case whose leg rows print EARLY and whose bounded tail holds only ok lines leaves, in the persisted record read back from scenario-runs.jsonl, every failing leg NAME with its one-line reason (the same tail parsed alone names nothing, so the leg is never a tail artifact); A2 GREEN ABSENCE - a green round persists a header with NO failed_detail key at all; A3 HONESTY - a red whose output holds no leg row records legs_parse=unrecognized plus its reason line, never a clean-looking empty list, and a case that only counts fails in its own SUMMARY lands as summary_only naming the count; A4 THE ENV SHAPE - an ENV_FAIL case in a content-red round carries the same entry shape with legs_parse=env_fail and its ENV_FAIL reason line; A5 STILL BOUNDED - the leg list stays at the store's bound, every name and reason line bounded, the evidence tail keeps its 1200-char bound, and a louder red counts what it omitted. Intent split (no intent-level duplication): the parser and validator truth tables (row shapes, malformed input, named outcomes, refusal reasons) belong to developer L1 (integration/tests/test_t261031_14_case_legs.py); the t261026-15 tail/absence/bound promise stays with its own two entries - THIS entry uniquely owns the structured leg face of the operator's record; the real-round wiring proof is the sibling t261031-14-round-legs-evidence. Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. run_scenarios or scenario_ledger unimportable = ENV_FAIL exit 2; tier: the persisted-reader promise, judged from the ledger file the operator reads; cost: seconds; this case now lives under the carrying ticket's own directory (t261031-31) because the own-scenario derivation is path-keyed (KI-445) - the entry NAME is unchanged",
+     "sh integration/py_interp.sh integration/t261031-31/sc_t26103131_failing_leg_record.py", "ro"),
+    ("t261031-14-round-legs-evidence",
+     "A REAL round's persisted record names the failing legs of a red case whose tail could not (ticket t261031-14, incident = the t261022-14 round's 12 red legs were unnameable from a tail that held only ok lines; KI-439; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a private real git fixture tree with an injected one-entry mode-switchable registry, the run-scoped ledger projected through SANDBAR_SCENARIO_LEDGER_DIR, every assertion read back FROM THE LEDGER FILE (scenario-runs.jsonl), offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A1 THE INCIDENT SHAPE - a red case prints 8 'FAIL <leg> — <reason>' rows FIRST, then 60 ok lines and its SUMMARY; the persisted header's failed_detail entry names ALL 8 legs with their reason lines while the evidence tail (bounded) holds no leg row at all - so the emit site reads the case's FULL output, never the tail; A2 THE GREEN CONTROL - the same round with the case passing persists a header with NO failed_detail key at all (the t261026-15 absence rule is intact); A3 THE UNPARSEABLE RED - a red case whose output is prose only records legs_parse=unrecognized with its reason line and never an empty leg list. Intent split (no intent-level duplication): the write-path proof of the same face over stub rows is the sibling t261031-14-failing-leg-record; the parser/validator truth tables belong to developer L1 (integration/tests/test_t261031_14_case_legs.py); the t261026-15 tail/absence promise stays with its own entries - THIS entry uniquely owns the real-round wiring (which text the leg face is read from). Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. git or the suite modules missing = ENV_FAIL exit 2; tier: the emit-site wiring only an end-to-end round can prove; cost: seconds; this case now lives under the carrying ticket's own directory (t261031-31) because the own-scenario derivation is path-keyed (KI-445) - the entry NAME is unchanged",
+     "sh integration/py_interp.sh integration/t261031-31/sc_t26103131_round_legs_evidence.py", "ro"),
     # ---- t261012-02: a hung case must not eat the round — the per-case
     # budget is real (group kill, no inherited pipe) and a twice-hung
     # entry is skipped by name ----
@@ -5728,12 +5736,228 @@ def _detail_bounds():
         return 1200, 20, "__truncated__"
 
 
+def _detail_leg_bounds():
+    """The structured leg bounds from the ledger store (single truth,
+    t261031-14); a store that predates the field falls back to the same
+    literal values, so the builder can never write what the store refuses."""
+    try:
+        mod = _reuse_ledger_module()
+        return (mod.DETAIL_LEG_MAX, mod.DETAIL_LEG_NAME_CHARS,
+                mod.DETAIL_LEG_REASON_CHARS, mod.DETAIL_LEG_NOTE_CHARS)
+    except Exception:  # noqa: BLE001 — bounds degrade to the documented values
+        return 16, 80, 100, 240
+
+
+#: t261031-14: the leg-row shapes that ACTUALLY exist in this tree (measured,
+#: not invented): an indented `  FAIL <leg> — <reason>` row (the t261022-14
+#: shape, sc_t26102214_review_panel_face.mjs record()), a column-0 `[FAIL]
+#: <leg>` row (sc_gate_recording_engine_route.py), a column-0 bare `FAIL <text>`
+#: row (lib_copy_face_driver.mjs), a bare `ENV_FAIL <leg> — <reason>` row, and
+#: pytest's own `FAILED <nodeid> - <reason>` summary row.
+_LEG_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_LEG_ROW_RES = (
+    re.compile(r"^(?P<tag>FAIL|ENV_FAIL)\s+(?P<rest>\S.*?)\s*$"),
+    re.compile(r"^\[(?P<tag>FAIL|ENV_FAIL)\]\s*(?P<rest>\S.*?)\s*$"),
+    re.compile(r"^(?P<tag>FAILED)\s+(?P<rest>\S.*?)\s*$"),
+)
+#: The runner's own case verdict (`FAIL [<case>] exit=1 (12.3s)`) is a case
+#: header, never a leg row — excluded by name.
+_LEG_CASE_VERDICT_RE = re.compile(r"^\[[^\]]+\]\s+exit=")
+#: The case's own summary (`SUMMARY pass=17 fail=12 env_fail=0 na=0` and the
+#: runner's `SCENARIOS ran=.. pass=.. fail=..`): the count of failing legs.
+_LEG_SUMMARY_RE = re.compile(r"^(?:SUMMARY|SCENARIOS)\b.*?\bfail=(\d+)")
+#: Separators between the leg name and its one-line reason, in PRIORITY order
+#: (not position order): the em dash is the tree's own leg-row separator, so a
+#: colon or hyphen INSIDE the leg name (measured: "P5/dark edited block: thread
+#: survives or is outdated — ...") must not win over it.
+_LEG_SEPARATORS = (" — ", " – ", " :: ", " - ", ": ")
+_LEG_NO_REASON = "the row carried no reason text"
+
+
+def _split_leg_row(rest):
+    """`<leg> — <reason>` -> (leg, reason); no separator -> (rest, '').
+    The separator is chosen by priority (_LEG_SEPARATORS), so a colon inside a
+    leg name survives when the row also carries the em dash. A split that would
+    leave a non-name on the left (e.g. a leading '::') is not a split: the whole
+    rest stays the leg and the reason stays honestly empty."""
+    rest = rest.strip()
+    for sep in _LEG_SEPARATORS:
+        i = rest.find(sep)
+        if i < 1:
+            continue
+        left = rest[:i].strip()
+        if not any(ch.isalnum() for ch in left):
+            continue
+        return left, rest[i + len(sep):].strip()
+    return rest, ""
+
+
+def parse_case_legs(out_text, env_like=False):
+    """Pure: one case's own output -> the structured failing-leg block that
+    rides its detail entry (t261031-14, KI-439).
+
+    Read from the case's OWN rows, in the shapes this tree prints (see
+    _LEG_ROW_RES / _LEG_SUMMARY_RE). The incident: the t261022-14 round booked
+    SUMMARY pass=17 fail=12 and the retained 1200-char tail was all ok lines,
+    so no red leg could be named from the record. A tail cannot answer that;
+    the leg rows can.
+
+    Outcomes are NAMED, never a clean-looking empty list:
+      parsed        >= 1 leg row; ``legs`` carries [{"leg", "reason"}] in the
+                    order printed, first occurrence wins per leg name.
+      summary_only  the SUMMARY counts failing legs but no leg row survived;
+                    ``legs_note`` names the count.
+      unrecognized  no leg row and no agreeing summary; ``legs_note`` names
+                    what was looked for and what the output held.
+      env_fail      env_like: the same entry shape, ``legs_note`` carries the
+                    ENV_FAIL reason line (the row that names the missing
+                    environment), never a leg list.
+
+    Bounds: at most DETAIL_LEG_MAX legs, each name and reason bounded, plus a
+    counted ``legs_omitted`` — a red storm must not unbound the record.
+    Deterministic (output order, no sorting). Malformed input (None, non-str,
+    undecodable) never raises: it degrades to ``unrecognized`` by name."""
+    max_legs, name_chars, reason_chars, note_chars = _detail_leg_bounds()
+
+    def _clip(s, n):
+        s = str(s).strip()
+        return s if len(s) <= n else s[:n - 1].rstrip() + "…"
+
+    text = out_text if isinstance(out_text, str) else ""
+    rows = []
+    env_lines = []
+    summary_fail = None
+    lines = text.splitlines()
+    for raw in lines:
+        line = _LEG_ANSI_RE.sub("", raw).strip()
+        if not line:
+            continue
+        m = _LEG_SUMMARY_RE.match(line)
+        if m:
+            summary_fail = int(m.group(1))
+            continue
+        for rx in _LEG_ROW_RES:
+            m = rx.match(line)
+            if m is None:
+                continue
+            rest = m.group("rest")
+            if _LEG_CASE_VERDICT_RE.match(rest):
+                break          # the runner's case verdict, never a leg row
+            tag = m.group("tag")
+            if tag == "ENV_FAIL":
+                env_lines.append(rest)
+                # an env-failed LEG inside a content-red case is still a leg
+                # that did not pass: it rides the list, its cause prefixed
+                leg, reason = _split_leg_row(rest)
+                rows.append((leg, ("env: " + reason) if reason
+                             else "env: " + _LEG_NO_REASON))
+                break
+            rows.append(_split_leg_row(rest))
+            break
+
+    if env_like:
+        note = (env_lines[0] if env_lines else
+                "no ENV_FAIL row in the case output; last line: %s"
+                % (_clip(lines[-1], note_chars) if lines and lines[-1].strip()
+                   else "(output empty)"))
+        return {"legs_parse": "env_fail", "legs_note": _clip(note, note_chars)}
+
+    # first occurrence wins per leg name; a later reason fills an earlier gap
+    seen = {}
+    ordered = []
+    for leg, reason in rows:
+        if leg in seen:
+            i = seen[leg]
+            if not ordered[i][1] and reason:
+                ordered[i] = (leg, reason)
+            continue
+        seen[leg] = len(ordered)
+        ordered.append((leg, reason))
+    n_rows = len(ordered)
+    out = {"legs": [{"leg": _clip(leg, name_chars),
+                     "reason": _clip(reason, reason_chars) if reason
+                     else _LEG_NO_REASON}
+                    for leg, reason in ordered[:max_legs]]}
+    if n_rows:
+        out["legs_parse"] = "parsed"
+        if n_rows > max_legs:
+            out["legs_omitted"] = n_rows - max_legs
+        if summary_fail is not None and summary_fail != n_rows:
+            out["legs_note"] = _clip(
+                "%d failing leg row(s) read; the case's own SUMMARY says "
+                "fail=%d" % (n_rows, summary_fail), note_chars)
+        return out
+    if summary_fail:
+        return {"legs_parse": "summary_only",
+                "legs_note": _clip(
+                    "the case's own SUMMARY says fail=%d but no FAIL / "
+                    "ENV_FAIL / FAILED row named a leg (%d output line(s) "
+                    "read)" % (summary_fail, len(lines)), note_chars)}
+    last = ""
+    for ln in reversed(lines):
+        if ln.strip():
+            last = _clip(ln, note_chars)
+            break
+    return {"legs_parse": "unrecognized",
+            "legs_note": _clip(
+                "no FAIL / [FAIL] / ENV_FAIL / FAILED leg row and no SUMMARY "
+                "fail= count in %d output line(s); last line: %s"
+                % (len(lines), last or "(output empty)"), note_chars)}
+
+
+def _leg_block(block, max_legs=None, name_chars=None, reason_chars=None,
+               note_chars=None):
+    """Re-bound a leg block handed in by a caller (the emit site pre-extracts
+    from the FULL output; a timings row may also carry none). Returns a dict
+    of only the lawful keys — never a half shape, never an empty list."""
+    d_max, d_name, d_reason, d_note = _detail_leg_bounds()
+    max_legs = d_max if max_legs is None else int(max_legs)
+    name_chars = d_name if name_chars is None else int(name_chars)
+    reason_chars = d_reason if reason_chars is None else int(reason_chars)
+    note_chars = d_note if note_chars is None else int(note_chars)
+    if not isinstance(block, dict):
+        return {}
+    outcome = block.get("legs_parse")
+    if outcome not in ("parsed", "summary_only", "unrecognized", "env_fail"):
+        return {}
+    out = {"legs_parse": outcome}
+    note = block.get("legs_note")
+    if isinstance(note, str) and note.strip():
+        out["legs_note"] = note.strip()[:note_chars]
+    if outcome == "parsed":
+        legs = []
+        for row in block.get("legs") or ():
+            if not isinstance(row, dict):
+                continue
+            leg, reason = row.get("leg"), row.get("reason")
+            if not isinstance(leg, str) or not leg.strip():
+                continue
+            if not isinstance(reason, str) or not reason.strip():
+                reason = _LEG_NO_REASON
+            legs.append({"leg": leg.strip()[:name_chars],
+                         "reason": reason.strip()[:reason_chars]})
+            if len(legs) >= max_legs:
+                break
+        if not legs:
+            return {}      # never a clean-looking empty parsed list
+        out["legs"] = legs
+        om = block.get("legs_omitted")
+        if isinstance(om, int) and not isinstance(om, bool) and om > 0:
+            out["legs_omitted"] = om
+        return out
+    # a non-parsed outcome carries its reason line and NO leg list
+    if "legs_note" not in out:
+        return {}
+    out.pop("legs", None)
+    return out
+
+
 def build_failed_detail(spec_cases, timings, tail_chars=None, max_cases=None,
                         truncated_key=None):
     """Pure: spec rows + timings rows -> the header's ``failed_detail`` value
-    (t261026-15). One bounded entry per CONTENT-RED case (``status == "fail"``;
-    env-fail cases already publish their tails through the env-red face and
-    never masquerade as content reds here). Evidence source, in order: the
+    (t261026-15). One bounded entry per non-green case — content-red cases
+    (``status == "fail"``) always, env-red cases only beside them (see the
+    t261031-14 note below). Evidence source, in order: the
     case's timings tail (what the case itself printed last — the failing
     assertion line and the observed value live there), else the spec row's own
     ``evidence``; ``dur_s`` comes from the timings row when it carries a real
@@ -5749,7 +5973,24 @@ def build_failed_detail(spec_cases, timings, tail_chars=None, max_cases=None,
     key — collision guard, review comment 2). Deterministic: sorted names.
     Malformed rows (non-dict, missing/empty name, non-str tails) are skipped
     by name, never raise. Returns {} when nothing qualifies — the caller
-    omits the key entirely for a green round (absence, never an empty map)."""
+    omits the key entirely for a green round (absence, never an empty map).
+
+    t261031-14 (KI-439): every entry also carries the STRUCTURED leg face
+    (``legs_parse`` + ``legs`` / ``legs_note``) so a red case NAMES its failing
+    legs. Source, in order: the timings row's pre-extracted ``legs`` block (the
+    emit site reads it from the case's FULL output — the leg rows are usually
+    nowhere near the tail), else this builder parses the tail it has. A case
+    whose output yields no leg row records that fact BY NAME (``unrecognized``
+    / ``summary_only``), never a clean-looking empty list.
+
+    ENV-red cases (``status == "not-checked"`` with ``cause == "external"``)
+    ride the SAME entry shape with ``legs_parse: "env_fail"`` and their ENV_FAIL
+    reason line — but only in a round that also has a content red: the store
+    refuses ``failed_detail`` on a content-green round (``failed_detail_on_green``,
+    the t261026-15 absence rule), so an env-only round keeps its honest absence.
+    The ``max_cases`` bound covers both kinds together (an env storm is a red
+    storm): whatever does not fit is counted in the ``__truncated__`` marker.
+    """
     d_tail, d_max, d_key = _detail_bounds()
     tail_chars = d_tail if tail_chars is None else int(tail_chars)
     max_cases = d_max if max_cases is None else int(max_cases)
@@ -5759,7 +6000,34 @@ def build_failed_detail(spec_cases, timings, tail_chars=None, max_cases=None,
         if isinstance(t, dict) and isinstance(t.get("name"), str) \
                 and t["name"].strip():
             trows[t["name"].strip()] = t
-    out = {}
+
+    def _entry(c, env_like):
+        """One case's detail entry, or None when nothing was measured."""
+        key = c["name"].strip()
+        trow = trows.get(key) or {}
+        tl = trow.get("tail")
+        if not isinstance(tl, str) or not tl.strip():
+            tl = c.get("evidence")
+        evidence = tl.strip()[-tail_chars:] if isinstance(tl, str) else ""
+        if not evidence:
+            return None   # nothing measured to publish: honest absence per case
+        dur = trow.get("dur_s")
+        if isinstance(dur, bool) or not isinstance(dur, (int, float)):
+            dur = c.get("dur_s")
+        if isinstance(dur, bool) or not isinstance(dur, (int, float)):
+            dur = None
+        block = _leg_block(trow.get("legs")) if "legs" in trow else {}
+        if not block:
+            # no pre-extracted block: the tail is the only text this builder
+            # has. Never a silent gap — the outcome is named either way.
+            block = _leg_block(parse_case_legs(evidence, env_like=env_like))
+        if not block:
+            return None
+        entry = {"evidence": evidence, "dur_s": dur}
+        entry.update(block)
+        return entry
+
+    reds, envs = {}, {}
     reserved = 0
     for c in spec_cases or ():
         if not isinstance(c, dict):
@@ -5767,25 +6035,25 @@ def build_failed_detail(spec_cases, timings, tail_chars=None, max_cases=None,
         name = c.get("name")
         if not isinstance(name, str) or not name.strip():
             continue
-        if c.get("status") != "fail":
+        is_red = c.get("status") == "fail"
+        is_env = (c.get("status") == "not-checked"
+                  and c.get("cause") == "external")
+        if not (is_red or is_env):
+            continue
+        entry = _entry(c, env_like=is_env)
+        if entry is None:
             continue
         key = name.strip()
-        trow = trows.get(key) or {}
-        tl = trow.get("tail")
-        if not isinstance(tl, str) or not tl.strip():
-            tl = c.get("evidence")
-        evidence = tl.strip()[-tail_chars:] if isinstance(tl, str) else ""
-        if not evidence:
-            continue   # nothing measured to publish: honest absence per case
-        dur = trow.get("dur_s")
-        if isinstance(dur, bool) or not isinstance(dur, (int, float)):
-            dur = c.get("dur_s")
-        if isinstance(dur, bool) or not isinstance(dur, (int, float)):
-            dur = None
         if key == truncated_key:
             reserved += 1   # real red, unlawful key: counted, never emitted
             continue
-        out[key] = {"evidence": evidence, "dur_s": dur}
+        (reds if is_red else envs)[key] = entry
+    out = dict(reds)   # deterministic order comes from the sort below
+    # t261031-14: env-red entries ride beside the content reds, and only when
+    # the round is content-red (the store's absence rule for a green round).
+    if out:
+        for key in sorted(envs):
+            out.setdefault(key, envs[key])
     out = dict(sorted(out.items()))   # deterministic order, always
     if len(out) > max_cases:
         kept = sorted(out)[:max_cases]
@@ -8625,7 +8893,18 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
                             # 非绿条目持久化尾段（t260910-08 arbitrate gen3）：此前
                             # tail 只进 stdout 即弃，报告对 FAIL 无败因可读，仲裁轮
                             # 只能盲跑复现。PASS 不存（体积与隐私面，绿的无须读）。
-                            **({} if exit_code == 0 else {"tail": tail_out[-1200:]})})
+                            # t261031-14 (KI-439): the structured failing-leg
+                            # block is read from the case's FULL output, never
+                            # from the bounded tail — in the measured round the
+                            # red leg rows were nowhere near the tail. Bounded
+                            # (names + one reason line each), so the record
+                            # stays a receipt, not a log. Green persists
+                            # neither key (the absence rule is untouched).
+                            **({} if exit_code == 0 else {
+                                "tail": tail_out[-1200:],
+                                "legs": parse_case_legs(
+                                    full_out or tail_out,
+                                    env_like=env_like)})})
             progress.note(name, ran, passed, failed, env_failed)
             print("\n".join(block), flush=True)
 
