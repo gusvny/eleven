@@ -1268,6 +1268,10 @@ SCENARIOS = [
     ("t261029-38-tmp-sweep-receipt-math",
      "The cadence receipt's own math, attribution and malformed-input matrix (ticket t261029-38; owner table rebased by t261030-06; pure stdlib, offline, zero docker/Temporal-server/browser, never touches 3099/7233, never binds the host temp root - KI-136, so every fixture is minted under out/ and reclaimed at exit): the round rule (only the inspection shape ticks; lane/manual/depth>=2/narrowed/disabled are named inert) with a SOURCE LOCK against the engine's injection site, so an engine change reds here instead of silently killing the cadence; the argv shape (no --kill-carriers, no --prefix, --apply only in apply mode) and the budget clamp; the due window and the 30 h staleness baseline rule; the M-table (config refusals named, torn state named with the due gate falling back to the newest receipt, sweep output untrusted, malformed entry names, lsof rows outside the root, prefix-sharing siblings, unwritable state); report mode never claiming deletions; the delta rules (mode/root change and unreadable previous force a baseline, growth flag); foreign families refused in both directions and never whitelisted; count-only skipping the probe; the bounded batch stopping cleanly with remaining counts. Owner table face (t261030-06): every family on the sweeper's delete surface has a row naming a repo and its evidence (a producer path that resolves in this tree, or an explicit owner=unknown with the record's reason), the derived/override/external counts are measured from the ONE family declaration and cross-checked against an independent classification plus the receipt's cited external families, the sister repo is never attributed to this repo (and a family whose producer is inside this tree is never attributed to a sibling), and the drift lock compares the sweeper's delete surface with the engine's mirror read of the same file in both directions - no literal owner dict is parsed any more. Intent split (no duplication): the sweep tool's own CLI safety contract is t261002-13-tmp-backlog-sweep-safety; the cadence CLI as a real process and the production daily-round face are t261029-38's L3 on the develop line, not carried by this branch; THIS entry owns the pure faces, the malformed-input matrix and the owner table. tier: receipt contract and the acceptance's malformed-input table, expressible only as a pure-face battery; cost: seconds (a few real sweep subprocesses for the CLI-shaped rows)",
      "python3 integration/tests/test_t261029_38_tmp_sweep_receipt.py", "ro", "serial"),
+    # ---- t261101-20: the suite's own test-target hand-off ----
+    ("t261101-20-suite-test-target-provision",
+     "The suite hands its scenario children a test target that ANSWERS, or states none and names why (ticket t261101-20; the incident = integration/run_scenarios.py stated SANDBAR_TARGET_HOST=127.0.0.1:17233 for every round while nothing listened there - the docker test bench retired 261027 - so the statement was false and any case that took it at its word booked a NAMED ENV_FAIL; grey-box L2, the REAL run_scenarios module loaded, its provision / teardown / child-env faces driven over a FAKE bench module - start, stop and the port probe are recorded, no process, no port, no Temporal, offline seconds, never touches 3099/7233): A an address the environment states is kept verbatim - no marker, no bench started, and a target the suite did not start is never stopped; B with no ambient statement the suite starts the bench ON the address it states (TEST_TARGET_DEFAULT, the value lib_inspection whitelists and the stripping case compares literally), and every child env carries the address, the SANDBAR_SUITE_STATED_TARGET marker and the namespace the bench serves; C an address that already answers is stated and never stopped - a concurrent round's bench is not this suite's to kill; D a bench that REFUSES states NOTHING and names the failed check, so the child env gets no address at all and the case that needs one books its own named ENV_FAIL instead of a dead address; E the teardown judges the residue from the OUTSIDE (port refuses, pid gone, temp dir reclaimed) and publishes a non-clean block as RESIDUE, never swallowed, and it is idempotent across the pool tail, atexit and both hard exits; F the wiring and the cross-face constants are locked by source - the provision runs in the prelude before any pool, the injection lives in one place, the receipt keys ride the round, and the stated address still matches the file that whitelists it and the file that strips it by literal. Intent split (no duplication): process_bench's own up/down/residue contract and its SIGKILL escalation belong to t261022-10 (its L1 battery plus its L3 lifecycle scenario); the round's face and verdict rules stay with the t261011-26 / t261024-30 family; THIS entry uniquely owns what the suite states to its children and whether that statement answers. tier: the one seam no single component expresses - the suite-to-child target hand-off; cost: seconds (the bench module is a fake, so nothing is started)",
+     "python3 integration/tests/test_t261101_20_suite_test_target.py", "ro", "serial"),
     ("t261002-13-tmp-alarm-owner-receipt",
      "水位告警点名泄漏家族（t261002-13，灰盒 L3，离线秒级零 docker，真扫描 IO 隔离 root 非注入 dict）：scan_tmp_fixture_dirs 真扫多家族越龄夹具→tmp_fixture_scan_result 回执组装——A 真扫描按家族可辨、缺口族 t26092523-* 在白名单可报警；B 越阈值触发 finding 且回执含 top_leakers（按计数降序、带最老年龄）——告警必须指向一个家族而不是一个数字（工单交付物 3 主面）；C 每条 leaker 带 owner 字段（生产者线索，未知=owner=unknown 绝不猜）；D EXCLUDED_PREFIXES 不进计数不进 top_leakers（不冤枉别的程序）、外来条目以 untouched/skipped 可见不静默；E 报数契约不回退（dirs/oldest_age_h/finding_count/threshold_source 具名在）。intent 分工：watchdog 纯函数真值分支矩阵（注入扫描/畸形条目降级点名/词表）归 developer L1 test_t260926_tmp_fixture_water.py，本条锁真扫描→回执端到端面。实现未落地段红属预期（TDD 信号），arbitrate/merge 期必须绿",
      # venv-fallback shim（t261003-05）：本条真扫引擎 activities.scan_tmp_fixture_dirs（需 temporalio），
@@ -6911,25 +6915,16 @@ def _run_entry(entry):
     # 勿误以为两层面同宽，也不要随手扩本层半径（防双层过滤面漂移出新撒谎注释）。
     child_env = {k: v for k, v in os.environ.items()
                  if k not in ("SANDBAR_TASK_QUEUE", "SANDBAR_WATCH_WORKFLOW")}
-    # 261016 provisioning (host order: 补环境): scenarios that create tickets
-    # against a Docker test Temporal refuse to run on an UNSTATED target
+    # 261016 provisioning (host order: 补环境), t261101-20: scenarios that create
+    # tickets against a test Temporal refuse to run on an UNSTATED target
     # ("refusing to create tickets on an unclear target"), so with a deployment
     # whose workers carry no SANDBAR_TARGET_HOST their env-half was a permanent
-    # ENV_FAIL - t261012-05 measured exactly that across four rounds and its
-    # acceptance face never moved. The suite states the TEST target for its
-    # children: explicit, named once on the run's log, never the production
-    # default (the scenario's own guard checks both conditions, so a deployment
-    # that already states a target keeps it verbatim).
-    if not str(child_env.get(TEST_TARGET_ENV) or "").strip():
-        child_env[TEST_TARGET_ENV] = TEST_TARGET_DEFAULT
-        # Provenance (261022): the statement above is the SUITE's convenience value,
-        # not the deployment's. A case whose tested face IS the target (the real-entry
-        # board probes read the engine the deployment runs) must be able to tell the
-        # two apart; it strips the suite's statement and names it (t261017-10
-        # discipline) instead of silently inheriting a test address. A deployment that
-        # states its own target never gets this marker.
-        child_env[TEST_TARGET_SOURCE_ENV] = TEST_TARGET_DEFAULT
-        _note_test_target_once()
+    # ENV_FAIL. The suite states the TEST target for its children - and now the
+    # statement is TRUE: it brings a plain-process Temporal up on that address
+    # (_provision_test_target, before any pool starts) or states nothing at all
+    # and names why. The marker rides only when the suite stated the value, so a
+    # case whose tested face IS the target can strip it and name the strip.
+    _apply_test_target_env(child_env)
     # 261016 executive finding (req-1792107950368-0001): a scenario that runs the
     # inspection period inside its own fixture wrote engine EVENT rows into the
     # PRODUCTION events ledger - between 23:45:06Z and 23:45:18Z four phantom
@@ -7927,23 +7922,180 @@ def _note_event_ledger_pin_once() -> None:
                      "project ledger)\n" % EVENT_LEDGER_PIN_ENV)
 
 TEST_TARGET_ENV = "SANDBAR_TARGET_HOST"
+#: The address the suite STATES for its scenario children when the ambient
+#: environment states none, and the address the suite's own bench is brought up
+#: on. 127.0.0.1:17233 is the retired docker stage's address, kept on purpose:
+#: two consumers pin the exact value. integration/t260905-03/lib_inspection.py
+#: whitelists it and refuses any other value by name, and the read-only cases
+#: that strip a suite statement (integration/t260929-07,
+#: integration/t261026-08) compare it literally. A random port would break both.
 TEST_TARGET_DEFAULT = "127.0.0.1:17233"
 #: Provenance of the value injected above: set only when the SUITE stated the target
 #: (a deployment's own statement is kept verbatim and carries no marker). A case whose
 #: tested face is the target itself uses this to strip the suite's convenience value
 #: and name what it stripped, instead of judging the product against a test address.
 TEST_TARGET_SOURCE_ENV = "SANDBAR_SUITE_STATED_TARGET"
-_TEST_TARGET_NOTED = {"done": False}
+#: Namespace the suite's own bench serves (integration/process_bench.py NAMESPACE).
+#: Stated only together with the suite's bench: a namespace the environment states
+#: is kept verbatim, exactly like the address.
+TEST_NAMESPACE_ENV = "SANDBAR_NAMESPACE"
+TEST_TARGET_NAMESPACE = "default"
+#: One resolution per suite process (t261101-20). "source" is one of:
+#:   "ambient"      - the environment stated the address; kept verbatim;
+#:   "bench"        - the suite started the process bench on that address;
+#:   "reused"       - something already answered there; stated, never stopped;
+#:   "absent"       - no address is stated; "note" says which check refused.
+_TEST_TARGET = {"resolved": False, "value": "", "source": "", "note": "",
+                "port": 0, "pid": 0, "db": "", "start_s": None,
+                "down": None, "stopped": False}
+_TEST_TARGET_LOCK = threading.Lock()
+#: The bench module, loaded once (a battery substitutes a fake here).
+_BENCH = {"mod": None}
 
 
-def _note_test_target_once() -> None:
-    """Say ONCE that the suite stated the test target (never silently)."""
-    if _TEST_TARGET_NOTED["done"]:
+def _bench_module():
+    """integration/process_bench.py, loaded on first use."""
+    if _BENCH["mod"] is None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import process_bench  # noqa: PLC0415 - only the target provision needs it
+        _BENCH["mod"] = process_bench
+    return _BENCH["mod"]
+
+
+def _test_target_port() -> int:
+    return int(TEST_TARGET_DEFAULT.rsplit(":", 1)[1])
+
+
+def _provision_test_target() -> dict:
+    """State the test target this suite hands its scenario children (t261101-20).
+
+    Decision order, once per suite process:
+      1. the AMBIENT environment states an address -> keep it verbatim (it is
+         the deployment's own statement; no marker, no bench, never stopped);
+      2. something already answers on TEST_TARGET_DEFAULT -> state that address
+         and never stop it (a bench this suite did not start);
+      3. otherwise start the process bench ON that address and state it, with
+         the namespace the bench serves;
+      4. a bench that refuses -> state NOTHING and name the absence. A case that
+         needs a target then books its own named ENV_FAIL. The suite never
+         hands out an address that does not answer.
+
+    The address is the TEST address in every branch, so children are never
+    pointed at the production Temporal by default (the isolation red line).
+    """
+    with _TEST_TARGET_LOCK:
+        if _TEST_TARGET["resolved"]:
+            return dict(_TEST_TARGET)
+        _TEST_TARGET["resolved"] = True
+        st = _TEST_TARGET
+        ambient = str(os.environ.get(TEST_TARGET_ENV) or "").strip()
+        if ambient:
+            st.update(value=ambient, source="ambient")
+            sys.stderr.write("[provision] %s=%s for scenario children (the "
+                             "environment states it; kept as stated, no bench is "
+                             "started or stopped here)\n"
+                             % (TEST_TARGET_ENV, ambient))
+            return dict(st)
+        bench = _bench_module()
+        port = _test_target_port()
+        if not bench.port_refuses(port):
+            st.update(value=TEST_TARGET_DEFAULT, source="reused", port=port)
+            sys.stderr.write("[provision] %s=%s for scenario children (ambient "
+                             "env states none; the address already answers - a "
+                             "bench this suite did not start, so it is not "
+                             "stopped here)\n" % (TEST_TARGET_ENV, TEST_TARGET_DEFAULT))
+            return dict(st)
+        handle = bench.start(port=port)
+        if not handle.get("ok"):
+            st.update(value="", source="absent",
+                      note=str(handle.get("reason") or "bench refused"))
+            sys.stderr.write("[provision] NO TEST TARGET for scenario children: "
+                             "%s (ambient env states none; the suite states NO "
+                             "address rather than a dead one - a case that needs a "
+                             "target books its own named ENV_FAIL)\n" % st["note"])
+            return dict(st)
+        st.update(value=TEST_TARGET_DEFAULT, source="bench", port=port,
+                  pid=int(handle.get("pid") or 0), db=str(handle.get("db") or ""),
+                  start_s=handle.get("start_s"))
+        import atexit
+        atexit.register(_teardown_test_target)
+        sys.stderr.write("[provision] %s=%s for scenario children (ambient env "
+                         "states none; the suite started the process bench: "
+                         "pid=%s start_s=%ss namespace=%s db=%s)\n"
+                         % (TEST_TARGET_ENV, TEST_TARGET_DEFAULT, st["pid"],
+                            st["start_s"], TEST_TARGET_NAMESPACE, st["db"]))
+        return dict(st)
+
+
+def _apply_test_target_env(child_env: dict) -> None:
+    """State the provisioned test target on ONE child's env (t261101-20).
+
+    The marker rides only when the SUITE stated the value; an address the
+    environment states is already on the child's env verbatim and gets none.
+    """
+    st = _TEST_TARGET
+    if not st["resolved"] or st["source"] in ("", "ambient", "absent"):
         return
-    _TEST_TARGET_NOTED["done"] = True
-    sys.stderr.write("[provision] %s=%s for scenario children (ambient env "
-                     "states none; the target is a TEST Temporal)\n"
-                     % (TEST_TARGET_ENV, TEST_TARGET_DEFAULT))
+    child_env[TEST_TARGET_ENV] = st["value"]
+    child_env[TEST_TARGET_SOURCE_ENV] = st["value"]
+    if st["source"] == "bench" and not str(
+            child_env.get(TEST_NAMESPACE_ENV) or "").strip():
+        child_env[TEST_NAMESPACE_ENV] = TEST_TARGET_NAMESPACE
+
+
+def _teardown_test_target():
+    """Stop the suite's own bench and judge the residue from the OUTSIDE.
+
+    The assertions are the reader's, never the stopped process's word: the port
+    must refuse, the pid must be gone, and the private temp dir must be
+    reclaimed. A bench this suite did not start is never stopped. Idempotent
+    (the pool tail calls it, atexit calls it again, the budget exit calls it).
+
+    Deliberately lock-FREE: a signal handler calls this too, and a handler that
+    blocked on a lock the interrupted main thread was holding would hang the
+    round instead of ending it. The worst a race can do is stop one bench twice,
+    which process_bench tolerates; a hang is the one outcome never allowed.
+    """
+    st = _TEST_TARGET
+    if st["stopped"]:
+        return st["down"]
+    st["stopped"] = True
+    if st["source"] != "bench" or not st["pid"]:
+        return st["down"]
+    bench = _bench_module()
+    try:
+        block = bench.stop(port=st["port"], pid=st["pid"], db=st["db"])
+    except Exception as _ex:                     # noqa: BLE001 - named, not raised
+        block = {"clean": False, "error": "%s: %s" % (type(_ex).__name__, _ex)}
+    st["down"] = block
+    sys.stderr.write("[test-target] down: endpoint=%s pid=%s stopped_s=%ss "
+                     "escalated=%s port_refuses=%s pid_alive=%s db_removed=%s "
+                     "clean=%s\n"
+                     % (st["value"], st["pid"], block.get("stopped_s"),
+                        block.get("escalated"), block.get("port_refuses"),
+                        block.get("pid_alive"), block.get("db_removed"),
+                        block.get("clean")))
+    if not block.get("clean"):
+        sys.stderr.write("[test-target] RESIDUE after down: %s - this suite "
+                         "started the bench at %s and did NOT reclaim it\n"
+                         % (json.dumps(block, ensure_ascii=False), st["value"]))
+    return block
+
+
+def _test_target_face() -> dict:
+    """The receipt face: the target this round used, or why it used none."""
+    st = _TEST_TARGET
+    return {"env": TEST_TARGET_ENV,
+            "value": st["value"] or None,
+            "source": st["source"] or "unresolved",
+            "namespace": (TEST_TARGET_NAMESPACE if st["source"] == "bench"
+                          else None),
+            "started_s": st["start_s"],
+            "pid": st["pid"] or None,
+            "absent_reason": (st["note"] or "") if not st["value"] else "",
+            "down": st["down"]}
 
 BATCH_ENV = "SANDBAR_STAGE_BATCH"                # 消费缝注入键（lib_gate/with_stage.sh）
 BATCH_MANIFEST_ENV = "SANDBAR_BATCH_MANIFEST"    # 例外清单路径覆盖（看守桩测缝）
@@ -8098,6 +8250,12 @@ def _batch_signal_teardown(signum, frame):
         _SIGNAL_PROGRESS[0].flush()        # 被打断也保留已完成面（验道据此点名「已跑 N 条」）
     except Exception:                      # noqa: BLE001——观测面不拦收口
         pass
+    # t261101-20: the suite's own test bench goes down here too - `os._exit`
+    # skips atexit. It runs BEFORE batch_teardown() on purpose: the reclamation
+    # pair below (batch_teardown -> reclaim_tmp_artifacts -> os._exit) is a
+    # pinned static lock of its own (t260927, tmp-fixture family lock B6), and a
+    # call slipped between them would tell that lock the reclamation was dropped.
+    _teardown_test_target()
     batch_teardown()
     reclaim_tmp_artifacts()
     os._exit(130)
@@ -8237,6 +8395,12 @@ def _budget_exhausted_exit(t0, budget, run_unrun, ran, passed, failed, env_faile
             ensure_ascii=False), flush=True)
     except Exception as _ex:   # noqa: BLE001——汇总行失败不改收口（观测面）
         print("INTEG_SUMMARY_ERROR %r" % _ex, flush=True)
+    # t261101-20: `os._exit` skips atexit, so the suite's own test bench is
+    # stopped here by name (idempotent - the pool tail and atexit use the same
+    # function). A leaked bench would outlive the round and the next start would
+    # read the port as taken. It runs BEFORE the pinned reclamation pair below,
+    # for the same reason as on the signal path.
+    _teardown_test_target()
     batch_teardown()
     # 260927：`os._exit` 跳过 atexit → 显式回收本进程登记的临时物料（锁档等；
     # 幂等，正常/异常路径早由 helper 的 atexit 收过一次）。
@@ -8939,11 +9103,20 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         # 快速环境红（要求⑤不假绿）：本轮零场景开跑零注入，不烧整套
         return 2
     _prelude_leg_s["batch_preboot_s"] = round(time.monotonic() - _leg_t0, 3)
+    # ---- t261101-20 test-target provision (before any pool starts): the target
+    # this round hands its children is either an address the environment states,
+    # an address that already answers, or a plain-process Temporal this suite
+    # brings up on the test address itself - never a stated address that nothing
+    # runs. A bench that refuses leaves the round WITHOUT a target, and the case
+    # that needs one books its own named ENV_FAIL (see _provision_test_target).
+    _leg_t0 = time.monotonic()
+    _provision_test_target()
+    _prelude_leg_s["test_target_s"] = round(time.monotonic() - _leg_t0, 3)
     _prelude_s = time.time() - _pre_t0   # t260925-12：前奏墙钟（含批台预起；失败路径不回写=观测面缺席不假值）
     print("prelude-legs: stage_sweep=%.3fs docker_hygiene=%.3fs batch_preboot=%.3fs"
-          " (sum=%.3fs, outer prelude wall measured after this line)"
+          " test_target=%.3fs (sum=%.3fs, outer prelude wall measured after this line)"
           % (_prelude_leg_s["stage_sweep_s"], _prelude_leg_s["docker_hygiene_s"],
-             _prelude_leg_s["batch_preboot_s"],
+             _prelude_leg_s["batch_preboot_s"], _prelude_leg_s["test_target_s"],
              round(sum(_prelude_leg_s.values()), 3)), flush=True)
     _prev_sig = {}
     if _BATCH_STATE["project"]:
@@ -8984,6 +9157,11 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         # 批终收口（t260921-06 验收④）：正常/异常/信号每条路径都 down 批台零残留；
         # 恢复既有信号处理（外层 runner 的信号语义不被本层吞掉）。
         batch_teardown()
+        # t261101-20: the suite's own test bench goes down here too, with its
+        # residue judged from the outside (port refuses, pid gone, temp dir
+        # reclaimed) and carried on the round's receipt. Idempotent: the atexit
+        # backstop and the budget exit call the same function.
+        _teardown_test_target()
         for _s, _h in _prev_sig.items():
             try:
                 signal.signal(_s, _h)
@@ -9153,6 +9331,11 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         _env_red_sorted = sorted(set(env_red_names))
         _summary["env_red_names"] = _env_red_sorted
         _summary["env_red_count"] = len(_env_red_sorted)
+        # t261101-20 additive receipt: WHICH test target this round handed its
+        # children (or why it handed none) and the residue verdict of the bench
+        # the suite started. Always present, so a reader never has to guess from
+        # a case's log whether the target was real.
+        _summary["test_target"] = _test_target_face()
         # ---- t261009-11 run record (executor-side driver) ----
         # The top driver mints the run id and writes rows + header at the end
         # of the round; counts come from the same recount the summary carries.
@@ -9254,6 +9437,8 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
         # 260929 直修 B1（宿主令·不开票）：报告落档同带环境红具名名单（与汇总行同名同源，
         # 排序去重；既有键一个不动）。
         _report["env_red_names"] = sorted(set(env_red_names))
+        # t261101-20: the same test-target receipt as INTEG_SUMMARY (additive).
+        _report["test_target"] = _test_target_face()
         try:
             _report["run_record"] = _report_run_face   # t261009-11 观测面
         except NameError:
