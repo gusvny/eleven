@@ -483,7 +483,11 @@ def test_integ_run_args_both_declaring_call_sites_route_through_the_writer():
     assert src.count("def _integ_run_args(self, only_names=(), own_names=()):") == 1
     assert "own_names=_own_face_names" in src       # the main run site
     assert "own_names=_closing_own" in src          # the closing arm
-    assert "own_names=list((quick_scope or {}).get(\"own_names\") or [])" in src
+    # t261031-23 (main ae92d77e) moved the inline own-names expression into the `_own`
+    # local on the quickmanual run site. The lock follows the shipped shape: the
+    # derivation from the quick_scope field, and the writer call that carries it.
+    assert '_own = list(_sc.get("own_names") or [])' in src
+    assert "own_names=_own)" in src
     # the caliber union lives in the writer, not at a call site
     body = src.split("def _integ_run_args(", 1)[1].split("\n    async def ", 1)[0]
     assert "for _n in (own_names or ()):" in body
