@@ -1030,3 +1030,83 @@ unusual layouts are unaffected. Deferral (review R1, verbatim): guard coverage o
 relies on the corrected engine env alone until the follow-up ticket lands its
 two-line migration; the integration gate must not sign this ticket as "family
 fully guarded".
+
+## 16. Optional GitHub review-request delivery flow, step (b) (t261103-05)
+
+Design: `docs/design/github-pr-flow-v1.md`. Step (a) (t261103-04) ships the two
+preconditions - the per-project switch and the credential - inside the same
+module (`pr_flow.py`, sections "the declaration face" / "the credential" /
+"the gate consumed by steps (b)-(d)"). This step ships the DELIVERY ACT and the
+park. Polling and comment rounds (step (c)) and post-merge reconciliation
+(step (d)) are separate tickets.
+
+**Where the fork sits.** Every merge phase site (dev-lane legacy, quickmanual,
+light lane) calls `DevLaneWorkflow._pr_flow_merge_step` behind
+`workflow.patched(pr_flow.PR_FLOW_DELIVERY_PATCH_ID)`. A history recorded before
+that marker schedules no new command. With the switch OFF the act answers "land
+locally" and the ordinary human merge gate runs exactly as before (the negative
+control). The develop buffer lane is out of scope for v1 and keeps landing on its
+line.
+
+**What happens with the switch ON.** `agent_activities.pr_flow_deliver` reads
+step (a)'s switch, derives the ticket's per-repository change set from the
+engine's EXISTING knowledge - the same `_lane_scopes` normalization the merge
+activity settles with (`meta.repo_worktrees` details when present, else the lane
+manifest) - keeps the repositories whose lane branch carries commits the landing
+target does not have, binds each one to an identity DECLARED in the project's
+`github_pr` block (least privilege: an unidentified or undeclared repository is a
+named stop, never a guess and never a silent skip), and publishes ONE request per
+repository. Nothing lands locally. The ticket parks in the named
+`awaiting-remote-review` state, which hands its working slot back with its own
+cause word `remote-review-wait` (ledger face `blocked_wait`, so the release can
+never be read as a zombie holder).
+
+**Idempotency by branch (the rule every stop leans on).** The act always reads
+the platform state for (repository, branch) before it writes: an existing request
+is rewritten in place, and only an absent one is created (the branch is published
+first - a request needs a branch the platform has). A retry therefore cannot open
+a second request, which is what makes the ambiguous face safe.
+
+**Named, retry-safe stops.** Step (a)'s `STOP_*` codes (declaration and
+credential preconditions) and this step's `DELIVERY_STOP_*` codes:
+`change_set_unreadable`, `no_changed_repository`, `no_evidence_record`,
+`gate_not_green`, `repository_unidentified`, `repository_not_declared`,
+`platform_unreachable`, `platform_refused`, `platform_ambiguous`. Each has its
+remedy line in `pr_flow.stop_remedy`; a stop blocks the merge stage by name
+(fail-closed: never a silent local landing) and `retry_qc` re-runs the act.
+Requests already published before a later repository stopped stay on the ticket
+face (`meta.pr_requests`) and are named in the blocked text.
+
+**The request body** names the ticket id and title, the repository and its
+declared identity, the machine gate rows that passed, where the evidence lives
+(ticket face, archive path, the project declaration) and how to get back to the
+ticket, so a reviewer who never saw this console can decide from the request
+alone.
+
+**The park's exit.** `remote_review_update` is the poller's signal (step (c)).
+`pr_flow.remote_review_exit` accepts a payload whose `source` is `poller` and
+refuses every other source BY NAME (a signature, an advance, an empty payload): a
+delivery whose acceptance record is the platform merge must never leave through a
+local act. What the reported platform answer MEANS is step (c)'s judgement, so
+this step records the wake, lands the ticket in the named `remote-review-wake`
+state and re-parks it.
+
+**The credential** is step (a)'s: `<sandbar home>/github/credential`, resolved
+with its placement/mode/shape checks and its validity probe. Step (b) resolves it
+INSIDE the activity (never in the workflow, never in a payload) and reveals it
+only to build the platform client. Every string the act returns goes through
+step (a)'s `redact`/`scrub`, so a receipt, a stop, a blocked text or a log line
+can never carry the value; the branch publish hands the token to git through
+`GIT_CONFIG_*` environment entries, never through argv.
+
+**Tests** (`tests/test_t261022_merge_slot_release.py`, section "t261103-05", an
+already-anchored engine test file - this ticket's write set excludes
+`integration/`, so the shared anchor manifest cannot be extended from this lane;
+step (a)'s own faces are covered in `test_t261004_44_deliver_refusal.py` and are
+not re-tested here): the body builder as a pure function, the negative control,
+one-request-per-repository, the declared-identity binding, idempotency by branch
+(including the ambiguous-create retry and a partial stop that keeps the published
+request), every delivery stop by name, the adapter's status mapping and credential
+handling with an injected transport/git runner, the receipt's redaction property,
+the park's slot release and its poller-only exit, and a source lock over the three
+merge phase sites.

@@ -545,3 +545,728 @@ def test_the_merge_wait_cause_is_its_own_word(proj):
         cc.release(key, "h", cc.CAUSE_HUMAN_GATE)
     assert "human-gate" in str(e.value) and "renew" in str(e.value)
     assert [h["ticket"] for h in cc.read_state(key)["holders"]] == ["h"]
+
+
+# ===========================================================================
+# t261103-05 (design step (b)) - the review-request delivery act and its park
+#
+# This section lives in this file because it owns the same mechanical question
+# (which parked state releases the working slot, and with which truthful cause
+# word) plus the delivery act that produces the park. The ticket's write set is
+# server/engine/ only, so the shared anchor manifest
+# (integration/test_anchors.json, owned by the integration role) cannot be
+# extended from this lane: the new tests therefore extend an ALREADY anchored
+# engine test file instead of adding an undeclared one (lint L16). Step (a)
+# (t261103-04) tests its own switch/credential faces in
+# tests/test_t261004_44_deliver_refusal.py; this section does not re-test them -
+# it tests what step (b) does WITH them.
+#
+# intent: with the project switch ON, a delivery that passed the machine gate
+# (merge_check green) opens exactly ONE review request per changed repository,
+# rewrites an existing request for the same branch instead of opening a second,
+# parks the ticket in the named awaiting-remote-review state holding no working
+# slot, and turns every failure face into a named, retry-safe stop. With the
+# switch OFF nothing changes.
+#
+# hermetic: the platform is injected (a fake port / a fake HTTP transport), the
+# switch decision is a plain value, no test opens a socket, reads ~/.sandbar,
+# touches git or schedules a real activity.
+# ===========================================================================
+
+import pr_flow  # noqa: E402  (stdlib-only core: no temporalio, no IO)
+
+
+class _FakePlatform:
+    """The platform port, scripted per repository and branch. Records every call
+    so a test can prove what was NOT called (no duplicate create, no local
+    landing)."""
+
+    def __init__(self, find=None, create=None, update=None, branch=None):
+        self.calls = []
+        self._find = find or (lambda scope: {"status": "absent", "number": 0, "url": ""})
+        self._create = create or (lambda scope, title, body:
+                                  {"status": "created", "number": 101,
+                                   "url": "https://example.invalid/pull/101"})
+        self._update = update or (lambda scope, number, title, body:
+                                  {"status": "updated", "number": number,
+                                   "url": "https://example.invalid/pull/%d" % number})
+        self._branch = branch or (lambda scope: {"status": "pushed", "detail": ""})
+
+    def find_request(self, scope):
+        self.calls.append(("find", scope.get("repo"), scope.get("branch")))
+        return self._find(scope)
+
+    def ensure_branch(self, scope):
+        self.calls.append(("branch", scope.get("repo"), scope.get("branch")))
+        return self._branch(scope)
+
+    def create_request(self, scope, title, body):
+        self.calls.append(("create", scope.get("repo"), scope.get("branch")))
+        return self._create(scope, title, body)
+
+    def update_request(self, scope, number, title, body):
+        self.calls.append(("update", scope.get("repo"), scope.get("branch")))
+        return self._update(scope, number, title, body)
+
+    def kinds(self, kind):
+        return [c for c in self.calls if c[0] == kind]
+
+
+DECLARED = ("owner/repo_a", "owner/repo_b", "owner/repo_c")
+
+
+def _scope(repo, changed=True, name=None, branch=None, identity=None):
+    """One entry of the engine's per-repository change-set knowledge."""
+    return {"repo": repo, "name": name or (repo or "root"),
+            "branch": branch or ("lane/x-%s" % (repo or "root")),
+            "tree": "/tmp/%s" % (repo or "root"),
+            "remote": "git@github.com:%s.git" % (identity or ("owner/%s" % (repo or "repo_a"))),
+            "changed": changed}
+
+
+def _on(repos=DECLARED):
+    """Step (a)'s switch decision, ON with the declared repository set."""
+    return pr_flow.SwitchDecision(enabled=True, reason="on",
+                                  repositories=tuple(repos),
+                                  declaration="/sandbox/projects/proj-alpha/project.yaml")
+
+
+def _off(reason="absent"):
+    return pr_flow.SwitchDecision(enabled=False, reason=reason, repositories=(),
+                                  declaration="/sandbox/projects/proj-alpha/project.yaml")
+
+
+def _payload(**over):
+    base = {
+        "ticket_id": "t261103ut",
+        "title": "PR flow step (b)",
+        "project": "proj-alpha",
+        "branch": "lane/x",
+        "base_ref": "main",
+        "target_branch": "main",
+        "gate_rows": [{"gate": "merge_check", "item": "Lane branch has commits",
+                       "green": True},
+                      {"gate": "merge_check", "item": "Worktree is clean", "green": True}],
+        "evidence": ["Ticket face `t261103ut` (Temporal workflow history)"],
+        "ticket_pointer": "python3 server/tools/ticket.py show t261103ut",
+        "scopes": [_scope("")],
+    }
+    base.update(over)
+    return base
+
+
+# ---------- the negative control: OFF is today's path ----------------------
+
+def test_pr_flow_switch_off_lands_locally_and_touches_nothing():
+    """OFF means today's path: no platform is built, no scope is derived, no
+    request is created - the design's default-off promise."""
+    built = []
+
+    def factory():
+        built.append(1)
+        return _FakePlatform()
+
+    def must_not_derive():
+        raise AssertionError("the change set was derived with the switch off")
+
+    verdict = pr_flow.run_delivery(_payload(), _off(), platform_factory=factory,
+                                   scope_provider=must_not_derive)
+    assert verdict.action == pr_flow.ACTION_LOCAL_LANDING, verdict
+    assert verdict.switch == "absent"
+    assert built == [], "the off switch still built a platform client"
+    assert verdict.requests == []
+
+
+def test_pr_flow_no_switch_read_at_all_is_off():
+    verdict = pr_flow.run_delivery(_payload(), None)
+    assert verdict.action == pr_flow.ACTION_LOCAL_LANDING, verdict
+
+
+def test_pr_flow_a_precondition_stop_surfaces_by_name_with_a_remedy():
+    """A step (a) refusal is reported by its own code, with an actionable remedy
+    and the duplicate-safety promise - never downgraded to "off" (that would land
+    the delivery locally behind the operator's back)."""
+    verdict = pr_flow.stop_verdict(pr_flow.STOP_CREDENTIAL_MISSING,
+                                   "no credential file for the enabled switch")
+    assert verdict.action == pr_flow.ACTION_STOP
+    assert verdict.stop == pr_flow.STOP_CREDENTIAL_MISSING
+    assert verdict.retryable is True
+    text = pr_flow.stop_text(verdict, "t261103ut")
+    assert pr_flow.STOP_CREDENTIAL_MISSING in text
+    assert "credential" in text and "remedy" in text
+    assert "no second request" in text
+    assert "no remedy recorded" not in text
+
+
+# ---------- the request body: what a reviewer sees -------------------------
+
+def test_pr_flow_request_body_carries_the_reviewer_facts():
+    body = pr_flow.build_request_body(
+        ticket_id="t261103ut", title="PR flow step (b)", project="proj-alpha",
+        repo="repo_b", identity="owner/repo_b", branch="lane/x-repo_b",
+        target_branch="main",
+        gate_items=["- `merge_check` - Lane branch has commits",
+                    "- `merge_check` - Worktree is clean"],
+        evidence=["Ticket face `t261103ut` (Temporal workflow history)",
+                  "Lane worktree: /tmp/wt"],
+        ticket_pointer="python3 server/tools/ticket.py show t261103ut")
+    assert body["title"].startswith("[t261103ut] PR flow step (b)")
+    text = body["body"]
+    for needle in ("t261103ut", "PR flow step (b)", "repo_b", "owner/repo_b",
+                   "lane/x-repo_b", "merge_check", "Lane branch has commits",
+                   "Ticket face `t261103ut`", "ticket.py show t261103ut"):
+        assert needle in text, "the request body is missing %r:\n%s" % (needle, text)
+
+
+def test_pr_flow_request_body_is_pure_and_the_title_is_bounded():
+    kwargs = dict(ticket_id="t1", title="x" * 500, project="p", repo="",
+                  identity="owner/n", branch="b", target_branch="main",
+                  gate_items=["- g"], evidence=["e"], ticket_pointer="p")
+    assert pr_flow.build_request_body(**kwargs) == pr_flow.build_request_body(**kwargs)
+    body = pr_flow.build_request_body(**kwargs)
+    assert len(body["title"]) <= pr_flow.TITLE_LIMIT
+    assert body["title"].startswith("[t1] ")
+
+
+# ---------- one request per changed repository ----------------------------
+
+def test_pr_flow_one_request_per_changed_repository():
+    platform = _FakePlatform()
+    verdict = pr_flow.run_delivery(
+        _payload(scopes=[_scope("repo_a"), _scope("repo_b"),
+                         _scope("repo_c", changed=False)]),
+        _on(), platform_factory=lambda: platform)
+    assert verdict.action == pr_flow.ACTION_REQUESTS_OPEN, verdict
+    assert [r["repo"] for r in verdict.requests] == ["repo_a", "repo_b"], verdict.requests
+    assert [c[1] for c in platform.kinds("create")] == ["repo_a", "repo_b"], (
+        "an unchanged repository was published: %r" % (platform.calls,))
+    assert platform.kinds("update") == []
+    assert [r["identity"] for r in verdict.requests] == ["owner/repo_a", "owner/repo_b"]
+    assert all(r["action"] == "created" and r["number"] == 101
+               for r in verdict.requests), verdict.requests
+
+
+def test_pr_flow_no_changed_repository_is_a_named_stop():
+    platform = _FakePlatform()
+    verdict = pr_flow.run_delivery(
+        _payload(scopes=[_scope("repo_a", changed=False)]), _on(),
+        platform_factory=lambda: platform)
+    assert verdict.action == pr_flow.ACTION_STOP
+    assert verdict.stop == pr_flow.DELIVERY_STOP_NO_CHANGED_REPOSITORY, verdict
+    assert verdict.retryable is True
+    assert platform.calls == [], "a stop still talked to the platform: %r" % (platform.calls,)
+
+
+def test_pr_flow_change_set_derivation_error_is_a_named_stop():
+    verdict = pr_flow.run_delivery(
+        _payload(), _on(), platform_factory=lambda: _FakePlatform(),
+        scope_provider=lambda: {"error": "multi-repo lane manifest corrupted"})
+    assert verdict.stop == pr_flow.DELIVERY_STOP_CHANGE_SET_UNREADABLE, verdict
+    assert "corrupted" in verdict.detail
+
+
+def test_pr_flow_repository_must_be_identified_and_declared():
+    """Least privilege: a request is only opened on a repository the project
+    declaration names. An unidentified remote, and an identity outside the
+    declared set, are each a NAMED stop - never a guess, never a silent skip
+    (a skip would silently narrow what a person reviews)."""
+    # (i) no GitHub remote at all
+    platform = _FakePlatform()
+    verdict = pr_flow.run_delivery(
+        _payload(scopes=[dict(_scope("repo_a"), remote="https://gitlab.com/o/n.git")]),
+        _on(), platform_factory=lambda: platform)
+    assert verdict.stop == pr_flow.DELIVERY_STOP_REPOSITORY_UNIDENTIFIED, verdict
+    # (ii) identified, but not in the declaration
+    verdict = pr_flow.run_delivery(
+        _payload(scopes=[_scope("repo_a", identity="someone/else")]), _on(),
+        platform_factory=lambda: platform)
+    assert verdict.stop == pr_flow.DELIVERY_STOP_REPOSITORY_NOT_DECLARED, verdict
+    assert "owner/repo_a" in verdict.detail and "someone/else" in verdict.detail, (
+        verdict.detail)
+    assert platform.calls == [], "a stop still published: %r" % (platform.calls,)
+
+
+# ---------- idempotency by branch ----------------------------------------
+
+def test_pr_flow_existing_request_is_rewritten_not_duplicated():
+    platform = _FakePlatform(find=lambda scope: {"status": "found", "number": 7,
+                                                 "url": "https://example.invalid/pull/7"})
+    first = pr_flow.run_delivery(_payload(), _on(), platform_factory=lambda: platform)
+    second = pr_flow.run_delivery(_payload(), _on(), platform_factory=lambda: platform)
+    assert first.action == second.action == pr_flow.ACTION_REQUESTS_OPEN
+    assert platform.kinds("create") == [], (
+        "a request was opened for a branch that already has one: %r" % (platform.calls,))
+    assert len(platform.kinds("update")) == 2
+    assert [r["action"] for r in second.requests] == ["updated"]
+    assert [r["number"] for r in second.requests] == [7]
+
+
+def test_pr_flow_ambiguous_create_never_becomes_a_second_request():
+    """The ambiguous face: the create may or may not have landed. The retry
+    re-reads the platform first, finds the request the first attempt created and
+    rewrites it - the create is called exactly once across both runs."""
+    state = {"created": False, "creates": 0}
+
+    def find(scope):
+        if state["created"]:
+            return {"status": "found", "number": 42, "url": "u42"}
+        return {"status": "absent", "number": 0, "url": ""}
+
+    def create(scope, title, body):
+        state["creates"] += 1
+        state["created"] = True          # it DID land; only the answer was lost
+        raise pr_flow.PrFlowStop(pr_flow.DELIVERY_STOP_PLATFORM_AMBIGUOUS,
+                                 "read timeout after the create was accepted")
+
+    platform = _FakePlatform(find=find, create=create)
+    first = pr_flow.run_delivery(_payload(), _on(), platform_factory=lambda: platform)
+    assert first.action == pr_flow.ACTION_STOP
+    assert first.stop == pr_flow.DELIVERY_STOP_PLATFORM_AMBIGUOUS, first
+    second = pr_flow.run_delivery(_payload(), _on(), platform_factory=lambda: platform)
+    assert second.action == pr_flow.ACTION_REQUESTS_OPEN, second
+    assert [r["action"] for r in second.requests] == ["updated"]
+    assert state["creates"] == 1, "a retry opened a second request"
+
+
+def test_pr_flow_partial_stop_keeps_the_published_request_and_retry_completes():
+    """Two repositories, the second one unreachable: the stop names it, the first
+    request stays recorded, and the retry finishes the job without a duplicate."""
+    state = {"repo_b_ok": False, "creates": []}
+
+    def find(scope):
+        if scope["repo"] == "repo_b" and not state["repo_b_ok"]:
+            raise pr_flow.PrFlowStop(pr_flow.DELIVERY_STOP_PLATFORM_UNREACHABLE,
+                                     "connection timed out")
+        if scope["repo"] in state["creates"]:
+            return {"status": "found",
+                    "number": 100 + state["creates"].index(scope["repo"]), "url": ""}
+        return {"status": "absent", "number": 0, "url": ""}
+
+    def create(scope, title, body):
+        state["creates"].append(scope["repo"])
+        return {"status": "created",
+                "number": 100 + state["creates"].index(scope["repo"]), "url": ""}
+
+    platform = _FakePlatform(find=find, create=create)
+    scopes = [_scope("repo_a"), _scope("repo_b")]
+    first = pr_flow.run_delivery(_payload(scopes=scopes), _on(),
+                                 platform_factory=lambda: platform)
+    assert first.action == pr_flow.ACTION_STOP
+    assert first.stop == pr_flow.DELIVERY_STOP_PLATFORM_UNREACHABLE, first
+    assert [r["repo"] for r in first.requests] == ["repo_a"], (
+        "a published request was lost by the stop: %r" % (first.requests,))
+    state["repo_b_ok"] = True
+    second = pr_flow.run_delivery(_payload(scopes=scopes), _on(),
+                                  platform_factory=lambda: platform)
+    assert second.action == pr_flow.ACTION_REQUESTS_OPEN, second
+    assert sorted(state["creates"]) == ["repo_a", "repo_b"], state["creates"]
+    assert [r["action"] for r in second.requests] == ["updated", "created"], (
+        second.requests)
+
+
+# ---------- every failure face is named and retry-safe -------------------
+
+@pytest.mark.parametrize("code", sorted(pr_flow.DELIVERY_STOP_TABLE))
+def test_pr_flow_every_delivery_stop_is_named_retry_safe_and_has_a_remedy(code):
+    assert pr_flow.is_delivery_stop(code) is True
+    verdict = pr_flow.stop_verdict(code, "detail")
+    assert verdict.action == pr_flow.ACTION_STOP and verdict.stop == code
+    assert verdict.retryable is True
+    assert pr_flow.stop_remedy(code) not in ("", "retry after the named condition "
+                                                 "is removed")
+    assert code in pr_flow.stop_text(verdict, "t261103ut")
+
+
+@pytest.mark.parametrize("exc_code", [
+    pr_flow.DELIVERY_STOP_PLATFORM_UNREACHABLE,
+    pr_flow.DELIVERY_STOP_PLATFORM_REFUSED,
+    pr_flow.DELIVERY_STOP_PLATFORM_AMBIGUOUS,
+])
+def test_pr_flow_each_placement_failure_is_the_named_stop(exc_code):
+    def create(scope, title, body):
+        raise pr_flow.PrFlowStop(exc_code, "platform said no (%s)" % exc_code)
+
+    platform = _FakePlatform(create=create)
+    verdict = pr_flow.run_delivery(_payload(), _on(), platform_factory=lambda: platform)
+    assert verdict.action == pr_flow.ACTION_STOP
+    assert verdict.stop == exc_code, verdict
+    assert verdict.retryable is True
+    assert len(platform.kinds("create")) == 1
+
+
+def test_pr_flow_unbuildable_platform_is_a_named_stop():
+    def factory():
+        raise pr_flow.PrFlowStop(pr_flow.STOP_CREDENTIAL_MISSING,
+                                 "no credential file for the enabled switch")
+
+    verdict = pr_flow.run_delivery(_payload(), _on(), platform_factory=factory)
+    assert verdict.stop == pr_flow.STOP_CREDENTIAL_MISSING, verdict
+    assert "no credential file" in verdict.detail
+
+
+def test_pr_flow_refuses_to_publish_without_evidence():
+    verdict = pr_flow.run_delivery(_payload(gate_rows=[]), _on(),
+                                   platform_factory=lambda: _FakePlatform())
+    assert verdict.stop == pr_flow.DELIVERY_STOP_NO_EVIDENCE, verdict
+
+
+def test_pr_flow_refuses_a_red_gate_row():
+    verdict = pr_flow.run_delivery(
+        _payload(gate_rows=[{"gate": "merge_check", "item": "Worktree is clean",
+                             "green": False}]),
+        _on(), platform_factory=lambda: _FakePlatform())
+    assert verdict.stop == pr_flow.DELIVERY_STOP_GATE_NOT_GREEN, verdict
+
+
+# ---------- the waiting state: named, no slot, poller-only exit ----------
+
+def test_pr_flow_waiting_state_exit_is_the_poller_only():
+    ok = pr_flow.remote_review_exit({"source": "poller", "note": "beat 7",
+                                     "reported": {"merged": False}})
+    assert ok.accepted is True and ok.record["source"] == "poller"
+    assert ok.record["reported"] == {"merged": False}
+    for bad in ({"source": "sign"}, {"source": "advance"}, {"source": ""},
+                {"note": "no source"}, {}, None, "poller", 7):
+        out = pr_flow.remote_review_exit(bad)
+        assert out.accepted is False, bad
+        assert "poller" in out.reason, out.reason
+    assert pr_flow.AWAITING_REMOTE_REVIEW == "awaiting-remote-review"
+    assert pr_flow.REMOTE_REVIEW_WAKE == "remote-review-wake"
+
+
+def test_pr_flow_awaiting_record_names_the_requests_and_the_exit_channel():
+    verdict = pr_flow.DeliveryVerdict(
+        action=pr_flow.ACTION_REQUESTS_OPEN,
+        requests=[{"repo": "repo_a", "name": "repo_a", "identity": "owner/repo_a",
+                   "branch": "lane/x-repo_a", "number": 3, "url": "u",
+                   "action": "created"}])
+    rec = pr_flow.awaiting_record(verdict, ticket_id="t261103ut", project="p",
+                                  at_iso="2026-11-03T00:00:00+00:00")
+    assert rec["state"] == pr_flow.AWAITING_REMOTE_REVIEW
+    assert rec["exit_channel"] == "poller"
+    assert rec["requests"][0]["number"] == 3
+
+
+# ---------- the secret never rides out on a receipt ----------------------
+
+def test_pr_flow_secret_never_reaches_a_delivery_receipt():
+    """The platform can echo the token back in an error text; every string the
+    act returns is scrubbed, so no receipt, no stop and no detail carries it."""
+    pr_flow.forget_secrets()
+    token = "ghp_" + "Q" * 36
+    pr_flow.register_secret(token)
+    try:
+        def create(scope, title, body):
+            raise pr_flow.PrFlowStop(pr_flow.DELIVERY_STOP_PLATFORM_REFUSED,
+                                     "422 bad token %s for %s" % (token, "owner/repo_a"))
+
+        platform = _FakePlatform(create=create)
+        verdict = pr_flow.run_delivery(_payload(), _on(),
+                                      platform_factory=lambda: platform)
+        for surface in (json.dumps(verdict.to_dict(), ensure_ascii=False),
+                        pr_flow.stop_text(verdict, "t261103ut"),
+                        str(verdict.detail), str(verdict.stop)):
+            assert token not in surface, surface
+            assert token[:12] not in surface, surface
+        assert pr_flow.REDACTED in verdict.detail
+        # the platform object itself never prints the token
+        plat = pr_flow.GitHubPlatform(token=token,
+                                      transport=lambda *a, **k: (200, {}, b"{}"))
+        assert token not in repr(plat) and token not in str(plat)
+    finally:
+        pr_flow.forget_secrets()
+
+
+# ---------- the GitHub adapter (injected transport; no socket) -----------
+
+def test_pr_flow_github_adapter_maps_statuses_to_named_stops():
+    def transport(status, payload):
+        def _t(method, url, headers, body, timeout):
+            return status, {}, json.dumps(payload).encode("utf-8")
+        return _t
+
+    scope = {"repo": "", "name": "root", "branch": "lane/x", "tree": "/tmp/x",
+             "remote": "git@github.com:owner/name.git", "changed": True}
+
+    plat = pr_flow.GitHubPlatform(token="ghp_" + "A" * 36,
+                                  transport=transport(200, []))
+    assert plat.find_request(scope)["status"] == "absent"
+
+    plat = pr_flow.GitHubPlatform(token="ghp_" + "A" * 36,
+                                  transport=transport(200, [{"number": 5,
+                                                             "html_url": "u"}]))
+    assert plat.find_request(scope) == {"status": "found", "number": 5, "url": "u",
+                                        "detail": ""}
+
+    plat = pr_flow.GitHubPlatform(token="ghp_" + "A" * 36,
+                                  transport=transport(200, [{"number": 5},
+                                                            {"number": 6}]))
+    two = plat.find_request(scope)
+    assert two["status"] == "ambiguous" and "one request per branch" in two["detail"]
+
+    plat = pr_flow.GitHubPlatform(token="ghp_" + "A" * 36,
+                                  transport=transport(201, {"number": 9,
+                                                            "html_url": "u9"}))
+    assert plat.create_request(scope, "title", "body") == {
+        "status": "created", "number": 9, "url": "u9", "detail": ""}
+
+    plat = pr_flow.GitHubPlatform(token="ghp_" + "A" * 36,
+                                  transport=transport(201, {}))
+    with pytest.raises(pr_flow.PrFlowStop) as e:
+        plat.create_request(scope, "title", "body")
+    assert e.value.code == pr_flow.DELIVERY_STOP_PLATFORM_AMBIGUOUS
+
+    cases = [(401, pr_flow.STOP_CREDENTIAL_REJECTED),
+             (403, pr_flow.DELIVERY_STOP_PLATFORM_REFUSED),
+             (422, pr_flow.DELIVERY_STOP_PLATFORM_REFUSED),
+             (500, pr_flow.DELIVERY_STOP_PLATFORM_UNREACHABLE),
+             (429, pr_flow.DELIVERY_STOP_PLATFORM_UNREACHABLE),
+             (418, pr_flow.DELIVERY_STOP_PLATFORM_AMBIGUOUS)]
+    for status, code in cases:
+        plat = pr_flow.GitHubPlatform(token="ghp_" + "A" * 36,
+                                      transport=transport(status, {"message": "m"}))
+        with pytest.raises(pr_flow.PrFlowStop) as e:
+            plat.create_request(scope, "title", "body")
+        assert e.value.code == code, (status, e.value.code, code)
+
+
+def test_pr_flow_github_adapter_never_puts_the_token_in_argv():
+    token = "ghp_" + "B" * 36
+    seen = {}
+
+    def git_runner(argv, env, timeout):
+        seen["argv"] = argv
+        seen["env"] = env
+        return 0, "Everything up-to-date"
+
+    plat = pr_flow.GitHubPlatform(token=token, git_runner=git_runner)
+    out = plat.ensure_branch({"repo": "", "branch": "lane/x", "tree": "/tmp/x"})
+    assert out["status"] == "present", out
+    assert token not in " ".join(seen["argv"]), (
+        "the credential leaked into the git argv: %r" % (seen["argv"],))
+    assert seen["env"].get("GIT_CONFIG_KEY_0", "").startswith("http."), seen["env"]
+    assert seen["env"].get("GIT_CONFIG_COUNT") == "1"
+
+    def failing(argv, env, timeout):
+        return 128, "fatal: Authentication failed for 'https://github.com/o/n.git/'"
+
+    plat = pr_flow.GitHubPlatform(token=token, git_runner=failing)
+    with pytest.raises(pr_flow.PrFlowStop) as e:
+        plat.ensure_branch({"repo": "", "branch": "lane/x", "tree": "/tmp/x"})
+    assert e.value.code == pr_flow.STOP_CREDENTIAL_REJECTED
+
+
+def test_pr_flow_repo_identity_parsing():
+    assert pr_flow.parse_repo_identity("git@github.com:owner/name.git") == "owner/name"
+    assert pr_flow.parse_repo_identity("https://github.com/owner/name.git") == "owner/name"
+    assert pr_flow.parse_repo_identity("ssh://git@github.com/owner/name/") == "owner/name"
+    assert pr_flow.parse_repo_identity("https://gitlab.com/owner/name") == ""
+    assert pr_flow.parse_repo_identity("") == ""
+
+
+# ---------- the workflow side: the park, the slot, no local landing ------
+
+def _pr_stub(recorded, receipt):
+    async def execute_activity(act, *a, **k):
+        name = getattr(act, "__name__", str(act))
+        recorded.append((name, a[0] if a else None))
+        if name == "pr_flow_deliver":
+            return receipt
+        if name == "concurrency_acquire":
+            return {"granted": True, "already_holding": False, "reason": "",
+                    "position": 0, "limit": 10, "holders": 1, "waiting": 0}
+        if name == "ui_evidence_decl":
+            return {"mode": "absent", "dirs": [], "note": ""}
+        if name == "bundle_out_ws_prefixes":
+            return SimpleNamespace(prefixes=[], note="")
+        if name == "concurrency_release":
+            return {"released": True, "cause": getattr(a[0], "cause", ""),
+                    "promoted": None, "dropped_stale": [], "holders": 0, "waiting": 0}
+        if name == "concurrency_renew":
+            return {"renewed": True, "holding": True, "reason": "human-hold"}
+        if name == "prepare_human_gate":
+            return SimpleNamespace(context_text="merge gate context")
+        if name == "merge":
+            raise _StoppedAtMerge()
+        return {}
+
+    async def wait_condition(cond):
+        # The real facade suspends until the condition holds; here a condition
+        # that already holds returns at once (a seeded poller wake), anything
+        # else parks the run at its first wait.
+        try:
+            ready = bool(cond())
+        except Exception:  # noqa: BLE001
+            ready = False
+        if ready:
+            return None
+        raise _Parked()
+
+    def sleep(_):
+        raise AssertionError("queue sleep reached: no slot should be taken")
+
+    return SimpleNamespace(
+        patched=lambda pid: True,
+        execute_activity=execute_activity,
+        sleep=sleep,
+        wait_condition=wait_condition,
+        now=lambda: __import__("datetime").datetime(2026, 11, 3, 9, 0, 0),
+        info=lambda: SimpleNamespace(start_time=None),
+        logger=SimpleNamespace(info=lambda *a, **k: None,
+                               warning=lambda *a, **k: None,
+                               warn=lambda *a, **k: None),
+        upsert_memo=lambda *a, **k: None,
+    )
+
+
+def _drive_pr(monkeypatch, receipt, seed_wake=None):
+    recorded = []
+    stub = _pr_stub(recorded, receipt)
+    monkeypatch.setattr(dev_lane, "workflow", stub)
+    monkeypatch.setattr(base, "workflow", stub)
+    orig_init = dev_lane.DevLaneWorkflow._init
+    orig_ctor = dev_lane.DevLaneWorkflow.__init__
+
+    def aimed_init(self, inp):
+        orig_init(self, inp)
+        self.meta["stage"] = "merge"
+        self.meta["stage_state"] = "awaiting-human"
+
+    def aimed_ctor(self):
+        orig_ctor(self)
+        if seed_wake is not None:
+            self._pr_wake = dict(seed_wake)
+
+    async def no_prepare(_self):
+        return None
+
+    monkeypatch.setattr(dev_lane.DevLaneWorkflow, "_init", aimed_init)
+    monkeypatch.setattr(dev_lane.DevLaneWorkflow, "__init__", aimed_ctor)
+    monkeypatch.setattr(dev_lane.DevLaneWorkflow, "_prepare_workspace_step", no_prepare)
+    wf = dev_lane.DevLaneWorkflow()
+    try:
+        asyncio.run(wf.run(_inp()))
+    except (_Parked, _StoppedAtMerge):
+        pass
+    return wf, recorded
+
+
+def _requests_open_receipt():
+    return {"action": pr_flow.ACTION_REQUESTS_OPEN, "switch": "on",
+            "requests": [{"repo": "repo_a", "name": "repo_a",
+                          "identity": "owner/repo_a",
+                          "branch": "lane/x-repo_a", "number": 11,
+                          "url": "https://example.invalid/pull/11",
+                          "action": "created"}]}
+
+
+def test_pr_flow_park_releases_the_slot_and_never_lands_locally(monkeypatch):
+    wf, recorded = _drive_pr(monkeypatch, _requests_open_receipt())
+    names = [n for n, _ in recorded]
+    assert "merge" not in names, "a request delivery still landed locally: %r" % (names,)
+    assert "prepare_human_gate" not in names, (
+        "the parked ticket still opened the local merge gate: %r" % (names,))
+    releases = [(n, getattr(a, "cause", "")) for n, a in recorded
+                if n == "concurrency_release"]
+    assert releases == [("concurrency_release", "remote-review-wait")], releases
+    assert wf.meta["stage_state"] == pr_flow.AWAITING_REMOTE_REVIEW, wf.meta["stage_state"]
+    assert wf.meta["pr_flow"]["state"] == pr_flow.AWAITING_REMOTE_REVIEW
+    assert [r["number"] for r in wf.meta["pr_requests"]] == [11]
+    assert any(t.get("state") == pr_flow.AWAITING_REMOTE_REVIEW for t in wf.timeline), (
+        "the park left no named timeline entry: %r" % (wf.timeline,))
+
+
+def test_pr_flow_park_refuses_a_non_poller_wake_and_stays_parked(monkeypatch):
+    wf, _recorded = _drive_pr(monkeypatch, _requests_open_receipt(),
+                              seed_wake={"source": "sign", "note": "host signed"})
+    assert wf.meta["stage_state"] == pr_flow.AWAITING_REMOTE_REVIEW
+    wakes = wf.meta.get("remote_review_wakes") or []
+    assert wakes and wakes[0]["accepted"] is False, wakes
+    assert "poller" in wakes[0]["reason"]
+    assert any("awaiting-remote-review" in str(r.get("want", ""))
+               for r in wf.refused), wf.refused
+    states = [t.get("state") for t in wf.timeline]
+    assert pr_flow.REMOTE_REVIEW_WAKE not in states, (
+        "a non-poller wake left the park: %r" % (states,))
+
+
+def test_pr_flow_park_leaves_only_on_a_poller_wake(monkeypatch):
+    """The park's exit is the poller's wake and nothing else: the poller wake is
+    recorded, the ticket lands in the named wake state, and what the platform
+    reported is NOT judged here (that is step (c)), so it re-parks."""
+    wf, _recorded = _drive_pr(monkeypatch, _requests_open_receipt(),
+                              seed_wake={"source": "poller", "note": "beat 3",
+                                         "reported": {"state": "open"}})
+    wakes = wf.meta.get("remote_review_wakes") or []
+    assert wakes and wakes[0]["accepted"] is True, wakes
+    assert wakes[0]["reported"] == {"state": "open"}
+    states = [t.get("state") for t in wf.timeline]
+    assert pr_flow.REMOTE_REVIEW_WAKE in states, (
+        "the poller wake did not leave the park: %r" % (states,))
+    assert wf.meta["stage_state"] == pr_flow.AWAITING_REMOTE_REVIEW
+
+
+def test_pr_flow_named_stop_blocks_the_merge_phase_by_name(monkeypatch):
+    receipt = pr_flow.stop_verdict(pr_flow.DELIVERY_STOP_PLATFORM_UNREACHABLE,
+                                   "no route to host").to_dict()
+    wf, recorded = _drive_pr(monkeypatch, receipt)
+    names = [n for n, _ in recorded]
+    assert "merge" not in names and "prepare_human_gate" not in names, names
+    assert pr_flow.DELIVERY_STOP_PLATFORM_UNREACHABLE in (
+        wf.meta.get("blocked_reason") or ""), wf.meta.get("blocked_reason")
+
+
+def test_pr_flow_switch_off_receipt_takes_the_ordinary_gate(monkeypatch):
+    """Negative control on the workflow side: an OFF receipt (or a receipt with no
+    verdict at all) falls through to today's merge gate - the park is never
+    entered by accident."""
+    wf, recorded = _drive_pr(monkeypatch, {"action": pr_flow.ACTION_LOCAL_LANDING,
+                                           "switch": "off"})
+    names = [n for n, _ in recorded]
+    assert "prepare_human_gate" in names, names
+    assert wf.meta["stage_state"] == "awaiting-human", wf.meta["stage_state"]
+    assert "pr_requests" not in wf.meta
+
+
+# ---------- source locks: the wiring cannot drift ------------------------
+
+def test_pr_flow_merge_sites_are_gated_and_poller_only():
+    """Every merge phase site forks through the SAME patched gate + helper (no
+    second implementation), and the park's slot release uses its own cause word."""
+    for lane_py, expected in ((DEV_LANE_PY, 2), (LIGHT_LANE_PY, 1)):
+        src = lane_py.read_text(encoding="utf-8")
+        gate = ("if workflow.patched(pr_flow.PR_FLOW_DELIVERY_PATCH_ID) \\\n"
+                "                        and await self._pr_flow_merge_step():")
+        assert src.count(gate) == expected, (
+            "%s: the review-request fork must sit at every merge phase site and "
+            "only there (found %d, expected %d)"
+            % (lane_py.name, src.count(gate), expected))
+    dev_src = DEV_LANE_PY.read_text(encoding="utf-8")
+    assert dev_src.count("_concurrency_release(CAUSE_REMOTE_REVIEW_WAIT") == 1, (
+        "the remote-review park must release the slot at exactly one site")
+    assert "def remote_review_update(" in dev_src, (
+        "the park has no poller wake signal - it could never leave the state")
+    assert pr_flow.AWAITING_REMOTE_REVIEW in dev_src
+    assert cc.CAUSE_REMOTE_REVIEW_WAIT == "remote-review-wait"
+    assert cc.CAUSE_REMOTE_REVIEW_WAIT not in (cc.CAUSE_PAUSED, cc.CAUSE_TERMINATED,
+                                               cc.CAUSE_HUMAN_GATE,
+                                               cc.CAUSE_MERGE_WAIT,
+                                               cc.CAUSE_BLOCKED_WAIT)
+
+
+def test_pr_flow_remote_review_release_parks_on_the_ledger_face(proj):
+    """The release is accepted by the ledger and parks under its own cause word,
+    so a reader can tell where the ticket waits (never a zombie holder)."""
+    root, key = proj
+    cc.acquire(key, "pr1")
+    out = cc.release(key, "pr1", cc.CAUSE_REMOTE_REVIEW_WAIT, stage="merge")
+    assert out["released"] is True and out["cause"] == "remote-review-wait", out
+    assert out["parked"]["face"] == "blocked-wait"
+    assert out["parked"]["cause"] == "remote-review-wait"
+    face = cc.read_state(key)["blocked_wait"]
+    assert [(e["ticket"], e["cause"], e["stage"]) for e in face] == [
+        ("pr1", "remote-review-wait", "merge")], face
+    assert cc.read_state(key)["holders"] == []
+    re_acq = cc.acquire(key, "pr1")
+    assert re_acq["granted"] is True, re_acq
+    assert re_acq.get("reacquired_from", {}).get("cause") == "remote-review-wait", re_acq

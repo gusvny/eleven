@@ -126,6 +126,15 @@ CAUSE_MERGE_WAIT = "merge-wait"
 #: Leaving the parked state is an ORDINARY acquire: the ticket queues behind
 #: whoever is already waiting (it never jumps back in).
 CAUSE_BLOCKED_WAIT = "blocked-wait"
+#: t261103-05 (docs/design/github-pr-flow-v1.md step (b)): a ticket parked in
+#: `stage_state=awaiting-remote-review` waits for a platform review, not for a
+#: person at this console, and it does no work of its own - so it holds no slot.
+#: Its own cause word keeps the ledger truthful about WHERE it waits (never
+#: `blocked-wait`, which means "waiting for an act at this console", and never
+#: `merge-wait`, which means "waiting for the merge signature"). It parks on the
+#: existing `blocked_wait` face, which already records cause + stage: no new
+#: ledger face is invented.
+CAUSE_REMOTE_REVIEW_WAIT = "remote-review-wait"
 REASON_RUNNING = "running"
 REASON_HUMAN_HOLD = "human-hold"
 #: The ledger lists that record a ticket WITHOUT holding a slot. They exist so a
@@ -1076,13 +1085,14 @@ def release(project_key: str, ticket: str, cause: str,
     k = _check_key(project_key)
     t = str(ticket or "").strip()
     if cause not in (CAUSE_TERMINATED, CAUSE_PAUSED, CAUSE_MERGE_WAIT,
-                     CAUSE_BLOCKED_WAIT):
+                     CAUSE_BLOCKED_WAIT, CAUSE_REMOTE_REVIEW_WAIT):
         raise ValueError(
             "Concurrency slot release refused: cause %r is not in the real-"
-            "release vocabulary (terminated|paused|merge-wait|blocked-wait) - "
-            "a stage that can still progress renews its hold (an atomic renew, "
-            "never a release point); only a parked state the engine itself set "
-            "(merge signature wait, blocked/awaiting-human) releases its slot"
+            "release vocabulary (terminated|paused|merge-wait|blocked-wait|"
+            "remote-review-wait) - a stage that can still progress renews its "
+            "hold (an atomic renew, never a release point); only a parked state "
+            "the engine itself set (merge signature wait, blocked/awaiting-human, "
+            "awaiting remote review) releases its slot"
             % cause)
     root = os.path.join(str(shared.perkey_projects_root()), k)
     now = time.time()
@@ -1103,12 +1113,12 @@ def release(project_key: str, ticket: str, cause: str,
         if released and cause == CAUSE_MERGE_WAIT:
             doc["merge_wait"].append({"ticket": t, "since": now})
             parked = {"face": CAUSE_MERGE_WAIT, "ticket": t, "since": now}
-        elif released and cause == CAUSE_BLOCKED_WAIT:
+        elif released and cause in (CAUSE_BLOCKED_WAIT, CAUSE_REMOTE_REVIEW_WAIT):
             doc["blocked_wait"].append({"ticket": t, "since": now,
-                                        "cause": CAUSE_BLOCKED_WAIT,
+                                        "cause": cause,
                                         "stage": parked_stage})
             parked = {"face": CAUSE_BLOCKED_WAIT, "ticket": t, "since": now,
-                      "stage": parked_stage}
+                      "cause": cause, "stage": parked_stage}
         promoted = None
         dropped_stale: List[str] = []
         limit = load_limit(k)

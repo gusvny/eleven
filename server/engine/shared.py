@@ -9945,6 +9945,14 @@ CODE_STAMP_MODULES: Tuple[Tuple[str, str], ...] = (
     # landing that adds an anchor entry (the measured 261031 block), so its
     # freshness must be visible on the stamp (tripwire criterion (a)).
     ("anchor_merge", "server/engine/anchor_merge.py"),
+    # t261103-05: pr_flow decides the delivery verdict of the optional
+    # review-request flow (the switch reading, the named stops, the
+    # idempotency-by-branch rule) and the workflow fork that parks the ticket.
+    # A worker running a stale copy would silently take the OLD local-landing
+    # path for a project whose deliveries must go to the platform - a gate
+    # verdict, so its freshness must be visible on the stamp (tripwire
+    # criterion (a)).
+    ("pr_flow", "server/engine/pr_flow.py"),
     ("verify_lane", "server/tools/verify_lane.py"),
 )
 

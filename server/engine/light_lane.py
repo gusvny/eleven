@@ -91,6 +91,9 @@ from typing import Any, Dict, List, Optional
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
+    # t261103-05: the review-request delivery fork (design step (b)) - the gate
+    # marker and the named waiting state live in the one stdlib-only core.
+    import pr_flow
     from dev_lane import (
         AGENT_CAPABLE_PHASES,
         INTEG_RUN_TO,
@@ -1642,6 +1645,12 @@ class LightLaneWorkflow(DevLaneWorkflow):
 
             # 5) merge（人审签字 → 真合并 → 归档 → 拆道）
             if phase == "merge":
+                # t261103-05 (design step (b)): the review-request fork. The helper is
+                # the dev-lane one (no second implementation here); the gate marker is
+                # single-sourced in pr_flow.
+                if workflow.patched(pr_flow.PR_FLOW_DELIVERY_PATCH_ID) \
+                        and await self._pr_flow_merge_step():
+                    continue
                 self._enter("merge")
                 prep_ctx = await workflow.execute_activity(
                     prepare_human_gate,
