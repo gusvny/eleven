@@ -2041,6 +2041,11 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
         # never silently treated as "this ticket is fine" — a nonzero count still lands
         # on the ticket face. Old receipts without the classification keys fall back to
         # one combined note at the converter (no class guessed, replay determinism).
+        # t261102-17: this import runs INSIDE a workflow task, so the sandbox restricts
+        # `os` and `pathlib` while the imported module body executes. Keep
+        # inspection_lane_watchdog free of import-time IO. The guard
+        # (tests/test_t261102_13_workflow_sandbox_imports.py) imports this module with the
+        # sandbox in runtime mode. No patch marker is needed: no workflow command changes.
         from inspection_lane_watchdog import machine_notes_from_meta
         notes, _noise_findings = machine_notes_from_meta(meta, meta.get("errors") or [])
         if isinstance(section, dict) and notes:

@@ -2,8 +2,8 @@
   "_header": {
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
-      "engine_tests": 383,
-      "scenarios": 870
+      "engine_tests": 375,
+      "scenarios": 862
     },
     "vocab": [
       "behaviour",
@@ -1858,33 +1858,9 @@
       "note": "t261031-43 (KI-447 follow-up, delivered by t261101-05): the declared develop line is resolved AT ACTIVITY TIME from the ticket's live meta with the recorded activity argument as the fallback, because a running workflow's recorded arguments hold the fields its history captured at start (t261031-34's fix was correct but unreachable for every in-flight ticket - measured on t261031-17). On a real temp git repo carrying the measured topology, one tree is judged with two calibers: the empty id (today's in-flight behavior) reds on the landed line file, while the meta-resolved id decides it as landed line content and names the skip on the write-set record. One judgment serves both faces through the real merge_check activity - the verify_lane payload and the foreign-repair population record carry the SAME resolved id - and the resolution is a NAMED receipt row for the incident shape. A ticket with no declared line keeps the empty payload, no record key and no row (byte for byte today's caliber, no new git work); an undeclared line, an unreadable declaration, a missing project key and a failed live meta read are each NAMED and never silently read as no line; a faulting resolution keeps the recorded argument and never blocks the gate. Replay safety is pinned: MergeCheckArgs keeps its shape and empty default, both face sites keep the recorded field as the literal fallback, the resolution runs once per call before the per-scope loop, the workflow still records the same argument, and outside an activity context there is no live read at all. Offline fixtures in temp dirs, zero network/Temporal/docker/3099.",
       "sync_path": "server/engine/agent_activities.py; server/engine/shared.py"
     },
-    "server/engine/tests/test_t261028_54_merge_verify_diagnosis.py": {
-      "anchor": "contract",
-      "note": "t261028-54 L1 (merge resolution): the red-item diagnosis for a process that may not run the lane's code - a timeout/expiry row names a process/lane tree mismatch (loaded agent_activities.py bytes vs the lane's copy: a lane-only activity fix cannot take effect, and replacing the process reloads the same tree) and the mtime-based case where modules were loaded before they were edited (there a replacement does load the fix); the note rides main's gate_budget_exhausted expiry row without changing its blocking verdict, a clean process adds no key, and a broken stamp never raises. The wait-budget derivation itself belongs to t261028_57_gate_budget_derivation (main), not to this file.",
-      "sync_path": "server/engine/agent_activities.py (_verify_tree_note / _verify_stale_code_note); verify.yaml (lanes.code.checks)"
-    },
-    "server/engine/tests/test_t261028_54_role_preset_fallback.py": {
+    "server/engine/tests/test_t261102_13_workflow_sandbox_imports.py": {
       "anchor": "behaviour",
-      "note": "t261028-54: role presets resolve per FILE with a trace - the project leg wins, the engine library serves only a project that DECLARES roles_dir (undeclared keeps the pre-ticket path byte for byte, no warning), a directory-shaped candidate never reads as present, a hostile role name reads nothing and cannot forge a log line, the engine preset is copied inside the lane (never a host path), and a copy/trace failure leaves the spawn alive. `patch_arg_added` means the argument was added, not that dsh applied it.",
-      "sync_path": "server/engine/shared.py; server/engine/agent_activities.py"
-    },
-    "server/engine/tests/test_t261029_18_lane_branch_root.py": {
-      "anchor": "behaviour",
-      "note": "t261029-18 L1: the lane branch naming source and the per-scope changed-file receipt - shared.lane_branch/lane_branch_candidates (root-tree twin, no -root-root, no twin for a member scope), _lane_branch_resolve (first hit, fallback trace, both miss names the candidates and never asks main), the stub-git changed_files matrix (manifest-present vs manifest-absent, per-scope union with repo prefixes, corrupt manifest, named diff/status failures with a scope tag, -uall kept, timeout propagates), lane_head_sha's root-twin resolve, and the wall-clock leg. Stub git only: the unit tier bans real git."
-    },
-    "server/engine/tests/test_261031_20_gate_receipt_freshness.py": {
-      "anchor": "behaviour",
-      "note": "t261031-20: the gate receipt must name the tree it judged. A receipt is valid only for the tree it ran on: every gate round anchors `receipt_sha` on the lane HEAD (resolved before the face write, so the face key and the anchor are one fact); main's movement is a NAMED delta (`main_sync`, `merge_check_acts` from the KI-009 self-heal row that only lands on a real commit move, `foreign_repair:<sha>`), never a new identity, so another ticket's merge cannot void this ticket's proof (host order 261009); at the merge_check entry, before the main sync, the guard compares the lane HEAD with the comparison base and a mismatch re-runs the gate (stale: two re-runs, no_receipt: one, unprovable: zero) with the tree judged before the cap; the void counter resets only on a fresh evaluation, `rework` and `retry_qc`, and those two handler writes sit outside `_counter_reset_active` so the pre-anchor population the arm exists for gets its genuine attempt; every new command site sits behind `_gate_receipt_arm` = patched OR the event-gated `enable_gate_receipt_guard` flag (S1: the arm reaches the writes, not only the read); the closing run replaces the face receipt in place and names its surface (full suite / targeted / fast set); the void line names measurements only, never a committer. Offline shells, the real dev_lane main loop with a stubbed activity seam, fixed receipts; no docker/Temporal/3099."
-    },
-    "server/engine/tests/test_t261031_28_integration_discipline_static_analyzer.py": {
-      "anchor": "behaviour",
-      "note": "",
-      "sync_path": ""
-    },
-    "server/engine/tests/test_t261031_17_multirepo_changed_files.py": {
-      "anchor": "behaviour",
-      "note": "t261031-17 L1: the collector's per-scope truth table with stubbed git - one branch, tree and repo per manifest entry, the suffix-less lane name never reaching git, project-root-relative prefixes, sibling-mount drops on both faces, per-scope fail-closed receipts with the old markers, corrupt and escaping manifests, timeout propagation, and the structure locks (the activity delegates to the collector; `_lane_scopes` resolves before any git query).",
-      "sync_path": ""
+      "note": "t261102-17: the workflow sandbox must accept every module a workflow body imports AT WORKFLOW RUNTIME (is_runtime=True), not only at import time. Measured defect: inspection_flow._lane_watchdog imports inspection_lane_watchdog inside the workflow body; that module ran os.path.join/os.path.abspath at module import, so the import raised RestrictedWorkflowAccessError (os.path.join named) and all seven inspection period workflow tasks failed permanently from 20261031. Assertions: the workflow-runtime import of the real module succeeds and its converter still converts; a synthetic module doing os.path.join at import is still refused under runtime restrictions (guard is not vacuous); the family sweep AST-derives every module imported from inside workflow code and imports each under runtime restrictions; and inspection_lane_watchdog computes no path at import while the lazy faces carry exactly the values the old constants held."
     }
   },
   "scenarios": {
@@ -6152,39 +6128,6 @@
     "integration/t261031-31/sc_t26103131_round_legs_evidence.py": {
       "anchor": "behaviour",
       "note": "t261031-14: a REAL round's persisted record names all 8 planted failing legs of a red case whose bounded tail holds no leg row at all (the emit site reads the case's full output), a green round writes no failed_detail key, and a prose-only red lands as legs_parse=unrecognized with its reason line."
-    },
-    "integration/t261028-54/sc_t261028_54_role_preset_fallback.py": {
-      "anchor": "contract",
-      "note": "t261028-54 L2 (offline seconds, no docker/Temporal/browser): the spawn-seam role-preset contract - A declared miss on both legs = no patch, trace state=declared_missing, one warning naming role + both absolute candidates; B declared miss + engine hit = one materialized copy inside the agent cwd, byte-equal, no .part, host library path never in cmd, trace state=engine; C undeclared project = no patch, no [role_preset] warning, undeclared_missing/declared=false (mechanism dormant, behavior frozen); D the project file wins and nothing is materialized; E the rollback knob off still warns; F malformed role text reads nothing and cannot forge a line; G the 64-character boundary is a valid shape; H the built-in persona role is quiet and materializes nothing.",
-      "sync_path": "server/engine/shared.py; server/engine/agent_activities.py"
-    },
-    "integration/t261029-18/sc_t261029_18_lane_branch_root.py": {
-      "anchor": "behaviour",
-      "note": "t261029-18: the real-git multi-repo lane shape whose root tree is on lane/<id>-root while the gate hands the placeholder lane/<id>. The incident shape (manifest present) returns every tree's committed and dirty files (member paths repo-prefixed) and the real blast-radius/targeted-plan decision narrows instead of the full-run sentinel; non-vacuity: the placeholder provably does not resolve there while the twin does, and the pre-fix failure input still rides the sentinel. Manifest ABSENT on a multi-repo lane fails closed by name (the root tree alone is not the lane's change set; member trees are enumerable only through the manifest), so the round cannot narrow, while a manifest-free SINGLE-repo lane still returns its own list (the control). A manifest-bearing lane whose scope branch is stale may use the root twin and log both names. Unresolvable names, a corrupt manifest and a missing member tree stay named fail-closed reds, and lane_head_sha keeps resolving the root-tree tip. Pool ro, seconds, offline."
-    },
-    "integration/t261029-38/sc_tmp_sweep_daily_tick.py": {
-      "anchor": "behaviour",
-      "note": "t261029-38 L3: the tmp-fixture sweep's daily cadence face as a user and the inspection reader see it - only the daily inspection face ticks (lane/manual/deep/narrowed/disabled/due-gated are named exit-0 inert with no state write and no delete, so no per-ticket gate is ever red by construction); the tick writes the receipt pair whose header names mode, absolute root, backlog and delta plus the top leaker family WITH its repo, and whose sections name the sister repo, the cross-repo project-vision family and the excluded/uncovered families; report mode deletes nothing, a forced second tick carries the count delta and a plain second tick is the named due skip; apply mode routes both guards end to end (aged unheld reclaimed, fresh survives, a dir held open by a live process survives and is named, the holder is never killed) while the foreign and excluded families survive; corrupt/unknown/below-floor config exits 8 and an unusable state dir exits 5, both named and both deleting nothing. Face E is the production face (acceptance item 1) and runs on the daily inspection round only: that round ticks the real host temp root with the real state dir and no mode flag, so the host's `enable --mode apply` governs (report keeps, apply reclaims behind the age and holder guards), and the periodic receipt, its backlog and its count delta exist outside a throwaway box; its header and sections name the real root, the top leaker family with its repo and the cross-repo project-vision family, nothing is deleted, and a forced second tick carries the numeric delta. Any other round prints one named N/A line and writes nothing (a per-ticket gate never touches the production state dir), face C proves the config governs in both directions on private boxes and a source lock refuses any tick call that passes --mode; a tick that overlaps a held state-dir lock is a named exit-0 lock-held skip with no second receipt and no delete (and the next tick after the holder stops proceeds).",
-      "sync_path": ""
-    },
-    "integration/t261030-35/sc_t261030_35_artifact_face.mjs": {
-      "anchor": "contract",
-      "note": "t261030-35: the served contract of the two artifact routes on the real workbench route table - GET-only, the inventory never dropping a declared row, the client model's row key reaching the byte route, the status family (404/409/413/400 and a declared-but-unusable 4xx that is not 404), nosniff/no-store/content-type, the per-request project anchor, and the existing dispatch staying intact. Assertions bind to the plan's declared contract and to user-visible HTTP answers, never to module internals or copy wording."
-    },
-    "integration/t261031-20/sc_gate_receipt_freshness.py": {
-      "anchor": "behaviour",
-      "note": "t261031-20: a gate receipt is valid only for the tree it measured - a moved tree voids it and sends the flow back to the gate, a main-sync delta never voids, an unresolvable or malformed anchor is never fresh, the void bound is reachable and a new anchor does not reset it, and the arming rule covers every declared command site; the reader text names both trees without claiming a committer",
-      "sync_path": ""
-    },
-    "integration/t261031-28/sc_t26103128_static_analyzer_read_only.py": {
-      "anchor": "behaviour",
-      "note": "t261031-28: the `-m <static analyzer>` family reads and never runs - the reported command and every user-typed analyzer over each entry shape settle a developer stage green with no violation row and a byte-identical receipt, while the executor modules (pytest/unittest/doctest/runpy/timeit/cProfile/profile/pdb/coverage/trace) keep one hit each, entry-module/plain forms keep their keys, the exemption stays segment-local and never retroactive, malformed analyzer argv stays green, the walkthrough/arbitrate evidence face still lands one drift row for a bare full run and keeps a targeted run green, and the agent-facing clause never advertises an analyzer the gate rejects. Joined form -m<analyzer> is declared, not asserted (classifier residual outside the write set).",
-      "sync_path": ""
-    },
-    "integration/t261031-17/sc_t261031_17_multirepo_changed_files.py": {
-      "anchor": "contract",
-      "note": "t261031-17 L2 contract: the changed-file collector resolves one baseline per repo on a manifest-bearing lane and the blast-radius decision narrows - real git fixtures (root repo plus one-level members, an engine-shaped manifest, real worktree mounts): the reported shape's member-only change reaches the list project-root-relative and the coarse-prefix full run narrows to the previous red names; a shared-base face still runs everything; the sibling mounts are dropped from both measured faces while an ordinary untracked directory is kept; one scope's missing baseline names that scope and runs everything; the single-repo lane keeps its list (committed plus the dirty half from the lane tree); an uncommitted member change is counted with its prefix; a corrupt manifest and an absolute repo entry answer an empty list, a named error and a full run.",
-      "sync_path": ""
     }
   }
 }

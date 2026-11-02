@@ -66,6 +66,14 @@
     single source the sweeper also reads). It is one small read of a file in this
     repository - no network, no temp root, no state written - and a file that is absent is
     reported as `absent`, never as "no families".
+  - (t261102-17) **IMPORT IS SIDE-EFFECT FREE.** The workflow body of
+    `inspection_flow._lane_watchdog` imports this module at workflow RUNTIME, and the
+    Temporal workflow sandbox then forbids every `os.path` call. `os.path.join` /
+    `os.path.abspath` used to run at import time here, so all seven inspection period
+    workflow tasks failed permanently from 20261031. Every path is now computed inside a
+    function that only the activity side calls. Do not add module-level IO or module-level
+    `os.path` calls: the sandbox guard (server/engine/tests/
+    test_t261102_13_workflow_sandbox_imports.py) imports this module at workflow runtime.
 
 阈值来源（宿主 260926 护栏②）：声明侧 `inspection.yaml` 实例级 `watchdog:` 档
 （`rerun_rounds`/`fault_loop_min`/`inflight_silent_min`）；缺失/畸形 → 回落本模块缺省，且
@@ -74,6 +82,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -134,13 +143,29 @@ INFLIGHT_INAPPLICABLE_STATUS = "blocked"
 #: `tmp_fixture_scan_result` raises a named finding and skips the threshold judgement -
 #: because "nothing declared" is not "nothing leaked" (a green water line there would be the
 #: exact falsehood this face exists to prevent).
-TMP_FIXTURE_DECLARATION_RELPATH = os.path.join(
-    "integration", "tools", "tmp_fixture_families.json")
-#: The declaration file this engine reads: repo root resolved from this file's location
-#: (server/engine/inspection_lane_watchdog.py -> two levels up).
-TMP_FIXTURE_DECLARATION_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    TMP_FIXTURE_DECLARATION_RELPATH)
+TMP_FIXTURE_DECLARATION_RELPATH = "integration/tools/tmp_fixture_families.json"
+#: (t261102-17) The literal above is deliberate: it carries the value that
+#: `os.path.join("integration", "tools", "tmp_fixture_families.json")` produced, but it
+#: makes no call. The workflow sandbox forbids `os.path` calls at workflow runtime, and
+#: this module is imported from inside a workflow body.
+
+
+def tmp_fixture_declaration_path() -> str:
+    """Absolute path of the declaration file. Computed per call, never at import.
+
+    Why lazy (t261102-17): the workflow sandbox imports this module at workflow RUNTIME
+    (inspection_flow._lane_watchdog -> machine_notes_from_meta), and every `os.path` call
+    is restricted there. `os.path.abspath` at import time raised
+    RestrictedWorkflowAccessError, so the import failed and every inspection period
+    workflow task failed permanently. Path resolution is IO-adjacent work: it runs on the
+    activity side only.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    # server/engine/inspection_lane_watchdog.py -> repository root (two levels up).
+    return os.path.join(os.path.dirname(os.path.dirname(here)),
+                        TMP_FIXTURE_DECLARATION_RELPATH)
+
+
 DECLARATION_LOADED = "loaded"
 DECLARATION_ABSENT = "absent"
 DECLARATION_MALFORMED = "malformed"
@@ -162,7 +187,7 @@ def load_tmp_fixture_declaration(path: str = "") -> Dict[str, Any]:
     can name what it could not use. Callers must not treat a non-loaded status as zero
     families: see `tmp_fixture_scan_result`.
     """
-    p = path or TMP_FIXTURE_DECLARATION_PATH
+    p = path or tmp_fixture_declaration_path()
     out: Dict[str, Any] = {"path": p, "status": DECLARATION_ABSENT,
                            "families": [], "prefixes": (), "detail": ""}
     try:
@@ -214,17 +239,55 @@ def load_tmp_fixture_declaration(path: str = "") -> Dict[str, Any]:
     return out
 
 
-#: The declaration as read at import (the water level is judged once per period; a running
-#: period must not change surface halfway).
-TMP_FIXTURE_DECLARATION = load_tmp_fixture_declaration()
-#: Every family the sweeper may delete, in the declaration's attribution order (the first
-#: matching prefix wins). Derived from the data file - never written by hand here.
-TMP_FIXTURE_PREFIXES = TMP_FIXTURE_DECLARATION["prefixes"]
-#: prefix -> producer hint (the declaration's `producer` field, when the census recorded
-#: one). Absent key = `owner=unknown`: never guessed. Derived, so a new family brings its
-#: owner along or explicitly says it has none.
-TMP_FIXTURE_OWNERS = {f["prefix"]: f["producer"]
-                      for f in TMP_FIXTURE_DECLARATION["families"] if f.get("producer")}
+#: (t261102-17) The declaration used to be read AT IMPORT, and its two derived tables were
+#: module constants. That is exactly what broke the inspection period workflow: the sandbox
+#: imports this module at workflow RUNTIME, and reading the file needs `os.path` calls that
+#: the sandbox forbids there. The read now happens on FIRST USE (the water level is still
+#: judged once per period: one read per process, that is what the cache holds), and the
+#: tables are derived from it at the same moment. The old names stay readable through
+#: `__getattr__` below, so no reader breaks.
+@functools.lru_cache(maxsize=1)
+def tmp_fixture_declaration() -> Dict[str, Any]:
+    """The family declaration, read on first use and then kept (one read per process)."""
+    return load_tmp_fixture_declaration()
+
+
+@functools.lru_cache(maxsize=1)
+def tmp_fixture_prefixes() -> Tuple[str, ...]:
+    """Every family the sweeper may delete, in the declaration's attribution order (the
+    first matching prefix wins). Derived from the data file - never written by hand here."""
+    return tmp_fixture_declaration()["prefixes"]
+
+
+@functools.lru_cache(maxsize=1)
+def tmp_fixture_owners() -> Dict[str, str]:
+    """prefix -> producer hint (the declaration's `producer` field, when the census recorded
+    one). Absent key = `owner=unknown`: never guessed. Derived, so a new family brings its
+    owner along or explicitly says it has none."""
+    return {f["prefix"]: f["producer"]
+            for f in tmp_fixture_declaration()["families"] if f.get("producer")}
+
+
+#: Retired module constants -> the lazy function that now answers for them (t261102-17).
+_LAZY_FACES = {
+    "TMP_FIXTURE_DECLARATION": tmp_fixture_declaration,
+    "TMP_FIXTURE_DECLARATION_PATH": tmp_fixture_declaration_path,
+    "TMP_FIXTURE_PREFIXES": tmp_fixture_prefixes,
+    "TMP_FIXTURE_OWNERS": tmp_fixture_owners,
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Retired module constants -> their lazy answers (t261102-17).
+
+    `TMP_FIXTURE_DECLARATION`, `TMP_FIXTURE_DECLARATION_PATH`, `TMP_FIXTURE_PREFIXES` and
+    `TMP_FIXTURE_OWNERS` were module constants computed at import. They are computed when
+    read now, so the import stays call-free and an old reader still gets the same value.
+    """
+    face = _LAZY_FACES.get(name)
+    if face is not None:
+        return face()
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
 
 #: 模块缺省阈值（真源；声明侧同名键可覆盖）。rerun_rounds 缺省 3 = 抓得住今天这种
 #: 「同一票 5 轮 × ~2h 全量」的形态；两道时间阈值单位=分钟。
@@ -1436,7 +1499,7 @@ def lane_section(findings: Any, meta: Any, *, source: str = "",
 # ========================================================================================
 
 def tmp_fixture_facts(scan: Any, *, now_ts: float = 0.0,
-                      prefixes: Sequence[str] = TMP_FIXTURE_PREFIXES) -> Dict[str, Any]:
+                      prefixes: Optional[Sequence[str]] = None) -> Dict[str, Any]:
     """只读扫描回执 → 水位事实（纯函数零 IO）。
 
     scan 形状（活动壳给的）：{"root": str, "entries": [{"name","mtime"}, ...],
@@ -1447,7 +1510,12 @@ def tmp_fixture_facts(scan: Any, *, now_ts: float = 0.0,
       - 畸形条目逐条进 `malformed` 并点名，**绝不抛、绝不当成水位 0**（把读不懂当没漏=假绿）；
       - `scan_error` 非空 = 水位未知（消费方出「扫描不到」的具名发现，不静默当零）；
       - `now_ts=0` 时用 `scan["scanned_at"]`，两者都没有则年龄=未知（0.0）并点名。
+    `prefixes=None` (t261102-17) means "use the declared families": resolved here, on
+    first use, never at import (the workflow sandbox forbids the path work at workflow
+    runtime). Pass a sequence to judge against an explicit whitelist.
     """
+    if prefixes is None:
+        prefixes = tmp_fixture_prefixes()
     out: Dict[str, Any] = {
         "root": "", "dirs": 0, "live": 0, "oldest_age_h": 0.0, "oldest_name": "",
         "by_prefix": {}, "entries_seen": 0, "untouched": 0, "epochs": 0,
@@ -1543,7 +1611,7 @@ def tmp_fixture_top_leakers(facts: Any, cap: int = 5) -> List[Dict[str, Any]]:
     ranked = sorted(((p, c) for p, c in by.items() if isinstance(c, int) and c > 0),
                     key=lambda kv: (-kv[1], kv[0]))
     return [{"prefix": p, "dirs": c,
-             "owner": TMP_FIXTURE_OWNERS.get(p, "unknown")}
+             "owner": tmp_fixture_owners().get(p, "unknown")}
             for p, c in ranked[:max(1, int(cap))]]
 
 
@@ -1563,7 +1631,7 @@ def tmp_fixture_legs(facts: Dict[str, Any], thresholds: Dict[str, Any],
     """
     if not isinstance(facts, dict):
         return []
-    decl = declaration if isinstance(declaration, dict) else TMP_FIXTURE_DECLARATION
+    decl = declaration if isinstance(declaration, dict) else tmp_fixture_declaration()
     max_dirs = int(thresholds.get("tmp_fixture_max_dirs") or DEFAULT_TMP_FIXTURE_MAX_DIRS)
     max_age_h = float(thresholds.get("tmp_fixture_max_age_h") or DEFAULT_TMP_FIXTURE_MAX_AGE_H)
     dirs = int(facts.get("dirs") or 0)
@@ -1638,7 +1706,7 @@ def tmp_fixture_scan_result(scan: Any, thresholds: Dict[str, Any], *, source: st
     declared, and the threshold judgement is skipped - "nothing declared" must never render
     as "nothing leaked".
     """
-    decl = declaration if isinstance(declaration, dict) else TMP_FIXTURE_DECLARATION
+    decl = declaration if isinstance(declaration, dict) else tmp_fixture_declaration()
     status = str(decl.get("status") or "")
     # The facts are counted against the SAME families this receipt judges (t261029-81): the
     # counted surface and the declared surface are one list, never a default plus an override.
@@ -1724,7 +1792,7 @@ def tmp_fixture_section(facts: Any, findings: Any, thresholds: Any, *, source: s
     f = [x for x in (findings if isinstance(findings, list) else []) if isinstance(x, dict)]
     fct = facts if isinstance(facts, dict) else {}
     thr = thresholds if isinstance(thresholds, dict) else {}
-    decl = declaration if isinstance(declaration, dict) else TMP_FIXTURE_DECLARATION
+    decl = declaration if isinstance(declaration, dict) else tmp_fixture_declaration()
     fams = [str(p) for p in (decl.get("prefixes") or [])]
     return {
         "scan": LANE_SCAN,

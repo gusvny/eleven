@@ -468,10 +468,12 @@ def test_c4_activity_registered_and_readonly_source_lock():
     #   - `open(` exists in exactly one place, inside `load_tmp_fixture_declaration`;
     #   - that open is read-only with an explicit encoding (no write mode anywhere);
     #   - no write/delete/spawn verb reappears (shutil/rmtree/unlink/remove/mkdtemp);
-    #   - the read happens ONCE at import (module level), never inside a judgement call, so
-    #     the water line itself still touches no disk.
+    #   - the read happens ONCE per process behind a cached accessor, never inside a
+    #     judgement call - and NEVER AT IMPORT (t261102-17): the workflow sandbox imports
+    #     this module at workflow runtime, where file and os.path access is forbidden, so an
+    #     import-time read made every inspection period workflow task fail permanently.
     decl_src = ws[ws.index("def load_tmp_fixture_declaration("):
-                  ws.index("TMP_FIXTURE_DECLARATION = load_tmp_fixture_declaration()")]
+                  ws.index("def tmp_fixture_declaration(")]
     assert ws.count("open(") == decl_src.count("open(") == 1
     assert 'open(p, "r", encoding="utf-8")' in decl_src
     for write_verb in ('"w"', '"a"', '"w+"', "os.remove", "os.unlink", "shutil", "rmtree",
@@ -480,6 +482,13 @@ def test_c4_activity_registered_and_readonly_source_lock():
     judgement = ws[ws.index("def tmp_fixture_legs("):]
     assert "load_tmp_fixture_declaration(" not in judgement
     assert "open(" not in judgement
+    # t261102-17: the eager import-time read is the defect shape; it must not come back.
+    assert "TMP_FIXTURE_DECLARATION = load_tmp_fixture_declaration()" not in ws
+    eager = [ln for ln in ws.splitlines()
+             if ln.startswith("TMP_FIXTURE_") and "=" in ln
+             and ("os.path" in ln or "load_tmp_fixture" in ln or "tmp_fixture_declaration()" in ln)]
+    assert eager == []
+    assert "@functools.lru_cache(maxsize=1)\ndef tmp_fixture_declaration(" in ws
 
 
 # ---------------- D. 巡检接线（face 段 + 心跳 + 具名失败） ----------------
