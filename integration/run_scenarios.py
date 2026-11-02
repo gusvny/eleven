@@ -2321,6 +2321,11 @@ SCENARIOS = [
      "On an UNPOINTED per-ticket gate round the ticket's OWN scenarios stay in the run list AND in the expected caliber, whatever pool they live in (ticket t261025-02, KI-355: the peel happens on the EXCLUSION side - the per-ticket gate excludes engine/exclusive wholesale AFTER the own set is computed; witness t261022-12's own scenario lives in the ENGINE pool and every round reported meta.last_green_run ran=0 while t261024-40/-60 landed, promoted and live; user words: 'the per-ticket gate excludes engine/exclusive wholesale AFTER the own set is computed, and an own scenario that lives in those pools disappears from the run list'; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a minimal fixture lane shaped like the live gate - verify.yaml excluding engine,exclusive, own fixtures under integration/t261025-02/ so the own-set derivation matches, seconds-scale stub scripts with on-disk execution markers read reader-side, one UNPOINTED round per case on a fresh lane so the reuse economy never enters these faces, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE WEDGE, POSITIVE - own in the engine pool + own in main + a non-own in exclusive with the own list declared: both OWN cases run (markers on disk, ran>=2), the non-own excluded entry stays out, and the completeness invariant holds exactly (expected==ran, the kept engine-pool own entry counted once - pre-fix this reds because the pool split runs the own entry while the expected caliber subtracts it); B EXCLUSION CONTROL - the same shape with no own list keeps the economy byte-stable (only the main entry runs, expected==ran==1, the skip face names the excluded pools, no own-exemption keys leak into an own-less receipt); C FAIL-CLOSED - a declared own name genuinely absent from the registry refuses BY NAME on an unpointed round (non-zero rc, REFUSED shape naming it, zero scripts executed) instead of running a subset while claiming own coverage; D MALFORMED - a whitespace-only own list behaves as absent, no phantom refusal. Intent split: the pointed-path keep/refusal/roster faces belong to t261024-40-own-scenario-gate-round; the ledger-reuse wedge belongs to t261024-60-own-never-ledger-reused; the pool-exclusion knob matrix belongs to t260913-03; the narrowed-empty fallback belongs to t260922-12; the engine-side faces (closing fast-union-own caliber, own-coverage named red, stale-lane capability probe) belong to developer L1 batteries plus the engine-gate stage driving the two live lanes; THIS entry uniquely owns 'the unpointed gate round is green and complete with an own scenario in a wholesale-excluded pool, and refuses by name when a declared own name is genuinely absent'. Pre-implement tree red on A/C = the named TDD signal; green required at the integration gate/merge. run_scenarios.py missing = ENV_FAIL exit 2",
      "python3 integration/t261025-02/sc_t261025_02_own_never_peeled.py", "browser-free"),
 
+    # ---- t261102-40: the prelude degrades by name and the round still runs ----
+    ("t261102-40-prelude-named-degrade",
+     "The suite names an unavailable test bench and still runs its cases, and a lane that carries the bench module finishes the same round with a bounded prelude (ticket t261102-40; incident = on line head 2d2d42a8 t261024-40 and t261025-02 failed at their 120 s cap and capture-redline-gate timed out, because the nested suite they spawn exited rc=1 after 140.2 s: _provision_test_target -> _bench_module raised ModuleNotFoundError for a lane that copies only a subset of integration/, after the prelude had burned a 120 s docker prune timeout plus a 20 s daemon probe; user words: 'the suite's test-target provisioning now hard-requires integration/process_bench.py, while fixture lanes copy only a subset of integration/ - the lane crashes instead of degrading'. grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a minimal lane whose bench-module asset is a knob - the real prelude, the real provision and real child spawns, on-disk execution markers read reader-side, offline seconds, zero docker stage, zero Temporal server, never touches 3099/7233): A THE INCIDENT SHAPE - the lane carries the runner and the judge-face modules but NOT process_bench.py: the round exits 0 with no traceback, both stub children ran (markers on disk), the provision prints the SAME named NO TEST TARGET line it prints for a refused binary and names process_bench.py missing at <lane>/integration/process_bench.py, and the round receipt's test_target block reads source=absent with that absent_reason - a missing module degrades, it never crashes; B THE LANE THAT CARRIES THE ASSETS - the same round with process_bench.py, bench_deadman.py and the batch manifest present: exit 0, children ran, no traceback, the prelude-legs line carries a numeric test_target leg below 30 s, and the receipt's test_target source is one of bench/reused/absent and never ambient, because the lane clears the inherited statement so the nested run resolves its own target; C MALFORMED MODULE - a process_bench.py that raises at import: exit 0, children ran, and the named line says present at ... but failed to import with the error type - a broken bench is a code fault named as one, never read as an environment absence. Intent split: the provisioning truth tables over a fake bench (and the two-wordings note) belong to developer L1 (integration/tests/test_t261101_20_suite_test_target.py); the probe matrix, the lane-contract copies and the nested-env clearing belong to developer L1 (integration/tests/test_t261102_40_suite_prelude_budget.py); the own-set and exclusion faces of the two incident fixtures stay theirs; THIS entry uniquely owns the nested-round journey - a real suite round that degrades by name and still runs its children. Pre-implement red on A = the named TDD signal; green required at the integration gate/merge. run_scenarios.py missing = ENV_FAIL exit 2; tier: the nested-prelude seam no single-component contract can express (a real round, a real provision, real children); cost: seconds (three nested rounds, no bench started on this host); budget: 240s (three rounds under a 60 s per-round hang guard)",
+     "python3 integration/t261102-40/sc_t261102_40_prelude_named_degrade.py", "ro"),
+
     # ---- t260907-06: multi-repo project lane carrying sub-repos (ticket B: one ticket, several worktrees cohabiting one lane) ----
 
     ("t260907-06-multirepo-journey",
@@ -6608,6 +6613,16 @@ def _docker_hygiene():
     # 一律零接触，而本函数的设计意图（函数注：手工直跑/旧期残留的防御面）本就是「旧」
     # 对象，语义不缩水。容器侧改用 container prune（同带 label 过滤，只碰 compose 台），
     # 不再枚举后逐个 rm。
+    # t261102-40: ask the one bounded probe FIRST. A daemon that does not answer
+    # used to burn the 120 s prune timeout in every round (measured: a failing
+    # round's whole prelude was 140.2 s, and its fixture lanes died at their
+    # 120 s cap). Hygiene is best-effort by its own contract, so a silent skip is
+    # lawful - but it is NAMED, on stderr, once per round.
+    if not _docker_probe()["up"]:
+        sys.stderr.write("docker-hygiene: docker daemon did not answer within "
+                         "%.0fs - surface hygiene skipped this round "
+                         "(best-effort, never a gate)\n" % _DOCKER_PROBE_S)
+        return
     try:
         subprocess.run(
             ["docker", "container", "prune", "-f",
@@ -8070,18 +8085,42 @@ _TEST_TARGET = {"resolved": False, "value": "", "source": "", "note": "",
                 "down": None, "stopped": False}
 _TEST_TARGET_LOCK = threading.Lock()
 #: The bench module, loaded once (a battery substitutes a fake here).
-_BENCH = {"mod": None}
+#: "absent" carries the NAMED reason a load failed; the prelude degrades on it
+#: instead of raising (t261102-40): a lane that does not carry the module must
+#: still run its children.
+_BENCH = {"mod": None, "absent": ""}
 
 
 def _bench_module():
-    """integration/process_bench.py, loaded on first use."""
-    if _BENCH["mod"] is None:
-        here = os.path.dirname(os.path.abspath(__file__))
-        if here not in sys.path:
-            sys.path.insert(0, here)
+    """integration/process_bench.py, loaded on first use; ``None`` when unavailable.
+
+    An unavailable module is a NAMED absence, never an exception out of the
+    prelude (t261102-40: fixture lanes copy a subset of integration/, so the bare
+    import raised ModuleNotFoundError and the whole round died after a 140 s
+    prelude with no child started). The note separates "the file is not there"
+    from "the file is there and broke": the second one is a code fault, not an
+    environment absence.
+    """
+    if _BENCH.get("mod") is not None:
+        return _BENCH["mod"]
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "process_bench.py")
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    try:
         import process_bench  # noqa: PLC0415 - only the target provision needs it
-        _BENCH["mod"] = process_bench
-    return _BENCH["mod"]
+    except Exception as exc:              # noqa: BLE001 - named here, never raised
+        if os.path.isfile(path):
+            _BENCH["absent"] = (
+                "process_bench.py present at %s but failed to import (%s: %s)"
+                % (path, type(exc).__name__, exc))
+        else:
+            _BENCH["absent"] = (
+                "process_bench.py missing at %s (%s: %s)"
+                % (path, type(exc).__name__, exc))
+        return None
+    _BENCH["mod"] = process_bench
+    return process_bench
 
 
 def _test_target_port() -> int:
@@ -8118,7 +8157,18 @@ def _provision_test_target() -> dict:
                              "started or stopped here)\n"
                              % (TEST_TARGET_ENV, ambient))
             return dict(st)
+        # t261102-40: an unavailable bench module states NOTHING and names why.
+        # This is the same named outcome the binary-absent branch below prints,
+        # so a lane that does not carry the module degrades instead of crashing
+        # before any child starts.
         bench = _bench_module()
+        if bench is None:
+            st.update(value="", source="absent", note=_BENCH["absent"])
+            sys.stderr.write("[provision] NO TEST TARGET for scenario children: "
+                             "%s (ambient env states none; the suite states NO "
+                             "address rather than a dead one - a case that needs a "
+                             "target books its own named ENV_FAIL)\n" % st["note"])
+            return dict(st)
         port = _test_target_port()
         if not bench.port_refuses(port):
             st.update(value=TEST_TARGET_DEFAULT, source="reused", port=port)
@@ -8185,6 +8235,17 @@ def _teardown_test_target():
     if st["source"] != "bench" or not st["pid"]:
         return st["down"]
     bench = _bench_module()
+    if bench is None:
+        # t261102-40: the module was loaded once and is no longer available.
+        # Judge it as residue with a NAMED error; never raise out of an exit path
+        # (the pool tail, the atexit backstop and both hard exits call this).
+        block = {"clean": False, "error": _BENCH["absent"]}
+        st["down"] = block
+        sys.stderr.write("[test-target] RESIDUE after down: %s - this suite "
+                         "started the bench at %s and cannot stop it: the bench "
+                         "module is no longer available\n"
+                         % (json.dumps(block, ensure_ascii=False), st["value"]))
+        return block
     try:
         block = bench.stop(port=st["port"], pid=st["pid"], db=st["db"])
     except Exception as _ex:                     # noqa: BLE001 - named, not raised
@@ -8276,6 +8337,28 @@ def _docker_daemon_up(timeout_s=20):
         return False
 
 
+#: One docker probe per round, bounded at the batch leg's own bound (t261102-40).
+#: Measured on this host: daemon up -> `docker info` answers in 0.21 s cold and
+#: 0.04 s warm; daemon cold-start -> 2.97 s; daemon down or still starting -> no
+#: answer at all (a 5 s and a 10 s bounded call timed out and an uncapped call was
+#: killed at 60 s). The gate measured the whole prelude of a failing round at
+#: 140.2 s: the 120 s prune timeout in _docker_hygiene plus the 20 s probe in
+#: batch_preboot. One memoized probe answers both legs, so the batch leg keeps its
+#: bound and the prunes are skipped when nothing answers.
+_DOCKER_PROBE_S = 20.0
+_DOCKER_PROBE = {"done": False, "up": False, "took": 0.0}
+
+
+def _docker_probe():
+    """The one docker daemon verdict for this process (bounded, memoized)."""
+    if not _DOCKER_PROBE["done"]:
+        _t0 = time.monotonic()
+        _DOCKER_PROBE["up"] = _docker_daemon_up(_DOCKER_PROBE_S)
+        _DOCKER_PROBE["took"] = round(time.monotonic() - _t0, 3)
+        _DOCKER_PROBE["done"] = True
+    return _DOCKER_PROBE
+
+
 def batch_preboot(consumers):
     """批台预起（stage_docker ensure --kind batch；清扫后、场景前）。零消费者轮=零建台
     零注入（打印留痕，最高频路径零回归）。失败=响亮 ENV_FAIL（调用方 exit 2 快速红：
@@ -8289,7 +8372,7 @@ def batch_preboot(consumers):
     # dependent cases are excluded from routine rounds through the known-red
     # roster, so this leg degrades to a NAMED skip instead of exit 2 (the old
     # refusal burned rounds while the daemon flapped; KI-381).
-    if not _docker_daemon_up():
+    if not _docker_probe()["up"]:
         print("batch-stage: docker daemon 未就绪——本轮零建台零注入（docker 已退役，"
               "宿主令 261027；docker 依赖用例已在已知红册排除，按需 --only 复跑）",
               flush=True)

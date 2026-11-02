@@ -34,7 +34,15 @@ SPEC = [(OWN_ENGINE, "engine"), (OWN_MAIN, None), (NONOWN_EXCL, "exclusive")]
 # Re-exported shared helpers (single spelling across the two ticket dirs).
 mini_script = SIB.mini_script
 stage_stub_text = SIB.stage_stub_text
+#: The 120 s cap is a HANG guard, one per nested round (t261102-40 rule 3). Its
+#: measured numbers live with the single definition in
+#: integration/t261024-40/lib_t26102440_lane.run_executor (gate wall 140.2 s
+#: pre-fix, one 20 s bounded docker probe after the fix, 4 nested rounds here).
 run_executor = SIB.run_executor
+prelude_receipt = SIB.prelude_receipt
+prelude_sum = SIB.prelude_sum
+relay_prelude = SIB.relay_prelude
+PRELUDE_BOUND_S = SIB.PRELUDE_BOUND_S
 summary_line = SIB.summary_line
 integ_summary = SIB.integ_summary
 Checker = SIB.Checker
@@ -57,6 +65,9 @@ def build_lane(root, spec=SPEC, exclude_pools=EXCLUDE_VALUE):
                  root / "integration" / "lib_env.py")
     (root / "integration" / "stage_docker.py").write_text(stage_stub_text(),
                                                           encoding="utf-8")
+    # t261102-40: carry what the runner's prelude reads and imports (one
+    # spelling: the shared helper, the same one the sibling lane uses).
+    SIB.suite_prelude.copy_prelude_assets(root / "integration")
     entries, markers = [], {}
     for name, pool in spec:
         f = own_dir / ("fx_%s.py" % name)

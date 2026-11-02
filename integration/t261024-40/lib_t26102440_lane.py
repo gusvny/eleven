@@ -22,6 +22,7 @@ _HERE = Path(__file__).resolve().parent
 REPO = _HERE.parents[1]  # _HERE is the ticket dir: parent = integration/, grandparent = repo root
 sys.path.insert(0, str(REPO / "integration"))
 import lib_env  # noqa: E402  (narrowing-knob cleanup single point)
+import lib_suite_prelude as suite_prelude  # noqa: E402  (lane side of the prelude)
 
 RUNNER = REPO / "integration" / "run_scenarios.py"
 MAIN_ANCHOR = 'if __name__ == "__main__":'
@@ -77,6 +78,10 @@ def build_lane(root, spec, exclude_pools=EXCLUDE_VALUE):
                  root / "integration" / "lib_env.py")
     (root / "integration" / "stage_docker.py").write_text(stage_stub_text(),
                                                           encoding="utf-8")
+    # t261102-40: the lane carries what the runner's PRELUDE reads and imports
+    # (process_bench.py, its deadman shim, the batch manifest). Without them the
+    # nested round crashed with ModuleNotFoundError before any child ran.
+    suite_prelude.copy_prelude_assets(root / "integration")
     entries, markers = [], {}
     for i, (name, pool) in enumerate(spec):
         f = own_dir / ("fx_%s.py" % name)
@@ -110,14 +115,75 @@ def roster_file(root, names, verdict="booked"):
     return p
 
 
-# SANCTIONED-WAIT: bounded subprocess budget = the `timeout` argument above (declared communicate() ceiling).
+#: HANG guard, never a performance assertion (t261102-40). Measured on this
+#: host: the nested prelude's cost is one bounded docker probe (20 s at most,
+#: and 0.04-0.21 s when the daemon answers) plus a stub stage sweep and the
+#: runner import (about 2 s together), so a whole stub round stays near 3 s,
+#: or near 22 s when the daemon does not answer at all. The pre-fix wall was
+#: 140.2 s (the gate's number: a 120 s docker prune timeout plus a 20 s probe,
+#: then the ModuleNotFoundError). This fixture drives 6 nested rounds; the cap
+#: is per round, and 120 s is about 5x the worst lawful round.
+# SANCTIONED-WAIT: nested-suite hang guard, one per round (see the note above).
 def run_executor(lane, env=None, timeout=120):
+    """Drive the lane's own runner. The env is built by the ONE nested-suite
+    helper, so the inherited test-target statement never reaches the nested
+    prelude (it would take the ambient branch and hide the degrade) and the
+    bench registry stays inside the lane."""
     cmd = [sys.executable, str(Path(lane) / "integration" / "run_scenarios.py")]
-    e = lib_env.clean_narrowing_env()
-    e.update({k: str(v) for k, v in (env or {}).items()})
+    e = suite_prelude.nested_suite_env(env, lane)
     return subprocess.run(cmd, cwd=str(lane), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=timeout,
                           env=e, start_new_session=True)
+
+
+def prelude_receipt(out):
+    """The nested round's prelude-legs line ('' when the round never printed it).
+
+    The fixtures relay this line so the measured prelude lands on the gate
+    receipt instead of living in a code comment (t261102-40 rule 3).
+    """
+    for ln in out.splitlines():
+        if ln.startswith("prelude-legs:"):
+            return ln
+    return ""
+
+
+def prelude_sum(line):
+    """The `sum=` seconds of a prelude-legs line, or None (named absence)."""
+    marker = "(sum="
+    if marker not in line:
+        return None
+    try:
+        return float(line.split(marker, 1)[1].split("s", 1)[0])
+    except (IndexError, ValueError):
+        return None
+
+
+#: The nested prelude bound the two fixtures assert (t261102-40 rule 3). One
+#: spelling: the shared prelude contract module owns the number; the 120 s cap
+#: below stays a hang guard, never a performance assertion.
+PRELUDE_BOUND_S = suite_prelude.PRELUDE_BOUND_S
+
+
+def relay_prelude(checker, p, label, judged):
+    """Relay a nested round's prelude-legs line and hold it to the bound.
+
+    The relay puts the measured number on the fixture's own output, so it lands
+    on the gate receipt instead of only in a code comment. A round that never
+    reached the prelude (a REFUSED early exit) carries no line by design, so only
+    a judged round is held to the bound; a judged round without the line is a
+    FAIL that names the absence.
+    """
+    line = prelude_receipt((p.stdout or "") + (p.stderr or ""))
+    if line:
+        print("nested-prelude: [%s] %s" % (label, line), flush=True)
+    if not judged:
+        return
+    total = prelude_sum(line) if line else None
+    checker.check(total is not None and total <= PRELUDE_BOUND_S,
+                  "%s nested prelude within the measured bound (<=%ss)"
+                  % (label, PRELUDE_BOUND_S),
+                  "line=%r rc=%s" % (line, getattr(p, "returncode", "?")))
 
 
 def summary_line(out):

@@ -34,7 +34,8 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from lib_env import clean_narrowing_env  # noqa: E402  (260930 收窄旋钮清理单点)
+import lib_env  # noqa: E402,F401  (260930 清理单点；本文件经 lib_suite_prelude 调用它)
+import lib_suite_prelude as suite_prelude  # noqa: E402  (t261102-40 lane prelude)
 
 REPO = Path(__file__).resolve().parents[2]
 ADMIN = REPO / "server" / "admin.py"
@@ -145,6 +146,10 @@ def build_lane(root, spec, exclude_pools=EXCLUDE_VALUE,
     battery = root / BATTERY_DIR / "test_fixture_battery.py"
     battery.parent.mkdir(parents=True, exist_ok=True)
     battery.write_text(_battery_text(), encoding="utf-8")
+    # t261102-40: the lane carries what the runner's PRELUDE reads and imports
+    # (process_bench.py, its deadman shim, the batch manifest). One spelling: the
+    # shared helper, the same one the other suite-spawning lanes call.
+    suite_prelude.copy_prelude_assets(root / "integration")
 
     entries, files = [], {}
     for name, pool, ok in spec:
@@ -181,20 +186,22 @@ def build_lane(root, spec, exclude_pools=EXCLUDE_VALUE,
 
 # ---------------------------------------------------------------- 调用面
 
-def _env(extra=None):
+def _env(extra=None, lane=None):
     # 260930（真票 t260930-09 实况）：**全部收窄/策略旋钮单点清理**，不再只清一个。
     # 病根：泳道轮的闸环境带着本轮收窄面（SANDBAR_SCENARIO_ONLY=<改动面>），本夹具再起
     # 内层执行器/闸时子进程继承了它 → 内层被收窄成不含夹具点名的面 → 断言成片红
     # （t260913-03-* ×4 + t260916-25 五条的同时红）。清理单点=integration/lib_env
     # .clean_narrowing_env（守卫=lint L12）；本夹具显式声明的那一档在下面 extra 里给。
-    env = clean_narrowing_env(extra)
-    env["SANDBAR_GATE_BASELINE"] = "0"                # 零基线开销 + 判定确定性（不拉 worktree）
-    # 嵌套调用豁免（260930 同批）：本夹具是「泳道轮内再起一层执行器/闸」的黑盒调用，
-    # 外层泳道轮正持着泳道级单飞锁——不显式打开并发豁免，内层必抢锁失败 exit 2
-    # （环境红、零场景开跑）。t260924-09/t260925-12 两个先例同款、同一理由。
-    env["SANDBAR_INTEG_ALLOW_CONCURRENT"] = "1"
-    env.update(extra or {})
-    return env
+    # t261102-40: the nested run also clears the parent round's test-target statement
+    # (a nested suite must resolve its own target) and pins its bench registry under
+    # the lane. One spelling: lib_suite_prelude.nested_suite_env.
+    declared = {"SANDBAR_GATE_BASELINE": "0",         # 零基线开销 + 判定确定性（不拉 worktree）
+                # 嵌套调用豁免（260930 同批）：本夹具是「泳道轮内再起一层执行器/闸」的黑盒调用，
+                # 外层泳道轮正持着泳道级单飞锁——不显式打开并发豁免，内层必抢锁失败 exit 2
+                # （环境红、零场景开跑）。t260924-09/t260925-12 两个先例同款、同一理由。
+                "SANDBAR_INTEG_ALLOW_CONCURRENT": "1"}
+    declared.update({str(k): str(v) for k, v in (extra or {}).items()})
+    return suite_prelude.nested_suite_env(declared, lane)
 
 
 def gate_apply_key():
@@ -242,7 +249,7 @@ def call_gate(lane, apply=None, write_set=None, env=None, timeout=240):
     p = subprocess.run([sys.executable, str(ADMIN), "call", "verify_lane",
                         json.dumps(args, ensure_ascii=False)],
                        cwd=str(REPO), capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", timeout=timeout, env=_env(env))
+                       encoding="utf-8", errors="replace", timeout=timeout, env=_env(env, lane))
     out = {"ok": False, "result": {}, "stdout": p.stdout or "", "stderr": p.stderr or "",
            "rc": p.returncode}
     if p.stdout and p.stdout.strip():
@@ -262,7 +269,7 @@ def run_executor(lane, env=None, args=(), cwd=None, timeout=300, new_session=Fal
     cmd = [sys.executable, str(Path(lane) / "integration" / "run_scenarios.py"), *args]
     return subprocess.run(cmd, cwd=str(cwd or lane), capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=timeout,
-                          env=_env(env), start_new_session=new_session)
+                          env=_env(env, lane), start_new_session=new_session)
 
 
 def probe_with_killpg(lane, args, cwd, timeout=8, env=None):
@@ -270,7 +277,7 @@ def probe_with_killpg(lane, args, cwd, timeout=8, env=None):
     cmd = [sys.executable, str(Path(lane) / "integration" / "run_scenarios.py"), *args]
     p = subprocess.Popen(cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          text=True, encoding="utf-8", errors="replace",
-                         env=_env(env), start_new_session=True)
+                         env=_env(env, lane), start_new_session=True)
     try:
         out, err = p.communicate(timeout=timeout)
         return {"rc": p.returncode, "stdout": out or "", "stderr": err or "", "timed_out": False}

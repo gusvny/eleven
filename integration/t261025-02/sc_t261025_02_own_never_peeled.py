@@ -93,6 +93,7 @@ with tempfile.TemporaryDirectory(prefix="t261025-02-") as td:
         EXCLUDE_ENV: F.EXCLUDE_VALUE,
         OWN_ENV: "%s,%s" % (F.OWN_ENGINE, F.OWN_MAIN),
     })
+    F.relay_prelude(C, pA, "A", pA.returncode == 0)
     sA = _summary(pA)
     ranA = F.markers_ran(laneA)
     C.check(pA.returncode == 0, "A rc==0", "rc=%s out=%r" % (pA.returncode, pA.stdout[-400:]))
@@ -107,6 +108,7 @@ with tempfile.TemporaryDirectory(prefix="t261025-02-") as td:
 
     # ------- B: exclusion control - no own list, economy byte-stable --------
     laneB, pB = _round(root, "laneB", {EXCLUDE_ENV: F.EXCLUDE_VALUE})
+    F.relay_prelude(C, pB, "B", pB.returncode == 0)
     sB = _summary(pB)
     ranB = F.markers_ran(laneB)
     C.check(pB.returncode == 0, "B rc==0", "rc=%s" % pB.returncode)
@@ -126,6 +128,7 @@ with tempfile.TemporaryDirectory(prefix="t261025-02-") as td:
         EXCLUDE_ENV: F.EXCLUDE_VALUE,
         OWN_ENV: "t261025-02-fx-ghost",
     })
+    F.relay_prelude(C, pC, "C", pC.returncode == 0)
     ranC = F.markers_ran(laneC)
     C.check(pC.returncode != 0, "C refuses (non-zero rc)", "rc=%s" % pC.returncode)
     C.check(F.refused_face(pC.stdout + pC.stderr), "C REFUSED shape present",
@@ -139,6 +142,7 @@ with tempfile.TemporaryDirectory(prefix="t261025-02-") as td:
         EXCLUDE_ENV: F.EXCLUDE_VALUE,
         OWN_ENV: "   ",
     })
+    F.relay_prelude(C, pD, "D", pD.returncode == 0)
     sD = _summary(pD)
     ranD = F.markers_ran(laneD)
     C.check(pD.returncode == 0, "D rc==0 (no phantom refusal)", "rc=%s" % pD.returncode)

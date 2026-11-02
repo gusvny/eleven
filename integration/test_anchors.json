@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 385,
-      "scenarios": 874
+      "scenarios": 875
     },
     "vocab": [
       "behaviour",
@@ -6209,6 +6209,10 @@
     "integration/t261103-03/sc_t261103_03_two_sided_collector.py": {
       "anchor": "contract",
       "note": "t261103-03: the buffer-lane change-set caliber inside the per-scope collector, end to end. A real-git fixture (a project root repo plus one member repo, each with a main commit the line does not carry and a line branch carrying its own file; the lane cut from the line head with main synced in, one worktree per scope, and the lane manifest) drives the REAL agent_activities.changed_files and the REAL shared.targeted_rerun_plan: with the line named as the other side the receipt keeps the ticket's own files in every scope (member paths project-root prefixed), drops the line-carried files and the main-side files, and names the basis; the per-scope resolution face carries one entry per scope; the main-only control DOES list the line's files, so the caliber is opt-in; naming main as the other side is byte-identical to naming nothing; an unresolvable other side answers files=[] with a named error carrying the side and the merge-base marker, and the decision face does not narrow; one unreadable member scope fails the whole call by tag, never a partial list; the status face is not intersected (an untracked own file still counts in both scopes); the sibling mount is not resurrected by the intersection; a single-repo lane keeps the same caliber with no repo prefix. Assertions land on the receipt and the decision writer only - no source text and no internal helper name - so a contract-preserving refactor must not red it. Offline seconds, real git, no docker, no Temporal, never 3099/7233."
+    },
+    "integration/t261102-40/sc_t261102_40_prelude_named_degrade.py": {
+      "anchor": "behaviour",
+      "note": "t261102-40: the nested-round journey of the guard against an unavailable bench module - a real suite round over a lane that does not carry process_bench.py degrades to the named NO TEST TARGET outcome, names the missing file and still runs its children; a lane that carries the assets finishes inside the bounded prelude and resolves its own target (never the parent round's ambient statement); a present-but-broken module is named as a code fault, never as a missing file. Assertions land on the round's exit code, its stderr copy, its INTEG_SUMMARY test_target face, the prelude-legs line and on-disk execution markers."
     }
   }
 }

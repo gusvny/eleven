@@ -33,6 +33,9 @@ import contextlib
 import importlib.util
 import io
 import os
+import shutil
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -387,6 +390,149 @@ class WiringSourceLockTest(unittest.TestCase):
                     "sc_t261026_08_request_sweep_ticket_channel.py"):
             self.assertIn('"SANDBAR_SUITE_STATED_TARGET"',
                           (REPO / rel).read_text(encoding="utf-8"))
+
+
+# --------------------------------------- G named degrade of a missing bench ----
+# t261102-40: `_bench_module` must never raise out of the prelude. These cases
+# drive the REAL module over a tree that carries no `process_bench.py` (the
+# incident shape) and over a module that is present but broken (a code fault).
+
+
+def _load_abs(name, path):
+    spec = importlib.util.spec_from_file_location(name, str(path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _capture(fn):
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        value = fn()
+    return value, buf.getvalue()
+
+
+class NamedDegradeTest(unittest.TestCase):
+    """An unavailable bench module is a NAMED absence, never an exception."""
+
+    _STATE = ("resolved", "value", "source", "note", "port", "pid", "db",
+              "start_s", "down", "stopped")
+
+    def setUp(self):
+        self._saved_state = rs._TEST_TARGET
+        self._saved_bench = dict(rs._BENCH)
+        self._saved_mod = sys.modules.get("process_bench", "absent")
+        self._saved_env = {k: os.environ.get(k) for k in
+                           (rs.TEST_TARGET_ENV, rs.TEST_TARGET_SOURCE_ENV,
+                            rs.TEST_NAMESPACE_ENV)}
+        for key in self._saved_env:
+            os.environ.pop(key, None)
+        rs._TEST_TARGET = _empty_state()
+        sys.modules.pop("process_bench", None)
+
+    def tearDown(self):
+        rs._TEST_TARGET = self._saved_state
+        rs._BENCH.clear()
+        rs._BENCH.update(self._saved_bench)
+        if self._saved_mod == "absent":
+            sys.modules.pop("process_bench", None)
+        else:
+            sys.modules["process_bench"] = self._saved_mod
+        for key, value in self._saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def test_a_missing_module_degrades_to_the_named_absence(self):
+        """The incident shape: the tree carries the runner, not the bench."""
+        with tempfile.TemporaryDirectory() as td:
+            tree = Path(td)
+            shutil.copy2(REPO / "integration" / "run_scenarios.py",
+                         tree / "run_scenarios.py")
+            mod = _load_abs("rs_t261102_40_missing_bench", tree / "run_scenarios.py")
+            # The lane's import root holds no process_bench.py: take the real
+            # integration/ off sys.path so the copy sees the incident shape
+            # instead of the checkout's own module.
+            saved_path = list(sys.path)
+            sys.modules.pop("process_bench", None)
+            sys.path[:] = [p for p in sys.path
+                           if Path(p or ".").resolve() != (REPO / "integration")]
+            try:
+                self.assertIsNone(
+                    mod._bench_module(),
+                    "a missing module returns None, it never raises")
+                note = mod._BENCH["absent"]
+                self.assertIn("process_bench.py missing at", note)
+                self.assertIn("ModuleNotFoundError", note)
+                st, err = _capture(mod._provision_test_target)
+            finally:
+                sys.path[:] = saved_path
+            self.assertEqual(st["source"], "absent")
+            self.assertEqual(st["value"], "")
+            self.assertEqual(st["note"], note)
+            self.assertIn("NO TEST TARGET for scenario children:", err)
+            self.assertIn("process_bench.py missing at", err)
+            child = {}
+            mod._apply_test_target_env(child)
+            self.assertEqual(child, {},
+                             "a missing module never hands a child an address")
+            face = mod._test_target_face()
+            self.assertEqual(face["source"], "absent")
+            self.assertIsNone(face["value"])
+            self.assertEqual(face["absent_reason"], note)
+
+    def test_a_broken_module_is_named_as_a_code_fault(self):
+        """Present but failing at import: the note must not read as 'missing'."""
+        sys.modules["process_bench"] = None      # import raises ImportError
+        rs._BENCH.clear()
+        rs._BENCH.update({"mod": None, "absent": ""})
+        self.assertIsNone(rs._bench_module())
+        note = rs._BENCH["absent"]
+        self.assertIn("process_bench.py present at", note)
+        self.assertIn("but failed to import", note)
+        self.assertRegex(note, r"(ImportError|ModuleNotFoundError)")
+        self.assertNotIn("missing", note)
+        st, err = _capture(rs._provision_test_target)
+        self.assertEqual(st["source"], "absent")
+        self.assertEqual(st["note"], note)
+        self.assertIn("NO TEST TARGET for scenario children:", err)
+
+    def test_an_ambient_statement_wins_without_any_import(self):
+        sys.modules["process_bench"] = None      # a would-be import raises
+        rs._BENCH.clear()
+        rs._BENCH.update({"mod": None, "absent": ""})
+        os.environ[rs.TEST_TARGET_ENV] = "127.0.0.1:12345"
+        st, err = _capture(rs._provision_test_target)
+        self.assertEqual(st["source"], "ambient")
+        self.assertEqual(st["value"], "127.0.0.1:12345")
+        self.assertEqual(st["note"], "")
+        self.assertIn("the environment states it", err)
+
+    def test_the_teardown_names_a_module_that_vanished_after_a_start(self):
+        """The guard covers 'imported, then lost' - the only reachable state."""
+        rs._TEST_TARGET = {
+            "resolved": True, "value": "127.0.0.1:17233", "source": "bench",
+            "note": "", "port": 17233, "pid": 4242,
+            "db": "/tmp/sandbar-bench-test/temporal.db", "start_s": 0.12,
+            "down": None, "stopped": False}
+        sys.modules["process_bench"] = None
+        rs._BENCH.clear()
+        rs._BENCH.update({"mod": None, "absent": ""})
+        block, err = _capture(rs._teardown_test_target)
+        self.assertFalse(block["clean"], "the residue verdict is not swallowed")
+        self.assertIn("failed to import", block["error"])
+        self.assertIn("RESIDUE after down", err)
+        self.assertIn("no longer available", err)
+        again, _ = _capture(rs._teardown_test_target)
+        self.assertEqual(again, block, "the teardown stays idempotent")
+
+    def test_the_source_carries_both_wordings(self):
+        src = _src()
+        self.assertIn("process_bench.py missing at %s (%s: %s)", src)
+        self.assertIn(
+            "process_bench.py present at %s but failed to import (%s: %s)", src)
+        self.assertIn("except Exception as exc:", src)
 
 
 if __name__ == "__main__":

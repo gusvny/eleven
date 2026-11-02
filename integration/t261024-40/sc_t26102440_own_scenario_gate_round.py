@@ -89,6 +89,7 @@ with tempfile.TemporaryDirectory(prefix="t261024-40-") as td:
         ONLY_ENV: "%s,%s" % (OTHER, OWN),
         OWN_ENV: OWN,             # the change's own declared scenario
     })
+    F.relay_prelude(C, p, "A", p.returncode == 0)
     mk = _markers(laneA["lane"], (OWN, OTHER))
     summ = F.integ_summary(p.stdout)
     C.check(p.returncode == 0,
@@ -124,6 +125,7 @@ with tempfile.TemporaryDirectory(prefix="t261024-40-") as td:
         ONLY_ENV: "%s,%s" % (OTHER, OWN),
         OWN_ENV: OWN,
     })
+    F.relay_prelude(C, p, "B", p.returncode == 0)
     mk = _markers(laneB["lane"], (OWN, OTHER))
     C.check(p.returncode == 0 and mk[OWN],
             "B1 the roster-booked OWN scenario still runs and is named",
@@ -142,6 +144,7 @@ with tempfile.TemporaryDirectory(prefix="t261024-40-") as td:
         ONLY_ENV: "t261024-40-fx-ghost",
         OWN_ENV: "t261024-40-fx-ghost",
     })
+    F.relay_prelude(C, p, "C", p.returncode == 0)
     mk = _markers(laneC["lane"], (OWN, OTHER))
     C.check(p.returncode == 2 and "REFUSED [" in p.stdout,
             "C1 an unregistered OWN name refuses rc=2 in the REFUSED shape",
@@ -159,6 +162,7 @@ with tempfile.TemporaryDirectory(prefix="t261024-40-") as td:
         EXCLUDE_ENV: F.EXCLUDE_VALUE,
         ONLY_ENV: OTHER,
     })
+    F.relay_prelude(C, p, "D", p.returncode == 0)
     C.check("INTEG_NARROWED_EMPTY" in p.stdout,
             "D1 without an own list the narrowed-empty widen contract stands",
             "tail=%s" % p.stdout[-300:])
@@ -172,6 +176,7 @@ with tempfile.TemporaryDirectory(prefix="t261024-40-") as td:
             "summary=%r plan=%r" % (summ, planD))
     laneD2 = F.build_lane(root / "laneD2", SPEC, exclude_pools=F.EXCLUDE_VALUE)
     p2 = F.run_executor(laneD2["lane"], env={})
+    F.relay_prelude(C, p2, "D2", p2.returncode == 0)
     mk2 = _markers(laneD2["lane"], (OWN, OTHER))
     C.check(p2.returncode == 0 and all(mk2.values()),
             "D3 an unpointed, exclusion-free round with no own list runs all as today",
@@ -183,6 +188,7 @@ with tempfile.TemporaryDirectory(prefix="t261024-40-") as td:
         EXCLUDE_ENV: F.EXCLUDE_VALUE,
         OWN_ENV: "  , ,, ",
     })
+    F.relay_prelude(C, p, "E", p.returncode == 0)
     C.check(p.returncode == 0 and "INTEG_NARROWED_EMPTY" not in p.stdout,
             "E1 a whitespace-only own value behaves as absent (no phantom face)",
             "rc=%s tail=%s" % (p.returncode, p.stdout[-300:]))
