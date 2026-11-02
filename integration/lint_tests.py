@@ -120,6 +120,21 @@ practice:
         nothing about integration/ generally — any other new path under
         integration/ is still judged by the gate exactly as before.
 
+  L30 fast-set declaration (t261102-25): every fast-marked registry entry
+        carries an honest fast-catch clause, and every clause names a
+        fast-marked entry (both directions, no drift). The judgement is
+        `run_scenarios.validate_fast_set()` itself — one ruler, never a second
+        copy of the rules — and the known-red roster is NOT read here, so the
+        merge gate acquires no environment-dependent red. Measured fault (main
+        9897c555): the new scenario t261102-12-named-read-state carried the
+        fast marker without a clause, so every face that drives the
+        declaration refused and nothing ran. The pytest rod that catches this
+        already existed in integration/tests and was red; no merge-gate check
+        collects that directory, so the red sat on main. This rule puts the
+        same judgement inside the battery the merge gate runs. Fail closed
+        NAMED: an unimportable module or a raising validator is a named error,
+        never a bare traceback and never a silent pass.
+
 Usage: python3 integration/lint_tests.py (cwd = repo root; exit 0 = pass)
        python3 integration/lint_tests.py --rules=L16,L17   # run a SUBSET of
        rules (t261011-22 host refinement: a mechanism test runs the rule it
@@ -1705,6 +1720,46 @@ def lint_interp():
            "launches through integration/py_interp.sh")
 
 
+def fast_set_declaration_errors(registry=None):
+    """L30 pure core: the declaration errors over one registry.
+
+    Default registry = the SHIPPED one. One ruler only: the fast set's own
+    validator decides, so this gate can never drift into a second copy of the
+    rules. The known-red roster is not read here (that refusal belongs to the
+    fast-set faces), so the merge gate stays free of environment-dependent
+    reds.
+    """
+    sys.path.insert(0, str(INTEG))
+    import run_scenarios as rs  # noqa: E402  (same import face as L4/L21/L29)
+    return list(rs.validate_fast_set(registry))
+
+
+def lint_fast_set_declaration(registry=None):
+    """L30 (t261102-25): a fast member without an honest fast-catch clause.
+
+    The incident: a registry entry joined the fast set with the marker and no
+    clause. Every face that drives the declaration refused, and the pytest rod
+    that catches it was red in integration/tests - a directory no merge-gate
+    check collects, so the red sat on main. This rule carries the same
+    judgement on the face the merge gate does run.
+
+    Fail closed NAMED: a validator that cannot be imported or that raises is a
+    named error, never a bare traceback and never a silent pass.
+    """
+    try:
+        found = fast_set_declaration_errors(registry)
+    except Exception as e:  # noqa: BLE001 — a named red, never a traceback
+        err("L30 fast-set declaration: the fast-set validator could not be "
+            "read (%s: %s) — the declaration is unjudged, so the gate fails "
+            "closed" % (type(e).__name__, e))
+        return
+    for e in found:
+        err("L30 fast-set declaration: %s" % e)
+    if not found:
+        ok("L30 fast-set declaration: every fast member carries a fast-catch "
+           "clause, and every clause names a fast member")
+
+
 #: The subset selector's dispatch table (t261011-22 host refinement: a
 #: mechanism test runs the rule(s) it plants for, never the whole battery).
 #: Every entry takes (base, scope): scope = --scope-files paths or None
@@ -1718,6 +1773,7 @@ RULES = {
     "L25": lint_wait_bounds,
     "L26": lambda base, scope=None: lint_lane_overlay_location(),
     "L29": lambda base, scope=None: lint_interp(),
+    "L30": lambda base, scope=None: lint_fast_set_declaration(),
 }
 
 #: Rules whose walk can be pruned to --scope-files paths (t261011-22). L25 is
@@ -2151,6 +2207,11 @@ def main():
         # "No module named temporalio" ENV_FAIL of finding 261026 — every
         # engine-importing python leg goes through integration/py_interp.sh.
         lint_interp()
+        # L30 fast-set declaration (t261102-25): the merge gate never collects
+        # integration/tests, so the pytest rod that judges the registry-wide
+        # declaration is red on main while every lane stays green. This rule
+        # carries the same judgement in the battery the merge gate does run.
+        lint_fast_set_declaration()
     n_e, n_w = len(errors), len(warns)
     # t261009-12 Defect B: the verdict line names any unstable-input condition
     # that fired, so two different verdicts for the same inputs can never print

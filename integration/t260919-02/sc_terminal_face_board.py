@@ -12,11 +12,16 @@ stage_state=running，用户看到一张永远在跑、永不动弹的票）；(
      标题诚实——绝不出现「查询超时，刷新重试」占位符（KI-018① 家族：错误文案不得
      顶替数据字段）；巡检行票身份（实例/期号）不因失败丢失；
   B. dev-lane 形失败行同口径（极简行不再 status=""/awaiting 被 UI 缺省推成在跑），
-     行键集 parity（除唯一加键 identity_note 外不加新键，t260915-08 R9 口径）。
+     行键集 parity（家族键 + 命名加键 read_state/read_state_note/identity_note，其余新键一律失败；
+     t260915-08 R9 口径）。
      260929 re-point (t261029-32; contract from t261028-17 / KI-391): the row family
      has ONE documented additive key, `identity_note` — diagnostics ride there and
-     `title` stays clean. The pin allows the family keys plus `identity_note`, and
-     still fails on any OTHER new key;
+     `title` stays clean.
+     261102 re-point (t261102-12 read-state surface, landed on main 9897c555): the
+     no-snapshot row family (failed / degraded / minimal) also carries ONE named read
+     state plus its note, so the failed dev row legitimately gained `read_state` and
+     `read_state_note`. The pin allows the family keys plus those three named keys,
+     and still fails on any OTHER new key;
   C. 终态失败票详情：回执 kind=terminal（KI-025 分级不变）、文案仍明说「刷新无效」
      （绝不诱导刷新/绝不谎报瞬时/绝不谎报不存在），并带可渲染失败面 face：
      执行状态、失败原因串、终态时刻、票身份（巡检含实例与期号）、「无快照及为何无」
@@ -362,15 +367,22 @@ DEV_ROW_KEYS = {"id", "project", "epic", "role", "status", "title", "workflow", 
                 # 引擎 UT DEVLANE_ROW_KEYS、t260915-08 场景 pinned 钉同一键集）。
                 "lane_version", "develop_line"}
 
-# t261028-17 (KI-391) — the row family's ONE documented additive key. That ticket
+# t261028-17 (KI-391) — the row family's additive NOTE slot. That ticket
 # moved the diagnostics (timeout/no-poller cause, durable-stage label, archive
 # identity note, reconciliation label) OUT of `title` and into `identity_note`, on
 # every dev-lane shape (empty string when there is nothing to report), and stated
-# that keyset parity is preserved for every OTHER key. The failed-row parity pin
-# therefore allows exactly DEV_ROW_KEYS plus this note slot: the note slot stays an
-# intentional addition, and any other new key still fails.
+# that keyset parity is preserved for every OTHER key.
 IDENTITY_NOTE_KEY = "identity_note"
-DEV_ROW_ALLOWED_KEYS = DEV_ROW_KEYS | {IDENTITY_NOTE_KEY}
+
+# t261102-12 (read-state surface, landed on main 9897c555) — the no-snapshot row
+# family (failed / degraded / minimal) carries ONE named read state plus its note,
+# because a finished-but-unreadable ticket must say WHY instead of rendering as a
+# slow read. The failed dev row therefore legitimately carries these two keys.
+# They are NAMED here, never wildcarded: every other new key still fails, which is
+# the pin's whole point (t260915-08 R9).
+READ_STATE_KEYS = {"read_state", "read_state_note"}
+
+DEV_ROW_ALLOWED_KEYS = DEV_ROW_KEYS | {IDENTITY_NOTE_KEY} | READ_STATE_KEYS
 
 
 # ---------------------------------------------------------------- face 宽容读取（灰盒浅绑定）
@@ -461,17 +473,17 @@ def main() -> int:
             check_failed_row_shape(row, "B dev 失败行")
             ok(row.get("project") == "sandbar",
                "行 project 不丢（SA 真源；got %r）" % row.get("project"))
-            # t261028-17/KI-391 re-point: the allowed set is the row family's keys
-            # plus the ONE documented additive note slot. Teeth unchanged — every
-            # family key must be present, the note slot must be present (the failed
-            # shape always carries it, empty when silent), and any OTHER key fails
-            # with its name in the message.
+            # t261028-17/KI-391 + t261102-12 re-point: the allowed set is the row
+            # family's keys plus the NAMED additive keys (identity_note, read_state,
+            # read_state_note). Teeth unchanged — every family key must be present,
+            # every named additive key must be present, and any OTHER key fails with
+            # its name in the message.
             row_keys = set(row.keys())
             _missing = DEV_ROW_ALLOWED_KEYS - row_keys
             _extra = row_keys - DEV_ROW_ALLOWED_KEYS
             ok(not _missing and not _extra,
-               "dev 失败行键集 parity（家族键齐全 + 唯一加键 identity_note，"
-               "t260915-08 R9 口径；missing=%r extra=%r）"
+               "dev 失败行键集 parity（家族键齐全 + 命名加键 read_state/read_state_note/"
+               "identity_note，t260915-08 R9 口径；missing=%r extra=%r）"
                % (sorted(_missing), sorted(_extra)))
             # TEETH (this case has no self-test leg, so the mutation recipe lives
             # here as a runnable proof). A scratch copy keeps its own path roots

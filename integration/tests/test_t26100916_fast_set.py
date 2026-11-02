@@ -13,14 +13,22 @@ Covers (review conditions 1/2/3/4 of the plan review):
   row = None (never a fabricated 0);
 - fast_set_wall_estimate: serial sums, pole-vs-sum/width arithmetic,
   unmeasured counting, width=1 degenerate;
-- fast_set_mode_enabled: flag > env > off, malformed env values.
+- fast_set_mode_enabled: flag > env > off, malformed env values;
+- t261102-25 declaration guard: shipped coherence with DERIVED counts, empty
+  and multi-line clause refusals, the L30 merge-gate rule (green, named,
+  registered, wired), and the reader rod that feeds the declaration face to the
+  engine's own parser `develop_line.parse_fast_set_declaration`.
 
 Zero docker/network/ledger-file contact: the roster reader and rows are
 injected fixtures; the real tree is only read via the imported module.
 """
+import inspect
 import json
 import os
+import re
+import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -29,6 +37,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "integration"))
 
 import run_scenarios as rs  # noqa: E402
+from lib_env import clean_narrowing_env  # noqa: E402  (L12 single point)
 
 
 # ---- marker parse truth table ------------------------------------------------
@@ -371,3 +380,168 @@ def test_report_dir_ignore_tolerates_unwritable(tmp_path):
     d = tmp_path / "not-a-dir"
     d.write_text("i am a file\n", encoding="utf-8")
     assert rs._ensure_report_dir_ignored(d) is False
+
+
+# ---- t261102-25: the declaration guard ---------------------------------------
+#
+# The incident: a registry entry joined the fast set with the marker and no
+# FAST_SET_CATCH clause. Every face that drives the declaration refused, and the
+# rod in this very file was red - but no merge-gate check collects
+# integration/tests, so the red sat on main. These rods keep the L1 face and add
+# the reader face; the merge-gate reach itself is lint rule L30.
+
+def _fast_member_names():
+    return [e[0] for e in rs.SCENARIOS if rs.parse_fast_markers(e)[0]]
+
+
+def _lint_tests():
+    import lint_tests  # noqa: PLC0415 (import is safe: tmp-dir side effects only)
+    return lint_tests
+
+
+def test_shipped_declaration_is_coherent_and_every_clause_is_one_line():
+    errors = rs.validate_fast_set()
+    assert errors == [], "shipped registry declaration is incoherent: %r" % (errors,)
+    members = _fast_member_names()
+    # Derived, never a hardcoded count: a future member that ships WITH its
+    # clause must not red this rod.
+    assert len(members) == len(rs.FAST_SET_CATCH), (
+        "%d fast members vs %d fast-catch clauses"
+        % (len(members), len(rs.FAST_SET_CATCH)))
+    for name in members:
+        clause = str(rs.FAST_SET_CATCH[name])
+        assert clause.strip(), "empty fast-catch clause for %s" % name
+        assert "\n" not in clause, "multi-line fast-catch clause for %s" % name
+
+
+def test_empty_clause_is_a_named_error():
+    saved = dict(rs.FAST_SET_CATCH)
+    try:
+        rs.FAST_SET_CATCH["m-quiet"] = "   "
+        errs = rs.validate_fast_set([_one("m-quiet", "ro", "fast")])
+        assert any("empty" in e and "[m-quiet]" in e for e in errs), errs
+    finally:
+        rs.FAST_SET_CATCH.clear()
+        rs.FAST_SET_CATCH.update(saved)
+
+
+def test_multiline_clause_is_a_named_error():
+    saved = dict(rs.FAST_SET_CATCH)
+    try:
+        rs.FAST_SET_CATCH["m-wrapped"] = "first line\nsecond line"
+        errs = rs.validate_fast_set([_one("m-wrapped", "ro", "fast")])
+        assert any("spans several lines" in e and "[m-wrapped]" in e
+                   for e in errs), errs
+    finally:
+        rs.FAST_SET_CATCH.clear()
+        rs.FAST_SET_CATCH.update(saved)
+
+
+def test_l30_declaration_rule_is_green_on_the_shipped_registry():
+    assert _lint_tests().fast_set_declaration_errors() == []
+
+
+def test_l30_names_a_member_without_a_declaration():
+    lt = _lint_tests()
+    saved_e, saved_w = list(lt.errors), list(lt.warns)
+    try:
+        del lt.errors[:]
+        del lt.warns[:]
+        lt.lint_fast_set_declaration([_one("m-unspoken", "ro", "fast")])
+        named = list(lt.errors)
+    finally:
+        lt.errors[:] = saved_e
+        lt.warns[:] = saved_w
+    assert any("L30" in e and "[m-unspoken]" in e
+               and "no fast-catch declaration" in e for e in named), named
+
+
+def test_l30_is_registered_and_wired_into_the_full_battery():
+    lt = _lint_tests()
+    assert "L30" in lt.RULES, "L30 is not in the --rules selector table"
+    assert "lint_fast_set_declaration()" in inspect.getsource(lt.main), (
+        "the full battery does not call L30 - a rule that never runs is no brake")
+
+
+def test_l30_fails_closed_named_when_the_validator_cannot_be_read(monkeypatch):
+    lt = _lint_tests()
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("registry unreadable")
+
+    monkeypatch.setattr(lt, "fast_set_declaration_errors", _boom)
+    saved_e = list(lt.errors)
+    try:
+        del lt.errors[:]
+        lt.lint_fast_set_declaration()
+        named = list(lt.errors)
+    finally:
+        lt.errors[:] = saved_e
+    assert len(named) == 1, named
+    assert named[0].startswith("L30 fast-set declaration:"), named[0]
+    assert "registry unreadable" in named[0], named[0]
+
+
+#: The reader leg: print the declaration face, then let the ENGINE's own parser
+#: read it. Runs in a child through integration/py_interp.sh because the parser
+#: needs the engine venv (develop_line imports agent_activities, which imports
+#: temporalio). The child prints one JSON verdict line.
+_READER_ROD = textwrap.dedent(
+    '''
+    import contextlib
+    import io
+    import json
+    import sys
+
+    sys.path.insert(0, "integration")
+    sys.path.insert(0, "server/engine")
+
+    import develop_line
+    import run_scenarios
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = run_scenarios.print_fast_set_declaration()
+    out = buf.getvalue()
+    verdict = {"rc": rc, "out": out}
+    try:
+        decl = develop_line.parse_fast_set_declaration(out)
+        verdict.update({"status": "ok", "refusals": list(decl.refusals),
+                        "members": list(decl.members),
+                        "budget_min": decl.budget_min})
+    except Exception as exc:                    # noqa: BLE001 - reported, never hidden
+        verdict.update({"status": "parse_error",
+                        "cause": "%s: %s" % (type(exc).__name__, exc)})
+    print(json.dumps(verdict))
+    ''')
+
+
+def test_reader_parses_the_declaration_face_and_reads_the_clause(tmp_path):
+    env = clean_narrowing_env({"SANDBAR_SCENARIO_LEDGER_DIR": str(tmp_path)})
+    # cwd is pinned to the repo root: py_interp.sh resolves the tree venv
+    # relative to cwd by design (test_t261003_05_alarm_scenario_venv precedent).
+    r = subprocess.run(["sh", "integration/py_interp.sh", "-c", _READER_ROD],
+                       cwd=str(REPO), env=env, capture_output=True, text=True)
+    chosen = next((ln for ln in (r.stderr or "").splitlines()
+                   if ln.startswith("py_interp: interpreter=")), "<no line>")
+    if r.returncode != 0:
+        if "ModuleNotFoundError" in (r.stderr or ""):
+            pytest.fail("no engine venv: the reader module cannot import under "
+                        "%s\n%s" % (chosen, (r.stderr or "")[-2000:]))
+        pytest.fail("reader rod child failed (%s)\n%s"
+                    % (chosen, (r.stderr or "")[-2000:]))
+    payload = json.loads(r.stdout.strip().splitlines()[-1])
+    assert payload["status"] == "ok", payload
+    assert payload["rc"] == 0, payload
+    assert payload["refusals"] == [], payload
+    assert "t261102-12-named-read-state" in payload["members"], payload
+    assert payload["budget_min"] == rs.FAST_SET_BUDGET_MIN, payload
+    lines = [ln for ln in payload["out"].splitlines()
+             if ln.strip().startswith("member t261102-12-named-read-state ")]
+    assert len(lines) == 1, lines
+    # The clause must REACH the reader: a refusal-free parse proves only that
+    # validation passed, not that the honest sentence is on the member line.
+    assert re.search(r"member t261102-12-named-read-state .* fast-catch: \S",
+                     lines[0]), lines[0]
+    assert "timeout" in lines[0] and "no_poller" in lines[0], (
+        "the clause must name the measured incident class: %r" % lines[0])

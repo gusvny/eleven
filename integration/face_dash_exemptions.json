@@ -1,12 +1,4 @@
 {
-  "_rule": "L28 face-dash exemptions (t261026-11): per-file:line sites that predate the funnel. ONLY SHRINKS — a new literal is a red, a stale entry is a red; regenerate same-size in the same change when an edit shifts line numbers.",
-  "_generated_by": "integration/face_dash_exemptions.json via lint_face_dash.py --write-baseline",
-  "server/plugins/executor-panel/src/host/page-logic.ts": [
-    83,
-    94,
-    163,
-    191
-  ],
   "server/plugins/executor-panel/src/host/panel-page.ts": [
     118,
     1858,
@@ -20,19 +12,28 @@
     575,
     582
   ],
-  "server/plugins/providers/src/client/index.tsx": [
-    483
-  ],
-  "server/plugins/providers/src/host/routes-edit.ts": [
-    87
-  ],
-  "server/plugins/workbench/node.ts": [
-    285
-  ],
-  "server/plugins/workbench/src/client/docs.tsx": [
-    275,
-    277,
-    278
+  "server/plugins/workbench/src/client/index.tsx": [
+    1461,
+    1465,
+    1496,
+    1533,
+    1764,
+    1837,
+    1846,
+    2174,
+    2314,
+    2571,
+    2573,
+    2589,
+    2609,
+    2618,
+    2619,
+    2912,
+    2919,
+    2966,
+    2967,
+    3677,
+    3679
   ],
   "server/plugins/workbench/src/client/epics.tsx": [
     412,
@@ -40,37 +41,110 @@
     414,
     415
   ],
-  "server/plugins/workbench/src/client/index.tsx": [
-    1444,
-    1448,
-    1479,
-    1516,
-    1747,
-    1820,
-    1829,
-    2097,
-    2237,
-    2494,
-    2496,
-    2512,
-    2532,
-    2541,
-    2542,
-    2835,
-    2842,
-    2889,
-    2890,
-    3600,
-    3602
-  ],
-  "server/plugins/workbench/src/client/inspection-report-model.ts": [
-    76,
-    77
-  ],
   "server/plugins/workbench/src/client/lane-durations.ts": [
     253
   ],
   "server/plugins/workbench/src/shared/parts.ts": [
     33
+  ],
+  "server/plugins/providers/src/client/index.tsx": [
+    483
+  ],
+  "_generated_by": [
+    " ",
+    "-",
+    ".",
+    "/",
+    "_",
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "j",
+    "l",
+    "m",
+    "n",
+    "o",
+    "p",
+    "r",
+    "s",
+    "t",
+    "v",
+    "w",
+    "x",
+    "y"
+  ],
+  "_rule": [
+    " ",
+    "(",
+    ")",
+    ",",
+    "-",
+    ".",
+    "0",
+    "1",
+    "2",
+    "6",
+    "8",
+    ":",
+    ";",
+    "H",
+    "I",
+    "K",
+    "L",
+    "N",
+    "O",
+    "R",
+    "S",
+    "Y",
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g",
+    "h",
+    "i",
+    "l",
+    "m",
+    "n",
+    "o",
+    "p",
+    "r",
+    "s",
+    "t",
+    "u",
+    "w",
+    "x",
+    "y",
+    "z",
+    "—"
+  ],
+  "server/plugins/providers/src/host/routes-edit.ts": [
+    87
+  ],
+  "server/plugins/workbench/src/client/docs.tsx": [
+    275,
+    277,
+    278
+  ],
+  "server/plugins/executor-panel/src/host/page-logic.ts": [
+    83,
+    94,
+    163,
+    191
+  ],
+  "server/plugins/workbench/src/client/inspection-report-model.ts": [
+    76,
+    77
+  ],
+  "server/plugins/workbench/node.ts": [
+    326
   ]
 }

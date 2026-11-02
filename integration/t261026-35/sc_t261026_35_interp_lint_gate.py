@@ -98,7 +98,11 @@ def main() -> int:
         "print('probe-ok')\n" % str(clone / "server" / "engine")
     )
 
-    # Inject the offender entry + its anchor row into the clone only.
+    # Inject the offender entry + its anchor row into the clone only. The probe
+    # entry is a PLAIN ro entry, never a fast-set member: a "fast" marker would
+    # put this fixture under the fast-set declaration rules (L30, t261102-25), so
+    # the L29 vacuity control would be judged by an unrelated face and leg C
+    # (same entry through py_interp.sh must be green) could never be green.
     reg = clone / "integration" / "run_scenarios.py"
     src = reg.read_text()
     entry = (
@@ -107,7 +111,7 @@ def main() -> int:
         '(ticket t261026-35): a bare-interpreter cmd over an engine-importing '
         'probe must be red under the L29 rule; green when relaunched through '
         'py_interp.sh. Not a real scenario - a probe.",\n'
-        '     "python3 %s", "ro", "fast"),\n'
+        '     "python3 %s", "ro"),\n'
     ) % (OFFENDER_ID, PROBE_REL)
     marker = "SCENARIOS = [\n"
     if marker not in src:
