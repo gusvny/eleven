@@ -136,6 +136,14 @@ import {
   type ArtifactRow,
   type ArtifactStat,
 } from './artifact-face-model.ts'
+// t261030-36 (epic artifact-face, slice 3): the six built-in views. `shouldRenderBody` is
+// the ONE rule that decides whether a row gets a body; the frame's call site and the
+// component both use it. The lightbox moved to `lightbox.tsx` and is shared with the
+// screenshot-evidence list.
+import { ArtifactView } from './artifact-view.tsx'
+import { shouldRenderBody } from './artifact-view-model.ts'
+import { Lightbox } from './lightbox.tsx'
+import { LIGHTBOX_KEYS, lightboxNav } from './lightbox-model.ts'
 // 「文档」视图（t260905-06 立；t260915-10 接壳层 projectKey）：docs/ 定稿库人读视图 +
 // notes/ 观察窗，默认跟随壳层当前项目（页内选择器可手动切且手动优先）。
 // t261005-10 (UI-2): the host Docs view moved into the panel Docs tab (docs.tsx keeps
@@ -1827,92 +1835,10 @@ export function evidenceImgSrc(ticketId: string, file: string): string {
   return `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/evidence/${encodeURIComponent(file)}`
 }
 
-/** 灯箱键盘键位契约（t260901-13，导出供 smoke 对齐键位，防 handler 与测试漂移）。 */
-export const evidenceLightboxKeys = { close: 'Escape', prev: 'ArrowLeft', next: 'ArrowRight' } as const
-
-/**
- * 灯箱下标导航纯函数（t260901-13，导出供 smoke 直测）：index 循环移动 delta，
- * 非法入参（空列表/越界/非整数 delta）一律兜底到安全下标，不抛——灯箱 open 期间
- * evidence 列表被重拉变短时，同一条兜底保证渲染下标始终落在列表内。
- */
-export function evidenceNav(files: readonly unknown[], index: number, delta: number): number {
-  const n = files.length
-  if (n <= 0) return 0
-  const i = Number.isInteger(index) && index >= 0 && index < n ? index : 0
-  const d = Number.isInteger(delta) ? delta : 0
-  return ((i + d) % n + n) % n
-}
-
-/** 详情抽屉「截图证据」区（t260831-08）：拉 evidence 列表端点渲染泳道/归档截图。
- *  降级口径：files 空（无泳道/已合并无归档/端点异常）→ 整区不渲染，不报错；
- *  单图加载失败 → 占位人话，不拖垮整区。
- *  灯箱（t260901-13）：缩略图点击 → EvidenceLightbox 遮罩层放大看图。
- *  C1（review 走查结论）：keydown 挂 document 级，方向键在 input/textarea/select/
- *  contentEditable 内触发时忽略（防一边移动光标一边切图），Esc 任何情况都关——
- *  见 evidenceKeyGuard。 */
-function isEditableTarget(t: EventTarget | null): boolean {
-  if (!(t instanceof HTMLElement)) return false
-  return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'
-    || t.isContentEditable
-}
-
-/** 灯箱 lightbox（t260901-13）：点击放大 + 左右按钮/键盘循环切换 + 计数与文件名
- *  + Esc/点遮罩关闭。键盘挂 document 级（fixed 遮罩不可聚焦，绑元素需 autoFocus
- *  抢抽屉焦点；document 级覆盖天然）。所有关闭路径（Esc/点遮罩/切工单/关抽屉）
- *  都收口到「卸载即 useEffect cleanup removeEventListener」单点回收。 */
-function EvidenceLightbox({ ticketId, files, index, onClose, onNav: nav }: {
-  ticketId: string; files: string[]; index: number; onClose: () => void
-  onNav: (files: string[], index: number, delta: number) => void
-}) {
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key === evidenceLightboxKeys.close) { e.preventDefault(); onClose() }
-      else if (e.key === evidenceLightboxKeys.prev && !isEditableTarget(e.target)) {
-        e.preventDefault(); nav(files, index, -1)
-      } else if (e.key === evidenceLightboxKeys.next && !isEditableTarget(e.target)) {
-        e.preventDefault(); nav(files, index, 1)
-      }
-    }
-    document.addEventListener('keydown', h)
-    return () => document.removeEventListener('keydown', h)
-  }, [files, index, onClose])
-  const f = files[index] ?? files[0]
-  const [broken, setBroken] = useState(false)
-  return (
-    <div className="wb-lb" onClick={onClose}>
-      {files.length > 1 && (
-        <button type="button" className="wb-lb-nav" aria-label="Previous"
-          onClick={(e) => { e.stopPropagation(); nav(files, index, -1) }}>‹</button>
-      )}
-      {broken
-        ? <div className="wb-lb-miss">Screenshot failed to load: {f}</div>
-        : (
-            <img
-              className="wb-lb-img"
-              alt={`Screenshot evidence ${f}`}
-              src={evidenceImgSrc(ticketId, f)}
-              onClick={(e) => e.stopPropagation()}
-              onError={() => setBroken(true)}
-            />
-          )}
-      {files.length > 1 && (
-        <button type="button" className="wb-lb-nav" aria-label="Next"
-          onClick={(e) => { e.stopPropagation(); nav(files, index, 1) }}>›</button>
-      )}
-      <div className="wb-lb-bar" onClick={(e) => e.stopPropagation()}>
-        <span>{files.length > 0 ? `${index + 1} / ${files.length}` : '0 / 0'}</span>
-        <span className="wb-lb-name">{f}</span>
-        <button type="button" className="wb-lb-close" onClick={onClose}>Close (Esc)</button>
-      </div>
-    </div>
-  )
-}
-
-/** 灯箱导航动作收口（t260901-13）：EvidenceImages 持 open 下标 state，经 setOpen
- *  落 evidenceNav 结果。抽成模块级函数便于 handler 复用与类型收口。 */
-function onNav(files: string[], index: number, delta: number, setOpen: (i: number | null) => void): void {
-  setOpen(evidenceNav(files, index, delta))
-}
+/** The lightbox contract the smoke asserts. The component now lives in `lightbox.tsx`,
+ *  so the screenshot-evidence list and the artifact image view share ONE overlay. */
+export const evidenceLightboxKeys = LIGHTBOX_KEYS
+export const evidenceNav = lightboxNav
 
 function EvidenceImages({ ticketId }: { ticketId: string }) {
   const [files, setFiles] = useState<string[] | null>(null)
@@ -1958,12 +1884,12 @@ function EvidenceImages({ ticketId }: { ticketId: string }) {
         ))}
       </div>
       {open !== null && (
-        <EvidenceLightbox
-          ticketId={ticketId}
-          files={files}
+        <Lightbox
+          items={files.map((f) => ({ name: f, src: evidenceImgSrc(ticketId, f), alt: `Screenshot evidence ${f}` }))}
           index={evidenceNav(files, open, 0)}
           onClose={() => setOpen(null)}
-          onNav={(fs, i, d) => onNav(fs, i, d, setOpen)}
+          onNav={(fs, i, d) => setOpen(evidenceNav(fs, i, d))}
+          kindLabel="Screenshot"
         />
       )}
     </div>
@@ -2093,6 +2019,11 @@ function ArtifactFace({ detail }: { detail: TicketDetail }) {
               : <span className="wb-af-nobytes">{r.bytesRefusal === '' ? 'Original bytes unavailable' : r.bytesRefusal}</span>}
             {r.openHint !== '' && <span className="wb-af-note">Open with: {r.openHint}</span>}
           </div>
+          {/* t261030-36: one body per row, only when the frame offers servable bytes.
+              The gate is the same function the component checks. */}
+          {shouldRenderBody(r, artifactBytesHref(ticketId, r)) && (
+            <ArtifactView row={r} ticketId={ticketId} bytesHref={artifactBytesHref(ticketId, r)} />
+          )}
         </div>
       ))}
       {frame.refusals.length > 0 && (

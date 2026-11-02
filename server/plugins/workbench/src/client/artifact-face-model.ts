@@ -120,9 +120,16 @@ export interface ArtifactViewRow {
   id: string
   stage: string
   title: string
+  /** The RAW declared kind (the engine's value, verbatim). The label is a display map;
+   *  a view decides which body to draw from this field (t261030-36, arbitrate gen0). */
+  kind: string
   kindLabel: string
   kindKnown: boolean
   sourceLabel: string
+  /** The RAW declared source (a path or a URL). The view gates on its suffix; the frame
+   *  keeps the display label separate so a face can rename the label without changing the
+   *  bytes decision (t261030-36, review B8). */
+  source: string
   repoLabel: string
   stageLabel: string
   /** The declared round, and its display text. */
@@ -131,6 +138,9 @@ export interface ArtifactViewRow {
   sizeText: string
   timeText: string
   note: string
+  /** The declared read hint for a structured artifact, verbatim (empty when absent).
+   *  Added by t261030-36 (review B8): the structure view reads the main-table path from it. */
+  shape: string
   openHint: string
   optionalText: string
   legacyText: string
@@ -704,9 +714,11 @@ export function buildArtifactFaceView(
       id: r.id,
       stage: r.stage,
       title: r.title,
+      kind: r.kind,
       kindLabel: unknownKind ? `${artifactKindLabel(r.kind)} (not recognized)` : artifactKindLabel(r.kind),
       kindKnown: !unknownKind,
       sourceLabel: r.source,
+      source: r.source,
       repoLabel: r.repo === '' ? '' : `repo ${r.repo}`,
       stageLabel: stageDisplayLabel(r.stage, r.stage),
       round: r.round,
@@ -714,6 +726,7 @@ export function buildArtifactFaceView(
       sizeText: typeof st.sizeBytes === 'number' ? formatBytes(st.sizeBytes) : '',
       timeText: formatArtifactTime(st.mtimeMs),
       note: r.note,
+      shape: r.shape,
       openHint: r.open,
       optionalText: r.optional ? 'optional' : '',
       legacyText: r.legacy ? 'legacy path (kind guessed)' : '',
