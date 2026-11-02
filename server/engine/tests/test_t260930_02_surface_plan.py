@@ -226,89 +226,79 @@ def _two_sided_worktree(tmp_path) -> str:
     return str(wt)
 
 
-def _rc2(stdout="", returncode=0, stderr=""):
-    class _P:
-        pass
-    p = _P()
-    p.returncode, p.stdout, p.stderr = returncode, stdout, stderr
-    return p
+class _P:
+    def __init__(self, stdout="", returncode=0, stderr=""):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
 
 
-def test_changed_files_two_sided_intersection_keeps_only_own_files(tmp_path):
-    wt = _two_sided_worktree(tmp_path)
+def _one_scope(wt: str):
+    """The single-scope shape `_lane_scopes` returns for a plain single-repo lane."""
+    return [{"repo": Path(wt), "tree": Path(wt), "branch": "lane-1", "repo_rel": ""}]
 
+
+def _stub_scope_env(monkeypatch, wt, diff_by_ref, status_out=""):
+    """Drive the REAL per-scope collector with a single scope and a fake git.
+
+    The collector resolves the lane branch first (t261031-17's twin logic), so the
+    fake answers `rev-parse` with the branch name; `_merge_base_ref` is stubbed by the
+    caller. Diff output is keyed by the ref triple's second element prefix.
+    """
     def fake_git(args, cwd, timeout=60):
+        if args[0] == "rev-parse":
+            return _P("lane-1\n")
         if args[0] == "diff":
             ref = args[2]
-            if ref.startswith("MAIN..."):
-                # main side: the ticket's own file PLUS everything the line carries
-                return _rc2("integration/own/x.py\nintegration/t261030-35/line_only.mjs\n")
-            if ref.startswith("LINE..."):
-                return _rc2("integration/own/x.py\nserver/app.py\n")
+            for key, out in diff_by_ref.items():
+                if ref.startswith(key):
+                    return _P(out)
             raise AssertionError(args)
         if args[0] == "status":
-            return _rc2("")
+            return _P(status_out)
         raise AssertionError(args)
 
-    orig_git, orig_mb = aa._git, aa._merge_base_ref
-    aa._git = fake_git
-    aa._merge_base_ref = lambda branch, repo, other="main": (
-        ("MAIN" if other == "main" else "LINE"), "")
-    try:
-        r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
-            ticket_id="t", worktree=wt, branch="lane-1", base_other_ref="develop-buffer")))
-    finally:
-        aa._git, aa._merge_base_ref = orig_git, orig_mb
-    assert isinstance(r, shared.ChangedFilesResult) and r.error == "", r.error
+    monkeypatch.setattr(aa, "_git", fake_git)
+    monkeypatch.setattr(aa, "_lane_scopes", lambda *a, **k: _one_scope(wt))
+
+
+def test_changed_files_two_sided_intersection_keeps_only_own_files(tmp_path, monkeypatch):
+    wt = _two_sided_worktree(tmp_path)
+    _stub_scope_env(monkeypatch, wt, {
+        "MAIN...": "integration/own/x.py\nintegration/t261030-35/line_only.mjs\n",
+        "LINE...": "integration/own/x.py\nserver/app.py\n",
+    })
+    monkeypatch.setattr(aa, "_merge_base_ref",
+                        lambda branch, repo, other="main": (
+                            ("MAIN" if other == "main" else "LINE"), ""))
+    r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
+        ticket_id="t", worktree=wt, branch="lane-1", base_other_ref="develop-buffer")))
+    assert r.error == "", r.error
     # the intersection: the line-only file and the main-only file are NOT this ticket's
     assert r.files == ["integration/own/x.py"], r.files
     assert r.basis == "develop-buffer", r.basis
 
 
-def test_changed_files_default_stays_main_only_and_is_named(tmp_path):
+def test_changed_files_default_stays_main_only_and_is_named(tmp_path, monkeypatch):
     wt = _two_sided_worktree(tmp_path)
-
-    def fake_git(args, cwd, timeout=60):
-        if args[0] == "diff":
-            return _rc2("a.py\nb.py\n")
-        if args[0] == "status":
-            return _rc2("?? c.py\0")
-        raise AssertionError(args)
-
-    orig_git, orig_mb = aa._git, aa._merge_base_ref
-    aa._git = fake_git
-    aa._merge_base_ref = lambda branch, repo, other="main": ("BASE", "")
-    try:
-        r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
-            ticket_id="t", worktree=wt, branch="lane-1")))
-    finally:
-        aa._git, aa._merge_base_ref = orig_git, orig_mb
+    _stub_scope_env(monkeypatch, wt, {"BASE...": "a.py\nb.py\n"}, status_out="?? c.py\0")
+    monkeypatch.setattr(aa, "_merge_base_ref", lambda branch, repo, other="main": ("BASE", ""))
+    r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
+        ticket_id="t", worktree=wt, branch="lane-1")))
+    assert r.error == "", r.error
     # byte-identical caliber: the main diff plus the dirty files, and the receipt says so
     assert r.files == ["a.py", "b.py", "c.py"], r.files
-    assert r.error == "" and r.basis == "main", (r.error, r.basis)
+    assert r.basis == "main", r.basis
 
 
-def test_changed_files_unreadable_line_side_fails_closed_by_name(tmp_path):
+def test_changed_files_unreadable_line_side_fails_closed_by_name(tmp_path, monkeypatch):
     """An unreadable line side must WIDEN, never narrow: files=[] plus an error naming
     the side (the caller's non-empty error arm runs everything)."""
     wt = _two_sided_worktree(tmp_path)
-
-    def fake_git(args, cwd, timeout=60):
-        if args[0] == "diff":
-            return _rc2("a.py\n")
-        if args[0] == "status":
-            return _rc2("")
-        raise AssertionError(args)
-
-    orig_git, orig_mb = aa._git, aa._merge_base_ref
-    aa._git = fake_git
-    aa._merge_base_ref = lambda branch, repo, other="main": (
-        ("MAIN", "") if other == "main" else ("", "unknown revision develop-buffer"))
-    try:
-        r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
-            ticket_id="t", worktree=wt, branch="lane-1", base_other_ref="develop-buffer")))
-    finally:
-        aa._git, aa._merge_base_ref = orig_git, orig_mb
+    _stub_scope_env(monkeypatch, wt, {"MAIN...": "a.py\n"})
+    monkeypatch.setattr(aa, "_merge_base_ref",
+                        lambda branch, repo, other="main": (
+                            ("MAIN", "") if other == "main" else ("", "unknown revision")))
+    r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
+        ticket_id="t", worktree=wt, branch="lane-1", base_other_ref="develop-buffer")))
     assert r.files == [] and "develop-buffer" in r.error and "merge-base" in r.error, r.error
 
 
@@ -319,3 +309,147 @@ def test_dev_lane_passes_the_line_side_for_buffer_tickets():
     i = src.index("ChangedFilesArgs(")
     block = src[i:i + 1200]
     assert "base_other_ref=self._dev_buffer_write_set_other_side()" in block, block[:600]
+
+
+# ------- t261103-03: the two-sided base inside the per-scope collector -------
+#
+# The reconciliation makes ONE collector: the line's per-scope walk
+# (t261031-17) with the two-sided base (t261102-45) applied inside EACH scope.
+# These cases judge that seam. Each one drives the real `aa.changed_files`; the
+# scope list, `_git` and `_merge_base_ref` are the only stubs.
+
+
+def _multiscope_worktree(tmp_path):
+    """`<tmp>/proj/.lane/t1` plus one member tree - the convention shape, so
+    `_lane_repo_root` answers the project root."""
+    lane = tmp_path / "proj" / ".lane" / "t1"
+    (lane / "fpv-parts").mkdir(parents=True)
+    (tmp_path / "proj" / ".git").mkdir()
+    (tmp_path / "proj" / "fpv-parts").mkdir()
+    return lane
+
+
+def _two_scopes(lane: Path, project: Path):
+    return [
+        {"name": "root", "tree": lane, "repo": project, "branch": "lane-1-root",
+         "repo_rel": "", "base_ref": "", "write_set": []},
+        {"name": "fpv-parts", "tree": lane / "fpv-parts",
+         "repo": project / "fpv-parts", "branch": "lane-1-fpv-parts",
+         "repo_rel": "fpv-parts", "base_ref": "", "write_set": []},
+    ]
+
+
+def _scoped_git(diff_by_key, fail=()):
+    def fake_git(args, cwd, timeout=60):
+        if args[0] == "rev-parse":
+            return _P(args[-1].replace("^{commit}", "") + "\n")
+        if args[0] == "diff":
+            key = (str(cwd), args[2])
+            if key in fail:
+                return _P(returncode=2, stderr="fatal: bad revision")
+            if key not in diff_by_key:
+                raise AssertionError("unexpected diff call: %s" % (key,))
+            return _P(diff_by_key[key])
+        if args[0] == "status":
+            return _P("")
+        raise AssertionError(args)
+    return fake_git
+
+
+def test_changed_files_intersects_each_scope_against_the_other_side(tmp_path,
+                                                                   monkeypatch):
+    """A buffer lane's own write per scope = the intersection of the two diffs.
+    The member scope keeps its `repo_rel/` prefix, and the line's files never
+    reach the receipt."""
+    lane = _multiscope_worktree(tmp_path)
+    project = tmp_path / "proj"
+    scopes = _two_scopes(lane, project)
+    member = project / "fpv-parts"
+    monkeypatch.setattr(aa, "_git", _scoped_git({
+        (str(project), "MAIN...lane-1-root"):
+            "integration/own/x.py\nintegration/t261030-35/line_only.mjs\nserver/app.py\n",
+        (str(project), "LINE...lane-1-root"): "integration/own/x.py\nserver/app.py\n",
+        (str(member), "MAIN...lane-1-fpv-parts"):
+            "integration/own/y.py\ntools/line_only.py\n",
+        (str(member), "LINE...lane-1-fpv-parts"): "integration/own/y.py\n",
+    }))
+    monkeypatch.setattr(aa, "_lane_scopes", lambda *a, **k: scopes)
+    monkeypatch.setattr(aa, "_merge_base_ref",
+                        lambda branch, repo, other="main": (
+                            ("MAIN" if other == "main" else "LINE"), ""))
+    r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
+        ticket_id="t", worktree=str(lane), branch="lane/t1",
+        base_other_ref="develop-buffer")))
+    assert r.error == "", r.error
+    assert r.files == ["integration/own/x.py", "server/app.py",
+                       "fpv-parts/integration/own/y.py"], r.files
+    assert r.basis == "develop-buffer", r.basis
+    assert r.resolved == ["root:lane-1-root", "fpv-parts:lane-1-fpv-parts"], r.resolved
+
+
+def test_changed_files_other_side_diff_error_names_the_side_and_the_repo(tmp_path,
+                                                                       monkeypatch):
+    """The t261031-17 caliber stays (`failed in repo <path>`) and the second
+    baseline says which side it was, because one scope reads two diffs."""
+    lane = _multiscope_worktree(tmp_path)
+    project = tmp_path / "proj"
+    monkeypatch.setattr(aa, "_git", _scoped_git(
+        {(str(project), "MAIN...lane-1-root"): "a.py\n"},
+        fail=((str(project), "LINE...lane-1-root"),)))
+    monkeypatch.setattr(aa, "_lane_scopes",
+                        lambda *a, **k: _two_scopes(lane, project)[:1])
+    monkeypatch.setattr(aa, "_merge_base_ref",
+                        lambda branch, repo, other="main": (
+                            ("MAIN", "") if other == "main" else ("LINE", "")))
+    r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
+        ticket_id="t", worktree=str(lane), branch="lane/t1",
+        base_other_ref="develop-buffer")))
+    assert r.files == [], r.files
+    assert "failed in repo" in r.error, r.error
+    assert "develop-buffer" in r.error, r.error
+
+
+def test_changed_files_unreadable_other_side_names_the_member_scope(tmp_path,
+                                                                  monkeypatch):
+    """An unreadable line side in ONE scope fails the whole call closed."""
+    lane = _multiscope_worktree(tmp_path)
+    project = tmp_path / "proj"
+    member = project / "fpv-parts"
+    monkeypatch.setattr(aa, "_git", _scoped_git({
+        (str(project), "MAIN...lane-1-root"): "a.py\n",
+        (str(project), "LINE...lane-1-root"): "a.py\n",
+        (str(member), "MAIN...lane-1-fpv-parts"): "b.py\n",
+    }))
+    monkeypatch.setattr(aa, "_lane_scopes", lambda *a, **k: _two_scopes(lane, project))
+
+    def fake_base(branch, repo, other="main"):
+        if other != "main" and str(repo).endswith("fpv-parts"):
+            return "", "unknown revision develop-buffer"
+        return ("MAIN" if other == "main" else "LINE"), ""
+
+    monkeypatch.setattr(aa, "_merge_base_ref", fake_base)
+    r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
+        ticket_id="t", worktree=str(lane), branch="lane/t1",
+        base_other_ref="develop-buffer")))
+    assert r.files == [], r.files
+    assert "[fpv-parts]" in r.error, r.error
+    assert "merge-base" in r.error and "develop-buffer" in r.error, r.error
+
+
+def test_changed_files_other_side_main_is_the_main_only_caliber(tmp_path, monkeypatch):
+    """`base_other_ref="main"` reads ONE diff: the historical caliber, byte for
+    byte. The fake git has no second-diff answer, so a second read would raise."""
+    lane = _multiscope_worktree(tmp_path)
+    project = tmp_path / "proj"
+    monkeypatch.setattr(aa, "_git", _scoped_git(
+        {(str(project), "MAIN...lane-1-root"): "a.py\nb.py\n"}))
+    monkeypatch.setattr(aa, "_lane_scopes",
+                        lambda *a, **k: _two_scopes(lane, project)[:1])
+    monkeypatch.setattr(aa, "_merge_base_ref",
+                        lambda branch, repo, other="main": ("MAIN", ""))
+    r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
+        ticket_id="t", worktree=str(lane), branch="lane/t1",
+        base_other_ref="main")))
+    assert r.error == "", r.error
+    assert r.files == ["a.py", "b.py"], r.files
+    assert r.basis == "main", r.basis

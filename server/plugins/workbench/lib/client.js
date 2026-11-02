@@ -516,7 +516,6 @@ function stageLabel(id) {
 function workflowLabel(id) {
 	return labelOf$1(WORKFLOW_TABLE, id);
 }
-/** Artifact view kind -> English (t261030-36 six built-in views). */
 function artifactKindLabel(id) {
 	return labelOf$1(ARTIFACT_KIND_TABLE, id);
 }

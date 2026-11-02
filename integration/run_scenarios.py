@@ -3319,6 +3319,42 @@ SCENARIOS = [
      "全量不变式注入面（t260925-04，灰盒 L3 决策点对抗输入，ro 秒级零 docker）：改动清单畸形（None/标量/裸字符串/dict/非串元素/空白元素/空清单）恒全量且不抛；diff_error 非空恒全量且优先于 localized 清单（计算面报错绝不放窄）；首轮恒全量不因新口径松动；定点面输出恒为红名清洗去重保序子集（__合成/空/非串剔除，红名畸形→全量）且合法清单时真解禁非恒全量换皮。intent 分工：t260925-04-file-blast-radius 守真仓三态组件链，本条只守同一决策点的畸形/边界注入不变式（对抗维度不同不互替）；developer L1 真值矩阵之外的用户级对抗复核。无 ENV 子用例；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "sh integration/py_interp.sh integration/t260925-04/sc_t260925_04_full_run_invariants.py", "ro"),
 
+    # ---- t261103-03: the two-sided change set inside the per-scope collector ----
+    # The buffer-lane caliber (main, t261102-45) and the per-scope collector (line,
+    # t261031-17) disagreed only where the two sides meet (KI-459). This entry guards the
+    # reconciled answer: which files a buffer ticket pays for, and what happens when the
+    # second baseline cannot be read.
+    ("t261103-03-two-sided-per-scope-collector",
+     "A buffer lane's change set counts only what the ticket itself wrote, in every scope, "
+     "and fails closed by name when the line side is unreadable (ticket t261103-03, "
+     "grey-box L3, the REAL agent_activities.changed_files x the REAL "
+     "shared.targeted_rerun_plan over self-built real-git buffer lanes - a project root "
+     "repo plus one member repo, a lane manifest, the line's carried file and a synced "
+     "main on both sides; ro pool, seconds, zero docker/Temporal-server/browser/console, "
+     "never touches 3099/7233): A the two-sided caliber excludes the line's carried files "
+     "in every scope, keeps the ticket's own files with their project-root prefix, and "
+     "names the basis; B the per-scope resolution face survives (one entry per scope); "
+     "C control - with no other side named the historical caliber is intact and the line's "
+     "files ARE in the list, so the new caliber is opt-in; D control - naming main as the "
+     "other side is byte-identical to naming nothing; E an unresolvable other side answers "
+     "files=[] with a named error that carries the side and the merge-base marker, and the "
+     "decision face does NOT narrow; F one unreadable member scope fails the WHOLE call by "
+     "tag, never a partial list; G the status face is not intersected (an untracked own "
+     "file still counts in both scopes); H the sibling mount is not resurrected by the "
+     "intersection; I a single-repo lane keeps the same caliber with no repo prefix. "
+     "Intent split (no intent-level duplication): t261031-17-multirepo-changed-files owns "
+     "the per-scope baseline, the branch naming and the mount drop; "
+     "t260925-04-file-blast-radius owns the real-git blast-radius chain; "
+     "t260925-04-full-run-invariants owns the malformed-input truth tables; "
+     "t261029-18-lane-branch-root owns the root-twin naming; t260930-02-surface-plan-query "
+     "owns the selector state machine; the collector truth tables and the source-structure "
+     "locks belong to developer L1 (a contract-preserving refactor must not red this "
+     "case). THIS entry owns which files a buffer ticket pays for. The fixture technique "
+     "is shared with the sibling entries; shared steps are not shared intent. "
+     "Pre-implementation red = the named TDD signal; green required at the integration "
+     "gate/merge. git or the engine modules unimportable = ENV_FAIL exit 2; cost: seconds",
+     "sh integration/py_interp.sh integration/t261103-03/sc_t261103_03_two_sided_collector.py", "ro"),
+
     # ---- t260925-12: 闸段分相计时——回执可见性与老回执兼容（验收④＋residual 归账）----
     ("t260925-12-executor-timings-receipt",
      "闸段分相计时·执行器回执可见性（t260925-12，灰盒 L3 真执行器 CLI 黑盒子进程，ro 离线秒级零 docker）：验收④「分解在 receipt 上可见，超时不用日志考古」的执行器半边——A additive 基线：--only 定点跑离线在册条目，INTEG_SUMMARY 既有键集/ran==pass==1/exit 0 逐项不变（老消费方零感知，计量不扰动计量对象）；B 回执暴露 timings 分相块（非负数值、相位和 ≤ 子进程墙钟 +5% 误差）。intent 分工：t260924-09-fixed-rerun 守 --only 入口与逐条耗时行、t260913-03 守池排除旋钮、t260922-12 守台账定点复跑——均不守分相计时可见性；developer L1 守纯函数矩阵，本条守真 CLI 整链。实现落地前 B 红属预期（TDD 信号）；执行器缺席/定点条目自身 ENV_FAIL=exit 2",

@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 385,
-      "scenarios": 873
+      "scenarios": 874
     },
     "vocab": [
       "behaviour",
@@ -1887,8 +1887,7 @@
     },
     "server/engine/tests/test_t261031_17_multirepo_changed_files.py": {
       "anchor": "behaviour",
-      "note": "t261031-17 L1: the collector's per-scope truth table with stubbed git - one branch, tree and repo per manifest entry, the suffix-less lane name never reaching git, project-root-relative prefixes, sibling-mount drops on both faces, per-scope fail-closed receipts with the old markers, corrupt and escaping manifests, timeout propagation, and the structure locks (the activity delegates to the collector; `_lane_scopes` resolves before any git query).",
-      "sync_path": ""
+      "note": "t261031-17 (merged with t261029-18), carried into the t261103-03 reconciliation: the per-scope changed-file collector. Each lane scope resolves its own branch through the shared naming source (the suffix-less placeholder never reaches git), then merge-base and the three-dot diff run at the owning repo while status runs in the lane tree; member paths keep their repo_rel/ prefix; sibling mounts are dropped on both measured faces (the collapsed untracked dir and the gitlink) while an ordinary untracked dir stays; every failure is fail-closed and named with the scope tag (unresolvable branch, the manifest-absent twin refusal, a failed merge-base/diff/status, a missing tree, a corrupt manifest, a manifest repo value that is absolute or carries ..), and a git timeout still propagates. The wording lock keeps 'failed in repo <path>', which the t261103-03 two-sided base extends with the side name but never replaces. Stub git only (the unit tier forbids real git)."
     },
     "server/engine/tests/test_t261102_12_named_read_state.py": {
       "anchor": "behaviour",
@@ -6206,6 +6205,10 @@
       "anchor": "contract",
       "note": "t261102-25: the merge gate catches a fast member that joined without an honest fast-catch declaration (incident replay names the member, placeholder clause caught too, shipped declaration passes), judged on the real gate command in a fixture clone of the tree",
       "sync_path": ""
+    },
+    "integration/t261103-03/sc_t261103_03_two_sided_collector.py": {
+      "anchor": "contract",
+      "note": "t261103-03: the buffer-lane change-set caliber inside the per-scope collector, end to end. A real-git fixture (a project root repo plus one member repo, each with a main commit the line does not carry and a line branch carrying its own file; the lane cut from the line head with main synced in, one worktree per scope, and the lane manifest) drives the REAL agent_activities.changed_files and the REAL shared.targeted_rerun_plan: with the line named as the other side the receipt keeps the ticket's own files in every scope (member paths project-root prefixed), drops the line-carried files and the main-side files, and names the basis; the per-scope resolution face carries one entry per scope; the main-only control DOES list the line's files, so the caliber is opt-in; naming main as the other side is byte-identical to naming nothing; an unresolvable other side answers files=[] with a named error carrying the side and the merge-base marker, and the decision face does not narrow; one unreadable member scope fails the whole call by tag, never a partial list; the status face is not intersected (an untracked own file still counts in both scopes); the sibling mount is not resurrected by the intersection; a single-repo lane keeps the same caliber with no repo prefix. Assertions land on the receipt and the decision writer only - no source text and no internal helper name - so a contract-preserving refactor must not red it. Offline seconds, real git, no docker, no Temporal, never 3099/7233."
     }
   }
 }
