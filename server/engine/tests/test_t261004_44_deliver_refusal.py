@@ -17,10 +17,15 @@ import os
 import sys
 import tempfile
 import time
+import traceback
 import unittest
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pr_flow  # noqa: E402  t261103-04: the PR-flow precondition face (carrier below)
+import shared  # noqa: E402  t261103-04: the project-declaration loader tolerance row
 import worker_registry  # noqa: E402
 
 
@@ -341,3 +346,459 @@ def _async_return(v):
     async def _g():
         return v
     return _g()
+
+
+# ---------------------------------------------------------------------------
+# t261103-04 CARRIER -- PR-flow step (a): the per-project switch (default OFF)
+# and the GitHub credential kept outside every repository worktree.
+#
+# Why this file: the anchors manifest (integration/test_anchors.json) is outside
+# this ticket's write set (server/engine/), so a NEW server/engine/tests/test_*.py
+# would be an L16 "anchor missing" error. This file is the delivery
+# named-refusal carrier (t261004-44, already extended once by t261008-29), which
+# is the same face these rows judge: a delivery precondition that refuses BY NAME
+# instead of failing silently.
+#
+# Everything is injected (projects root, sandbar home, probe, credential reader):
+# zero real ~/.sandbar, zero network, no Temporal, no docker, no port 3099.
+# ---------------------------------------------------------------------------
+
+TOKEN = "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"      # 44 chars, token-shaped
+TOKEN_SHAPE_OTHER = "ghp_" + "Z" * 36                     # never registered with us
+
+
+@pytest.fixture(autouse=True)
+def _fresh_secret_registry():
+    """Each row starts and ends with an empty redaction registry (the registry is a
+    process global on purpose -- a caller cannot forget to register a secret)."""
+    pr_flow.forget_secrets()
+    yield
+    pr_flow.forget_secrets()
+
+
+def _write_declaration(root, key="proj", body=""):
+    d = root / key
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / "project.yaml"
+    p.write_text("schema: v1\nproject:\n  - key: %s\n    name: %s\n    dirs:\n"
+                 "      - /repo/%s\n%s" % (key, key, key, body), "utf-8")
+    return p
+
+
+def _write_credential(home, value=TOKEN, mode=0o600):
+    path = pr_flow.credential_path(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(value, "utf-8")
+    os.chmod(path, mode)
+    return path
+
+
+def _stop_code(fn, *a, **kw):
+    """Run fn; return the named stop's code (AssertionError when it does not refuse)."""
+    try:
+        fn(*a, **kw)
+    except pr_flow.PrFlowStop as e:
+        return e.code
+    raise AssertionError("expected a named stop, got none")
+
+
+# ---- 1. the switch: attribute truth table --------------------------------
+
+SWITCH_ROWS = [
+    # (label, declaration body, enabled, reason)
+    ("absent-section", "", False, "absent"),
+    ("off", "github_pr:\n  enabled: false\n", False, "off"),
+    ("off-without-repositories", "github_pr:\n  enabled: no\n", False, "off"),
+    ("on", "github_pr:\n  enabled: true\n  repositories:\n    - owner/name\n",
+     True, "on"),
+    ("on-synonyms", "github_pr:\n  enabled: YES\n  repositories:\n    - o/r\n"
+                    "    - a-b/c.d\n", True, "on"),
+]
+
+
+@pytest.mark.parametrize("label,body,enabled,reason", SWITCH_ROWS,
+                         ids=[r[0] for r in SWITCH_ROWS])
+def test_pr_flow_switch_truth_table(tmp_path, label, body, enabled, reason):
+    root = tmp_path / "projects"
+    _write_declaration(root, body=body)
+    d = pr_flow.read_switch("proj", root)
+    assert (d.enabled, d.reason) == (enabled, reason)
+    assert d.face() == {"enabled": enabled, "reason": reason,
+                        "repositories": list(d.repositories),
+                        "declaration": d.declaration}
+    if enabled:
+        assert d.repositories                       # least privilege needs the set
+    else:
+        assert d.repositories == ()
+
+
+@pytest.mark.parametrize("label,body,code", [
+    ("enabled-value-junk", "github_pr:\n  enabled: maybe\n  repositories:\n"
+                           "    - o/r\n", pr_flow.STOP_DECLARATION_MALFORMED),
+    ("enabled-missing", "github_pr:\n  repositories:\n    - o/r\n",
+     pr_flow.STOP_DECLARATION_MALFORMED),
+    ("unknown-key", "github_pr:\n  enable: true\n", pr_flow.STOP_DECLARATION_MALFORMED),
+    ("duplicate-block", "github_pr:\n  enabled: true\ngithub_pr:\n  enabled: false\n",
+     pr_flow.STOP_DECLARATION_MALFORMED),
+    ("inline-repositories", "github_pr:\n  enabled: true\n  repositories: [o/r]\n",
+     pr_flow.STOP_DECLARATION_MALFORMED),
+    ("repository-not-owner-name", "github_pr:\n  enabled: true\n  repositories:\n"
+                                  "    - justaname\n",
+     pr_flow.STOP_DECLARATION_MALFORMED),
+    ("on-without-repositories", "github_pr:\n  enabled: true\n",
+     pr_flow.STOP_SWITCH_REPOSITORIES_MISSING),
+])
+def test_pr_flow_switch_malformed_is_a_named_stop(tmp_path, label, body, code):
+    """An unusable switch is NEVER read as "off": a typo must not pick the delivery
+    mode. Each row proves its own named stop."""
+    root = tmp_path / "projects"
+    _write_declaration(root, body=body)
+    assert _stop_code(pr_flow.read_switch, "proj", root) == code
+
+
+def test_pr_flow_switch_refuses_a_non_key(tmp_path):
+    """The project key is a path segment: a traversal is refused before the join."""
+    assert _stop_code(pr_flow.read_switch, "../escape", tmp_path) == \
+        pr_flow.STOP_DECLARATION_MALFORMED
+
+
+# ---- 2. default OFF is the historical path (negative control) ------------
+
+
+def test_pr_flow_default_off_matches_the_historical_path(tmp_path):
+    """A project that does not set the attribute is indistinguishable from today:
+    the declaration is the only file read, no credential is resolved, no probe
+    runs, no file appears, and the decision face carries no credential field."""
+    root = tmp_path / "projects"
+    home = tmp_path / "home"
+    _write_declaration(root)                       # no github_pr: block
+    cred = _write_credential(home)                 # a perfect credential, untouched
+
+    calls = {"reader": 0, "probe": 0}
+
+    def bomb_reader(**kwargs):
+        calls["reader"] += 1
+        raise AssertionError("the credential was read while the switch is off")
+
+    def bomb_probe(token):
+        calls["probe"] += 1
+        raise AssertionError("the validity probe ran while the switch is off")
+
+    before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
+    cred_before = cred.read_bytes()
+
+    decision = pr_flow.delivery_decision(
+        "proj", projects_root_dir=root, home=home, probe=bomb_probe,
+        credential_reader=bomb_reader)
+
+    assert decision.enabled is False and decision.reason == "absent"
+    assert decision.face() == {"enabled": False, "reason": "absent",
+                               "repositories": [], "declaration": decision.declaration,
+                               "credential_fingerprint": ""}
+    assert calls == {"reader": 0, "probe": 0}
+    assert cred.read_bytes() == cred_before
+    assert sorted(p.relative_to(tmp_path).as_posix()
+                  for p in tmp_path.rglob("*")) == before
+
+
+def test_pr_flow_off_explicit_is_the_historical_path_too(tmp_path):
+    root = tmp_path / "projects"
+    _write_declaration(root, body="github_pr:\n  enabled: false\n")
+    decision = pr_flow.delivery_decision(
+        "proj", projects_root_dir=root, home=tmp_path / "nowhere",
+        credential_reader=lambda **kw: (_ for _ in ()).throw(
+            AssertionError("credential read on an off switch")))
+    assert decision.face()["enabled"] is False and decision.reason == "off"
+    assert not (tmp_path / "nowhere").exists()     # nothing probed into existence
+
+
+def test_pr_flow_off_path_binds_no_network_client():
+    """The module namespace carries no HTTP client: the one network seam
+    (probe_github_token) imports its client inside the function, and the OFF path
+    never reaches it."""
+    for name in ("urllib", "request", "urlopen", "http", "socket", "requests"):
+        assert name not in vars(pr_flow)
+
+
+def test_pr_flow_switch_read_creates_nothing(tmp_path):
+    root = tmp_path / "projects"
+    d = pr_flow.read_switch("proj", root)
+    assert (d.enabled, d.reason) == (False, "absent")
+    assert not root.exists()                       # a read creates no state
+
+
+def test_pr_flow_declaration_loader_tolerates_the_section(tmp_path):
+    """The engine's own registry loader must not quarantine a declaration that
+    carries the attribute, and must parse a declaration without it unchanged."""
+    before = "schema: v1\nproject:\n  - key: proj\n    name: proj\n    dirs:\n      - /repo\n"
+    plain = shared.parse_project_file(before, "project.yaml")
+    with_section = before + "github_pr:\n  enabled: true\n  repositories:\n    - o/r\n"
+    parsed = shared.parse_project_file(with_section, "project.yaml")
+    assert parsed == plain == {"key": "proj", "name": "proj", "dirs": ["/repo"]}
+
+
+# ---- 3. credential resolution truth table --------------------------------
+
+
+def test_pr_flow_credential_resolution_truth_table(tmp_path):
+    home = tmp_path / "home"
+    path = _write_credential(home)
+
+    good = pr_flow.resolve_credential(home=home)
+    assert good.reveal() == TOKEN and len(good.fingerprint) == 12
+    assert TOKEN not in str(good) and TOKEN not in repr(good)
+    # the same row read twice yields the same fingerprint (stable audit label)
+    assert pr_flow.resolve_credential(home=home).fingerprint == good.fingerprint
+
+    os.unlink(path)
+    assert _stop_code(pr_flow.resolve_credential, home=home) == \
+        pr_flow.STOP_CREDENTIAL_MISSING
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.mkdir()                                   # a directory is not a credential
+    assert _stop_code(pr_flow.resolve_credential, home=home) == \
+        pr_flow.STOP_CREDENTIAL_MISSING
+    path.rmdir()
+
+    for label, value in (("empty", ""), ("blank", "  \n\t\n")):
+        _write_credential(home, value=value)
+        assert _stop_code(pr_flow.resolve_credential, home=home) == \
+            pr_flow.STOP_CREDENTIAL_EMPTY, label
+
+    _write_credential(home)
+    path.write_bytes(b"\xff\xfe\x00not-utf8")      # unreadable content, 0600
+    assert _stop_code(pr_flow.resolve_credential, home=home) == \
+        pr_flow.STOP_CREDENTIAL_UNREADABLE
+
+    if os.geteuid() != 0:                          # root reads anything
+        _write_credential(home)
+        os.chmod(path, 0o000)
+        assert _stop_code(pr_flow.resolve_credential, home=home) == \
+            pr_flow.STOP_CREDENTIAL_UNREADABLE
+        os.chmod(path, 0o600)                      # restore, then start a fresh file
+        os.unlink(path)
+
+    _write_credential(home, value="short")
+    assert _stop_code(pr_flow.resolve_credential, home=home) == \
+        pr_flow.STOP_CREDENTIAL_SHORT
+
+    _write_credential(home, value=TOKEN + "\n" + TOKEN)
+    assert _stop_code(pr_flow.resolve_credential, home=home) == \
+        pr_flow.STOP_CREDENTIAL_MALFORMED
+
+    _write_credential(home, value="g" * (pr_flow.MAX_CREDENTIAL_CHARS + 1))
+    assert _stop_code(pr_flow.resolve_credential, home=home) == \
+        pr_flow.STOP_CREDENTIAL_MALFORMED
+
+    _write_credential(home, value=TOKEN, mode=0o644)
+    assert _stop_code(pr_flow.resolve_credential, home=home) == \
+        pr_flow.STOP_CREDENTIAL_PERMISSIONS
+
+    _write_credential(home, value=TOKEN, mode=0o604)
+    assert _stop_code(pr_flow.resolve_credential, home=home) == \
+        pr_flow.STOP_CREDENTIAL_PERMISSIONS
+
+    _write_credential(home, value=TOKEN + "\n", mode=0o400)   # trailing newline is fine
+    assert pr_flow.resolve_credential(home=home).reveal() == TOKEN
+
+
+def test_pr_flow_credential_must_live_outside_every_worktree(tmp_path):
+    """Placement is judged BEFORE any read: a credential inside a worktree (an
+    ancestor carries .git) or under a declared project directory is refused by
+    name, so the value is never even read."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    at_worktree_root = repo / "github" / "credential"
+    _write_credential(repo, value=TOKEN, mode=0o644)   # bad mode AND bad content
+    assert _stop_code(pr_flow.resolve_credential, home=repo) == \
+        pr_flow.STOP_CREDENTIAL_IN_WORKTREE
+
+    plain_home = tmp_path / "home"
+    os.makedirs(plain_home / "github")
+    os.rename(str(at_worktree_root), str(plain_home / "github" / "credential"))
+    # outside the git-ancestor test, but still under a declared project directory
+    assert _stop_code(pr_flow.resolve_credential, home=plain_home,
+                      project_dirs=[str(tmp_path)]) == \
+        pr_flow.STOP_CREDENTIAL_IN_WORKTREE
+    os.chmod(str(plain_home / "github" / "credential"), 0o600)
+    assert pr_flow.resolve_credential(home=plain_home).reveal() == TOKEN
+
+
+def test_pr_flow_probe_rows(tmp_path):
+    """The single validity probe is injectable: accepted / rejected / could not
+    answer; the rejected stop carries the platform's reason, never the secret."""
+    home = tmp_path / "home"
+    _write_credential(home)
+
+    assert pr_flow.resolve_credential(home=home, probe=lambda t: "").reveal() == TOKEN
+
+    seen = []
+
+    def rejecting(token):
+        seen.append(token)
+        return "401 Bad credentials for token %s" % token
+
+    stopped = None
+    try:
+        pr_flow.resolve_credential(home=home, probe=rejecting)
+    except pr_flow.PrFlowStop as e:
+        stopped = e
+    assert stopped is not None and stopped.code == pr_flow.STOP_CREDENTIAL_REJECTED
+    assert seen == [TOKEN]
+    assert TOKEN not in stopped.message() and TOKEN not in json.dumps(stopped.face())
+    assert "401 Bad credentials" in stopped.message()          # the reason survives
+
+    def unreachable(token):
+        raise ConnectionError("no route to host (token=%s)" % token)
+
+    stopped = None
+    try:
+        pr_flow.resolve_credential(home=home, probe=unreachable)
+    except pr_flow.PrFlowStop as e:
+        stopped = e
+    assert stopped is not None and stopped.code == pr_flow.STOP_PROBE_FAILED
+    assert TOKEN not in str(stopped)
+
+
+def test_pr_flow_four_required_stops_are_four_distinct_names(tmp_path):
+    """The design names four stops; they must be four names, not one reworded."""
+    assert len(set(pr_flow.REQUIRED_STOPS)) == 4
+    home = tmp_path / "home"
+    codes = set()
+    codes.add(_stop_code(pr_flow.resolve_credential, home=home))          # missing
+    _write_credential(home, value="")
+    codes.add(_stop_code(pr_flow.resolve_credential, home=home))          # empty
+    _write_credential(home)
+    home_cred = pr_flow.credential_path(home)
+    home_cred.write_bytes(b"\xff\xfe")
+    codes.add(_stop_code(pr_flow.resolve_credential, home=home))          # unreadable
+    _write_credential(home)
+    codes.add(_stop_code(pr_flow.resolve_credential, home=home,
+                         probe=lambda t: "rejected"))                     # rejected
+    assert codes == set(pr_flow.REQUIRED_STOPS)
+
+
+def test_pr_flow_on_switch_makes_the_credential_a_hard_precondition(tmp_path):
+    root = tmp_path / "projects"
+    home = tmp_path / "home"
+    _write_declaration(root, body="github_pr:\n  enabled: true\n  repositories:\n"
+                                   "    - owner/name\n")
+    assert _stop_code(pr_flow.delivery_decision, "proj",
+                      projects_root_dir=root, home=home) == \
+        pr_flow.STOP_CREDENTIAL_MISSING
+    _write_credential(home)
+    decision = pr_flow.delivery_decision("proj", projects_root_dir=root, home=home)
+    assert decision.enabled is True and decision.reason == "on"
+    assert decision.repositories == ("owner/name",)
+    assert len(decision.credential_fingerprint) == 12
+    assert decision.face()["credential_fingerprint"] == decision.credential_fingerprint
+
+
+# ---- 4. the redaction property ------------------------------------------
+
+
+def test_pr_flow_secret_never_reaches_any_surface(tmp_path):
+    """The property the design's upfront constraint demands: the value never
+    reaches a ticket face, a handoff, a ledger row, a log line or an exception
+    string -- including when the platform echoes the token back in its reason."""
+    root = tmp_path / "projects"
+    home = tmp_path / "home"
+    _write_declaration(root, body="github_pr:\n  enabled: true\n  repositories:\n"
+                                   "    - owner/name\n")
+    _write_credential(home)
+
+    # (i) a stop that carries a platform reason which echoes the token
+    stopped = None
+    try:
+        pr_flow.delivery_decision(
+            "proj", projects_root_dir=root, home=home,
+            probe=lambda t: "bad token %s and lookalike %s" % (t, TOKEN_SHAPE_OTHER))
+    except pr_flow.PrFlowStop as e:
+        stopped = e
+    assert stopped is not None and stopped.code == pr_flow.STOP_CREDENTIAL_REJECTED
+    surfaces = [
+        str(stopped), repr(stopped), stopped.message(),
+        json.dumps(stopped.face(), ensure_ascii=False),
+        "".join(traceback.format_exception(type(stopped), stopped,
+                                           stopped.__traceback__)),
+    ]
+
+    # (ii) the success path: the decision face, the credential's own repr
+    decision = pr_flow.delivery_decision("proj", projects_root_dir=root, home=home)
+    credential = pr_flow.resolve_credential(home=home)
+    surfaces += [json.dumps(decision.face(), ensure_ascii=False),
+                 str(credential), repr(credential)]
+
+    # (iii) a ledger row / handoff payload scrubbed before it is written
+    row = {"kind": "pr_flow", "token": TOKEN,
+           "note": "opened with %s" % TOKEN,
+           "nested": {"%s_as_key" % TOKEN: [TOKEN]}}
+    handoff = {"summary": "credential %s accepted" % TOKEN, "rows": [row]}
+    surfaces.append(json.dumps(pr_flow.scrub(handoff), ensure_ascii=False))
+
+    for surface in surfaces:
+        assert TOKEN not in surface, surface
+        assert TOKEN[:16] not in surface, surface        # no partial leak either
+        assert TOKEN_SHAPE_OTHER not in surface, surface
+    assert pr_flow.REDACTED in json.dumps(pr_flow.scrub(row))
+    assert pr_flow.REDACTED in str(credential)
+
+    # the secret is registered by construction: one explicit way to get it
+    assert pr_flow.redact("wrapped %s wrapped" % TOKEN).count(pr_flow.REDACTED) == 1
+    assert pr_flow.redact("wrapped %s wrapped" % TOKEN) == \
+        "wrapped %s wrapped" % pr_flow.REDACTED
+
+
+def test_pr_flow_stop_face_is_a_plain_redacted_payload(tmp_path):
+    """Every stop is exportable into a receipt/ticket face as data: named code,
+    the check that failed, the non-secret path -- and nothing else."""
+    home = tmp_path / "home"
+    stopped = None
+    try:
+        pr_flow.resolve_credential(home=home, probe=None)
+    except pr_flow.PrFlowStop as e:
+        stopped = e
+    face = stopped.face()
+    assert face["ok"] is False
+    assert face["code"] == pr_flow.STOP_CREDENTIAL_MISSING
+    assert face["path"] == str(pr_flow.credential_path(home))
+    assert "which check failed" not in face["message"]
+    assert face["message"].startswith(pr_flow.STOP_CREDENTIAL_MISSING)
+    assert set(face) == {"ok", "code", "message", "detail", "path"}
+
+
+def test_pr_flow_default_location_resolution_is_env_injectable(tmp_path, monkeypatch):
+    """The production defaults resolve from $SANDBAR_PROJECTS_DIR / $SANDBAR_HOME, so
+    the whole flow is reachable without ever touching the real ~/.sandbar; with no
+    env at all the paths are the per-user home (asserted by string, never opened)."""
+    monkeypatch.delenv(pr_flow.PROJECTS_DIR_ENV, raising=False)
+    monkeypatch.delenv(pr_flow.HOME_ENV, raising=False)
+    assert pr_flow.projects_root() == pr_flow.Path.home() / ".sandbar" / "projects"
+    assert pr_flow.sandbar_home() == pr_flow.Path.home() / ".sandbar"
+    assert pr_flow.credential_path() == pr_flow.Path.home() / ".sandbar" / "github" / "credential"
+    assert ".." not in str(pr_flow.credential_path())      # outside every worktree by layout
+
+    root = tmp_path / "projects"
+    home = tmp_path / "home"
+    _write_declaration(root, body="github_pr:\n  enabled: true\n  repositories:\n"
+                                   "    - owner/name\n")
+    _write_credential(home)
+    monkeypatch.setenv(pr_flow.PROJECTS_DIR_ENV, str(root))
+    monkeypatch.setenv(pr_flow.HOME_ENV, str(home))
+    decision = pr_flow.delivery_decision("proj")
+    assert decision.enabled is True and decision.repositories == ("owner/name",)
+    assert TOKEN not in json.dumps(decision.face())
+
+
+def test_pr_flow_named_stops_are_terminal_and_never_read_as_off():
+    """One vocabulary, twelve names, every one terminal: a stop is raised once (no
+    retry loop) and is never reported as "off" (that would pick the historical
+    delivery mode behind the operator's back)."""
+    constants = {v for k, v in vars(pr_flow).items()
+                 if k.startswith("STOP_") and isinstance(v, str)}
+    assert constants == set(pr_flow.STOP_TABLE)
+    assert len(constants) == 12
+    for code in constants:
+        assert pr_flow.is_named_stop(code) is True
+    assert pr_flow.is_named_stop("") is False and pr_flow.is_named_stop("nope") is False
+    assert set(pr_flow.REQUIRED_STOPS) <= constants
