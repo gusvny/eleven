@@ -50,6 +50,8 @@ updated: 2026-09-28
 | `design/markdown-reviewer-panel-design.md` | Markdown reviewer panel design (t261022-14): what the changed-files reviewer is, where its comment store lives, and the rules the implementation pins |
 | `design/metrics-token-face-delta.md` | Metrics token face and population — delta rulings 261025 (additive delta over `metrics-api-contract-v2.md`: show what the ratio measured, not only the ratio) |
 | `design/project-external-workflow-templates.md` | Project external workflow templates: how a project ships its own workflow templates and how the engine loads them |
+| `design/github-pr-flow-v1.md` | Optional GitHub pull-request delivery flow v1 (draft): a project-level opt-in that makes a ticket's delivery a GitHub review request, its merge the end of the ticket and its comments a way to send work back, with a project that has not enabled it behaving exactly as today |
+| `design/project-docs-roots-v1.md` | Per-project documentation roots v1: one or many declared roots per project (each naming its repository and its relative path), every consumer follows the declaration, no declaration keeps today's behaviour byte for byte, the machine index is derived and lives outside the repository, a missing or unusable declaration is a named refusal, and the judged surface follows the declared paths instead of a directory name |
 
 ## ops (operations — build / deploy / monitor)
 

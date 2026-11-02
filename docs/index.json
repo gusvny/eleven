@@ -1,6 +1,6 @@
 {
   "generated_at": "2026-10-29T13:36:33+08:00",
-  "total": 54,
+  "total": 57,
   "categories": [
     "design",
     "content",
@@ -157,6 +157,24 @@
       "has_frontmatter": true
     },
     {
+      "path": "design/github-pr-flow-v1.md",
+      "file": "github-pr-flow-v1.md",
+      "title": "Optional GitHub Pull-Request Delivery Flow v1",
+      "category": "design",
+      "tags": [
+        "ticket workflow",
+        "delivery",
+        "human review",
+        "pull request",
+        "github",
+        "mode: dependency",
+        "mode: reference"
+      ],
+      "status": "draft",
+      "updated": "2026-11-02",
+      "has_frontmatter": true
+    },
+    {
       "path": "design/inspection-produce-face-extension.md",
       "file": "inspection-produce-face-extension.md",
       "title": "Inspection Produce-Face Extension (doc/simplify produce change) and Inspection workflow Generalization",
@@ -254,6 +272,27 @@
       ],
       "status": "active",
       "updated": "2026-10-25",
+      "has_frontmatter": true
+    },
+    {
+      "path": "design/project-docs-roots-v1.md",
+      "file": "project-docs-roots-v1.md",
+      "title": "Per-Project Documentation Roots v1 (one or many, per repository; the index kept outside the repository)",
+      "category": "design",
+      "tags": [
+        "docs roots",
+        "documentation",
+        "knowledge base",
+        "multi-repository",
+        "judged surface",
+        "mode: practice reference",
+        "mode: context",
+        "mode: dependency",
+        "mode: dependency",
+        "mode: context"
+      ],
+      "status": "active",
+      "updated": "2026-11-03",
       "has_frontmatter": true
     },
     {
@@ -423,6 +462,17 @@
       "code": "agent-backend",
       "retired": false,
       "summary": "Pluggable agent backends: a ticket can run on a different executor than its neighbour, chosen per ticket, two running side by side.",
+      "has_frontmatter": true
+    },
+    {
+      "path": "epics/artifact-face.md",
+      "file": "artifact-face.md",
+      "title": "artifact-face",
+      "category": "epics",
+      "tags": [],
+      "code": "artifact-face",
+      "retired": false,
+      "summary": "Make what a ticket produces visible while it runs and reviewable at the human gate, with the base capability built once and each project free to ship its own views.",
       "has_frontmatter": true
     },
     {
