@@ -439,10 +439,13 @@ def test_e_row_keyset_parity_across_the_no_snapshot_family(monkeypatch, tmp_path
         assert set(row) == keyset, "no-snapshot family keyset drifted: %s" % sorted(
             set(row) ^ keyset)
     # The live row's key names, pinned by the list face it actually serves (t261009-76
-    # spec (4)); the family's only extra key is the pre-existing additive note slot.
+    # spec (4)). The family carries the pre-existing additive note slot plus, since
+    # t261102-12, the named read state pair (read_state + read_state_note): a row that
+    # cannot be read says WHY by name, and the same two keys ride on every shape so the
+    # family keyset stays one keyset (keys added, the parity discipline itself holds).
     live_keys = set(client_mod._row_from_meta("t-live", {"title": "x"}, "RUNNING"))
     live_keys.add("close_ts")                      # cmd_ticket_list stamps close_ts
-    assert keyset - live_keys == {"identity_note"}
+    assert keyset - live_keys == {"identity_note", "read_state", "read_state_note"}
     assert live_keys - keyset == {"paused", "paused_phase"}   # pre-existing, untouched
     assert "identity_note" in keyset
     # the note slot is a string on every shape (consumers may read it unconditionally)

@@ -27,7 +27,7 @@
     87
   ],
   "server/plugins/workbench/node.ts": [
-    326
+    285
   ],
   "server/plugins/workbench/src/client/docs.tsx": [
     275,
@@ -41,27 +41,27 @@
     415
   ],
   "server/plugins/workbench/src/client/index.tsx": [
-    1453,
-    1457,
-    1488,
-    1525,
-    1713,
-    1786,
-    1795,
-    2123,
-    2263,
-    2520,
-    2522,
-    2538,
-    2558,
-    2567,
-    2568,
-    2861,
-    2868,
-    2915,
-    2916,
-    3626,
-    3628
+    1444,
+    1448,
+    1479,
+    1516,
+    1747,
+    1820,
+    1829,
+    2097,
+    2237,
+    2494,
+    2496,
+    2512,
+    2532,
+    2541,
+    2542,
+    2835,
+    2842,
+    2889,
+    2890,
+    3600,
+    3602
   ],
   "server/plugins/workbench/src/client/inspection-report-model.ts": [
     76,

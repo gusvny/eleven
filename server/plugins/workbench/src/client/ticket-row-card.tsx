@@ -20,7 +20,7 @@ import {
   dismissedFaceOf, dismissedNoteOf, lineFaceOf, linePillText,
   type WfLike,
 } from './ticket-list-model.ts'
-import { stageDisplayLabel } from './ui-labels.ts'
+import { readStateLabel, stageDisplayLabel } from './ui-labels.ts'
 
 /** 行卡消费的工单最小字段面（对齐 index.tsx TicketRow，多字段不关心）。 */
 export interface CardTicket {
@@ -69,6 +69,13 @@ export interface CardTicket {
    *  lineFaceOf — a mapping, never a derivation; absent/unknown => no pill. */
   line_face?: unknown
   line_face_overdue?: unknown
+  /** t261102-12: the ENGINE's named read state of this row (no_poller /
+   *  workflow_task_failed / query_timeout / terminal_failed / closed_no_snapshot /
+   *  retained / retained_unavailable). The card shows it BY NAME, so a row that cannot
+   *  be read never reads as a slow running ticket. Absent/unknown => no chip. */
+  read_state?: unknown
+  /** The engine's one-line reason for that state (rendered as the chip tooltip). */
+  read_state_note?: unknown
 }
 
 /** 进展行（host enrichment 透传；缺省=行卡降级只显相对时间）。 */
@@ -306,6 +313,22 @@ export function TicketRowCard({
     <span className="wb-card-dismiss-note" data-dismiss-note="1"
       title={dismissedNoteOf(t)}>Dismiss note</span>
   )
+  // t261102-12: the named read state as a row chip. The state word is mapped by the ONE
+  // UI label table (ui-labels.ts); an unknown word renders raw rather than vanishing, so
+  // a row never silently loses the only honest thing it carries.
+  const readStateSpan = (() => {
+    const state = typeof t.read_state === 'string' ? t.read_state.trim() : ''
+    if (state === '') return null
+    const label = readStateLabel(state)
+    const note = typeof t.read_state_note === 'string' && t.read_state_note.trim() !== ''
+      ? t.read_state_note
+      : `Read state: ${state}`
+    return (
+      <span className="wb-card-read-state" data-read-state={state} title={note}>
+        {label}
+      </span>
+    )
+  })()
   const viewersSpan = (peerViewers?.length ?? 0) > 0 && (
     <span title={`Viewed from another tab: ${(peerViewers ?? []).map(v => v.who).join(', ')}`}>👀</span>
   )
@@ -401,6 +424,7 @@ export function TicketRowCard({
               </span>
             )}
             {kindSpan}
+            {readStateSpan}
             {healthSpan}
             {noteSpan}
             {idSpan}
@@ -422,6 +446,7 @@ export function TicketRowCard({
           <div className="wb-card-l3">
             {stageSpan}
             {kindSpan}
+            {readStateSpan}
             {healthSpan}
             {noteSpan}
             {viewersSpan}

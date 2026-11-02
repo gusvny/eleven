@@ -364,6 +364,22 @@ async def _cancel_deliver_workflow(client: Any, wf_id: str) -> Optional[str]:
 # pre-read) use the same kind and face — an ops refusal is no longer a bare TimeoutError.
 KIND_NO_POLLER = "no_poller"
 
+# t261102-12 (finished/poisoned ticket read face): a RUNNING workflow can be
+# PERMANENTLY unqueryable while the server still reports it RUNNING — its workflow task
+# keeps failing, so the server answers every `snapshot` query with "Unable to query
+# workflow due to Workflow Task in failed state". That is deterministic, not jitter:
+# retrying costs the full retry budget and the read can never succeed until the task
+# stops failing. It is its own named kind (an EXTENSION of the KI-025 taxonomy, new
+# kinds add, never overwrite) so no caller spins it as a transient timeout.
+KIND_WORKFLOW_TASK_FAILED = "workflow_task_failed"
+#: The server's own words for that state (matched on the RPC message).
+WORKFLOW_TASK_FAILED_MARK = "Workflow Task in failed state"
+#: Retained-state names carried on read faces (t261102-12). A finished ticket is
+#: answered from the on-disk witness/archive, never from a query that needs a live
+#: poller; a face that cannot read the retained store says so by name.
+FACE_STATE_RETAINED = "retained"
+FACE_STATE_RETAINED_UNAVAILABLE = "retained_unavailable"
+
 # ---- authorize 落账确认轮询参数（t260913-01）----
 # 投递后有界轮询（指数退避 0.5→8s，6 轮 ≈ 20s 上限）：intake 在 worker 激活边界即跑，
 # 常态 1-3s 内可见。常量模块级，便于单测注入加速。
@@ -2849,7 +2865,12 @@ async def _query_snapshot_with_retry(handle: Any, timeout: float = QUERY_TIMEOUT
     the window. When retries run out, the last exception is raised and the caller does an
     explicit degradation (a transient detail error, a degraded list row); no more
     swallowing silently. The delay parameters are injectable so self-tests can speed
-    things up with 0 and not drag the tests."""
+    things up with 0 and not drag the tests.
+
+    t261102-12: a DETERMINISTIC refusal (the workflow task is in a failed state) is
+    re-raised on the first attempt. The retry budget exists for jitter, and jitter never
+    keeps a workflow task failing — spending ~18s per row on such a ticket turned one
+    list refresh into a slow blank column."""
     last: Optional[BaseException] = None
     for i in range(max(1, attempts)):
         if i:
@@ -2857,6 +2878,8 @@ async def _query_snapshot_with_retry(handle: Any, timeout: float = QUERY_TIMEOUT
         try:
             return await asyncio.wait_for(handle.query("snapshot"), timeout=timeout)
         except Exception as e:
+            if is_workflow_task_failed_exc(e):
+                raise
             last = e
     assert last is not None
     raise last
@@ -2985,15 +3008,103 @@ def _face_live_count(poller_face: Any) -> "tuple[bool, Any]":
     return False, None
 
 
+def _exc_message(exc: BaseException) -> str:
+    """One exception's own words ('' when it carries none). Pure; never raises."""
+    try:
+        return str(exc or "")
+    except Exception:  # noqa: BLE001 — a broken __str__ must not break a read face
+        return ""
+
+
+def is_workflow_task_failed_exc(exc: BaseException) -> bool:
+    """True when the server refused the read because the workflow TASK is in a failed
+    state (t261102-12). That refusal is deterministic: the same query fails until the
+    task stops failing, so retrying and re-polling cannot help. Pure predicate — the
+    classification table for the read faces consults it once."""
+    return WORKFLOW_TASK_FAILED_MARK.lower() in _exc_message(exc).lower()
+
+
+def ticket_read_queue(desc: Any, tid: str) -> "tuple[str, str]":
+    """(queue, queue_source) for a ticket's read face (t261102-12).
+
+    The queue a workflow actually POLLS is on its execution, not in its id: inspection
+    period tickets run on the shared `sandbar` queue while dev-lane tickets carry a
+    dedicated `sandbar-ticket-<id>` queue. Deriving the queue from the id therefore
+    probes a queue nobody is supposed to poll and reports a FALSE no_poller (measured
+    261101 on seven inspection tickets). describe is the truth; the id-derived name is
+    only a fallback, and the face says which source it used ("describe" | "derived").
+    """
+    q = str(getattr(desc, "task_queue", "") or "").strip()
+    if q:
+        return q, "describe"
+    return ticket_task_queue(tid), "derived"
+
+
+async def workflow_task_failure_facts(handle: Any,
+                                      timeout: float = 4.0) -> Dict[str, Any]:
+    """Retained facts for a workflow whose task is in a failed state (t261102-12).
+
+    The HISTORY is durable: it survives every failed task and needs no poller. The last
+    WorkflowTaskFailed event carries the cause the reader needs ("which check failed"),
+    so the read face names it instead of guessing at "a timeout". Bounded by `timeout`;
+    every failure keeps its own named reason, so an unreadable history is
+    `retained_unavailable` rather than an invented cause.
+    """
+    face: Dict[str, Any] = {"available": False, "reason": "", "failure_type": "",
+                            "failure_message": "", "event_id": 0}
+    try:
+        hist = await asyncio.wait_for(handle.fetch_history(), timeout=timeout)
+    except Exception as e:  # noqa: BLE001 — an unreadable history is a named absence
+        face["reason"] = "history unreadable (%s: %s)" % (type(e).__name__,
+                                                          _exc_message(e)[:160])
+        return face
+    for ev in reversed(list(getattr(hist, "events", None) or [])):
+        attrs = getattr(ev, "workflow_task_failed_event_attributes", None)
+        if attrs is None:
+            continue
+        failure = getattr(attrs, "failure", None)
+        info = getattr(failure, "failure_info", None)
+        msg = str(getattr(failure, "message", "") or "")
+        face.update({
+            "available": True,
+            "event_id": int(getattr(ev, "event_id", 0) or 0),
+            "failure_type": str(getattr(info, "type", "") or ""),
+            "failure_message": msg.splitlines()[0][:400] if msg else "",
+            "reason": "last WorkflowTaskFailed event in the execution history",
+        })
+        return face
+    face["reason"] = ("no WorkflowTaskFailed event in the execution history "
+                      "(the failed-task state has no recorded cause)")
+    return face
+
+
 def _classify_snapshot_failure(exc: BaseException, tid: str, queue: str,
-                               poller_face: Any = None) -> Dict[str, Any]:
+                               poller_face: Any = None,
+                               queue_source: str = "derived") -> Dict[str, Any]:
     """One failed snapshot read -> a named _err receipt (the classification single
-    point; nothing below the read faces surfaces a bare TimeoutError). Zero live
-    pollers (proven) -> kind=no_poller with the structured face; live pollers present
-    -> transient/query_timeout wording; an unprovable face stays transient and names
-    the cannot-prove value. Never not_found, never internal-by-default."""
+    point; nothing below the read faces surfaces a bare TimeoutError).
+
+    Order matters (t261102-12): a DETERMINISTIC refusal (the workflow task is in a
+    failed state) is named first and is never dressed as a poller or timeout problem —
+    a live poller cannot help a failed task. Then: zero live pollers (proven) ->
+    kind=no_poller with the structured face; live pollers present ->
+    transient/query_timeout wording; an unprovable face stays transient and names the
+    cannot-prove value. Never not_found, never internal-by-default."""
+    if is_workflow_task_failed_exc(exc):
+        face = dict(poller_face) if isinstance(poller_face, dict) else {}
+        face.update({"ticket": tid, "queue": queue, "queue_source": queue_source,
+                     "deterministic": True, "retryable": False,
+                     "face_state": KIND_WORKFLOW_TASK_FAILED})
+        return _err(
+            "workflow_task_failed: the snapshot of ticket %s (queue %s) cannot be read "
+            "- the server reports its workflow task in a failed state; this is "
+            "deterministic, not a transient timeout; retrying the read cannot help"
+            % (tid, queue), KIND_WORKFLOW_TASK_FAILED, face=face)
     available, live = _face_live_count(poller_face)
     structured = poller_face if (available and isinstance(poller_face, dict)) else None
+    if isinstance(structured, dict):
+        structured.setdefault("queue_source", queue_source)
+        structured.setdefault("face_state", KIND_NO_POLLER if live == 0 else "query_timeout")
     if available and live == 0:
         return _err(
             "no_poller: snapshot unavailable for ticket %s - queue %s has 0 live "
@@ -3040,24 +3151,40 @@ async def named_snapshot_read(handle: Any, tid: str, queue: str,
 
 async def _snapshot_read_named(handle: Any, tid: str, client: Any,
                                timeout: float = QUERY_TIMEOUT_S,
-                               alive_fn: Any = None) -> "tuple[Any, Any]":
+                               alive_fn: Any = None,
+                               desc: Any = None) -> "tuple[Any, Any]":
     """The internal read face with the KI-003/KI-008 retry budget in place: a failing
     RUNNING query is usually momentary jitter in the stage-transition window, so the
-    retry loop runs first and only the exhausted budget reaches the classifier."""
-    queue = ticket_task_queue(tid)
+    retry loop runs first and only the exhausted budget reaches the classifier.
+
+    Two t261102-12 corrections to the pre-existing behaviour:
+    - a DETERMINISTIC refusal (the workflow task is in a failed state) leaves at the
+      first attempt: spending the retry budget on it delays every list refresh and
+      still cannot succeed;
+    - the poller probe reads the queue the execution actually polls (`desc.task_queue`)
+      instead of one derived from the ticket id — the derived name belongs to a queue
+      nobody is supposed to poll, which reported a false no_poller on inspection
+      tickets that run on the shared queue.
+    """
+    queue, queue_source = ticket_read_queue(desc, tid)
     try:
         return await _query_snapshot_with_retry(handle, timeout=timeout), None
     except Exception as e:  # noqa: BLE001 — classification single point below the read faces
         if _is_not_found_exc(e):
             raise
+        if is_workflow_task_failed_exc(e):
+            # No retry budget is spent on a deterministic refusal (the retry loop
+            # leaves at the first attempt) and no poller probe is run: a live poller
+            # cannot help a failed workflow task.
+            return None, _classify_snapshot_failure(e, tid, queue, None, queue_source)
         face = await queue_live_pollers(client, queue, alive_fn=alive_fn)
         face["ticket"] = tid
         if _face_live_count(face) == (True, 0):
             # The proven zero-poller cause degrades in place (the t261005-03 contract).
-            return None, _classify_snapshot_failure(e, tid, queue, face)
+            return None, _classify_snapshot_failure(e, tid, queue, face, queue_source)
         # Any other failure re-raises so each caller keeps its OWN legacy transient
         # wording (e.g. ticket-query's "refresh and retry" contract) — the classifier
-        # is only the no-poller extension, it never rewrites the existing copy.
+        # is only the named-cause extension, it never rewrites the existing copy.
         raise
 
 
@@ -3090,20 +3217,47 @@ async def _augment_read_failure_receipt(receipt: Dict[str, Any], tid: str,
     - the named orphan-window note (spec 4).
 
     Augmentation is best-effort: a describe/memo failure leaves the receipt
-    unchanged (never a half-made face)."""
+    unchanged (never a half-made face).
+
+    t261102-12 adds the deterministic member to the same face: a receipt of kind
+    workflow_task_failed keeps its own wording and gains `durable.retained` — the last
+    WorkflowTaskFailed cause read from the durable history (no poller needed), or the
+    named `retained_unavailable` reason when the history cannot be read. The queue named
+    on the face is the queue the EXECUTION polls (`queue_source` says so)."""
     try:
         kind = str(receipt.get("kind") or "")
-        if kind not in (KIND_NO_POLLER, KIND_TRANSIENT):
+        if kind not in (KIND_NO_POLLER, KIND_TRANSIENT, KIND_WORKFLOW_TASK_FAILED):
             return receipt
-        cause = "no_poller" if kind == KIND_NO_POLLER else "query_timeout"
-        queue = ticket_task_queue(tid)
+        cause = "no_poller" if kind == KIND_NO_POLLER else (
+            KIND_WORKFLOW_TASK_FAILED if kind == KIND_WORKFLOW_TASK_FAILED
+            else "query_timeout")
+        queue, queue_source = ticket_read_queue(desc, tid)
+        _live = (receipt.get("face") or {}).get("live_pollers") \
+            if isinstance(receipt.get("face"), dict) else None
         durable: Dict[str, Any] = {
             "status": (desc.status.name if getattr(desc, "status", None) is not None else None),
             "queue": queue,
+            "queue_source": queue_source,
+            "live_pollers": _live,
             "ticket": tid,
+            "face_state": cause,
             "unavailable": "unavailable(%s @ queue=%s ticket=%s)" % (cause, queue, tid),
             "orphan_window_note": _orphan_window_note(cause),
         }
+        if kind == KIND_WORKFLOW_TASK_FAILED:
+            facts = await workflow_task_failure_facts(handle)
+            durable["deterministic"] = True
+            durable["retryable"] = False
+            durable["retained"] = {
+                "source": "execution history (WorkflowTaskFailed event)",
+                "available": bool(facts.get("available")),
+                "failure_type": facts.get("failure_type", ""),
+                "failure_message": facts.get("failure_message", ""),
+                "event_id": facts.get("event_id", 0),
+                "reason": facts.get("reason", ""),
+            }
+            if not facts.get("available"):
+                durable["face_state"] = FACE_STATE_RETAINED_UNAVAILABLE
         stage_face = await _terminal_face_stage_from_memo(desc)
         durable["last_stage"] = stage_face.get("last_stage")
         durable["last_stage_available"] = bool(stage_face.get("last_stage_available"))
@@ -3124,6 +3278,7 @@ async def _augment_read_failure_receipt(receipt: Dict[str, Any], tid: str,
                                        "guessed")
         face = receipt.get("face") if isinstance(receipt.get("face"), dict) else {}
         face["durable"] = durable
+        face["face_state"] = durable["face_state"]
         receipt["face"] = face
         return receipt
     except Exception:  # noqa: BLE001 — the augmentation is an enhancement, never a new failure
@@ -3633,6 +3788,91 @@ def _terminal_face_reconcile(snap: Any, exec_status: str, close_ts: float) -> An
     return out
 
 
+def retained_ticket_face(ticket_id: str) -> Dict[str, Any]:
+    """The retained state of a FINISHED ticket, read WITHOUT any Temporal query
+    (t261102-12).
+
+    A closed ticket must stay readable after its workflow leaves the queue, stops
+    answering, or is pruned. The engine already writes that evidence at close time:
+    - `<projects>/<key>/data/tickets/<id>/closed.json` — the post-close witness
+      (schema, terminal_status, closed_at, written_by), written only from an OBSERVED
+      terminal status;
+    - `<projects>/<key>/data/tickets/<id>/archive.json` — the archive manifest
+      (the ticket's own meta: title / project / epic / close facts).
+
+    This reader is a pure store read: no client, no poller, no retry. The project key is
+    not known when the workflow is gone, so the store root is walked one level deep
+    (the same bounded directory listing the metrics cache does) and every hit is
+    verified through the canonical path resolvers.
+
+    Returns {"face_state": "retained"|"retained_unavailable", "source": <path>,
+             "project": <key>, "terminal_status": str, "closed_at": str,
+             "written_by": str, "title": str, "epic": str, "archived_at": str,
+             "meta": dict, "reason": str}. `meta` is the archived ticket meta, verbatim.
+    """
+    out: Dict[str, Any] = {"face_state": FACE_STATE_RETAINED_UNAVAILABLE, "source": "",
+                           "project": "", "terminal_status": "", "closed_at": "",
+                           "written_by": "", "title": "", "epic": "", "archived_at": "",
+                           "meta": {}, "reason": ""}
+    tid = str(ticket_id or "").strip()
+    try:
+        if not shared.PROJECT_KEY_RE.match(tid):
+            out["reason"] = ("malformed ticket id %r - the retained store path cannot be "
+                             "built" % tid[:60])
+            return out
+        try:
+            keys = sorted(p.name for p in shared.registry_root().iterdir() if p.is_dir())
+        except OSError as e:
+            out["reason"] = ("projects root unreadable (%s: %s) - no retained state can be "
+                             "read" % (type(e).__name__, str(e)[:160]))
+            return out
+    except Exception as e:  # noqa: BLE001 — a store read never breaks the read face
+        out["reason"] = "retained store lookup failed: %s: %s" % (type(e).__name__, e)
+        return out
+    reasons: List[str] = []
+    for key in keys:
+        try:
+            tdir = ticket_data_dir(key, tid)
+        except ValueError:
+            continue
+        if not tdir.is_dir():
+            continue
+        witness = shared.read_closed_witness(key, tid)
+        if witness.get("witness"):
+            out.update({"face_state": FACE_STATE_RETAINED, "source": witness.get("path", ""),
+                        "project": key,
+                        "terminal_status": str(witness.get("terminal_status") or ""),
+                        "closed_at": str(witness.get("closed_at") or ""),
+                        "written_by": str(witness.get("written_by") or "")})
+        manifest = _read_archive_manifest(tid, key)
+        if str(manifest.get("state")) == "ok":
+            meta = manifest.get("meta") if isinstance(manifest.get("meta"), dict) else {}
+            doc = {}
+            try:
+                import json as _json
+                doc = _json.loads((tdir / "archive.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                doc = {}
+            out["project"] = key
+            out["meta"] = meta
+            out["title"] = str(meta.get("title") or "")
+            out["epic"] = str(meta.get("epic") or "")
+            out["archived_at"] = str(doc.get("archived_at") or "")
+            if out["face_state"] != FACE_STATE_RETAINED:
+                out.update({"face_state": FACE_STATE_RETAINED,
+                            "source": str(manifest.get("detail") or "")})
+        elif out["face_state"] != FACE_STATE_RETAINED:
+            reasons.append(str(manifest.get("detail") or manifest.get("state") or ""))
+        if out["face_state"] == FACE_STATE_RETAINED:
+            out["reason"] = ""
+            return out
+    out["reason"] = ("no retained state for ticket %s (no post-close witness and no "
+                     "archive manifest)%s"
+                     % (tid, (": " + "; ".join(r for r in reasons if r))
+                        if reasons else ""))
+    return out
+
+
 async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
     """Single-ticket query (v2): the full snapshot + meta (a JSON-compatible ticket
     shape, consumed directly by ticket.py show).
@@ -3666,15 +3906,24 @@ async def cmd_ticket_query(args: Dict[str, Any]) -> Dict[str, Any]:
         try:
             snap = await handle.result()
         except Exception as e:
+            # t261102-12: a closed ticket's outcome is also on disk (post-close witness
+            # + archive manifest). The transient wording stays (a result() read can be a
+            # service hiccup), but the retained outcome rides on the face so the panel
+            # can show what the ticket actually ended as instead of only an error.
+            retained = retained_ticket_face(tid)
             return _err("workflow 结果读取失败（瞬时），请刷新重试：%s: %s"
-                        % (type(e).__name__, e), KIND_TRANSIENT)
+                        % (type(e).__name__, e), KIND_TRANSIENT,
+                        face={"face_state": retained["face_state"],
+                              "retained": retained})
     elif exec_status == "RUNNING":
         # t261005-03: the read goes through _snapshot_read_named — a timeout with a
-        # PROVEN zero live pollers on the ticket's dedicated queue is kind=no_poller
-        # with a ticket/queue/live_pollers face, never a bare TimeoutError; every
-        # other failure keeps the legacy transient wording below.
+        # PROVEN zero live pollers on the ticket's own queue is kind=no_poller with a
+        # ticket/queue/live_pollers face, never a bare TimeoutError.
+        # t261102-12: a workflow whose TASK is in a failed state is kind=
+        # workflow_task_failed — deterministic, never dressed as a timeout, and answered
+        # with the retained cause from the durable history.
         try:
-            snap, rerr = await _snapshot_read_named(handle, tid, client)
+            snap, rerr = await _snapshot_read_named(handle, tid, client, desc=desc)
             if rerr is not None:
                 # t261009-55 spec (3): the read fails BY NAME, and the receipt
                 # carries the durable facts (memo stage/status) + the
@@ -4080,6 +4329,13 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
             inspection_inst_period[e["id"]] = (inst, per)
             if inst not in whitelist:
                 continue  # 未在册实例（test-face/suite-drill 等历史测试僵尸）不上板
+            # t261102-12 COLUMN RULE for a completed inspection period row, stated:
+            # it STAYS on the board while it is inside the closed-row window below, and
+            # it must stay READABLE there (its title/identity come from result() inside
+            # the hydrate window and from the archive manifest after it). Past the window
+            # the row leaves by THIS named rule, never by a missing-data accident. A row
+            # that cannot be read at all does not leave: it stays with a named read state
+            # (read_state / read_state_note), so the operator sees why instead of nothing.
             if e["exec_status"] == "COMPLETED" and (
                     not e["close_ts"]
                     or time.time() - e["close_ts"] >= CLOSED_HYDRATE_WINDOW_S):
@@ -4133,36 +4389,49 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                 m["paused"] = bool((snap or {}).get("paused"))
                 m["paused_phase"] = str((snap or {}).get("paused_phase") or "")
                 return m
-            except Exception:
+            except Exception as e:
                 # KI-008 explicit degradation: a degraded marker (not a silent {}) — the
-                # row-assembly branch uses it to build a "query timed out, refresh and
-                # retry" row, and stage_state stays running (a ticket that really is
-                # running must not be shown as waiting).
+                # row-assembly branch uses it to build a named read row, and stage_state
+                # stays running for a genuine timeout (a ticket that really is running
+                # must not be shown as waiting).
                 # t261005-03: best-effort named cause — when the ticket's queue has zero
                 # live pollers the degraded row names it (no extra query cost beyond the
                 # one bounded probe; probe failure keeps the plain degraded row).
+                # t261102-12: a DETERMINISTIC refusal (workflow task in a failed state) is
+                # named first and named as its own state — no poller probe (a live poller
+                # cannot help a failed task) and no retry budget.
                 degrade: Dict[str, Any] = {"_query_degraded": True}
-                try:
-                    # t261028-17: this call named a helper that does not exist
-                    # (`_queue_poller_face`), so the NameError was swallowed below and
-                    # the named cause could never be produced. The probe is
-                    # queue_live_pollers — the bounded, proven-face function the
-                    # ticket-list degradation was designed around.
-                    pface = await queue_live_pollers(client, ticket_task_queue(tid),
-                                                     timeout=2.0)
-                    if pface.get("available") and pface.get("live_pollers") == 0:
-                        pface["ticket"] = tid
-                        degrade["_no_poller_face"] = pface
-                except Exception:  # noqa: BLE001 — the naming is an enhancement; it never crashes the list
-                    pass
+                deterministic = is_workflow_task_failed_exc(e)
+                if deterministic:
+                    degrade["_deterministic"] = KIND_WORKFLOW_TASK_FAILED
                 # t261009-55 spec (3): durable facts readable WITHOUT a poller —
                 # last known stage + time from the stage memo, describe status.
                 # The degraded row must not render stage=None with a bogus updated:
                 # whatever the memo still proves is rendered; the missing part is
                 # labelled unavailable(<cause> @ queue/ticket) (cause = no_poller
-                # when the probe proved zero, else the query_timeout that did happen).
+                # when the probe proved zero, workflow_task_failed when the task is
+                # failed, else the query_timeout that did happen).
+                _ddesc: Any = None
                 try:
                     _ddesc = await _describe_with_retry(client.get_workflow_handle(tid))
+                except Exception:  # noqa: BLE001 — best-effort, the row shape never changes
+                    _ddesc = None
+                # t261102-12: the probe reads the queue the EXECUTION polls. Deriving it
+                # from the ticket id probed a queue nobody should poll and produced a
+                # FALSE no_poller on inspection tickets that run on the shared queue.
+                _queue, _queue_source = ticket_read_queue(_ddesc, tid)
+                if not deterministic:
+                    try:
+                        pface = await queue_live_pollers(client, _queue, timeout=2.0)
+                        if pface.get("available") and pface.get("live_pollers") == 0:
+                            pface["ticket"] = tid
+                            pface["queue_source"] = _queue_source
+                            degrade["_no_poller_face"] = pface
+                    except Exception:  # noqa: BLE001 — the naming is an enhancement; it never crashes the list
+                        pass
+                try:
+                    if _ddesc is None:
+                        raise RuntimeError("describe unavailable")
                     _sf = await _terminal_face_stage_from_memo(_ddesc)
                     _hist = _sf.get("last_stage_history")
                     _ts = 0
@@ -4171,21 +4440,42 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                             _ts = int(_hist[-1].get("ts") or 0)
                         except (TypeError, ValueError):
                             _ts = 0
-                    _cause = ("no_poller" if (degrade.get("_no_poller_face") or {})
-                              .get("queue") else "query_timeout")
-                    degrade["_durable"] = {
+                    _cause = (KIND_WORKFLOW_TASK_FAILED if deterministic else
+                              ("no_poller" if (degrade.get("_no_poller_face") or {})
+                               .get("queue") else "query_timeout"))
+                    _durable: Dict[str, Any] = {
                         "status": (_ddesc.status.name if getattr(_ddesc, "status", None)
                                    is not None else None),
+                        "live_pollers": ((degrade.get("_no_poller_face") or {})
+                                         .get("live_pollers")),
                         "last_stage": _sf.get("last_stage"),
                         "last_stage_available": bool(_sf.get("last_stage_available")),
                         "last_stage_note": _sf.get("last_stage_note") or "",
                         "updated_ts": _ts,
-                        "queue": ticket_task_queue(tid),
+                        "queue": _queue,
+                        "queue_source": _queue_source,
                         "ticket": tid,
+                        "face_state": _cause,
                         "unavailable": "unavailable(%s @ queue=%s ticket=%s)" % (
-                            _cause, ticket_task_queue(tid), tid),
+                            _cause, _queue, tid),
                         "orphan_window_note": _orphan_window_note(_cause),
                     }
+                    if deterministic:
+                        _facts = await workflow_task_failure_facts(
+                            client.get_workflow_handle(tid))
+                        _durable["deterministic"] = True
+                        _durable["retryable"] = False
+                        _durable["retained"] = {
+                            "source": "execution history (WorkflowTaskFailed event)",
+                            "available": bool(_facts.get("available")),
+                            "failure_type": _facts.get("failure_type", ""),
+                            "failure_message": _facts.get("failure_message", ""),
+                            "event_id": _facts.get("event_id", 0),
+                            "reason": _facts.get("reason", ""),
+                        }
+                        if not _facts.get("available"):
+                            _durable["face_state"] = FACE_STATE_RETAINED_UNAVAILABLE
+                    degrade["_durable"] = _durable
                 except Exception:  # noqa: BLE001 — durable enrichment is best-effort, the row shape never changes
                     pass
                 return degrade
@@ -4237,9 +4527,17 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                     tid, meta["_inspection_snap"], sa_project, sa_epic,
                     exec_status, e["close_ts"], e.get("created") or 0, **insp_kw))
             elif meta.get("_inspection_closed_degraded"):
-                rows.append(_row_from_inspection_face(
+                _r = _row_from_inspection_face(
                     tid, {}, sa_project, sa_epic, exec_status, e["close_ts"],
-                    e.get("created") or 0, degraded=True, **insp_kw))
+                    e.get("created") or 0, degraded=True, **insp_kw)
+                # t261102-12: the read state is a NAMED key on the row. A closed ticket
+                # that could not hand back its snapshot is named as such; the panel
+                # renders the name instead of treating the row as a slow read.
+                _r["read_state"] = "closed_no_snapshot"
+                _r["read_state_note"] = (
+                    "closed ticket: the snapshot was not readable inside the hydrate "
+                    "window; the row keeps its identity and close facts")
+                rows.append(_r)
             elif meta.get("_terminal_failed"):
                 # t260919-02：失败类终态巡检行——标题=正常巡检标题（身份保留，实例/期
                 # 可辨），status/stage_state=failed（UI 显「已失败」红标），绝不落
@@ -4254,9 +4552,38 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                 row["stage_state"] = "failed"
                 row["status"] = "failed"
                 row["awaiting_gate"] = False
+                row["read_state"] = "terminal_failed"
+                row["read_state_note"] = (
+                    "the workflow ended in failure (%s); it no longer advances"
+                    % (exec_status or "unknown"))
                 if e["close_ts"]:
                     row["updated_ts"] = int(e["close_ts"])
                     row["updated"] = time.strftime("%m-%d %H:%M", time.localtime(e["close_ts"]))
+                rows.append(row)
+            elif meta.get("_deterministic"):
+                # t261102-12: a workflow whose TASK is in a failed state can never answer
+                # and never advances. The row keeps the ticket's identity as its title (a
+                # title is a name, never an instruction) and carries the named read state;
+                # status/stage_state say the read is dead, so the row stops reading as a
+                # ticket that is simply still running.
+                _dur = meta.get("_durable") or {}
+                _ret = (_dur.get("retained") if isinstance(_dur, dict) else None) or {}
+                row = _row_from_inspection_face(
+                    tid, {}, sa_project, sa_epic, exec_status, e["close_ts"],
+                    e.get("created") or 0, **insp_kw)
+                row["title"] = _inspection_title_of({}, tid, inst_p[0], inst_p[1])
+                row["stage"] = None
+                row["stage_state"] = "failed"
+                row["status"] = "failed"
+                row["awaiting_gate"] = False
+                row["read_state"] = KIND_WORKFLOW_TASK_FAILED
+                row["read_state_note"] = (
+                    "workflow task failed (deterministic, not a timeout): %s"
+                    % (("%s: %s" % (_ret.get("failure_type") or "unknown type",
+                                    _ret.get("failure_message") or "no recorded cause"))
+                       if _ret.get("available")
+                       else ("retained_unavailable: %s"
+                             % (_ret.get("reason") or "no retained cause"))))
                 rows.append(row)
             else:
                 row = _row_from_inspection_face(
@@ -4267,6 +4594,23 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                 row["stage_state"] = "running"
                 row["status"] = "dispatched"
                 row["awaiting_gate"] = False
+                _dur = meta.get("_durable") or {}
+                _state = str((_dur.get("face_state") if _dur else "") or "query_timeout")
+                # t261102-12: even the legacy degraded row names its read state, so the
+                # panel never has to guess between "no worker" and "timed out".
+                row["read_state"] = _state
+                if _state == "no_poller":
+                    row["read_state_note"] = (
+                        "%s live pollers on the queue this ticket polls (queue=%s, "
+                        "source=%s): the read is waiting for a worker"
+                        % ("0" if _dur.get("live_pollers") in (None, 0) else
+                           str(_dur.get("live_pollers")),
+                           _dur.get("queue") or "",
+                           _dur.get("queue_source") or "derived"))
+                else:
+                    row["read_state_note"] = (
+                        "snapshot query timed out (transient): %s"
+                        % (_dur.get("unavailable") or "no durable facts readable"))
                 rows.append(row)
             continue
         if meta.get("_terminal_failed"):
@@ -4295,6 +4639,12 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          # degraded / minimal / failed rows share one shape (no
                          # snapshot = no authorization face to read)
                          "authz_active": 0,
+                         # t261102-12: one named read state across the no-snapshot family
+                         # (keyset parity keeps the three shapes one shape).
+                         "read_state": "terminal_failed",
+                         "read_state_note": (
+                             "the workflow ended in failure (%s); it no longer advances"
+                             % (exec_status or "unknown")),
                          # t261028-17: the family's note slot — a diagnostic rides
                          # here, never in `title`
                          "identity_note": ""})
@@ -4314,6 +4664,9 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
             # `title` on any path (the Epic tab renders a title verbatim).
             dur = meta.get("_durable") or {}
             _row_updated_ts = int(dur.get("updated_ts") or 0)
+            _deterministic = bool(meta.get("_deterministic"))
+            _read_state = str((meta.get("_deterministic")
+                               or (dur.get("face_state") if dur else "")) or "query_timeout")
             _dur_note = ""
             if dur:
                 _dur_note = (
@@ -4322,7 +4675,7 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                         (dur.get("last_stage") if dur.get("last_stage_available")
                          else (dur.get("last_stage_note") or "memo unavailable")),
                         dur.get("status") or "unknown"))
-                if dur.get("orphan_window_note"):
+                if dur.get("orphan_window_note") and not _deterministic:
                     _dur_note += (
                         "; waiting on the platform, not stuck "
                         "(STARTED task start_to_close_timeout 499s)")
@@ -4348,17 +4701,45 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          "close_health_reason": _close_health_of(exec_status)[1],
                          "authz_active": 0,   # degraded / minimal / failed rows share one
                                              # shape (no snapshot = no authorization face)
+                         # t261102-12: the named read state rides on every no-snapshot
+                         # shape (keyset parity keeps the family one shape). A DETERMINISTIC
+                         # state overrides the legacy title/status below: a workflow whose
+                         # task is in a failed state cannot advance and cannot be read, so
+                         # the row must not read as a running ticket with a retry hint.
+                         "read_state": _read_state,
+                         "read_state_note": "",
                          "identity_note": ""})
+            if _deterministic:
+                rows[-1]["status"] = "failed"
+                rows[-1]["stage_state"] = "failed"
+                rows[-1]["title"] = ""
             _diag = ""
-            if npf:
+            if _deterministic:
+                _ret = (dur.get("retained") if isinstance(dur, dict) else None) or {}
+                _diag = (
+                    "workflow_task_failed: the workflow task is in a failed state on "
+                    "queue %s (source=%s) — deterministic, not a transient timeout; "
+                    "retrying the read cannot help. %s"
+                    % (dur.get("queue") or "", dur.get("queue_source") or "derived",
+                       ("cause: %s: %s" % (_ret.get("failure_type") or "unknown type",
+                                           _ret.get("failure_message") or "no recorded cause"))
+                       if _ret.get("available")
+                       else ("retained_unavailable: %s"
+                             % (_ret.get("reason") or "no retained cause"))))
+                rows[-1]["read_state_note"] = _diag
+            elif npf:
                 # t261005-03 / t261028-17: the named cause is a DIAGNOSTIC — it rides in
                 # identity_note, and the title is left untouched (UI copy in English per
                 # the 261004 host order).
-                _diag = ("ticket query timed out: queue %s has 0 live pollers (dedicated "
-                         "worker stopped polling or absent); wait for the ensure "
-                         "replacement before refreshing"
-                         % (npf.get("queue") or ticket_task_queue(tid)))
-            if _dur_note:
+                _diag = ("ticket query timed out: queue %s (source=%s) has 0 live pollers "
+                         "(the worker that polls it stopped or is absent); wait for the "
+                         "ensure replacement before refreshing"
+                         % (npf.get("queue") or ticket_task_queue(tid),
+                            npf.get("queue_source") or "derived"))
+                rows[-1]["read_state_note"] = _diag
+            elif dur:
+                rows[-1]["read_state_note"] = _dur_note
+            if _dur_note and not _deterministic:
                 _diag = "; ".join(x for x in (_diag, _dur_note) if x)
             if _diag:
                 rows[-1]["identity_note"] = _diag
@@ -4411,6 +4792,16 @@ async def cmd_ticket_list(args: Dict[str, Any]) -> Dict[str, Any]:
                          # degraded / minimal / failed rows share one shape (no
                          # snapshot = no authorization face to read)
                          "authz_active": 0,
+                         # t261102-12: the closed ticket's readable source is named. Past
+                         # the hydrate window the archive manifest IS the answer, so the
+                         # row says which retained state it was read from.
+                         "read_state": ("retained" if (_ident["title"] or not _ident["note"])
+                                        else FACE_STATE_RETAINED_UNAVAILABLE),
+                         "read_state_note": (
+                             "closed ticket read from the retained archive manifest"
+                             if (_ident["title"] or not _ident["note"]) else
+                             ("retained_unavailable: %s" % (_ident["note"] or
+                                                            "no archive manifest"))),
                          "identity_note": "; ".join(x for x in _note_parts if x)})
     # t260917-02 修复②收尾 pass（巡检板面专用）：
     # ① identity_note：不可辨且在跑的行（kept_unresolved 分支）带假设语气注记——疑似

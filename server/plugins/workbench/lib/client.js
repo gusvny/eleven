@@ -480,26 +480,30 @@ const WORKFLOW_TABLE = {
 	"inspection-lite": "Inspection",
 	"chore-lane": "Chore Lane"
 };
-/** Artifact view kind → English (truth source: engine shared.ARTIFACT_KINDS, epic
-*  artifact-face). A kind says what a human does with an artifact, not what it looks
-*  like; an unknown value falls back to the raw identifier (labelOf rule). */
-const ARTIFACT_KIND_TABLE = {
-	image: "Image",
-	text: "Text",
-	structure: "Structure",
-	diff: "Diff",
-	ledger: "Ledger",
-	external: "External"
+/**
+* t261102-12: the engine's NAMED read states -> English chips. Truth source = the
+* engine's own words (client.py read_state values); an unknown value falls back to the
+* raw identifier (labelOf), so a new engine state shows up as itself and waits for this
+* table instead of disappearing.
+*/
+const READ_STATE_TABLE = {
+	no_poller: "No worker polling",
+	workflow_task_failed: "Workflow task failed",
+	query_timeout: "Query timed out",
+	terminal_failed: "Ended in failure",
+	closed_no_snapshot: "Closed (no snapshot)",
+	retained: "From retained record",
+	retained_unavailable: "No retained record"
 };
+function readStateLabel(id) {
+	return labelOf$1(READ_STATE_TABLE, id);
+}
 const STATE_LABEL = STATE_TABLE;
 function stageLabel(id) {
 	return labelOf$1(STAGE_TABLE, id);
 }
 function workflowLabel(id) {
 	return labelOf$1(WORKFLOW_TABLE, id);
-}
-function artifactKindLabel(id) {
-	return labelOf$1(ARTIFACT_KIND_TABLE, id);
 }
 /** 段名优先级：拓扑/模板节点自带英文时数据侧已可用；此处只认 id 映射（显示层覆盖，
 *  不改引擎数据——review 260925 裁定：引擎中文 label 数据不动，仅显示层按 id 覆盖）。 */
@@ -1019,7 +1023,7 @@ function laneMapScene(model) {
 		cursor
 	};
 }
-function asString$2(v) {
+function asString$1(v) {
 	return typeof v === "string" ? v : "";
 }
 function asStringArray$1(v) {
@@ -1038,7 +1042,7 @@ function firstClockMs(detail) {
 	if (!Array.isArray(detail.timeline)) return null;
 	for (const e of detail.timeline) {
 		if (e === null || typeof e !== "object") continue;
-		const at = asString$2(e.at);
+		const at = asString$1(e.at);
 		if (!at) continue;
 		const ms = Date.parse(at);
 		if (Number.isFinite(ms)) return ms;
@@ -1060,9 +1064,9 @@ function parseTopology(raw) {
 	for (const n of r.nodes) {
 		if (n === null || typeof n !== "object") continue;
 		const o = n;
-		const id = asString$2(o.id);
-		const label = asString$2(o.label);
-		const kind = asString$2(o.kind);
+		const id = asString$1(o.id);
+		const label = asString$1(o.label);
+		const kind = asString$1(o.kind);
 		if (!id || !label) continue;
 		if (kind !== "agent" && kind !== "gate" && kind !== "human") continue;
 		if (ids.has(id)) continue;
@@ -1071,9 +1075,9 @@ function parseTopology(raw) {
 			id,
 			label,
 			kind,
-			role: asString$2(o.role),
+			role: asString$1(o.role),
 			parts: asStringArray$1(o.parts),
-			...asString$2(o.optional) ? { optional: asString$2(o.optional) } : {}
+			...asString$1(o.optional) ? { optional: asString$1(o.optional) } : {}
 		});
 	}
 	if (nodes.length === 0) return null;
@@ -1087,18 +1091,18 @@ function parseTopology(raw) {
 	if (Array.isArray(r.groups)) for (const g of r.groups) {
 		if (g === null || typeof g !== "object") continue;
 		const o = g;
-		const id = asString$2(o.id);
+		const id = asString$1(o.id);
 		const members = asStringArray$1(o.members).filter((m) => ids.has(m));
 		if (id && members.length >= 2) groups.push({
 			id,
 			members,
-			phase: asString$2(o.phase)
+			phase: asString$1(o.phase)
 		});
 	}
 	return {
-		version: asString$2(r.version) || void 0,
-		template: asString$2(r.template) || "unknown",
-		name: asString$2(r.name) || void 0,
+		version: asString$1(r.version) || void 0,
+		template: asString$1(r.template) || "unknown",
+		name: asString$1(r.name) || void 0,
 		nodes,
 		edges,
 		groups
@@ -1110,16 +1114,16 @@ function timelineOf(detail) {
 	for (const e of detail.timeline) {
 		if (e === null || typeof e !== "object") continue;
 		const o = e;
-		const stage = asString$2(o.stage);
-		const state = asString$2(o.state);
+		const stage = asString$1(o.stage);
+		const state = asString$1(o.state);
 		if (!stage || !state) continue;
 		out.push({
 			stage,
 			state,
-			at: asString$2(o.at) || void 0,
-			reason: asString$2(o.reason) || void 0,
+			at: asString$1(o.at) || void 0,
+			reason: asString$1(o.reason) || void 0,
 			gen: typeof o.gen === "number" && Number.isFinite(o.gen) ? o.gen : void 0,
-			phase: asString$2(o.phase) || void 0
+			phase: asString$1(o.phase) || void 0
 		});
 	}
 	return out;
@@ -1145,11 +1149,11 @@ function handoffsOf(detail) {
 	for (const h of detail.handoffs) {
 		if (h === null || typeof h !== "object") continue;
 		const o = h;
-		const stage = asString$2(o.stage);
+		const stage = asString$1(o.stage);
 		if (!stage) continue;
 		out.push({
 			stage,
-			summary: asString$2(o.summary) || void 0,
+			summary: asString$1(o.summary) || void 0,
 			gen: typeof o.gen === "number" && Number.isFinite(o.gen) ? o.gen : void 0
 		});
 	}
@@ -1276,10 +1280,10 @@ function receiptRowView(raw) {
 	if (raw === null || typeof raw !== "object") return null;
 	const co = raw;
 	const green = rowVerdict(co) === true;
-	const checkId = asString$2(co.id) || void 0;
-	const name = asString$2(co.item) || asString$2(co.check) || checkId || "";
-	const detail = asString$2(co.detail) || void 0;
-	const note = asString$2(co.note) || void 0;
+	const checkId = asString$1(co.id) || void 0;
+	const name = asString$1(co.item) || asString$1(co.check) || checkId || "";
+	const detail = asString$1(co.detail) || void 0;
+	const note = asString$1(co.note) || void 0;
 	const count = typeof co.count === "number" && Number.isFinite(co.count) ? co.count : void 0;
 	if (green && !name && !detail && !note && count === void 0) return null;
 	return {
@@ -1289,9 +1293,9 @@ function receiptRowView(raw) {
 		note,
 		count,
 		checkId,
-		reasonCode: asString$2(co.reason_code) || void 0,
+		reasonCode: asString$1(co.reason_code) || void 0,
 		files: asStringArray$1(co.files),
-		nextAction: asString$2(co.next_action) || void 0
+		nextAction: asString$1(co.next_action) || void 0
 	};
 }
 /** Every informative row of one `checks` array, through the one accessor. */
@@ -1337,7 +1341,7 @@ function readGateRunVerdict(run) {
 * is a false attribution (t261028-56).
 */
 function gateRunStage(run) {
-	return asString$2(run.stage) || asString$2(run.label);
+	return asString$1(run.stage) || asString$1(run.label);
 }
 /**
 * The approval line's green suffix: '' unless the run's own receipt says green
@@ -1364,7 +1368,7 @@ function buildChecksDetail(detail) {
 	for (const run of [...runs].reverse()) {
 		if (run === null || typeof run !== "object") continue;
 		const o = run;
-		const stage = asString$2(o.stage);
+		const stage = asString$1(o.stage);
 		if (!stage) continue;
 		const rows = receiptRowViews(o.checks);
 		const rowsGreen = rows.every((r) => r.green);
@@ -1374,7 +1378,7 @@ function buildChecksDetail(detail) {
 		const contradiction = rows.length > 0 && written !== rowsGreen || written === true && redCount > 0;
 		out.push({
 			stage,
-			label: asString$2(o.label) || stage,
+			label: asString$1(o.label) || stage,
 			green: written !== void 0 ? written : rowsGreen,
 			redCount,
 			verdictSource: verdict.source,
@@ -1484,7 +1488,7 @@ function buildLaneMap(topologyRaw, detailRaw, opts) {
 		return g ? g.members : [nodes[id]].filter(Boolean);
 	};
 	const isLive = (m) => m.vis === "running" || m.vis === "awaiting-human" || m.vis === "blocked";
-	const ptr = asString$2(detail.stage);
+	const ptr = asString$1(detail.stage);
 	const curItem = (ptr ? items.find((it) => itemMembers(it.id).some((m) => m.node.id === ptr)) : void 0) ?? items.find((it) => itemMembers(it.id).some(isLive)) ?? items[items.length - 1];
 	const nowLabel = curItem ? itemMembers(curItem.id).map((m) => stageDisplayLabel(m.node.id, m.node.label)).join(" ∥ ") : "";
 	const nowItem = curItem?.id ?? null;
@@ -1529,7 +1533,7 @@ function buildLaneMap(topologyRaw, detailRaw, opts) {
 * it listed every row as "red" (the green ones included) and could not name
 * any of them.
 */
-const asString$1 = (v) => typeof v === "string" ? v : "";
+const asString = (v) => typeof v === "string" ? v : "";
 const asFinite = (v) => typeof v === "number" && Number.isFinite(v) ? v : null;
 /** gate_runs 末条（容忍 detail/gate_runs 畸形：非对象/非数组 → undefined）。 */
 function lastGateRun(detail) {
@@ -1542,7 +1546,7 @@ function lastGateRun(detail) {
 /** gate 的展示标签：label 优先、stage 兜底，畸形 → 'gate'。 */
 function gateStageLabel(g) {
 	if (!g) return "gate";
-	return asString$1(g.label) || asString$1(g.stage) || "gate";
+	return asString(g.label) || asString(g.stage) || "gate";
 }
 /**
 * Receipt rows of a red gate → problem rows (t261028-48).
@@ -1580,7 +1584,7 @@ function rowsFromChecks(checks, prefix) {
 /** 轻道闸形态（无 checks 键）：自带字段 → 人话原因行。 */
 function rowsFromLightGate(g) {
 	const out = [];
-	const err = asString$1(g.error);
+	const err = asString(g.error);
 	if (err) out.push({
 		key: "error",
 		text: `gate error: ${err}`
@@ -1625,7 +1629,7 @@ function gateProblemRows(detail) {
 	const g = lastGateRun(detail);
 	if (!g) return [];
 	const label = gateStageLabel(g);
-	const prefix = asString$1(g.stage) || label;
+	const prefix = asString(g.stage) || label;
 	const checks = Array.isArray(g.checks) ? g.checks : null;
 	const rowProblems = checks !== null ? rowsFromChecks(checks, prefix) : null;
 	const written = readGateRunVerdict(g).green;
@@ -7524,6 +7528,17 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 		title: dismissedNoteOf(t),
 		children: "Dismiss note"
 	});
+	const readStateSpan = (() => {
+		const state = typeof t.read_state === "string" ? t.read_state.trim() : "";
+		if (state === "") return null;
+		const label = readStateLabel(state);
+		return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+			className: "wb-card-read-state",
+			"data-read-state": state,
+			title: typeof t.read_state_note === "string" && t.read_state_note.trim() !== "" ? t.read_state_note : `Read state: ${state}`,
+			children: label
+		});
+	})();
 	const viewersSpan = (peerViewers?.length ?? 0) > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 		title: `Viewed from another tab: ${(peerViewers ?? []).map((v) => v.who).join(", ")}`,
 		children: "👀"
@@ -7623,6 +7638,7 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 						children: pausedBadgeText(t.paused_phase)
 					}),
 					kindSpan,
+					readStateSpan,
 					healthSpan,
 					noteSpan,
 					idSpan,
@@ -7640,6 +7656,7 @@ function TicketRowCard({ t, wf, progress, compact = false, active = false, busy 
 				children: [
 					stageSpan,
 					kindSpan,
+					readStateSpan,
 					healthSpan,
 					noteSpan,
 					viewersSpan,
@@ -9751,7 +9768,7 @@ const INSPECTION_TOPOLOGY = [
 	}
 ];
 /** 消费外部行=不可信输入的取串助手（非串→''）。 */
-function strOf$1(v) {
+function strOf$2(v) {
 	return typeof v === "string" ? v : "";
 }
 /** 是否巡检行：kind 或 engine 标记任一命中（引擎行带 kind=inspection）。 */
@@ -9815,7 +9832,7 @@ function inspectionSummaryOf(face) {
 }
 /** 阶段短名：拓扑命中用短名，未命中截断原词（stageShortOf 同口径），畸形→''。 */
 function inspectionStageShort(stage) {
-	const s = strOf$1(stage);
+	const s = strOf$2(stage);
 	if (s === "") return "";
 	const hit = INSPECTION_TOPOLOGY.find((st) => st.id === s);
 	if (hit) return hit.short;
@@ -9829,8 +9846,8 @@ function inspectionStageShort(stage) {
 */
 function inspectionProgressOf(row) {
 	if (row === null || typeof row !== "object") return void 0;
-	const stageState = strOf$1(row.stage_state);
-	const status = strOf$1(row.status);
+	const stageState = strOf$2(row.stage_state);
+	const status = strOf$2(row.status);
 	const c = findingsCountOf(row);
 	const findingsTxt = `findings H${c.high}/M${c.med}/L${c.low}`;
 	if (status === "closed") return {
@@ -9842,7 +9859,7 @@ function inspectionProgressOf(row) {
 		text: `Awaiting your signature · ${findingsTxt}`
 	};
 	if (stageState === "blocked") {
-		const reason = strOf$1(row.blocked_reason);
+		const reason = strOf$2(row.blocked_reason);
 		return {
 			state: "blocked",
 			text: `Blocked${reason ? ": " + reason : " · see detail"}`
@@ -9885,7 +9902,7 @@ function inspectionSplitByProject(rows, registeredKeys) {
 	const byProject = {};
 	const unowned = [];
 	for (const row of inspectionSidebarRows(rows)) {
-		const p = strOf$1(row.project);
+		const p = strOf$2(row.project);
 		if (p !== "" && keySet.has(p)) (byProject[p] ??= []).push(row);
 		else unowned.push(row);
 	}
@@ -14495,1655 +14512,6 @@ function timelineRows(timeline) {
 	return out.length > 0 ? out : null;
 }
 //#endregion
-//#region src/client/artifact-face-model.ts
-/**
-* artifact-face-model.ts — the console's artifact inventory and frame (epic
-* artifact-face, slice 2, ticket t261030-35).
-*
-* One reader for the declared artifact list. This module is pure: no IO, no DOM,
-* no node built-ins. The host half (`src/host/artifact-face.ts`) imports it to
-* resolve a row for the byte route, and the console panel imports it to draw the
-* frame. Two copies of these rules would be two readers of one rule.
-*
-* Data source (verified against the engine on `main`):
-*   - the engine normalizes a stage's declared list into descriptors
-*     (`{id,title,kind,kind_known,source,repo,stage,note,open,shape,optional,legacy,round}`)
-*     and writes them per receipt as `results[stage].artifact_descriptors`
-*     (+ `_shape` / `_dropped`), plus `handoffs[].artifact_descriptors`;
-*   - `server/tools/ticket.py::_v2_query` carries `results` into `ticket show`
-*     but does NOT carry the snapshot's flat top-level `artifact_descriptors`.
-*     The model therefore prefers that key when it appears (forward compatible)
-*     and otherwise reads the per-receipt lists. It never re-runs the engine's
-*     aggregation: only what a receipt declared is listed, and a row's round is
-*     the receipt's own `gen` when the descriptor carries no round.
-*
-* The canonical list comes from the HANDOFF history (the engine's own rule,
-* `shared.snapshot_artifact_descriptors`): one entry per round, a declaring handoff
-* trusted (its legacy paths not mirrored), a handoff that declared nothing contributing
-* its `artifacts` paths as guessed descriptors. Reading only the latest receipt lost
-* two things on a live ticket (walkthrough 1): the legacy paths of every stage whose
-* receipt carried the engine's empty list with shape `absent`, and the declarations of
-* an earlier round of a reworked stage. The per-receipt path therefore stays only as
-* the fallback for data with no handoff history, and there it obeys the receipt's
-* `artifact_descriptors_shape`: a non-empty list is trusted; empty/absent/malformed
-* falls back to `deliverables` (the same fallback the canonical rule gives), with the
-* malformed shape named as well.
-*
-* Two rules complete the canonical read (walkthrough 1, A2/A3):
-*   - A stage whose handoff history yields no rows (a mechanical stage such as
-*     `ui_evidence`, which writes a receipt and no handoff, or an entry with no paths) is
-*     read from its receipt, shape rule included. A stage the history already produced
-*     rows for is never also read from its receipt: one stage, one source, no twins.
-*   - Rows are ordered by stage order (the template's), then by the order the source
-*     declared them. The history is chronological, so the raw handoff order interleaves
-*     stages when a reworked stage runs again after the next stage started; the frame
-*     keeps each stage in one block (plan D4/A2).
-*
-* Frame ownership (epic ruling 3): a project view may never decide whether an
-* artifact is listed, in which order, or what the machine verdict is. In this
-* slice no view channel exists yet; the guard is structural: the frame takes
-* only the host payload and the gate receipts, and descriptor keys that could
-* shrink or reorder the list (`hidden`, `visible`, `order`, `view`, `render`)
-* are ignored and named as refused.
-*/
-/** The console's built-in kinds (epic ruling). The engine's list is the truth source. */
-const ARTIFACT_KINDS = [
-	"image",
-	"text",
-	"structure",
-	"diff",
-	"ledger",
-	"external"
-];
-/** Human size. Deterministic, no locale formatting. */
-function formatBytes(n) {
-	if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return "";
-	if (n < 1024) return `${n} B`;
-	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-	return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-/** `YYYY-MM-DD HH:MM` in UTC — the console shows one clock, and tests can pin it. */
-function formatArtifactTime(ms) {
-	if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "";
-	const d = new Date(ms);
-	const p = (x) => String(x).padStart(2, "0");
-	return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
-}
-/** The named sentence for each non-ok state. English, short (host order 260925). */
-function artifactStateText(state, reason) {
-	const r = (reason ?? "").trim();
-	switch (state) {
-		case "ok": return "";
-		case "missing": return `File not found at the declared source${r === "" ? "" : ` (${r})`}`;
-		case "not_a_file": return `The declared source is not a regular file${r === "" ? "" : ` (${r})`}`;
-		case "unreadable": return `The file cannot be read${r === "" ? "" : ` (${r})`}`;
-		case "outside_root": return `The resolved path is outside the ticket workspace; the console does not serve it${r === "" ? "" : ` (${r})`}`;
-		case "repo_root_unknown": return `Declared in another repository, and this ticket has no workspace for it${r === "" ? "" : ` (${r})`}`;
-		case "too_large": return `Too large to open in the page${r === "" ? "" : ` (${r})`}`;
-		case "not_utf8": return `The text is not valid UTF-8, so the console does not show it${r === "" ? "" : ` (${r})`}`;
-		case "external": return `Outside the project, so the console shows metadata only${r === "" ? "" : ` (${r})`}`;
-		case "id_not_servable": return r === "" ? "This row cannot be fetched by id" : r;
-		default: return r;
-	}
-}
-/**
-* The frame view. `stats` is the host's metadata map keyed by row key.
-*
-* A row is never removed and never reordered: the order is the derivation order
-* (stage order, then declaration order), whatever the stats say.
-*/
-function buildArtifactFaceView(derived, stats, detailRaw) {
-	const statOf = (key) => {
-		const s = stats ? stats[key] : void 0;
-		if (s !== void 0 && s !== null && typeof s.state === "string") return s;
-		return {
-			state: "unreadable",
-			reason: "no metadata was read for this row"
-		};
-	};
-	const rows = derived.rows.map((r) => {
-		const st = statOf(r.rowKey);
-		const state = st.state;
-		const stateText = artifactStateText(state, st.reason);
-		const unknownKind = !r.kindKnown || !ARTIFACT_KINDS.includes(r.kind);
-		const servable = r.servable && state === "ok";
-		const bytesRefusal = servable ? "" : r.byteRefusal !== "" ? r.byteRefusal : stateText;
-		return {
-			key: r.key,
-			rowKey: r.rowKey,
-			id: r.id,
-			stage: r.stage,
-			title: r.title,
-			kind: r.kind,
-			kindLabel: unknownKind ? `${artifactKindLabel(r.kind)} (not recognized)` : artifactKindLabel(r.kind),
-			kindKnown: !unknownKind,
-			sourceLabel: r.source,
-			source: r.source,
-			repoLabel: r.repo === "" ? "" : `repo ${r.repo}`,
-			stageLabel: stageDisplayLabel(r.stage, r.stage),
-			round: r.round,
-			roundText: r.round === null ? "round unknown" : `round ${r.round}`,
-			sizeText: typeof st.sizeBytes === "number" ? formatBytes(st.sizeBytes) : "",
-			timeText: formatArtifactTime(st.mtimeMs),
-			note: r.note,
-			shape: r.shape,
-			openHint: r.open,
-			optionalText: r.optional ? "optional" : "",
-			legacyText: r.legacy ? "legacy path (kind guessed)" : "",
-			state,
-			stateText,
-			card: unknownKind || state !== "ok" ? "degrade" : "row",
-			bytesHref: servable ? `bytes` : null,
-			bytesRefusal,
-			refusals: r.refusals
-		};
-	});
-	const checks = buildChecksDetail(detailRaw);
-	const newest = checks.length > 0 ? checks[0] : void 0;
-	const verdict = newest === void 0 ? {
-		text: "Machine verdict: no gate run yet",
-		green: null,
-		source: "none",
-		disagreement: false
-	} : {
-		text: `Machine verdict: ${newest.label || newest.stage} ${newest.green ? "green" : "red"}` + (newest.disagreement ? " (the receipt verdict and its rows disagree; both shown verbatim)" : ""),
-		green: newest.green,
-		source: newest.verdictSource,
-		disagreement: newest.disagreement
-	};
-	return {
-		title: "Artifacts",
-		countText: `${rows.length} declared`,
-		listSourceText: derived.listSource === "aggregate" ? "read from the snapshot artifact list" : derived.listSource === "handoffs" ? "read from the handoff history (one entry per round)" : derived.listSource === "handoffs+receipts" ? "read from the handoff history, plus the stage receipts it does not name" : "read from the stage receipts",
-		rows,
-		refusals: derived.refusals,
-		emptyText: "This ticket declares no artifacts.",
-		verdict,
-		qcText: "QC red/green: no data face on this ticket yet."
-	};
-}
-//#endregion
-//#region src/client/artifact-view-css.ts
-/**
-* artifact-view-css.ts — the six views' stylesheet (epic artifact-face, slice 3,
-* ticket t261030-36). A `.ts` module on purpose: every color is a theme token with a hex
-* fallback, and the L2 battery imports this string to check the token discipline without
-* a browser or a `.tsx` loader.
-*/
-/** Every color is a theme token with a hex fallback (the palette gates read this form). */
-const ARTIFACT_VIEW_CSS = `
-.wb-av{margin-top:6px;padding-top:6px;border-top:1px dashed var(--dsw-derive-border,#d0d7de);font-size:12px;color:var(--dsw-derive-fg,#1f2328)}
-.wb-av-body{display:flex;flex-direction:column;gap:4px}
-.wb-av-toggle,.wb-av-retry,.wb-av-thumb{font:inherit;color:var(--dsw-derive-accent,#0969da);background:none;border:0;padding:0;cursor:pointer;text-align:left}
-.wb-av-thumb{padding:0;border:0;background:none}
-.wb-av-state{color:var(--dsw-derive-warn-deep,#7d4e00)}
-.wb-av-note{color:var(--dsw-derive-muted,#57606a)}
-.wb-av-meta{color:var(--dsw-derive-muted,#57606a)}
-.wb-av-source{font-family:ui-monospace,monospace;font-size:11px;word-break:break-all}
-.wb-av-strong{font-weight:600}
-.wb-av-img{display:block;max-width:100%;max-height:240px;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-av-pre{margin:0;padding:6px 8px;max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word;
-  font-family:ui-monospace,monospace;font-size:11px;background:var(--dsw-derive-surface,#f6f8fa);
-  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px}
-.wb-av-table{width:100%;border-collapse:collapse;font-size:11px}
-.wb-av-table th,.wb-av-table td{border:1px solid var(--dsw-derive-border,#d0d7de);padding:2px 5px;text-align:left;vertical-align:top}
-.wb-av-table th{background:var(--dsw-derive-surface,#f6f8fa);font-weight:600}
-.wb-av-tree{margin:0;padding-left:14px;list-style:none}
-.wb-av-tree li{margin:1px 0}
-.wb-av-key{font-family:ui-monospace,monospace}
-.wb-av-val{font-family:ui-monospace,monospace;color:var(--dsw-derive-fg,#1f2328)}
-.wb-av-file{margin-top:4px}
-.wb-av-file-head{display:flex;gap:8px;align-items:baseline}
-.wb-av-hunk{margin-top:2px;border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:6px;overflow:hidden}
-.wb-av-hunk-head{padding:2px 6px;font-family:ui-monospace,monospace;font-size:10px;color:var(--dsw-derive-muted,#57606a);background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-av-dline{display:flex;gap:6px;padding:0 6px;font-family:ui-monospace,monospace;font-size:11px;white-space:pre-wrap;word-break:break-word}
-.wb-av-dline[data-kind=added]{background:var(--dsw-derive-success-bg,#dafbe1);color:var(--dsw-derive-success-deep,#116329)}
-.wb-av-dline[data-kind=removed]{background:var(--dsw-derive-danger-bg,#ffebe9);color:var(--dsw-derive-danger-solid,#d1242f)}
-.wb-av-ln{min-width:2.5em;text-align:right;color:var(--dsw-derive-muted,#57606a)}
-.wb-av-mark{min-width:1em}
-.wb-av-run{margin-top:6px}
-.wb-av-run-head{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
-.wb-av-verdict{font-weight:600}
-.wb-av-verdict[data-verdict=green]{color:var(--dsw-derive-success,#1a7f37)}
-.wb-av-verdict[data-verdict=red]{color:var(--dsw-derive-danger,#cf222e)}
-.wb-av-verdict[data-verdict=none]{color:var(--dsw-derive-muted,#57606a)}
-.wb-av-counts{color:var(--dsw-derive-muted,#57606a)}
-.wb-av-entry{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;padding:1px 0}
-.wb-av-dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:0 0 auto}
-.wb-av-dot[data-color=green]{background:var(--dsw-derive-success,#1a7f37)}
-.wb-av-dot[data-color=red]{background:var(--dsw-derive-danger,#cf222e)}
-.wb-av-dot[data-color=neutral]{background:var(--dsw-derive-muted,#57606a)}
-.wb-av-tag{font-size:10px;color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:5px;padding:0 4px}
-.wb-av-action{color:var(--dsw-derive-accent,#0969da)}
-`;
-//#endregion
-//#region src/client/lightbox-model.ts
-/**
-* lightbox-model.ts — the shared lightbox's pure contract (epic artifact-face, slice 3,
-* ticket t261030-36). Extracted from `index.tsx` so the screenshot-evidence lightbox and
-* the artifact image view use ONE component, ONE key contract and ONE navigation rule.
-*
-* No React, no DOM, no node imports: the console bundle carries it, `smoke/evidence-lightbox.mjs`
-* loads the built bundle and asserts the re-exported names, and the L1 battery drives the
-* malformed-input cases directly.
-*/
-/** The key contract: Esc closes; the arrows page only outside an editable target. */
-const LIGHTBOX_KEYS = {
-	close: "Escape",
-	prev: "ArrowLeft",
-	next: "ArrowRight"
-};
-/**
-* Cycle `index` by `delta` over a list. Malformed input (an empty list, an out-of-range or
-* non-integer index, a non-integer delta) lands on a safe index and never throws: while the
-* lightbox is open the list can shrink when its source is re-read.
-*/
-function lightboxNav(items, index, delta) {
-	const n = Array.isArray(items) ? items.length : 0;
-	if (n <= 0) return 0;
-	return (((typeof index === "number" && Number.isInteger(index) && index >= 0 && index < n ? index : 0) + (typeof delta === "number" && Number.isInteger(delta) ? delta : 0)) % n + n) % n;
-}
-//#endregion
-//#region src/client/lightbox.tsx
-/**
-* lightbox.tsx — the shared overlay (epic artifact-face, slice 3, ticket t261030-36).
-*
-* Extracted from `index.tsx`, where it served the screenshot-evidence list only. The
-* artifact image view uses the SAME component, so both faces keep the same guards:
-*   - Esc closes (any focus);
-*   - the arrow keys page only when the focus is outside an editable control, so typing
-*     in an input does not page the overlay;
-*   - a click on the backdrop closes, a click on the image does not;
-*   - the `keydown` listener and the broken-image state are reclaimed on unmount.
-*
-* The component is a projection: the caller owns the item list and the open index.
-*/
-/** True when the event target is an editable control (typing moves the caret, not the page). */
-function isEditableTarget$1(t) {
-	if (!(t instanceof HTMLElement)) return false;
-	return t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable;
-}
-function Lightbox({ items, index, onClose, onNav, kindLabel }) {
-	(0, react.useEffect)(() => {
-		const h = (e) => {
-			if (e.key === LIGHTBOX_KEYS.close) {
-				e.preventDefault();
-				onClose();
-			} else if (e.key === LIGHTBOX_KEYS.prev && !isEditableTarget$1(e.target)) {
-				e.preventDefault();
-				onNav(items, index, -1);
-			} else if (e.key === LIGHTBOX_KEYS.next && !isEditableTarget$1(e.target)) {
-				e.preventDefault();
-				onNav(items, index, 1);
-			}
-		};
-		document.addEventListener("keydown", h);
-		return () => document.removeEventListener("keydown", h);
-	}, [
-		items,
-		index,
-		onClose,
-		onNav
-	]);
-	const f = items[index] ?? items[0];
-	const [broken, setBroken] = (0, react.useState)(false);
-	(0, react.useEffect)(() => {
-		setBroken(false);
-	}, [f?.src]);
-	if (!f) return null;
-	const word = kindLabel ?? "Image";
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "wb-lb",
-		onClick: onClose,
-		"data-testid": "lightbox",
-		children: [
-			items.length > 1 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-				type: "button",
-				className: "wb-lb-nav",
-				"aria-label": "Previous",
-				onClick: (e) => {
-					e.stopPropagation();
-					onNav(items, index, -1);
-				},
-				children: "‹"
-			}),
-			broken ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-lb-miss",
-				children: [
-					word,
-					" failed to load: ",
-					f.name
-				]
-			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-				className: "wb-lb-img",
-				alt: f.alt ?? f.name,
-				src: f.src,
-				onClick: (e) => e.stopPropagation(),
-				onError: () => setBroken(true)
-			}),
-			items.length > 1 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-				type: "button",
-				className: "wb-lb-nav",
-				"aria-label": "Next",
-				onClick: (e) => {
-					e.stopPropagation();
-					onNav(items, index, 1);
-				},
-				children: "›"
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-lb-bar",
-				onClick: (e) => e.stopPropagation(),
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: items.length > 0 ? `${index + 1} / ${items.length}` : "0 / 0" }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-lb-name",
-						children: f.name
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: "wb-lb-close",
-						onClick: onClose,
-						children: "Close (Esc)"
-					})
-				]
-			})
-		]
-	});
-}
-//#endregion
-//#region src/client/artifact-view-model.ts
-/**
-* artifact-view-model.ts — the six built-in artifact views (epic artifact-face, slice 3,
-* ticket t261030-36). ONE declared artifact, ONE body; the frame owns the row list, the
-* order, the byte link and the machine verdict.
-*
-* This module holds every decision. `artifact-view.tsx` is the React projection.
-* Pure: no React, no DOM, no node built-ins, so the L1 battery drives it directly.
-*
-* Reuse (one rule, one home):
-*   - the kind vocabulary is `ARTIFACT_KINDS` from the frame model (never a second list);
-*   - receipt-shaped ledger documents go through `buildChecksDetail` from `lane-map-model.ts`,
-*     the ONE gate-row reader (script `{check, level, count}` and agent `{item, by, done,
-*     green}` shapes; a conflicting row resolves red; no signal resolves red);
-*   - a unified diff goes through `parseUnifiedDiff` from `diff-rows-model.ts`; this module
-*     only splits a multi-file diff into files and clips the display.
-*/
-const VIEW_KINDS = ARTIFACT_KINDS;
-/** English titles (host order 260925: console copy is English). */
-const VIEW_TITLE = {
-	image: "Image",
-	text: "Text",
-	structure: "Structure",
-	diff: "Diff",
-	ledger: "Ledger",
-	external: "External"
-};
-function blankPlan(kind, why) {
-	return {
-		body: false,
-		read: "none",
-		href: "",
-		kind,
-		title: "",
-		sizeText: "",
-		timeText: "",
-		state: "",
-		why
-	};
-}
-function filledPlan(row, href, kind, read, why) {
-	return {
-		body: true,
-		read,
-		href: typeof href === "string" ? href : "",
-		kind,
-		title: row.title,
-		sizeText: row.sizeText,
-		timeText: row.timeText,
-		state: row.state,
-		why
-	};
-}
-/** The three refusals every view shares: a degraded row, no servable bytes, an unknown kind. */
-function gate(row, kind) {
-	if (row === null || typeof row !== "object") return blankPlan(kind, "no row was supplied");
-	if (row.card !== "row") return blankPlan(kind, "the frame marked this row degraded");
-	if (row.bytesHref === null || row.bytesHref === "") return blankPlan(kind, row.bytesRefusal || "the frame offers no servable bytes");
-	if (row.kindKnown !== true) return blankPlan(kind, "the kind is not recognized");
-	return null;
-}
-const viewImage = (row, href) => {
-	const refused = gate(row, "image");
-	if (refused !== null) return refused;
-	return imageIsInline(row.source) ? filledPlan(row, href, "image", "image", "") : filledPlan(row, href, "image", "none", "The host serves this image as a download, so the console shows its metadata.");
-};
-const viewText = (row, href) => gate(row, "text") ?? filledPlan(row, href, "text", "text", "");
-const viewStructure = (row, href) => gate(row, "structure") ?? filledPlan(row, href, "structure", "text", "");
-const viewDiff = (row, href) => gate(row, "diff") ?? filledPlan(row, href, "diff", "text", "");
-const viewLedger = (row, href) => gate(row, "ledger") ?? filledPlan(row, href, "ledger", "text", "");
-const viewExternal = (row, href) => gate(row, "external") ?? filledPlan(row, href, "external", "none", "");
-/** The built-in registry this slice ships; slice 6 will add project views beside it. */
-const ARTIFACT_VIEWS = {
-	image: viewImage,
-	text: viewText,
-	structure: viewStructure,
-	diff: viewDiff,
-	ledger: viewLedger,
-	external: viewExternal
-};
-/**
-* Map a declared kind to its view. An unknown kind maps to the external view — the slice-6
-* registry contract. In this slice an unknown-kind row never reaches a view body: the frame
-* already drew its degrade card.
-*/
-function resolveArtifactView(kind) {
-	const k = typeof kind === "string" ? kind : "";
-	return VIEW_KINDS.includes(k) ? ARTIFACT_VIEWS[k] : viewExternal;
-}
-/**
-* THE render rule. `href` is the link the frame built for this row (the view never builds
-* one); it is optional because the rule also answers "does this row get a body at all",
-* which the frame's call site and this component both ask. Three row classes produce no
-* read at all: a degrade row, a row the frame marked `card === 'row'` but offered no
-* servable bytes for, and a non-inline image (the host serves SVG and unknown suffixes as a
-* download, so the image cannot be shown).
-*/
-function planArtifactBody(row, href) {
-	return resolveArtifactView(row === null || typeof row !== "object" ? "" : row.kind)(row, href);
-}
-/** The gate the frame's call site and the component both use (defined from the plan). */
-function shouldRenderBody(row, href) {
-	return planArtifactBody(row, href).body;
-}
-/** The suffixes the host serves inline as an image (mirrors `artifactContentType`). */
-const INLINE_IMAGE_SUFFIXES = [
-	".png",
-	".jpg",
-	".jpeg",
-	".webp",
-	".gif"
-];
-/** Markdown documents (`classifyPath` in `src/host/changes.ts` uses the same set). */
-const MARKDOWN_SUFFIXES = [".md", ".markdown"];
-function sourceSuffix(source) {
-	const s = typeof source === "string" ? source.replace(/\\/g, "/") : "";
-	const base = s.slice(s.lastIndexOf("/") + 1);
-	const dot = base.lastIndexOf(".");
-	return dot > 0 ? base.slice(dot).toLowerCase() : "";
-}
-function imageIsInline(source) {
-	return INLINE_IMAGE_SUFFIXES.includes(sourceSuffix(source));
-}
-function isMarkdownSource(source) {
-	return MARKDOWN_SUFFIXES.includes(sourceSuffix(source));
-}
-function errorText(err) {
-	if (err instanceof Error) return err.message;
-	return String(err);
-}
-function isAbort(err, signal) {
-	if (signal !== void 0 && signal.aborted === true) return true;
-	return err instanceof Error && err.name === "AbortError";
-}
-async function readErrorBody(res) {
-	if (typeof res.json !== "function") return "";
-	try {
-		const body = await res.json();
-		if (body !== null && typeof body === "object") {
-			const record = body;
-			const code = typeof record.code === "string" ? record.code : "";
-			const err = typeof record.error === "string" ? record.error : "";
-			if (code !== "" && err !== "") return `${code}: ${err}`;
-			if (code !== "") return code;
-			if (err !== "") return err;
-		}
-	} catch {}
-	return "";
-}
-/**
-* Read one artifact's text through the host's read-only route. Every failure is named:
-* an HTTP status (with the route's own `error` when it answers JSON), a non-text content
-* type, a network error, or an abort. Never throws.
-*/
-async function readArtifactText(href, fetchImpl, signal) {
-	let res;
-	try {
-		res = await fetchImpl(href, {
-			method: "GET",
-			signal,
-			headers: { accept: "text/plain" }
-		});
-	} catch (err) {
-		if (isAbort(err, signal)) return {
-			ok: false,
-			kind: "aborted",
-			status: 0,
-			message: "The read was cancelled."
-		};
-		return {
-			ok: false,
-			kind: "network",
-			status: 0,
-			message: errorText(err)
-		};
-	}
-	if (!res.ok) {
-		const detail = await readErrorBody(res);
-		return {
-			ok: false,
-			kind: "http",
-			status: res.status,
-			message: `HTTP ${res.status}${detail === "" ? "" : `: ${detail}`}`
-		};
-	}
-	const contentType = (res.headers?.get("content-type") ?? "").toLowerCase();
-	if (contentType !== "" && !contentType.startsWith("text/")) return {
-		ok: false,
-		kind: "content-type",
-		status: res.status,
-		message: `The host answered ${contentType}; the console reads text only.`
-	};
-	try {
-		return {
-			ok: true,
-			text: await res.text()
-		};
-	} catch (err) {
-		if (isAbort(err, signal)) return {
-			ok: false,
-			kind: "aborted",
-			status: 0,
-			message: "The read was cancelled."
-		};
-		return {
-			ok: false,
-			kind: "network",
-			status: 0,
-			message: errorText(err)
-		};
-	}
-}
-/**
-* The only read entry the component uses: a plan that does not need text returns null and
-* NEVER calls the reader (the zero-read rule for degrade, not-servable, external and image
-* rows).
-*/
-async function runBodyRead(plan, read, signal) {
-	if (plan === null || typeof plan !== "object") return null;
-	if (plan.body !== true || plan.read !== "text") return null;
-	return read(plan.href, signal);
-}
-const TEXT_DISPLAY_MAX_CHARS = 2e5;
-const TEXT_DISPLAY_MAX_LINES = 5e3;
-const DIFF_DISPLAY_MAX_ROWS = 2e3;
-function textLooksBinary(text) {
-	if (typeof text !== "string") return false;
-	return text.includes("\0") || text.includes("�");
-}
-/** Clip text for the page and say that it is partial (the original stays one click away). */
-function clipText(text, maxChars = TEXT_DISPLAY_MAX_CHARS, maxLines = TEXT_DISPLAY_MAX_LINES) {
-	const src = typeof text === "string" ? text : "";
-	const totalLines = src === "" ? 0 : src.split("\n").length;
-	let shown = src;
-	let truncated = false;
-	if (shown.length > maxChars) {
-		shown = shown.slice(0, maxChars);
-		truncated = true;
-	}
-	const lines = shown === "" ? [] : shown.split("\n");
-	if (lines.length > maxLines) {
-		lines.length = maxLines;
-		truncated = true;
-	}
-	return {
-		text: lines.join("\n"),
-		lines,
-		truncated,
-		note: truncated ? `Showing the first ${lines.length} of ${totalLines} lines; the original is one click away.` : ""
-	};
-}
-function buildTextView(text, source) {
-	const clip = clipText(text);
-	return {
-		mode: isMarkdownSource(source) ? "markdown" : "text",
-		text: clip.text,
-		note: clip.note
-	};
-}
-const STRUCTURE_KEYS = [
-	"entries",
-	"items",
-	"rows",
-	"units",
-	"data"
-];
-/** `units[]`, `data.items`, `$.rows[0].cells` -> path segments (a trailing `[]` is noise). */
-function parseShapePath(shape) {
-	const raw = typeof shape === "string" ? shape.trim() : "";
-	if (raw === "") return [];
-	return (raw.startsWith("$.") ? raw.slice(2) : raw.startsWith("$") ? raw.slice(1) : raw).split(".").map((seg) => seg.replace(/\[\]$/, "").trim()).filter((seg) => seg !== "");
-}
-function readShapeTarget(doc, path) {
-	let cur = doc;
-	for (const seg of path) {
-		if (cur === null || typeof cur !== "object") return {
-			found: false,
-			value: void 0
-		};
-		if (Array.isArray(cur)) {
-			const idx = /^\d+$/.test(seg) ? Number(seg) : -1;
-			if (idx < 0 || idx >= cur.length) return {
-				found: false,
-				value: void 0
-			};
-			cur = cur[idx];
-		} else {
-			const record = cur;
-			if (!Object.prototype.hasOwnProperty.call(record, seg)) return {
-				found: false,
-				value: void 0
-			};
-			cur = record[seg];
-		}
-	}
-	return {
-		found: true,
-		value: cur
-	};
-}
-function scalarText(value) {
-	if (value === null) return "null";
-	if (value === void 0) return "";
-	if (typeof value === "string") return value.length > 500 ? `${value.slice(0, 500)}…` : value;
-	if (typeof value === "number" || typeof value === "boolean") return String(value);
-	try {
-		const text = JSON.stringify(value);
-		if (typeof text === "string") return text.length > 200 ? `${text.slice(0, 200)}…` : text;
-	} catch {}
-	return "";
-}
-function buildNode(label, value, depth, budget) {
-	if (budget.left <= 0) return null;
-	budget.left -= 1;
-	if (value === null || typeof value !== "object") return {
-		label,
-		value: scalarText(value),
-		kind: "scalar",
-		depth,
-		children: []
-	};
-	const array = Array.isArray(value);
-	const node = {
-		label,
-		value: array ? `[${value.length}]` : "",
-		kind: array ? "array" : "object",
-		depth,
-		children: []
-	};
-	if (depth >= 6) return node;
-	const entries = array ? value.map((item, i) => [String(i), item]) : Object.entries(value);
-	for (const [key, item] of entries) {
-		const child = buildNode(key, item, depth + 1, budget);
-		if (child === null) break;
-		node.children.push(child);
-	}
-	return node;
-}
-function buildTree(value, note) {
-	if (value === null || typeof value !== "object") return {
-		mode: "tree",
-		nodes: [{
-			label: "value",
-			value: scalarText(value),
-			kind: "scalar",
-			depth: 0,
-			children: []
-		}],
-		hidden: 0,
-		note
-	};
-	const budget = { left: 500 };
-	const entries = Array.isArray(value) ? value.map((item, i) => [String(i), item]) : Object.entries(value);
-	const nodes = [];
-	let hidden = 0;
-	for (const [key, item] of entries) {
-		const node = buildNode(key, item, 0, budget);
-		if (node === null) {
-			hidden += 1;
-			continue;
-		}
-		nodes.push(node);
-	}
-	return {
-		mode: "tree",
-		nodes,
-		hidden,
-		note: note === "" ? hidden > 0 ? `${hidden} more entries are not shown.` : "" : `${note}${hidden > 0 ? ` ${hidden} more entries are not shown.` : ""}`
-	};
-}
-function looksLikeRecord(value) {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-function buildTable(rows, note) {
-	const totalRows = rows.length;
-	const records = rows.length > 0 && rows.every(looksLikeRecord);
-	let columns;
-	if (records) {
-		const seen = [];
-		for (const row of rows.slice(0, 20)) for (const key of Object.keys(row)) if (!seen.includes(key)) seen.push(key);
-		columns = seen.slice(0, 12);
-	} else columns = ["value"];
-	const shown = rows.slice(0, 200);
-	const body = shown.map((row) => columns.map((column) => {
-		if (!records) return scalarText(row);
-		const record = row;
-		return Object.prototype.hasOwnProperty.call(record, column) ? scalarText(record[column]) : "";
-	}));
-	const notes = [];
-	if (note !== "") notes.push(note);
-	if (records && rows.length > 0) {
-		const seenCount = new Set(rows.slice(0, 20).flatMap((row) => Object.keys(row))).size;
-		if (seenCount > 12) notes.push(`Showing the first ${columns.length} of ${seenCount} columns.`);
-	}
-	if (totalRows > shown.length) notes.push(`Showing the first ${shown.length} of ${totalRows} rows.`);
-	return {
-		mode: "table",
-		columns,
-		rows: body,
-		totalRows,
-		shownRows: shown.length,
-		note: notes.join(" ")
-	};
-}
-function buildCsvTable(text) {
-	const parsed = parseCsvRows(text);
-	if (parsed.ok !== true) return {
-		mode: "text",
-		text: clipText(text).text,
-		note: `The CSV could not be read (${parsed.reason}); shown as text.`
-	};
-	const rows = parsed.rows;
-	if (rows.length === 0) return {
-		mode: "text",
-		text: "",
-		note: "The CSV is empty."
-	};
-	const header = rows[0].map((cell, i) => cell.trim() !== "" ? cell.trim() : `column ${i + 1}`);
-	const columns = header.slice(0, 12);
-	const body = rows.slice(1);
-	const ragged = body.filter((row) => row.length !== header.length).length;
-	const shown = body.slice(0, 200).map((row) => columns.map((_, i) => scalarText(row[i] ?? "")));
-	const notes = [];
-	if (header.length > columns.length) notes.push(`Showing the first ${columns.length} of ${header.length} columns.`);
-	if (body.length > shown.length) notes.push(`Showing the first ${shown.length} of ${body.length} rows.`);
-	if (ragged > 0) notes.push(`${ragged} rows have a different column count; missing cells are blank.`);
-	return {
-		mode: "table",
-		columns,
-		rows: shown,
-		totalRows: body.length,
-		shownRows: shown.length,
-		note: notes.join(" ")
-	};
-}
-function parseCsvRows(text) {
-	const rows = [];
-	let row = [];
-	let field = "";
-	let inQuotes = false;
-	const src = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-	for (let i = 0; i < src.length; i += 1) {
-		const ch = src[i];
-		if (inQuotes) if (ch === "\"") if (src[i + 1] === "\"") {
-			field += "\"";
-			i += 1;
-		} else inQuotes = false;
-		else field += ch;
-		else if (ch === "\"") inQuotes = true;
-		else if (ch === ",") {
-			row.push(field);
-			field = "";
-		} else if (ch === "\n") {
-			row.push(field);
-			rows.push(row);
-			row = [];
-			field = "";
-		} else field += ch;
-	}
-	if (inQuotes) return {
-		ok: false,
-		reason: "the text ends inside a quoted field"
-	};
-	row.push(field);
-	rows.push(row);
-	if (rows.length > 1 && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === "") rows.pop();
-	return {
-		ok: true,
-		rows
-	};
-}
-function buildStructureView(text, source, shape) {
-	const src = typeof text === "string" ? text : "";
-	if (src.trim() === "") return {
-		mode: "text",
-		text: "",
-		note: "The file is empty."
-	};
-	const suffix = sourceSuffix(source);
-	if (suffix === ".json") {
-		let doc;
-		try {
-			doc = JSON.parse(src);
-		} catch (err) {
-			return {
-				mode: "text",
-				text: clipText(src).text,
-				note: `Not valid JSON (${errorText(err)}); shown as text.`
-			};
-		}
-		const path = parseShapePath(shape);
-		if (path.length > 0) {
-			const hit = readShapeTarget(doc, path);
-			if (hit.found !== true) return buildTree(doc, `Shape '${path.join(".")}' was not found; showing the whole document.`);
-			if (Array.isArray(hit.value)) return buildTable(hit.value, `Shape '${path.join(".")}' is the main table.`);
-			if (looksLikeRecord(hit.value)) return buildTree(hit.value, `Shape '${path.join(".")}' resolved to an object; shown as a tree.`);
-			return buildTree(doc, `Shape '${path.join(".")}' names a scalar; showing the whole document.`);
-		}
-		return buildTree(doc, "");
-	}
-	if (suffix === ".csv") return buildCsvTable(src);
-	if (suffix === ".yaml" || suffix === ".yml" || suffix === ".toml") {
-		const clip = clipText(src);
-		return {
-			mode: "lines",
-			lines: clip.lines,
-			note: `Shown as indented text (the console has no ${suffix.slice(1).toUpperCase()} parser).${clip.note === "" ? "" : ` ${clip.note}`}`
-		};
-	}
-	const clip = clipText(src);
-	return {
-		mode: "text",
-		text: clip.text,
-		note: `The console cannot read this as structured data; shown as text.${clip.note === "" ? "" : ` ${clip.note}`}`
-	};
-}
-function diffChunks(text) {
-	const lines = text.split("\n");
-	const chunks = [];
-	let current = null;
-	for (const line of lines) {
-		if (line.startsWith("diff --git ")) {
-			current = {
-				name: "",
-				lines: [line]
-			};
-			chunks.push(current);
-			continue;
-		}
-		if (current === null) {
-			current = {
-				name: "",
-				lines: []
-			};
-			chunks.push(current);
-		}
-		current.lines.push(line);
-	}
-	return chunks.map((chunk) => {
-		let name = "";
-		const header = chunk.lines.find((l) => l.startsWith("diff --git "));
-		if (header !== void 0) {
-			const m = /\sb\/(.+)$/.exec(header);
-			if (m !== null) name = m[1].trim();
-		}
-		if (name === "") {
-			const plus = chunk.lines.find((l) => l.startsWith("+++ "));
-			if (plus !== void 0 && !plus.startsWith("+++ /dev/null")) name = plus.slice(4).replace(/^[ab]\//, "").trim();
-		}
-		return {
-			name: name === "" ? "(diff)" : name,
-			text: chunk.lines.join("\n")
-		};
-	});
-}
-/**
-* Build the diff body. A multi-file diff is parsed one file at a time, so each file keeps
-* its own hunks and counts. A text that contains no readable hunk falls back to a named
-* text body (never a blank panel).
-*/
-function buildDiffView(text) {
-	const src = typeof text === "string" ? text : "";
-	if (src.trim() === "") return {
-		mode: "text",
-		text: "",
-		note: "The diff is empty."
-	};
-	const chunks = diffChunks(src);
-	const files = [];
-	let added = 0;
-	let removed = 0;
-	let rowsLeft = DIFF_DISPLAY_MAX_ROWS;
-	let anyRow = false;
-	let truncationNoted = false;
-	const notes = [];
-	for (const chunk of chunks) {
-		const parsed = parseUnifiedDiff(chunk.text);
-		if (parsed.ok !== true) {
-			files.push({
-				name: chunk.name,
-				hunks: [],
-				added: 0,
-				removed: 0,
-				note: `${parsed.state}: ${parsed.reason}`
-			});
-			continue;
-		}
-		added += parsed.added;
-		removed += parsed.removed;
-		const hunks = [];
-		for (const hunk of parsed.hunks) {
-			const slice = parsed.rows.slice(hunk.firstRow, hunk.firstRow + hunk.rowCount);
-			const lines = [];
-			let truncated = false;
-			for (const row of slice) {
-				if (rowsLeft <= 0) {
-					truncated = true;
-					break;
-				}
-				rowsLeft -= 1;
-				lines.push({
-					kind: row.kind,
-					text: row.text,
-					oldLine: row.oldLine,
-					newLine: row.newLine
-				});
-			}
-			if (lines.length > 0) anyRow = true;
-			if (truncated && !truncationNoted) {
-				truncationNoted = true;
-				notes.push("Showing the first rows only; the original is one click away.");
-			}
-			hunks.push({
-				label: hunk.label,
-				lines,
-				truncated
-			});
-		}
-		files.push({
-			name: chunk.name,
-			hunks,
-			added: parsed.added,
-			removed: parsed.removed,
-			note: parsed.skipped > 0 ? `${parsed.skipped} lines were skipped as preamble or noise.` : ""
-		});
-	}
-	if (!anyRow) {
-		const reason = files.map((f) => `${f.name}: ${f.note}`).filter((x) => x !== "").join("; ");
-		return {
-			mode: "text",
-			text: clipText(src).text,
-			note: `Not a readable unified diff (${reason === "" ? "no hunk and no changed line" : reason}); shown as text.`
-		};
-	}
-	const head = [];
-	if (files.length > 1) head.push(`${files.length} files.`);
-	head.push(...notes);
-	return {
-		mode: "diff",
-		files,
-		added,
-		removed,
-		note: head.join(" ")
-	};
-}
-const GREEN_WORDS = /* @__PURE__ */ new Set([
-	"ok",
-	"pass",
-	"passed",
-	"green",
-	"success",
-	"succeeded",
-	"true",
-	"yes",
-	"done"
-]);
-const RED_WORDS = /* @__PURE__ */ new Set([
-	"fail",
-	"failed",
-	"red",
-	"error",
-	"false",
-	"no",
-	"blocked"
-]);
-/** Map a declared status to a color. An unknown or absent status is neutral, never green. */
-function ledgerColor(status) {
-	if (status === true) return "green";
-	if (status === false) return "red";
-	if (typeof status !== "string") return "neutral";
-	const word = status.trim().toLowerCase();
-	if (GREEN_WORDS.has(word)) return "green";
-	if (RED_WORDS.has(word)) return "red";
-	return "neutral";
-}
-function asString(value) {
-	return typeof value === "string" ? value : "";
-}
-function statusOf(record) {
-	for (const key of [
-		"status",
-		"state",
-		"result",
-		"ok",
-		"pass",
-		"green",
-		"done"
-	]) if (Object.prototype.hasOwnProperty.call(record, key)) return record[key];
-}
-const LEDGER_NOTE = "Entries read from this artifact; the frame header carries the ticket machine verdict.";
-/**
-* Receipt-shaped ledger documents go through the ONE gate-row reader
-* (`buildChecksDetail`): both real shapes, the conflict rule and the no-signal rule stay
-* in one place. The run label is the artifact's own; a run without a name is named
-* "artifact" for display only.
-*/
-function receiptBody(runsRaw) {
-	const views = buildChecksDetail({ gate_runs: runsRaw.filter((run) => run !== null && typeof run === "object" && !Array.isArray(run)).map((run) => ({
-		...run,
-		stage: asString(run.stage) || asString(run.label) || "artifact"
-	})) });
-	const out = [];
-	let green = 0;
-	let red = 0;
-	for (const view of views) {
-		const entries = view.rows.map((row) => {
-			if (row.green) green += 1;
-			else red += 1;
-			return {
-				name: row.item,
-				color: row.green ? "green" : "red",
-				detail: row.detail ?? "",
-				note: row.note ?? "",
-				count: row.count === void 0 ? "" : String(row.count)
-			};
-		});
-		const verdict = view.verdictSource === "rows" && view.rows.length === 0 ? "none" : view.green ? "green" : "red";
-		out.push({
-			label: view.label,
-			verdict,
-			disagreement: view.disagreement,
-			redCount: view.redCount,
-			entries
-		});
-	}
-	return {
-		mode: "receipt",
-		runs: out,
-		green,
-		red,
-		neutral: 0,
-		note: LEDGER_NOTE
-	};
-}
-function genericBody(list) {
-	const shown = list.slice(0, 500);
-	let green = 0;
-	let red = 0;
-	let neutral = 0;
-	const entries = shown.map((raw, i) => {
-		const record = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
-		const name = record === null ? scalarText(raw) || `entry ${i + 1}` : asString(record.name) || asString(record.title) || asString(record.label) || asString(record.id) || asString(record.key) || `entry ${i + 1}`;
-		const color = record === null ? "neutral" : ledgerColor(statusOf(record));
-		if (color === "green") green += 1;
-		else if (color === "red") red += 1;
-		else neutral += 1;
-		return {
-			name,
-			color,
-			detail: record === null ? "" : asString(record.detail) || asString(record.note) || asString(record.message),
-			note: record === null ? "" : asString(record.note),
-			count: record !== null && typeof record.count === "number" && Number.isFinite(record.count) ? String(record.count) : ""
-		};
-	});
-	const hidden = list.length - shown.length;
-	return {
-		mode: "generic",
-		entries,
-		green,
-		red,
-		neutral,
-		note: hidden > 0 ? `${LEDGER_NOTE} Showing the first ${shown.length} of ${list.length} entries.` : LEDGER_NOTE
-	};
-}
-function buildLedgerView(text, shape) {
-	const src = typeof text === "string" ? text : "";
-	if (src.trim() === "") return {
-		mode: "text",
-		text: "",
-		note: "The ledger is empty."
-	};
-	let doc;
-	try {
-		doc = JSON.parse(src);
-	} catch (err) {
-		return {
-			mode: "text",
-			text: clipText(src).text,
-			note: `Not valid JSON (${errorText(err)}); shown as text.`
-		};
-	}
-	if (Array.isArray(doc)) return genericBody(doc);
-	if (doc !== null && typeof doc === "object") {
-		const record = doc;
-		if (Array.isArray(record.checks)) return receiptBody([record]);
-		if (Array.isArray(record.runs)) return receiptBody(record.runs);
-		const path = parseShapePath(shape);
-		if (path.length > 0) {
-			const hit = readShapeTarget(record, path);
-			if (hit.found === true && Array.isArray(hit.value)) return genericBody(hit.value);
-		}
-		for (const key of STRUCTURE_KEYS) {
-			const value = record[key];
-			if (Array.isArray(value)) return genericBody(value);
-		}
-		return {
-			mode: "text",
-			text: clipText(src).text,
-			note: "The ledger shape is not recognized; shown as text."
-		};
-	}
-	return {
-		mode: "text",
-		text: clipText(src).text,
-		note: "The ledger is a scalar; shown as text."
-	};
-}
-//#endregion
-//#region src/client/artifact-view.tsx
-/**
-* artifact-view.tsx — the six built-in artifact views (epic artifact-face, slice 3,
-* ticket t261030-36). One view draws ONE declared artifact. The frame owns the row list,
-* the order, the byte link and the machine verdict; a view never adds, hides or reorders
-* a row.
-*
-* Every decision lives in `artifact-view-model.ts`; this file is the React projection.
-* A text read starts only when the body is opened, and stops on close, on unmount and on a
-* ticket change (one AbortController per read). An image body uses the shared `Lightbox`
-* that the screenshot-evidence list also uses.
-*/
-/**
-* Read one text row. The effect aborts on close, on unmount and on a link change; a retry
-* bumps a nonce so the same link is read again on demand.
-*/
-function useArtifactRead(plan, open) {
-	const [state, setState] = (0, react.useState)({ phase: "idle" });
-	const [nonce, setNonce] = (0, react.useState)(0);
-	(0, react.useEffect)(() => {
-		if (!open) return;
-		const controller = new AbortController();
-		let live = true;
-		setState({ phase: "loading" });
-		const fetchImpl = globalThis.fetch;
-		runBodyRead(plan, (href, signal) => readArtifactText(href, fetchImpl, signal), controller.signal).then((result) => {
-			if (!live) return;
-			if (result === null) {
-				setState({ phase: "idle" });
-				return;
-			}
-			if (result.ok) {
-				setState({
-					phase: "ready",
-					text: result.text
-				});
-				return;
-			}
-			if (result.kind === "aborted") return;
-			setState({
-				phase: "error",
-				message: result.message
-			});
-		}).catch((err) => {
-			if (live) setState({
-				phase: "error",
-				message: err instanceof Error ? err.message : String(err)
-			});
-		});
-		return () => {
-			live = false;
-			controller.abort();
-		};
-	}, [
-		open,
-		plan.href,
-		plan.read,
-		nonce
-	]);
-	return {
-		...state,
-		retry: () => setNonce((n) => n + 1)
-	};
-}
-function ArtifactView({ row, ticketId, bytesHref }) {
-	const plan = planArtifactBody(row, bytesHref);
-	if (!plan.body) return null;
-	const kind = plan.kind;
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "wb-av",
-		"data-view-kind": kind,
-		"data-view-state": plan.read === "text" ? "lazy" : "ready",
-		"data-testid": `artifact-view-${kind}`,
-		"data-ticket": ticketId,
-		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: ARTIFACT_VIEW_CSS }),
-			kind === "image" && (plan.read === "image" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ImageBody, {
-				row,
-				plan
-			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExternalBody, {
-				row,
-				plan,
-				reason: plan.why
-			})),
-			kind === "external" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExternalBody, {
-				row,
-				plan,
-				reason: ""
-			}),
-			plan.read === "text" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TextBody, {
-				row,
-				plan
-			})
-		]
-	});
-}
-function ImageBody({ row, plan }) {
-	const [open, setOpen] = (0, react.useState)(false);
-	const [broken, setBroken] = (0, react.useState)(false);
-	const items = [{
-		name: row.title,
-		src: plan.href,
-		alt: row.title
-	}];
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "wb-av-body",
-		children: [
-			broken ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-av-state",
-				children: "The image could not be loaded. Use the original link on the row."
-			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-				type: "button",
-				className: "wb-av-thumb",
-				"aria-label": `Zoom in ${row.title}`,
-				onClick: () => setOpen(true),
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
-					className: "wb-av-img",
-					loading: "lazy",
-					alt: row.title,
-					src: plan.href,
-					onError: () => setBroken(true)
-				})
-			}),
-			!broken && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-av-note",
-				children: "Click the image to zoom."
-			}),
-			open && !broken && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Lightbox, {
-				items,
-				index: 0,
-				onClose: () => setOpen(false),
-				onNav: () => setOpen(true),
-				kindLabel: "Image"
-			})
-		]
-	});
-}
-function ExternalBody({ row, plan, reason }) {
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "wb-av-body",
-		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-av-strong",
-				children: row.title
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-av-source",
-				children: row.sourceLabel
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-av-meta",
-				children: [plan.sizeText, plan.timeText].filter((x) => x !== "").join(" · ")
-			}),
-			reason !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-av-note",
-				children: reason
-			}),
-			row.openHint !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-av-note",
-				children: ["Open with: ", row.openHint]
-			}),
-			plan.href !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
-				className: "wb-av-action",
-				href: plan.href,
-				target: "_blank",
-				rel: "noreferrer",
-				children: "Download original"
-			})
-		]
-	});
-}
-function TextBody({ row, plan }) {
-	const [open, setOpen] = (0, react.useState)(false);
-	const read = useArtifactRead(plan, open);
-	const title = VIEW_TITLE[plan.kind];
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "wb-av-body",
-		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-				type: "button",
-				className: "wb-av-toggle",
-				"aria-expanded": open,
-				"data-read-state": read.phase,
-				onClick: () => setOpen((value) => !value),
-				children: open ? `Hide ${title}` : `Show ${title}`
-			}),
-			open && read.phase === "loading" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-av-meta",
-				children: "Reading the artifact…"
-			}),
-			open && read.phase === "error" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-av-state",
-				children: [
-					"The artifact could not be read: ",
-					read.message,
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: "wb-av-retry",
-						onClick: read.retry,
-						children: "Retry"
-					})
-				]
-			}),
-			open && read.phase === "ready" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TextReady, {
-				row,
-				plan,
-				text: read.text ?? ""
-			})
-		]
-	});
-}
-function TextReady({ row, plan, text }) {
-	if (textLooksBinary(text)) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ExternalBody, {
-		row,
-		plan,
-		reason: "The file looks binary; the console shows its metadata only."
-	});
-	if (plan.kind === "text") {
-		const view = buildTextView(text, row.source);
-		if (view.mode === "markdown") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "wb-md",
-			"data-view-body": "markdown",
-			dangerouslySetInnerHTML: { __html: renderMarkdown(view.text) }
-		}), view.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "wb-av-note",
-			children: view.note
-		})] });
-		return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
-			className: "wb-av-pre",
-			"data-view-body": "text",
-			children: view.text
-		}), view.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "wb-av-note",
-			children: view.note
-		})] });
-	}
-	if (plan.kind === "structure") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(StructureBodyView, { body: buildStructureView(text, row.source, row.shape) });
-	if (plan.kind === "diff") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DiffBodyView, { body: buildDiffView(text) });
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LedgerBodyView, { body: buildLedgerView(text, row.shape) });
-}
-function StructureBodyView({ body }) {
-	if (body.mode === "table") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
-		className: "wb-av-table",
-		"data-view-body": "table",
-		children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tr", { children: body.columns.map((column) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", { children: column }, column)) }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: body.rows.map((cells, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tr", { children: cells.map((cell, j) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", { children: cell }, j)) }, i)) })]
-	}), body.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "wb-av-note",
-		children: body.note
-	})] });
-	if (body.mode === "tree") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
-		className: "wb-av-tree",
-		"data-view-body": "tree",
-		children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TreeNodes, { nodes: body.nodes })
-	}), body.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "wb-av-note",
-		children: body.note
-	})] });
-	if (body.mode === "lines") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
-		className: "wb-av-pre",
-		"data-view-body": "lines",
-		children: body.lines.join("\n")
-	}), body.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "wb-av-note",
-		children: body.note
-	})] });
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
-		className: "wb-av-pre",
-		"data-view-body": "text",
-		children: body.text
-	}), body.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "wb-av-note",
-		children: body.note
-	})] });
-}
-function TreeNodes({ nodes }) {
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_jsx_runtime.Fragment, { children: nodes.map((node, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("li", { children: node.kind === "scalar" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: [
-		/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-			className: "wb-av-key",
-			children: node.label
-		}),
-		": ",
-		/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-			className: "wb-av-val",
-			children: node.value
-		})
-	] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("summary", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-		className: "wb-av-key",
-		children: node.label
-	}), node.value !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-		className: "wb-av-meta",
-		children: [" ", node.value]
-	})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("ul", {
-		className: "wb-av-tree",
-		children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TreeNodes, { nodes: node.children })
-	})] }) }, `${node.label}-${i}`)) });
-}
-function DiffBodyView({ body }) {
-	if (body.mode === "text") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
-		className: "wb-av-pre",
-		"data-view-body": "text",
-		children: body.text
-	}), body.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "wb-av-note",
-		children: body.note
-	})] });
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "wb-av-counts",
-		children: [
-			body.note,
-			body.note === "" ? "" : " ",
-			"+",
-			body.added,
-			" -",
-			body.removed
-		]
-	}), body.files.map((file) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
-		className: "wb-av-file",
-		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-av-file-head",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-					className: "wb-av-key",
-					children: file.name
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-					className: "wb-av-meta",
-					children: [
-						"+",
-						file.added,
-						" -",
-						file.removed
-					]
-				})]
-			}),
-			file.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-av-note",
-				children: file.note
-			}),
-			file.hunks.map((hunk) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-av-hunk",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-av-hunk-head",
-						children: hunk.label
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						"data-view-body": "diff",
-						children: hunk.lines.map((line, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "wb-av-dline",
-							"data-kind": line.kind,
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-av-ln",
-									children: line.oldLine === null ? "" : line.oldLine
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-av-ln",
-									children: line.newLine === null ? "" : line.newLine
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-av-mark",
-									children: line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " "
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "wb-av-dtext",
-									children: line.text
-								})
-							]
-						}, i))
-					}),
-					hunk.truncated && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-av-note",
-						children: "Showing the first rows of this hunk; the original is one click away."
-					})
-				]
-			}, hunk.label))
-		]
-	}, file.name))] });
-}
-function LedgerEntries({ entries }) {
-	if (entries.length === 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "wb-av-note",
-		children: "No entries in this run."
-	});
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_jsx_runtime.Fragment, { children: entries.map((entry, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "wb-av-entry",
-		"data-color": entry.color,
-		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: "wb-av-dot",
-				"data-color": entry.color
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: "wb-av-meta",
-				children: entry.color
-			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: "wb-av-key",
-				children: entry.name
-			}),
-			entry.detail !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: "wb-av-meta",
-				children: entry.detail
-			}),
-			entry.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: "wb-av-note",
-				children: entry.note
-			}),
-			entry.count !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-				className: "wb-av-tag",
-				children: ["count ", entry.count]
-			})
-		]
-	}, `${entry.name}-${i}`)) });
-}
-function LedgerBodyView({ body }) {
-	if (body.mode === "text") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("pre", {
-		className: "wb-av-pre",
-		"data-view-body": "text",
-		children: body.text
-	}), body.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "wb-av-note",
-		children: body.note
-	})] });
-	if (body.mode === "generic") return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
-		/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "wb-av-counts",
-			"data-view-body": "ledger-generic",
-			children: [
-				"green ",
-				body.green,
-				" · red ",
-				body.red,
-				" · neutral ",
-				body.neutral
-			]
-		}),
-		/* @__PURE__ */ (0, react_jsx_runtime.jsx)(LedgerEntries, { entries: body.entries }),
-		body.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "wb-av-note",
-			children: body.note
-		})
-	] });
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
-		/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "wb-av-counts",
-			"data-view-body": "ledger-receipt",
-			children: [
-				"green ",
-				body.green,
-				" · red ",
-				body.red,
-				" · ",
-				body.runs.length,
-				" runs"
-			]
-		}),
-		body.runs.map((run, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
-			className: "wb-av-run",
-			children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-av-run-head",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-av-key",
-						children: run.label
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-av-verdict",
-						"data-verdict": run.verdict,
-						children: run.verdict === "none" ? "no written verdict" : run.verdict
-					}),
-					run.disagreement && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-av-note",
-						children: "The recorded verdict and its rows disagree; both are shown."
-					})
-				]
-			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LedgerEntries, { entries: run.entries })]
-		}, `${run.label}-${i}`)),
-		body.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "wb-av-note",
-			children: body.note
-		})
-	] });
-}
-//#endregion
 //#region src/client/terminal-face.ts
 /** 恒定兜底文案（与引擎 face 面语义一致；face 缺失时 UI 侧唯一免责声明源）。 */
 const TERMINAL_FACE_FALLBACKS = {
@@ -16153,7 +14521,7 @@ const TERMINAL_FACE_FALLBACKS = {
 	lastStageNote: "Last known stage unavailable: omitted rather than guessed"
 };
 /** str 消费：非字符串 → ''（畸形降级，不抛）。 */
-function strOf(v) {
+function strOf$1(v) {
 	return typeof v === "string" ? v : "";
 }
 /**
@@ -16161,7 +14529,7 @@ function strOf(v) {
 * 纯函数：不抛、不编造；缺什么显式写什么。
 */
 function terminalFaceView(face, receiptError) {
-	const errTxt = strOf(receiptError);
+	const errTxt = strOf$1(receiptError);
 	if (face === null || typeof face !== "object" || Array.isArray(face)) return {
 		execStatus: TERMINAL_FACE_FALLBACKS.execStatus,
 		reason: "",
@@ -16180,26 +14548,183 @@ function terminalFaceView(face, receiptError) {
 		closeTimeTxt: ""
 	};
 	const f = face;
-	const reason = strOf(f.reason);
+	const reason = strOf$1(f.reason);
 	const reasonAvailable = f.reason_available === true && reason !== "";
-	const lastStage = strOf(f.last_stage);
+	const lastStage = strOf$1(f.last_stage);
 	return {
-		execStatus: strOf(f.exec_status) || TERMINAL_FACE_FALLBACKS.execStatus,
+		execStatus: strOf$1(f.exec_status) || TERMINAL_FACE_FALLBACKS.execStatus,
 		reason,
 		reasonAvailable,
-		reasonNote: reasonAvailable ? strOf(f.reason_source) || "source: Temporal workflow execution failure info" : strOf(f.reason_source) || strOf(f.reason_unavailable_note) || TERMINAL_FACE_FALLBACKS.reasonNote,
+		reasonNote: reasonAvailable ? strOf$1(f.reason_source) || "source: Temporal workflow execution failure info" : strOf$1(f.reason_source) || strOf$1(f.reason_unavailable_note) || TERMINAL_FACE_FALLBACKS.reasonNote,
 		receiptError: errTxt,
-		snapshotNote: strOf(f.snapshot_note) || TERMINAL_FACE_FALLBACKS.snapshotNote,
+		snapshotNote: strOf$1(f.snapshot_note) || TERMINAL_FACE_FALLBACKS.snapshotNote,
 		lastStage,
-		lastStageNote: strOf(f.last_stage_note) || TERMINAL_FACE_FALLBACKS.lastStageNote,
-		ticketId: strOf(f.ticket_id),
-		project: strOf(f.project),
-		epic: strOf(f.epic),
-		instanceId: strOf(f.instance_id),
-		period: strOf(f.period),
-		startTimeTxt: strOf(f.start_time_txt),
-		closeTimeTxt: strOf(f.close_time_txt)
+		lastStageNote: strOf$1(f.last_stage_note) || TERMINAL_FACE_FALLBACKS.lastStageNote,
+		ticketId: strOf$1(f.ticket_id),
+		project: strOf$1(f.project),
+		epic: strOf$1(f.epic),
+		instanceId: strOf$1(f.instance_id),
+		period: strOf$1(f.period),
+		startTimeTxt: strOf$1(f.start_time_txt),
+		closeTimeTxt: strOf$1(f.close_time_txt)
 	};
+}
+//#endregion
+//#region src/client/read-state.ts
+/** Headlines per state (the ONLY place these words live). */
+const HEADLINES = {
+	no_poller: "No worker polls this ticket",
+	workflow_task_failed: "Workflow task failed — this ticket cannot be read",
+	terminal: "Ticket ended (terminal state)",
+	retained: "Read from retained state (workflow not running)",
+	retained_unavailable: "No retained state and the workflow is not readable",
+	not_found: "No such workflow",
+	transient: "Read failed (transient)",
+	internal: "Read failed (unexpected answer)"
+};
+/** What auto re-reading does, per state, in the operator's words. */
+const POLL_NOTES = {
+	no_poller: "Named state, slow re-read only: a worker must appear on this queue first.",
+	workflow_task_failed: "Deterministic state, not re-polled: retrying the read cannot help until the workflow task stops failing.",
+	terminal: "Terminal state, not re-polled: a closed workflow no longer answers.",
+	retained: "Read from the retained record, not re-polled as a live workflow read.",
+	retained_unavailable: "Not re-polled: neither a live read nor a retained record is available for this ticket.",
+	not_found: "Not re-polled: no workflow with this id exists on this namespace.",
+	transient: "Transient fault: auto re-read on the next beat.",
+	internal: "Not re-polled as transient: the answer was malformed — a defect, not jitter."
+};
+const NAMED = new Set(Object.keys(HEADLINES));
+/** str consume: non-string → '' (malformed degrade, never throws). */
+function strOf(v) {
+	return typeof v === "string" ? v : "";
+}
+/** plain-object consume: anything else → null (arrays and null are not faces). */
+function objOf(v) {
+	return v !== null && typeof v === "object" && !Array.isArray(v) ? v : null;
+}
+/** Finite number consume: anything else → null (0 is a real count, keep it). */
+function numOf(v) {
+	return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+/** The engine's read face nests its durable facts here (client.py). */
+function durableOf(face) {
+	return objOf(face?.durable) ?? {};
+}
+/** The retained record inside a read face. The engine puts it under
+*  `face.durable.retained` on the detail receipt and under `face.retained` on the
+*  ticket-list row face — read both, prefer the durable one (the detail receipt). */
+function retainedOf(face, durable = {}) {
+	return objOf(durable.retained) ?? objOf(face?.retained) ?? {};
+}
+/**
+* Turn one failed detail read into its named view.
+*
+* @param kind  the receipt kind (`no_poller` / `workflow_task_failed` / `not_found` /
+*              `terminal` / `transient` / missing) — the engine's classification.
+* @param face  the engine read face (the `read_face` key of the HTTP body, or `face`).
+* @param errorText the receipt's own error string (verbatim, may be '').
+* @param ticketId the id the read was for ('' when unknown).
+*/
+function readStateView(kind, face, errorText, ticketId) {
+	const receiptError = strOf(errorText);
+	const id = strOf(ticketId);
+	const f = objOf(face);
+	const dur = durableOf(f);
+	const ret = retainedOf(f, dur);
+	const receipt = strOf(kind);
+	const faceState = strOf(f?.face_state);
+	let state = "internal";
+	if (receipt === "workflow_task_failed") state = "workflow_task_failed";
+	else if (receipt === "no_poller") state = "no_poller";
+	else if (receipt === "terminal") state = "terminal";
+	else if (receipt === "not_found") state = faceState === "retained" ? "retained" : faceState === "retained_unavailable" ? "retained_unavailable" : "not_found";
+	else if (receipt === "transient") state = faceState === "retained" ? "retained" : faceState === "retained_unavailable" ? "retained_unavailable" : "transient";
+	else if (NAMED.has(receipt)) state = receipt;
+	else if (faceState !== "" && NAMED.has(faceState)) state = faceState;
+	const facts = [];
+	const push = (label, value) => {
+		const v = strOf(value);
+		if (v !== "") facts.push({
+			label,
+			value: v
+		});
+	};
+	const queue = strOf(dur.queue) || strOf(f?.queue);
+	const queueSource = strOf(dur.queue_source) || strOf(f?.queue_source);
+	push("Queue", queue);
+	push("Queue source", queueSource);
+	const live = numOf(f?.live_pollers) ?? numOf(dur.live_pollers);
+	if (live !== null) push("Live pollers", String(live));
+	push("Workflow status", dur.status);
+	push("Last known stage", dur.last_stage_available === true ? strOf(dur.last_stage) : "");
+	const retainedSource = strOf(ret.source);
+	push("Retained source", retainedSource);
+	if (strOf(ret.failure_type) !== "") push("Workflow task failure", strOf(ret.failure_type));
+	if (strOf(ret.failure_message) !== "") push("Cause message", strOf(ret.failure_message));
+	push("Terminal status", strOf(ret.terminal_status) || strOf(f?.terminal_status));
+	push("Closed at", strOf(ret.closed_at) || strOf(f?.closed_at));
+	push("Closed by", strOf(ret.written_by) || strOf(f?.written_by));
+	push("Ticket title (from the retained record)", strOf(ret.title));
+	push("Archived at", strOf(ret.archived_at));
+	let cause = "";
+	let causeNote = "";
+	if (state === "workflow_task_failed") {
+		const msg = strOf(ret.failure_message);
+		const type = strOf(ret.failure_type);
+		if (msg !== "" || type !== "") {
+			cause = [type, msg].filter((x) => x !== "").join(": ");
+			causeNote = "Cause: the last WorkflowTaskFailed event in the execution history";
+		} else causeNote = strOf(ret.reason) !== "" ? `Cause unavailable (retained_unavailable): ${strOf(ret.reason)}` : "Cause unavailable (retained_unavailable): the execution history carries no WorkflowTaskFailed cause";
+	} else if (state === "no_poller") {
+		cause = `No live poller on ${queue === "" ? "the ticket queue" : `queue ${queue}`}, so the snapshot read has no one to answer it`;
+		causeNote = queueSource === "describe" ? "Cause: the queue the execution itself reports" : "Cause: the queue derived from the ticket id (the execution reported none)";
+	} else if (state === "retained") {
+		cause = retainedSource !== "" ? `The workflow is not readable; the outcome comes from the retained record (${retainedSource})` : "The workflow is not readable; the outcome comes from the retained record";
+		causeNote = "Cause: the on-disk record the engine wrote when the ticket closed";
+	} else if (state === "retained_unavailable") {
+		const why = strOf(ret.reason);
+		causeNote = f === null ? "No retained record readable: the read receipt carried no read face at all" : why !== "" ? `No retained record readable: ${why}` : "No retained record readable and the workflow does not answer";
+	} else if (state === "terminal") {
+		cause = strOf(f?.exec_status) !== "" ? `Execution status ${strOf(f?.exec_status)}` : "";
+		causeNote = cause !== "" ? "Cause: the workflow reached a terminal state" : "Cause unavailable: the terminal receipt carried no execution status";
+	} else if (state === "transient") causeNote = "Cause not located: the read failed without a located reason (a service hiccup)";
+	else if (state === "not_found") causeNote = "Cause: the server reports no workflow with this id";
+	else causeNote = "Cause not located: the receipt carried no classification this panel knows";
+	const retry = state === "no_poller" ? "slow" : state === "transient" ? "normal" : state === "internal" ? "never" : "never";
+	return {
+		state,
+		headline: HEADLINES[state],
+		causeAvailable: cause !== "",
+		cause,
+		causeNote,
+		facts,
+		retry,
+		pollNote: POLL_NOTES[state],
+		receiptError,
+		ticketId: id
+	};
+}
+/** True when the caller must NOT auto re-read this state (deterministic / finished). */
+function isPermanentReadState(view) {
+	return view !== null && view !== void 0 && view.retry === "never";
+}
+/** The next delay for a detail re-read, or null = do not re-read automatically.
+*  Deterministic states return null so a finished ticket is never spun as transient. */
+function detailRepollDelayMs(view, normalMs, slowMs) {
+	if (view === null || view === void 0) return normalMs;
+	if (view.retry === "never") return null;
+	if (view.retry === "slow") return slowMs;
+	return normalMs;
+}
+//#endregion
+//#region src/host/ticket-error.ts
+/** t261102-12: the named read states. `no_poller` = the queue this ticket polls has no
+*  live poller; `workflow_task_failed` = the server reports the workflow task in a failed
+*  state, which is deterministic (retrying the read cannot help). Neither is a timeout. */
+const NAMED_READ_KINDS = ["no_poller", "workflow_task_failed"];
+/** True when `kind` is one of the named read states (never a transient retry). */
+function isNamedReadKind(kind) {
+	return typeof kind === "string" && NAMED_READ_KINDS.includes(kind);
 }
 //#endregion
 //#region src/client/tab-presence.ts
@@ -16853,7 +15378,7 @@ const API_PREFIX = "/sandbar-workbench/api/wf/tickets";
 /** 契约锚（集成场景/UT 断言用；不可移除/改名）。 */
 const TICKET_TIME_VIEWER_TESTID = "ticket-time-viewer";
 /** 与 index.tsx isEditableTarget 同款（C6：复用语义、本地复刻防 import 环）。 */
-function isEditableTarget(t) {
+function isEditableTarget$1(t) {
 	if (!(t instanceof HTMLElement)) return false;
 	return t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable;
 }
@@ -16887,7 +15412,7 @@ function TicketTimeViewer({ ticketId, path, initialMode, onClose }) {
 	}, []);
 	(0, react.useEffect)(() => {
 		const h = (e) => {
-			if (e.key === "Escape" && !isEditableTarget(e.target)) {
+			if (e.key === "Escape" && !isEditableTarget$1(e.target)) {
 				e.preventDefault();
 				onClose();
 			}
@@ -18218,6 +16743,86 @@ function TerminalFailurePanel({ view }) {
 		]
 	});
 }
+/**
+* t261102-12: the named read-state panel. It renders WHY a ticket could not be read —
+* no live poller on the queue the ticket polls, a workflow task in a failed state, or a
+* gone workflow answered from (or missing) its retained record — and it states the
+* polling rule in words, so a finished or deterministic state is never shown as a
+* spinner that will clear.
+*
+* Contract (pinned by UT): no operation entry, no invented cause. A missing cause is
+* named as missing; every rendered value comes from the engine's read face verbatim.
+*/
+function ReadStatePanel({ view }) {
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-tf-panel",
+		"data-testid": "read-state-panel",
+		"data-read-state": view.state,
+		"data-read-retry": view.retry,
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-tf-head",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-mark",
+						children: view.retry === "never" ? "⛔" : "⏳"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-title",
+						children: view.headline
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-tf-exec",
+						title: "Named read state",
+						children: view.state
+					})
+				]
+			}),
+			view.receiptError !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-tf-receipt",
+				children: view.receiptError
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-tf-reason",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-tf-k",
+						children: "Cause"
+					}),
+					view.causeAvailable ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-tf-reason-txt",
+						children: view.cause
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-tf-reason-txt wb-tf-unavailable",
+						children: "Cause unavailable"
+					}),
+					view.causeNote !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "wb-tf-src",
+						children: view.causeNote
+					})
+				]
+			}),
+			view.facts.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-tf-grid",
+				children: view.facts.map((f) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: "wb-tf-k",
+					children: f.label
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					className: "wb-tf-v",
+					children: f.value
+				})] }, f.label))
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-tf-snapshot",
+				children: view.pollNote
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-tf-honesty",
+				children: "Read-only panel — it names the state, it changes nothing."
+			})
+		]
+	});
+}
 /** 阶段视觉态推导住在纯模块 lane-states.ts（零依赖，node 可裸 import 做行为测试）；
 *  index.tsx 只做消费。推导口径（优先级/回退/畸形输入）见 lane-states.ts 头注。 */
 function d2StageVisual(detail, stageId, order) {
@@ -18504,10 +17109,119 @@ function specMarkdownHtml(spec) {
 function evidenceImgSrc(ticketId, file) {
 	return `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/evidence/${encodeURIComponent(file)}`;
 }
-/** The lightbox contract the smoke asserts. The component now lives in `lightbox.tsx`,
-*  so the screenshot-evidence list and the artifact image view share ONE overlay. */
-const evidenceLightboxKeys = LIGHTBOX_KEYS;
-const evidenceNav = lightboxNav;
+/** 灯箱键盘键位契约（t260901-13，导出供 smoke 对齐键位，防 handler 与测试漂移）。 */
+const evidenceLightboxKeys = {
+	close: "Escape",
+	prev: "ArrowLeft",
+	next: "ArrowRight"
+};
+/**
+* 灯箱下标导航纯函数（t260901-13，导出供 smoke 直测）：index 循环移动 delta，
+* 非法入参（空列表/越界/非整数 delta）一律兜底到安全下标，不抛——灯箱 open 期间
+* evidence 列表被重拉变短时，同一条兜底保证渲染下标始终落在列表内。
+*/
+function evidenceNav(files, index, delta) {
+	const n = files.length;
+	if (n <= 0) return 0;
+	return (((Number.isInteger(index) && index >= 0 && index < n ? index : 0) + (Number.isInteger(delta) ? delta : 0)) % n + n) % n;
+}
+/** 详情抽屉「截图证据」区（t260831-08）：拉 evidence 列表端点渲染泳道/归档截图。
+*  降级口径：files 空（无泳道/已合并无归档/端点异常）→ 整区不渲染，不报错；
+*  单图加载失败 → 占位人话，不拖垮整区。
+*  灯箱（t260901-13）：缩略图点击 → EvidenceLightbox 遮罩层放大看图。
+*  C1（review 走查结论）：keydown 挂 document 级，方向键在 input/textarea/select/
+*  contentEditable 内触发时忽略（防一边移动光标一边切图），Esc 任何情况都关——
+*  见 evidenceKeyGuard。 */
+function isEditableTarget(t) {
+	if (!(t instanceof HTMLElement)) return false;
+	return t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable;
+}
+/** 灯箱 lightbox（t260901-13）：点击放大 + 左右按钮/键盘循环切换 + 计数与文件名
+*  + Esc/点遮罩关闭。键盘挂 document 级（fixed 遮罩不可聚焦，绑元素需 autoFocus
+*  抢抽屉焦点；document 级覆盖天然）。所有关闭路径（Esc/点遮罩/切工单/关抽屉）
+*  都收口到「卸载即 useEffect cleanup removeEventListener」单点回收。 */
+function EvidenceLightbox({ ticketId, files, index, onClose, onNav: nav }) {
+	(0, react.useEffect)(() => {
+		const h = (e) => {
+			if (e.key === evidenceLightboxKeys.close) {
+				e.preventDefault();
+				onClose();
+			} else if (e.key === evidenceLightboxKeys.prev && !isEditableTarget(e.target)) {
+				e.preventDefault();
+				nav(files, index, -1);
+			} else if (e.key === evidenceLightboxKeys.next && !isEditableTarget(e.target)) {
+				e.preventDefault();
+				nav(files, index, 1);
+			}
+		};
+		document.addEventListener("keydown", h);
+		return () => document.removeEventListener("keydown", h);
+	}, [
+		files,
+		index,
+		onClose
+	]);
+	const f = files[index] ?? files[0];
+	const [broken, setBroken] = (0, react.useState)(false);
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-lb",
+		onClick: onClose,
+		children: [
+			files.length > 1 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "wb-lb-nav",
+				"aria-label": "Previous",
+				onClick: (e) => {
+					e.stopPropagation();
+					nav(files, index, -1);
+				},
+				children: "‹"
+			}),
+			broken ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-lb-miss",
+				children: ["Screenshot failed to load: ", f]
+			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("img", {
+				className: "wb-lb-img",
+				alt: `Screenshot evidence ${f}`,
+				src: evidenceImgSrc(ticketId, f),
+				onClick: (e) => e.stopPropagation(),
+				onError: () => setBroken(true)
+			}),
+			files.length > 1 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "wb-lb-nav",
+				"aria-label": "Next",
+				onClick: (e) => {
+					e.stopPropagation();
+					nav(files, index, 1);
+				},
+				children: "›"
+			}),
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-lb-bar",
+				onClick: (e) => e.stopPropagation(),
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: files.length > 0 ? `${index + 1} / ${files.length}` : "0 / 0" }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-lb-name",
+						children: f
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "wb-lb-close",
+						onClick: onClose,
+						children: "Close (Esc)"
+					})
+				]
+			})
+		]
+	});
+}
+/** 灯箱导航动作收口（t260901-13）：EvidenceImages 持 open 下标 state，经 setOpen
+*  落 evidenceNav 结果。抽成模块级函数便于 handler 复用与类型收口。 */
+function onNav(files, index, delta, setOpen) {
+	setOpen(evidenceNav(files, index, delta));
+}
 function EvidenceImages({ ticketId }) {
 	const [files, setFiles] = (0, react.useState)(null);
 	const [broken, setBroken] = (0, react.useState)({});
@@ -18564,221 +17278,12 @@ function EvidenceImages({ ticketId }) {
 					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("figcaption", { children: f })]
 				}, f))
 			}),
-			open !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(Lightbox, {
-				items: files.map((f) => ({
-					name: f,
-					src: evidenceImgSrc(ticketId, f),
-					alt: `Screenshot evidence ${f}`
-				})),
+			open !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(EvidenceLightbox, {
+				ticketId,
+				files,
 				index: evidenceNav(files, open, 0),
 				onClose: () => setOpen(null),
-				onNav: (fs, i, d) => setOpen(evidenceNav(fs, i, d)),
-				kindLabel: "Screenshot"
-			})
-		]
-	});
-}
-/**
-* Artifact face (t261030-35, epic artifact-face slice 2): the console's inventory of
-* the artifacts a ticket declared, plus the frame that the console owns.
-*
-* Slice scope: no built-in views yet — every row is metadata plus the original-bytes
-* link; a row whose kind is unknown, or whose bytes cannot be used, renders the
-* degrade card. Rounds are not grouped and not compared. Nothing is archived here.
-*
-* Frame ownership (epic ruling 3): the frame is drawn only from the host payload and
-* the ticket's gate receipts. There is no view/plugin channel in this slice, so no
-* project code can add, hide or reorder a row or restate the machine verdict.
-*
-* Fetch failure and an empty declaration are both named: the panel never shows a
-* silent blank (a blank panel would read as "this ticket has no artifacts").
-*/
-const ARTIFACT_FACE_CSS = `
-.wb-af{display:flex;flex-direction:column;gap:6px;margin:4px 0}
-.wb-af-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:6px 10px;
-  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-af-head .ttl{font-weight:600;font-size:13px}
-.wb-af-count{font-size:12px;color:var(--dsw-derive-muted,#57606a)}
-.wb-af-src{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
-.wb-af-verdict{font-size:12px;font-weight:600;margin-left:auto}
-.wb-af-verdict[data-green=green]{color:var(--dsw-derive-success,#1a7f37)}
-.wb-af-verdict[data-green=red]{color:var(--dsw-derive-danger,#cf222e)}
-.wb-af-verdict[data-green=none]{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-empty{font-size:12px;color:var(--dsw-derive-muted,#57606a);padding:4px 2px}
-.wb-af-row{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;padding:6px 10px;font-size:12px}
-.wb-af-row[data-card=degrade]{border-style:dashed}
-.wb-af-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
-.wb-af-title{font-weight:600;font-size:13px}
-.wb-af-kind{font-size:11px;padding:0 5px;border-radius:5px;border:1px solid var(--dsw-derive-border,#d0d7de)}
-.wb-af-kind[data-known=false]{border-style:dashed;color:var(--dsw-derive-warn-deep,#7d4e00)}
-.wb-af-meta{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-tag{font-size:10px;color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:5px;padding:0 4px}
-.wb-af-source{font-family:ui-monospace,monospace;font-size:11px;color:var(--dsw-derive-fg,#1f2328);word-break:break-all}
-.wb-af-note{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-state{color:var(--dsw-derive-warn-deep,#7d4e00);margin-top:2px}
-.wb-af-actions{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px;align-items:baseline}
-.wb-af-actions a{color:var(--dsw-derive-accent,#0969da)}
-.wb-af-nobytes{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-refusal{color:var(--dsw-derive-warn-deep,#7d4e00)}
-.wb-af-qc{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
-`;
-/** Byte link for one row: the stage and the id are the address, never a path.
-*  Both segments are percent-encoded once here; the host decodes the path once. */
-function artifactBytesHref(ticketId, row) {
-	return withProject(`${API}/tickets/${encodeURIComponent(ticketId)}/artifacts/${encodeURIComponent(row.stage)}/${encodeURIComponent(row.id)}/bytes`);
-}
-function ArtifactFace({ detail }) {
-	const ticketId = detail.id;
-	const [data, setData] = (0, react.useState)(null);
-	const [err, setErr] = (0, react.useState)("");
-	(0, react.useEffect)(() => {
-		let cancelled = false;
-		setData(null);
-		setErr("");
-		apiGet(`${API}/tickets/${encodeURIComponent(ticketId)}/artifacts`).then((d) => {
-			if (cancelled) return;
-			if (d?.ok === true && d.result) setData(d.result);
-			else setErr(String(d?.error ?? "the artifact inventory could not be read"));
-		}).catch((e) => {
-			if (!cancelled) setErr(String(e instanceof Error ? e.message : e));
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [ticketId]);
-	if (err !== "") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-		className: "wb-af",
-		children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "wb-af-empty",
-			children: ["Artifacts unavailable: ", err]
-		})
-	});
-	if (data === null || !Array.isArray(data.rows)) return null;
-	const frame = buildArtifactFaceView({
-		rows: data.rows,
-		refusals: data.refusals ?? [],
-		listSource: data.listSource
-	}, data.stats, detail);
-	const verdictTag = frame.verdict.green === null ? "none" : frame.verdict.green ? "green" : "red";
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-		className: "wb-af",
-		"data-testid": "artifact-face",
-		children: [
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: ARTIFACT_FACE_CSS }),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-af-head",
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "ttl",
-						children: frame.title
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-af-count",
-						children: frame.countText
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-af-src",
-						children: frame.listSourceText
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "wb-af-verdict",
-						"data-green": verdictTag,
-						"data-source": frame.verdict.source,
-						children: frame.verdict.text
-					})
-				]
-			}),
-			frame.rows.length === 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-af-empty",
-				children: frame.emptyText
-			}),
-			frame.rows.map((r) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "wb-af-row",
-				"data-card": r.card,
-				"data-state": r.state,
-				"data-testid": `artifact-row-${r.key}`,
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "wb-af-line",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-af-title",
-								children: r.title
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-af-kind",
-								"data-known": r.kindKnown ? "true" : "false",
-								children: r.kindLabel
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-af-meta",
-								children: [
-									r.stageLabel,
-									r.roundText,
-									r.repoLabel,
-									r.sizeText,
-									r.timeText
-								].filter((x) => x !== "").join(" · ")
-							}),
-							r.optionalText !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-af-tag",
-								children: r.optionalText
-							}),
-							r.legacyText !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "wb-af-tag",
-								children: r.legacyText
-							})
-						]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-af-source",
-						children: r.sourceLabel
-					}),
-					r.note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-af-note",
-						children: r.note
-					}),
-					r.stateText !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-af-state",
-						children: r.stateText
-					}),
-					r.refusals.map((x) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "wb-af-refusal",
-						children: x
-					}, x)),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "wb-af-actions",
-						children: [r.bytesHref !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("a", {
-							href: artifactBytesHref(ticketId, r),
-							target: "_blank",
-							rel: "noreferrer",
-							children: "Open original"
-						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "wb-af-nobytes",
-							children: r.bytesRefusal === "" ? "Original bytes unavailable" : r.bytesRefusal
-						}), r.openHint !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-							className: "wb-af-note",
-							children: ["Open with: ", r.openHint]
-						})]
-					}),
-					shouldRenderBody(r, artifactBytesHref(ticketId, r)) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactView, {
-						row: r,
-						ticketId,
-						bytesHref: artifactBytesHref(ticketId, r)
-					})
-				]
-			}, r.rowKey)),
-			frame.refusals.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("details", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("summary", { children: [
-				"Refused declarations (",
-				frame.refusals.length,
-				")"
-			] }), frame.refusals.map((x, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-af-refusal",
-				children: x
-			}, `${i}-${x}`))] }),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				className: "wb-af-qc",
-				children: frame.qcText
+				onNav: (fs, i, d) => onNav(fs, i, d, setOpen)
 			})
 		]
 	});
@@ -20889,6 +19394,17 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 	/** t260919-02 终态失败面视图：openDetail 捕获 terminal 回执的 face 后装配；
 	*  切单/重开/关抽屉即清（openDetail 开头 + 关闭钮兜底），绝不串票。 */
 	const [terminalFace, setTerminalFace] = (0, react.useState)(null);
+	/** t261102-12 named read state of the open ticket: set when the read failed with a
+	*  located cause (no_poller / workflow_task_failed / retained / retained_unavailable).
+	*  A permanent state stops the detail from being re-polled as transient; a cleared
+	*  selection or a successful read clears it (never carried across tickets). */
+	const [readStateFace, setReadStateFace] = (0, react.useState)(null);
+	/** Ref mirror of the named read state: the poll loop reads it synchronously. */
+	const readStateRef = (0, react.useRef)(null);
+	/** t261102-12: when the open ticket's detail was last read. The poll loop compares it
+	*  with the model's per-state delay, so a `slow` state is really re-read slowly and a
+	*  `never` state is not re-read at all. */
+	const lastDetailReadRef = (0, react.useRef)(0);
 	const [promptBox, setPromptBox] = (0, react.useState)(null);
 	const [reworkId, setReworkId] = (0, react.useState)(null);
 	const [reworkHuman, setReworkHuman] = (0, react.useState)(false);
@@ -20983,7 +19499,11 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 	async function pollOnce() {
 		if (listInFlight.current || detailInFlight.current) return;
 		const detailOpen = selectedIdRef.current !== null;
-		const [listOut, detailOut] = await Promise.all([reloadTickets(), detailOpen ? refreshDetailSilent() : Promise.resolve("ok")]);
+		const readView = readStateRef.current;
+		const detailDelay = detailRepollDelayMs(readView, 5e3, 3e4);
+		const lastDetailReadMs = lastDetailReadRef.current;
+		const detailDue = detailDelay !== null && Date.now() - lastDetailReadMs >= detailDelay;
+		const [listOut, detailOut] = await Promise.all([reloadTickets(), detailOpen && detailDue ? refreshDetailSilent() : Promise.resolve("ok")]);
 		const out = worstOutcome(listOut, detailOut);
 		applyPollOutcome(out, out === "ok" ? "" : "snapshot query transient failure (stage switch window?)");
 	}
@@ -21033,23 +19553,32 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 		setDetailLoading(true);
 		setOpMsg("");
 		setTerminalFace(null);
+		setReadStateFace(null);
+		readStateRef.current = null;
 		try {
 			const data = await apiGet(`${API}/tickets/${encodeURIComponent(id)}`);
 			if (data?.ok !== true) {
 				const e = new Error(data?.error ?? "detail load failed");
 				e.kind = data?.kind;
-				e.face = data?.face;
+				e.face = data?.face ?? data?.read_face;
+				e.readFace = data?.read_face;
 				throw e;
 			}
 			if (selectedIdRef.current !== id) return;
+			readStateRef.current = null;
+			setReadStateFace(null);
 			setDetail(data.result);
 		} catch (err) {
 			if (selectedIdRef.current === id) {
 				const kind = err?.kind;
-				if (kind === "not_found") setOpMsg(`Ticket not found: ${id} (no such Temporal workflow)`);
-				else if (kind === "terminal") {
+				if (kind === "terminal") {
 					setTerminalFace(terminalFaceView(err?.face, err instanceof Error ? err.message : String(err)));
 					setOpMsg(String(err instanceof Error ? err.message : err));
+				} else if (isNamedReadKind(kind) || kind === "not_found") {
+					const view = readStateView(kind, err?.readFace ?? err?.face, err instanceof Error ? err.message : String(err), id);
+					readStateRef.current = view;
+					setReadStateFace(view);
+					setOpMsg(`${view.headline}${view.cause !== "" ? ` — ${view.cause}` : ""}`);
 				} else setOpMsg(`Detail load failed (transient query error), retrying: ${String(err instanceof Error ? err.message : err)}`);
 			}
 		} finally {
@@ -21081,6 +19610,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 		setOverlayNav((nav) => closeOverlay(nav));
 		setDetail(void 0);
 		setTerminalFace(null);
+		setReadStateFace(null);
+		readStateRef.current = null;
 	}
 	/** ArrowUp/Down ticket walk (only while the overlay is open; no walk in the epic content state — the list-walk semantics apply to the ticket detail only).
 	*  A walk = a fresh open from the list context: the crumb is cleared (an arrow jump carries no epic origin). */
@@ -21281,15 +19812,28 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 	async function refreshDetailSilent() {
 		const id = selectedIdRef.current;
 		if (!id) return "ok";
+		if (isPermanentReadState(readStateRef.current)) return "ok";
 		detailInFlight.current = true;
+		lastDetailReadRef.current = Date.now();
 		try {
 			const data = await apiGet(`${API}/tickets/${encodeURIComponent(id)}`);
 			if (data?.ok === true) {
-				if (selectedIdRef.current === id) setDetail(data.result);
+				if (selectedIdRef.current === id) {
+					setDetail(data.result);
+					readStateRef.current = null;
+					setReadStateFace(null);
+				}
 				return "ok";
 			}
 			const out = classifyPollBody(data);
-			if (out !== "retryable" && selectedIdRef.current === id) setOpMsg(String(data?.error ?? "ticket query failed"));
+			if (out !== "retryable" && selectedIdRef.current === id) {
+				const view = readStateView(data?.kind, data?.read_face ?? data?.face, data?.error, id);
+				if (view.retry !== "normal" || view.state === "retained") {
+					readStateRef.current = view;
+					setReadStateFace(view);
+				}
+				setOpMsg(String(data?.error ?? "ticket query failed"));
+			}
 			return out;
 		} catch {
 			return "retryable";
@@ -21415,6 +19959,7 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 						children: "Loading detail…"
 					}),
 					!detailLoading && overlayNav.current?.kind !== "epic" && terminalFace !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TerminalFailurePanel, { view: terminalFace }),
+					!detailLoading && overlayNav.current?.kind !== "epic" && readStateFace !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ReadStatePanel, { view: readStateFace }),
 					!detailLoading && overlayNav.current?.kind !== "epic" && detail !== void 0 && detail.id === selectedId && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "wb-drawer-head",
@@ -21721,7 +20266,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }) {
 							});
 						})(),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(PulseLine, { detail }),
-						detail.kind !== "inspection" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactFace, { detail }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AgentLivePanel, { ticketId: detail.id }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(EvidenceImages, { ticketId: detail.id }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(D2Problems, { detail }),
@@ -22041,6 +20585,7 @@ function apply(ctx) {
 	}) })));
 }
 //#endregion
+exports.ReadStatePanel = ReadStatePanel;
 exports.TerminalFailurePanel = TerminalFailurePanel;
 exports.apply = apply;
 exports.evidenceImgSrc = evidenceImgSrc;

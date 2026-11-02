@@ -26,18 +26,6 @@
  *                                               → 进展行 enrichment（t260904-17）：主响应零 show；
  *                                                 enrich 阶段逐票 show 短超时+并发上限+allSettled
  *   GET  /sandbar-workbench/api/wf/tickets/<id>   → ticket show（详情全文）
- *   GET  /sandbar-workbench/api/wf/tickets/<id>/artifacts
- *                                               → artifact inventory (t261030-35, epic artifact-face
- *                                                 slice 2): the canonical row list read from the
- *                                                 ticket snapshot, plus one metadata record per row
- *                                                 (state, size, mtime). Rows are never dropped because
- *                                                 their bytes are unavailable — the state names why.
- *   GET  /sandbar-workbench/api/wf/tickets/<id>/artifacts/<stage>/<id>/bytes
- *                                               → the ORIGINAL BYTES of one declared artifact. The
- *                                                 source is resolved from the snapshot, never from the
- *                                                 request; an id declared twice in one stage is a 409,
- *                                                 over-cap is a 413, a saturated read pool is a 503.
- *                                                 Read-only: any other method is a 405
  *   GET  /sandbar-workbench/api/wf/tickets/<id>/file?path=&mode=settle|base|current
  *                                               → 「本票时刻」只读文件（t260915-17，mock 260904
  *                                                 标注 D）：settle=收口版（该票的提交版本）/base=
@@ -182,16 +170,6 @@ function projectRootsFor(projectKey: unknown): string[] {
 
 import { computeTicketDiff, type TicketForDiff } from './src/host/changes.ts'
 import { readTicketTimeFile } from './src/host/ticket-time-file.ts'
-// t261030-35 (epic artifact-face, slice 2): the artifact inventory and its
-// original-bytes channel. The row list comes from the same pure model the console
-// panel uses (`src/client/artifact-face-model.ts`), so the panel cannot list a row
-// this route cannot find, or the reverse.
-import {
-  buildArtifactInventory,
-  readArtifactBytes,
-  withArtifactSlot,
-  type ArtifactByteFailure,
-} from './src/host/artifact-face.ts'
 // t261022-14: the lane-file comment store for the markdown reviewer. MINIMAL
 // REGISTRATION ONLY (CF1, lost by settles a21f4d00/6846bb14 — see
 // integration/t261022-14/node-ts-registration.patch for the one-command
@@ -199,7 +177,7 @@ import {
 import { handleReviewComments } from './src/host/review-comments-routes.ts'
 import { backfillRowsFromArchive, readArchiveIndex } from './src/host/ticket-archive.ts'
 import { isTicketTimeMode } from './src/shared/ticket-time-model.ts'
-import { ticketShowErrorReply } from './src/host/ticket-error.ts'
+import { isNamedReadKind, ticketShowErrorReply } from './src/host/ticket-error.ts'
 import { readInspectionArchive, readPeriodReport } from './src/host/inspection-archive.ts'
 // t261026-10: the declaration read (declared instance ids + scan_face per instance)
 // feeds the archive's declared-instance filter and the served faces map.
@@ -293,25 +271,6 @@ const OPS = new Set(['accept', 'advance', 'dispatch-next', 'rework', 'update', '
 /** 工单 id 白名单：review 落盘文件名由它拼出，必须防穿路径（同 knowledge DOC_PATH_RE 的角色）。
  *  放行 Han 字（真实工单 id 含中文，54 张全量体检零误伤）；/ \ . % 与控制字符全在表外，穿路径无门。 */
 const TICKET_ID_RE = /^[A-Za-z0-9\p{Script=Han}][A-Za-z0-9_\-\p{Script=Han}]{2,80}$/u
-
-/**
- * Stage order for the artifact inventory (t261030-35): the template topology the
- * ticket already carries (`topology.nodes[].id`), else undefined so the model
- * keeps the receipt order. Ordering only — it never adds or removes a row.
- */
-function artifactStageOrder(detail: Record<string, unknown>): string[] | undefined {
-  const topo = detail.topology
-  if (topo === null || typeof topo !== 'object') return undefined
-  const nodes = (topo as Record<string, unknown>).nodes
-  if (!Array.isArray(nodes)) return undefined
-  const order: string[] = []
-  for (const n of nodes) {
-    if (n === null || typeof n !== 'object') continue
-    const id = (n as Record<string, unknown>).id
-    if (typeof id === 'string' && id !== '' && !order.includes(id)) order.push(id)
-  }
-  return order.length > 0 ? order : undefined
-}
 
 /**
  * 工单快照 → 首条上下文消息（t260831-08 从 handleTicketSessionOpen 的闭包抽出，
@@ -538,9 +497,14 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    *  未知一律 500 非 404——「工单不存在」只能由明确 NotFound 语义触发，谎报是本票
    *  消灭对象。t260919-02：可选 face（终态失败面）——只加键不改级（terminal 仍
    *  410 仍「刷新无效」）；face 仅 plain dict 且 terminal 才附带（直读失败/超时/
-   *  畸形 → 无 face 键，UI 按纯错误提示降级，绝不渲染半残假面）。 */
-  function sendTicketShowError(res: ServerResponse, s: unknown, id = '', face?: unknown): void {
-    const reply = ticketShowErrorReply(s as { error?: unknown; kind?: unknown } | null, id, face)
+   *  畸形 → 无 face 键，UI 按纯错误提示降级，绝不渲染半残假面）。
+   *  t261102-12: the named read states (no_poller / workflow_task_failed) carry the
+   *  engine's read face in their OWN key `read_face` — same honesty rule, a separate slot
+   *  so the terminal `face` contract stays exactly as it is. */
+  function sendTicketShowError(res: ServerResponse, s: unknown, id = '', face?: unknown,
+                               readFace?: unknown): void {
+    const reply = ticketShowErrorReply(
+      s as { error?: unknown; kind?: unknown } | null, id, face, readFace)
     sendJson(res, reply.status, reply.body)
   }
 
@@ -557,6 +521,27 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       const r = await runPocCli(cli, ['ticket-query', JSON.stringify({ ticket_id: id })],
         { timeoutMs: TERMINAL_FACE_TIMEOUT_MS })
       return (r !== null && typeof r === 'object' && !Array.isArray(r)) ? (r as any).face : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  // t261102-12 named-read bridge: a no_poller / workflow_task_failed receipt carries the
+  // engine's read face (the queue this ticket polls plus its live poller count, or the
+  // workflow-task failure cause). ticket.py only forwards `face` for terminal receipts
+  // (server/tools/ is outside this ticket's write set), so the host reads the engine
+  // receipt once more through the same bounded bridge and hands the face to the panel.
+  // A failed / timed-out / malformed read leaves the face out; the panel then names the
+  // cause as unavailable instead of inventing one.
+  const READ_FACE_TIMEOUT_MS = 5_000
+
+  /** The engine read face for a named read state; unreadable → undefined. */
+  async function fetchReadFace(id: string): Promise<unknown> {
+    try {
+      const r = await runPocCli(cli, ['ticket-query', JSON.stringify({ ticket_id: id })],
+        { timeoutMs: READ_FACE_TIMEOUT_MS })
+      if (r === null || typeof r !== 'object' || Array.isArray(r)) return undefined
+      return (r as any).face
     } catch {
       return undefined
     }
@@ -1127,133 +1112,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     }
   }
 
-  /**
-   * Artifact inventory (t261030-35, epic artifact-face slice 2):
-   * GET /wf/tickets/<id>/artifacts[?project=].
-   *
-   * The row list is the canonical one from the ticket snapshot (read through the
-   * ONE pure model, `src/client/artifact-face-model.ts`); this route adds the
-   * metadata the snapshot does not carry (size, mtime, and the named state when
-   * the bytes cannot be used). A row is never removed: a torn-down lane, a missing
-   * file, a multi-repo source with no workspace and an absolute/URL source each
-   * become a named state on the row.
-   *
-   * Read-only: the dispatch refuses any method except GET.
-   */
-  async function handleTicketArtifacts(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
-    if (!TICKET_ID_RE.test(id) || /[./]/.test(id)) {
-      sendJson(res, 400, { ok: false, error: `ticket id is not valid: '${id.slice(0, 40)}'` })
-      return
-    }
-    const url = new URL(req.url ?? '/', 'http://x')
-    try {
-      const s = await callTool('ticket', { op: 'show', id })
-      if (s?.ok !== true) {
-        sendTicketShowError(res, s, id)
-        return
-      }
-      const t = (s.result ?? {}) as Record<string, unknown>
-      const queryKey = url.searchParams.get('project')
-      const a = resolveProjectAnchor(
-        queryKey !== null && queryKey !== '' ? queryKey : (typeof t.project === 'string' ? t.project : ''),
-        repo)
-      const anchor = anchorGuard(res, a)
-      if (anchor === null) return
-      const inventory = await buildArtifactInventory(anchor.root, t, artifactStageOrder(t))
-      sendJson(res, 200, { ok: true, result: inventory, resolved: resolvedMark(anchor) })
-    } catch (err) {
-      sendJson(res, 502, { ok: false, error: `artifact inventory read failed: ${String(err instanceof Error ? err.message : err)}` })
-    }
-  }
-
-  /**
-   * Original bytes of ONE declared artifact (t261030-35):
-   * GET /wf/tickets/<id>/artifacts/<stage>/<id>/bytes[?project=].
-   *
-   * The address is the row key, never a path: the source is resolved from the
-   * snapshot. The dispatch has already decoded the path once (`decodeURIComponent`
-   * over the whole remainder), so the segment is used as decoded — decoding again
-   * here would be the classic double-decode bug.
-   *
-   * Status map: 404 not declared / 409 id declared twice in the stage / 413 over
-   * the in-page cap / 503 read pool saturated / 400 the declared source is not
-   * usable (missing file, outside the root, unknown repo, not UTF-8). Every body
-   * names the check that failed. Headers: nosniff + no-store + a content type and
-   * disposition from the kind table (SVG leaves as a download).
-   */
-  async function handleTicketArtifactBytes(
-    req: IncomingMessage, res: ServerResponse, id: string, stage: string, artId: string,
-  ): Promise<void> {
-    if (!TICKET_ID_RE.test(id) || /[./]/.test(id)) {
-      sendJson(res, 400, { ok: false, error: `ticket id is not valid: '${id.slice(0, 40)}'` })
-      return
-    }
-    if (stage === '' || artId === '') {
-      sendJson(res, 400, { ok: false, error: 'stage and artifact id are both required' })
-      return
-    }
-    // Shape guard on the address segments. The client percent-encodes both; the
-    // dispatch decodes the path once, so a path-shaped id (`..`, a separator, a
-    // percent that survived one decode) reaches here as data — refused by name,
-    // never resolved against the filesystem. A declared id that cannot pass this
-    // guard is already marked un-servable on its row (the link is not offered).
-    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$/.test(stage)
-      || !/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,120}$/.test(artId)) {
-      sendJson(res, 400, {
-        ok: false,
-        error: `artifact address is not a plain stage/id pair (stage='${stage.slice(0, 40)}', id='${artId.slice(0, 40)}'); the byte route never takes a path`,
-      })
-      return
-    }
-    const url = new URL(req.url ?? '/', 'http://x')
-    const statusOf = (f: ArtifactByteFailure): number => {
-      switch (f.code) {
-        case 'not_found': return 404
-        case 'ambiguous': return 409
-        case 'too_large': return 413
-        case 'busy': return 503
-        default: return 400
-      }
-    }
-    try {
-      const s = await callTool('ticket', { op: 'show', id })
-      if (s?.ok !== true) {
-        sendTicketShowError(res, s, id)
-        return
-      }
-      const t = (s.result ?? {}) as Record<string, unknown>
-      const queryKey = url.searchParams.get('project')
-      const a = resolveProjectAnchor(
-        queryKey !== null && queryKey !== '' ? queryKey : (typeof t.project === 'string' ? t.project : ''),
-        repo)
-      const anchor = anchorGuard(res, a)
-      if (anchor === null) return
-      const answer = await withArtifactSlot(() => readArtifactBytes(anchor.root, t, stage, artId))
-      if (answer.ok !== true) {
-        const status = statusOf(answer)
-        const headers: Record<string, string> = {
-          'content-type': 'application/json; charset=utf-8',
-          'cache-control': 'no-store',
-          'x-content-type-options': 'nosniff',
-        }
-        const body = JSON.stringify({ ok: false, code: answer.code, error: answer.reason })
-        res.writeHead(status, headers)
-        res.end(body)
-        return
-      }
-      res.writeHead(200, {
-        'content-type': answer.contentType,
-        'content-disposition': `${answer.disposition}; filename="${answer.filename}"`,
-        'content-length': String(answer.sizeBytes),
-        'cache-control': 'no-store',
-        'x-content-type-options': 'nosniff',
-      })
-      res.end(answer.body)
-    } catch (err) {
-      sendJson(res, 502, { ok: false, error: `artifact bytes read failed: ${String(err instanceof Error ? err.message : err)}` })
-    }
-  }
-
   /** 追加一轮审批意见（制式照 knowledge /review/save：白名单防穿+admin.log 同形审计+run-id）。 */
   async function handleTicketReviewSave(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
     const runId = randomUUID().replace(/-/g, '').slice(0, 12)
@@ -1433,6 +1291,13 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
           if ((r as any)?.kind === 'terminal') {
             const face = await fetchTerminalFace(parts[0])
             sendTicketShowError(res, r, parts[0], face)
+          } else if (isNamedReadKind((r as any)?.kind)) {
+            // t261102-12: no_poller / workflow_task_failed are NAMED states, not
+            // timeouts. The engine's read face rides in its own key so the panel can
+            // render which queue has no poller, or which workflow-task failure holds the
+            // ticket — and stop re-polling it as if the next tick could succeed.
+            const readFace = await fetchReadFace(parts[0])
+            sendTicketShowError(res, r, parts[0], undefined, readFace)
           } else {
             sendTicketShowError(res, r, parts[0])
           }
@@ -1460,29 +1325,8 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       await handleTicketEvidence(req, res, parts[0], parts[2])
       return
     }
-    if (parts.length === 5 && parts[1] === 'artifacts' && parts[4] === 'bytes') {
-      // t261030-35: original bytes of one declared artifact. The path was decoded once
-      // above (`decodeURIComponent` over the whole remainder): segments are used as-is.
-      if (req.method !== 'GET') {
-        sendJson(res, 405, { ok: false, error: 'artifact bytes is a read-only channel (GET only)' })
-        return
-      }
-      await handleTicketArtifactBytes(req, res, parts[0], parts[2], parts[3])
-      return
-    }
     if (parts.length === 2) {
       const [id, op] = parts
-      // t261030-35: the artifact inventory (epic artifact-face slice 2). Read-only; the
-      // handler refuses nothing by method because the dispatch already answered 405 for
-      // non-GET below — kept explicit here for the same reason the `file` op is explicit.
-      if (op === 'artifacts') {
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { ok: false, error: 'the artifact inventory is a read-only channel (GET only)' })
-          return
-        }
-        await handleTicketArtifacts(req, res, id)
-        return
-      }
       // t260831-08：evidence 列表只读 GET（详情抽屉「截图证据」区数据源；
       // 带文件段的取图在同前缀 3 段路由，见上方 handleTicketEvidence）。
       if (op === 'evidence' && req.method === 'GET') {
@@ -1713,16 +1557,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       } catch (err) {
         sendJson(res, 502, { ok: false, error: String(err instanceof Error ? err.message : err) })
       }
-      return
-    }
-    if (parts.length > 5 && parts[1] === 'artifacts') {
-      // t261030-35: a byte address that decoded into more segments than stage/id/bytes
-      // carries a separator (or a `..`) that the caller encoded — refuse by name rather
-      // than let the family 404 imply "such a ticket path does not exist".
-      sendJson(res, 400, {
-        ok: false,
-        error: 'artifact byte address must be /artifacts/<stage>/<id>/bytes; the id cannot contain a path separator',
-      })
       return
     }
     sendJson(res, 404, { ok: false, error: '路径不合法：/sandbar-workbench/api/wf/tickets/<id>[/op | /evidence/<file>]' })

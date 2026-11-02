@@ -69,7 +69,7 @@
  * 注入锚），见两文件头注。工单会话入口（点工单 handleTicketClick 链路）不受影响。
  */
 
-import { Component, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent, ReactNode } from 'react'
 // t261001-11：问题区行模型单写者（gate_runs 双形态容忍）+ 槽错误边界文案纯面。
 import { gateProblemRows, lastGateRun, slotFaultMessage } from './problems-model.ts'
@@ -127,23 +127,6 @@ import {
 // face (queue-model discipline: the UI never computes order, only projects it).
 import { concFaceFromReply, parseConcFace } from './queue-model.ts'
 import { STATE_LABEL, stageDisplayLabel, workflowLabel } from './ui-labels.ts'
-// t261030-35 (epic artifact-face, slice 2): the artifact inventory + frame. The view
-// model is pure (`artifact-face-model.ts`) and is the ONE reader of the declared list
-// — the host's byte route derives its rows through the same function.
-import {
-  buildArtifactFaceView,
-  type ArtifactFrame,
-  type ArtifactRow,
-  type ArtifactStat,
-} from './artifact-face-model.ts'
-// t261030-36 (epic artifact-face, slice 3): the six built-in views. `shouldRenderBody` is
-// the ONE rule that decides whether a row gets a body; the frame's call site and the
-// component both use it. The lightbox moved to `lightbox.tsx` and is shared with the
-// screenshot-evidence list.
-import { ArtifactView } from './artifact-view.tsx'
-import { shouldRenderBody } from './artifact-view-model.ts'
-import { Lightbox } from './lightbox.tsx'
-import { LIGHTBOX_KEYS, lightboxNav } from './lightbox-model.ts'
 // 「文档」视图（t260905-06 立；t260915-10 接壳层 projectKey）：docs/ 定稿库人读视图 +
 // notes/ 观察窗，默认跟随壳层当前项目（页内选择器可手动切且手动优先）。
 // t261005-10 (UI-2): the host Docs view moved into the panel Docs tab (docs.tsx keeps
@@ -156,6 +139,14 @@ import {
 } from './ticket-list-model.ts'
 // t260919-02 终态失败票详情面：视图模型纯函数（畸形 face 全降级不编造，单测直跑）。
 import { terminalFaceView, type TerminalFaceView } from './terminal-face.ts'
+// t261102-12 named read states: a deterministic / finished read is a NAMED state, never
+// a timeout the panel re-polls. Pure model (node-testable) — see read-state.ts.
+import {
+  readStateView, isPermanentReadState, detailRepollDelayMs, type ReadStateView,
+} from './read-state.ts'
+// The named-kind vocabulary has ONE home (the host verdict module) — the panel consumes
+// it instead of re-spelling the kinds.
+import { isNamedReadKind } from '../host/ticket-error.ts'
 // t260915-08 巡检板面：纯函数层住 host（拓扑=宿主声明面；client 只消费不内置词表）。
 // t260915-19：端点串迁 host 单点（左栏分拣同吃此端点，URL 字面量不再两处维护）。
 import {
@@ -1543,6 +1534,49 @@ export function TerminalFailurePanel({ view }: { view: TerminalFaceView }) {
   )
 }
 
+/**
+ * t261102-12: the named read-state panel. It renders WHY a ticket could not be read —
+ * no live poller on the queue the ticket polls, a workflow task in a failed state, or a
+ * gone workflow answered from (or missing) its retained record — and it states the
+ * polling rule in words, so a finished or deterministic state is never shown as a
+ * spinner that will clear.
+ *
+ * Contract (pinned by UT): no operation entry, no invented cause. A missing cause is
+ * named as missing; every rendered value comes from the engine's read face verbatim.
+ */
+export function ReadStatePanel({ view }: { view: ReadStateView }) {
+  return (
+    <div className="wb-tf-panel" data-testid="read-state-panel" data-read-state={view.state}
+      data-read-retry={view.retry}>
+      <div className="wb-tf-head">
+        <span className="wb-tf-mark">{view.retry === 'never' ? '⛔' : '⏳'}</span>
+        <span className="wb-tf-title">{view.headline}</span>
+        <span className="wb-tf-exec" title="Named read state">{view.state}</span>
+      </div>
+      {view.receiptError !== '' && <div className="wb-tf-receipt">{view.receiptError}</div>}
+      <div className="wb-tf-reason">
+        <div className="wb-tf-k">Cause</div>
+        {view.causeAvailable
+          ? <div className="wb-tf-reason-txt">{view.cause}</div>
+          : <div className="wb-tf-reason-txt wb-tf-unavailable">Cause unavailable</div>}
+        {view.causeNote !== '' && <div className="wb-tf-src">{view.causeNote}</div>}
+      </div>
+      {view.facts.length > 0 && (
+        <div className="wb-tf-grid">
+          {view.facts.map(f => (
+            <Fragment key={f.label}>
+              <span className="wb-tf-k">{f.label}</span>
+              <span className="wb-tf-v">{f.value}</span>
+            </Fragment>
+          ))}
+        </div>
+      )}
+      <div className="wb-tf-snapshot">{view.pollNote}</div>
+      <div className="wb-tf-honesty">Read-only panel — it names the state, it changes nothing.</div>
+    </div>
+  )
+}
+
 /** 编号 section 标题：01/02/… 蓝色编号徽标 + 标题 + 灰色说明（详情分组层次分明）。 */
 function SectionTitle({ num, title, desc }: { num: string; title: string; desc?: string }) {
   return (
@@ -1835,10 +1869,92 @@ export function evidenceImgSrc(ticketId: string, file: string): string {
   return `/sandbar-workbench/api/wf/tickets/${encodeURIComponent(ticketId)}/evidence/${encodeURIComponent(file)}`
 }
 
-/** The lightbox contract the smoke asserts. The component now lives in `lightbox.tsx`,
- *  so the screenshot-evidence list and the artifact image view share ONE overlay. */
-export const evidenceLightboxKeys = LIGHTBOX_KEYS
-export const evidenceNav = lightboxNav
+/** 灯箱键盘键位契约（t260901-13，导出供 smoke 对齐键位，防 handler 与测试漂移）。 */
+export const evidenceLightboxKeys = { close: 'Escape', prev: 'ArrowLeft', next: 'ArrowRight' } as const
+
+/**
+ * 灯箱下标导航纯函数（t260901-13，导出供 smoke 直测）：index 循环移动 delta，
+ * 非法入参（空列表/越界/非整数 delta）一律兜底到安全下标，不抛——灯箱 open 期间
+ * evidence 列表被重拉变短时，同一条兜底保证渲染下标始终落在列表内。
+ */
+export function evidenceNav(files: readonly unknown[], index: number, delta: number): number {
+  const n = files.length
+  if (n <= 0) return 0
+  const i = Number.isInteger(index) && index >= 0 && index < n ? index : 0
+  const d = Number.isInteger(delta) ? delta : 0
+  return ((i + d) % n + n) % n
+}
+
+/** 详情抽屉「截图证据」区（t260831-08）：拉 evidence 列表端点渲染泳道/归档截图。
+ *  降级口径：files 空（无泳道/已合并无归档/端点异常）→ 整区不渲染，不报错；
+ *  单图加载失败 → 占位人话，不拖垮整区。
+ *  灯箱（t260901-13）：缩略图点击 → EvidenceLightbox 遮罩层放大看图。
+ *  C1（review 走查结论）：keydown 挂 document 级，方向键在 input/textarea/select/
+ *  contentEditable 内触发时忽略（防一边移动光标一边切图），Esc 任何情况都关——
+ *  见 evidenceKeyGuard。 */
+function isEditableTarget(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false
+  return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT'
+    || t.isContentEditable
+}
+
+/** 灯箱 lightbox（t260901-13）：点击放大 + 左右按钮/键盘循环切换 + 计数与文件名
+ *  + Esc/点遮罩关闭。键盘挂 document 级（fixed 遮罩不可聚焦，绑元素需 autoFocus
+ *  抢抽屉焦点；document 级覆盖天然）。所有关闭路径（Esc/点遮罩/切工单/关抽屉）
+ *  都收口到「卸载即 useEffect cleanup removeEventListener」单点回收。 */
+function EvidenceLightbox({ ticketId, files, index, onClose, onNav: nav }: {
+  ticketId: string; files: string[]; index: number; onClose: () => void
+  onNav: (files: string[], index: number, delta: number) => void
+}) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === evidenceLightboxKeys.close) { e.preventDefault(); onClose() }
+      else if (e.key === evidenceLightboxKeys.prev && !isEditableTarget(e.target)) {
+        e.preventDefault(); nav(files, index, -1)
+      } else if (e.key === evidenceLightboxKeys.next && !isEditableTarget(e.target)) {
+        e.preventDefault(); nav(files, index, 1)
+      }
+    }
+    document.addEventListener('keydown', h)
+    return () => document.removeEventListener('keydown', h)
+  }, [files, index, onClose])
+  const f = files[index] ?? files[0]
+  const [broken, setBroken] = useState(false)
+  return (
+    <div className="wb-lb" onClick={onClose}>
+      {files.length > 1 && (
+        <button type="button" className="wb-lb-nav" aria-label="Previous"
+          onClick={(e) => { e.stopPropagation(); nav(files, index, -1) }}>‹</button>
+      )}
+      {broken
+        ? <div className="wb-lb-miss">Screenshot failed to load: {f}</div>
+        : (
+            <img
+              className="wb-lb-img"
+              alt={`Screenshot evidence ${f}`}
+              src={evidenceImgSrc(ticketId, f)}
+              onClick={(e) => e.stopPropagation()}
+              onError={() => setBroken(true)}
+            />
+          )}
+      {files.length > 1 && (
+        <button type="button" className="wb-lb-nav" aria-label="Next"
+          onClick={(e) => { e.stopPropagation(); nav(files, index, 1) }}>›</button>
+      )}
+      <div className="wb-lb-bar" onClick={(e) => e.stopPropagation()}>
+        <span>{files.length > 0 ? `${index + 1} / ${files.length}` : '0 / 0'}</span>
+        <span className="wb-lb-name">{f}</span>
+        <button type="button" className="wb-lb-close" onClick={onClose}>Close (Esc)</button>
+      </div>
+    </div>
+  )
+}
+
+/** 灯箱导航动作收口（t260901-13）：EvidenceImages 持 open 下标 state，经 setOpen
+ *  落 evidenceNav 结果。抽成模块级函数便于 handler 复用与类型收口。 */
+function onNav(files: string[], index: number, delta: number, setOpen: (i: number | null) => void): void {
+  setOpen(evidenceNav(files, index, delta))
+}
 
 function EvidenceImages({ ticketId }: { ticketId: string }) {
   const [files, setFiles] = useState<string[] | null>(null)
@@ -1884,159 +2000,17 @@ function EvidenceImages({ ticketId }: { ticketId: string }) {
         ))}
       </div>
       {open !== null && (
-        <Lightbox
-          items={files.map((f) => ({ name: f, src: evidenceImgSrc(ticketId, f), alt: `Screenshot evidence ${f}` }))}
+        <EvidenceLightbox
+          ticketId={ticketId}
+          files={files}
           index={evidenceNav(files, open, 0)}
           onClose={() => setOpen(null)}
-          onNav={(fs, i, d) => setOpen(evidenceNav(fs, i, d))}
-          kindLabel="Screenshot"
+          onNav={(fs, i, d) => onNav(fs, i, d, setOpen)}
         />
       )}
     </div>
   )
 }
-
-/**
- * Artifact face (t261030-35, epic artifact-face slice 2): the console's inventory of
- * the artifacts a ticket declared, plus the frame that the console owns.
- *
- * Slice scope: no built-in views yet — every row is metadata plus the original-bytes
- * link; a row whose kind is unknown, or whose bytes cannot be used, renders the
- * degrade card. Rounds are not grouped and not compared. Nothing is archived here.
- *
- * Frame ownership (epic ruling 3): the frame is drawn only from the host payload and
- * the ticket's gate receipts. There is no view/plugin channel in this slice, so no
- * project code can add, hide or reorder a row or restate the machine verdict.
- *
- * Fetch failure and an empty declaration are both named: the panel never shows a
- * silent blank (a blank panel would read as "this ticket has no artifacts").
- */
-const ARTIFACT_FACE_CSS = `
-.wb-af{display:flex;flex-direction:column;gap:6px;margin:4px 0}
-.wb-af-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;padding:6px 10px;
-  border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;background:var(--dsw-derive-surface,#f6f8fa)}
-.wb-af-head .ttl{font-weight:600;font-size:13px}
-.wb-af-count{font-size:12px;color:var(--dsw-derive-muted,#57606a)}
-.wb-af-src{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
-.wb-af-verdict{font-size:12px;font-weight:600;margin-left:auto}
-.wb-af-verdict[data-green=green]{color:var(--dsw-derive-success,#1a7f37)}
-.wb-af-verdict[data-green=red]{color:var(--dsw-derive-danger,#cf222e)}
-.wb-af-verdict[data-green=none]{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-empty{font-size:12px;color:var(--dsw-derive-muted,#57606a);padding:4px 2px}
-.wb-af-row{border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:8px;padding:6px 10px;font-size:12px}
-.wb-af-row[data-card=degrade]{border-style:dashed}
-.wb-af-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
-.wb-af-title{font-weight:600;font-size:13px}
-.wb-af-kind{font-size:11px;padding:0 5px;border-radius:5px;border:1px solid var(--dsw-derive-border,#d0d7de)}
-.wb-af-kind[data-known=false]{border-style:dashed;color:var(--dsw-derive-warn-deep,#7d4e00)}
-.wb-af-meta{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-tag{font-size:10px;color:var(--dsw-derive-muted,#57606a);border:1px solid var(--dsw-derive-border,#d0d7de);border-radius:5px;padding:0 4px}
-.wb-af-source{font-family:ui-monospace,monospace;font-size:11px;color:var(--dsw-derive-fg,#1f2328);word-break:break-all}
-.wb-af-note{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-state{color:var(--dsw-derive-warn-deep,#7d4e00);margin-top:2px}
-.wb-af-actions{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:4px;align-items:baseline}
-.wb-af-actions a{color:var(--dsw-derive-accent,#0969da)}
-.wb-af-nobytes{color:var(--dsw-derive-muted,#57606a)}
-.wb-af-refusal{color:var(--dsw-derive-warn-deep,#7d4e00)}
-.wb-af-qc{font-size:11px;color:var(--dsw-derive-muted,#57606a)}
-`
-
-/** Byte link for one row: the stage and the id are the address, never a path.
- *  Both segments are percent-encoded once here; the host decodes the path once. */
-function artifactBytesHref(ticketId: string, row: { stage: string; id: string }): string {
-  const path = `${API}/tickets/${encodeURIComponent(ticketId)}/artifacts/`
-    + `${encodeURIComponent(row.stage)}/${encodeURIComponent(row.id)}/bytes`
-  return withProject(path)
-}
-
-interface ArtifactInventoryPayload {
-  rows: ArtifactRow[]
-  stats: Record<string, ArtifactStat>
-  refusals: string[]
-  listSource: 'aggregate' | 'handoffs' | 'handoffs+receipts' | 'receipts'
-}
-
-function ArtifactFace({ detail }: { detail: TicketDetail }) {
-  const ticketId = detail.id
-  const [data, setData] = useState<ArtifactInventoryPayload | null>(null)
-  const [err, setErr] = useState('')
-  useEffect(() => {
-    let cancelled = false
-    setData(null)
-    setErr('')
-    apiGet(`${API}/tickets/${encodeURIComponent(ticketId)}/artifacts`)
-      .then((d) => {
-        if (cancelled) return
-        if (d?.ok === true && d.result) setData(d.result as ArtifactInventoryPayload)
-        else setErr(String(d?.error ?? 'the artifact inventory could not be read'))
-      })
-      .catch((e) => { if (!cancelled) setErr(String(e instanceof Error ? e.message : e)) })
-    return () => { cancelled = true }
-  }, [ticketId])
-  // Nothing to draw while the first read is in flight: the panel is not a claim about
-  // the ticket yet, and a placeholder would read as "no artifacts".
-  if (err !== '') {
-    return <div className="wb-af"><div className="wb-af-empty">Artifacts unavailable: {err}</div></div>
-  }
-  if (data === null || !Array.isArray(data.rows)) return null
-  const frame: ArtifactFrame = buildArtifactFaceView(
-    { rows: data.rows, refusals: data.refusals ?? [], listSource: data.listSource },
-    data.stats,
-    detail,
-  )
-  const verdictTag = frame.verdict.green === null ? 'none' : (frame.verdict.green ? 'green' : 'red')
-  return (
-    <div className="wb-af" data-testid="artifact-face">
-      <style>{ARTIFACT_FACE_CSS}</style>
-      <div className="wb-af-head">
-        <span className="ttl">{frame.title}</span>
-        <span className="wb-af-count">{frame.countText}</span>
-        <span className="wb-af-src">{frame.listSourceText}</span>
-        <span className="wb-af-verdict" data-green={verdictTag} data-source={frame.verdict.source}>
-          {frame.verdict.text}
-        </span>
-      </div>
-      {frame.rows.length === 0 && <div className="wb-af-empty">{frame.emptyText}</div>}
-      {frame.rows.map((r) => (
-        <div className="wb-af-row" data-card={r.card} data-state={r.state} key={r.rowKey}
-          data-testid={`artifact-row-${r.key}`}>
-          <div className="wb-af-line">
-            <span className="wb-af-title">{r.title}</span>
-            <span className="wb-af-kind" data-known={r.kindKnown ? 'true' : 'false'}>{r.kindLabel}</span>
-            <span className="wb-af-meta">
-              {[r.stageLabel, r.roundText, r.repoLabel, r.sizeText, r.timeText].filter(x => x !== '').join(' · ')}
-            </span>
-            {r.optionalText !== '' && <span className="wb-af-tag">{r.optionalText}</span>}
-            {r.legacyText !== '' && <span className="wb-af-tag">{r.legacyText}</span>}
-          </div>
-          <div className="wb-af-source">{r.sourceLabel}</div>
-          {r.note !== '' && <div className="wb-af-note">{r.note}</div>}
-          {r.stateText !== '' && <div className="wb-af-state">{r.stateText}</div>}
-          {r.refusals.map((x) => <div className="wb-af-refusal" key={x}>{x}</div>)}
-          <div className="wb-af-actions">
-            {r.bytesHref !== null
-              ? <a href={artifactBytesHref(ticketId, r)} target="_blank" rel="noreferrer">Open original</a>
-              : <span className="wb-af-nobytes">{r.bytesRefusal === '' ? 'Original bytes unavailable' : r.bytesRefusal}</span>}
-            {r.openHint !== '' && <span className="wb-af-note">Open with: {r.openHint}</span>}
-          </div>
-          {/* t261030-36: one body per row, only when the frame offers servable bytes.
-              The gate is the same function the component checks. */}
-          {shouldRenderBody(r, artifactBytesHref(ticketId, r)) && (
-            <ArtifactView row={r} ticketId={ticketId} bytesHref={artifactBytesHref(ticketId, r)} />
-          )}
-        </div>
-      ))}
-      {frame.refusals.length > 0 && (
-        <details>
-          <summary>Refused declarations ({frame.refusals.length})</summary>
-          {frame.refusals.map((x, i) => <div className="wb-af-refusal" key={`${i}-${x}`}>{x}</div>)}
-        </details>
-      )}
-      <div className="wb-af-qc">{frame.qcText}</div>
-    </div>
-  )
-}
-
 
 /** 「实时动态」折叠面板（t260825-03）：泳道会话文件尾 30 条事件流（agent 最近在干什么）。
  *  折叠时不轮询；展开后每 8s 拉一次 agent-live。降级（exists=false）显 reason，不报错。 */
@@ -3742,6 +3716,17 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
   /** t260919-02 终态失败面视图：openDetail 捕获 terminal 回执的 face 后装配；
    *  切单/重开/关抽屉即清（openDetail 开头 + 关闭钮兜底），绝不串票。 */
   const [terminalFace, setTerminalFace] = useState<TerminalFaceView | null>(null)
+  /** t261102-12 named read state of the open ticket: set when the read failed with a
+   *  located cause (no_poller / workflow_task_failed / retained / retained_unavailable).
+   *  A permanent state stops the detail from being re-polled as transient; a cleared
+   *  selection or a successful read clears it (never carried across tickets). */
+  const [readStateFace, setReadStateFace] = useState<ReadStateView | null>(null)
+  /** Ref mirror of the named read state: the poll loop reads it synchronously. */
+  const readStateRef = useRef<ReadStateView | null>(null)
+  /** t261102-12: when the open ticket's detail was last read. The poll loop compares it
+   *  with the model's per-state delay, so a `slow` state is really re-read slowly and a
+   *  `never` state is not re-read at all. */
+  const lastDetailReadRef = useRef(0)
   const [promptBox, setPromptBox] = useState<{ role: string; stage: string; prompt: string } | null>(null)
   const [reworkId, setReworkId] = useState<string | null>(null)
   const [reworkHuman, setReworkHuman] = useState(false)
@@ -3856,9 +3841,19 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
   async function pollOnce(): Promise<void> {
     if (listInFlight.current || detailInFlight.current) return
     const detailOpen = selectedIdRef.current !== null
+    // t261102-12: never re-poll a ticket whose read state is permanent (deterministic
+    // workflow-task failure, terminal, retained record). The old behaviour re-asked the
+    // same unanswerable question on every beat and reported it as a transient fault —
+    // measured 261101 on seven inspection rows that time out forever. A `slow` state
+    // (no_poller) is re-read on the slow beat only: a worker may appear on that queue,
+    // and the model says so.
+    const readView = readStateRef.current
+    const detailDelay = detailRepollDelayMs(readView, 5_000, 30_000)
+    const lastDetailReadMs = lastDetailReadRef.current
+    const detailDue = detailDelay !== null && (Date.now() - lastDetailReadMs) >= detailDelay
     const [listOut, detailOut] = await Promise.all([
       reloadTickets(),
-      detailOpen ? refreshDetailSilent() : Promise.resolve('ok' as PollOutcome),
+      (detailOpen && detailDue) ? refreshDetailSilent() : Promise.resolve('ok' as PollOutcome),
     ])
     const out = worstOutcome(listOut, detailOut)
     applyPollOutcome(out, out === 'ok' ? '' : 'snapshot query transient failure (stage switch window?)')
@@ -3933,6 +3928,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
     setDetailLoading(true)
     setOpMsg('')
     setTerminalFace(null)  // t260919-02：切单/重开先清失败面，绝不串票
+    setReadStateFace(null) // t261102-12: the named read state is per ticket as well
+    readStateRef.current = null
     try {
       const data = await apiGet(`${API}/tickets/${encodeURIComponent(id)}`)
       if (data?.ok !== true) {
@@ -3940,26 +3937,43 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
         // 精确报「不存在/已终态」，瞬时类引导「自动重试中」而非手动刷新。
         // t260919-02：terminal 回执 body 可带 face（host 直读桥附带）——随错误对象
         // 带起，终态失败票在详情抽屉渲染结构化失败面，不再是空面板。
-        const e = new Error(data?.error ?? 'detail load failed') as Error & { kind?: unknown; face?: unknown }
+        // t261102-12: read_face (no_poller / workflow_task_failed) rides the same bridge.
+        // That face is the NAMED read state: the panel names it and stops re-reading it
+        // as a transient fault.
+        const e = new Error(data?.error ?? 'detail load failed') as Error & {
+          kind?: unknown; face?: unknown; readFace?: unknown
+        }
         e.kind = data?.kind
-        e.face = data?.face
+        e.face = data?.face ?? data?.read_face
+        e.readFace = data?.read_face
         throw e
       }
       // t260901-15 跳单守卫：响应到达时若用户已改看别单，丢弃过期结果（防「点 13 跳 11」）。
       if (selectedIdRef.current !== id) return
+      readStateRef.current = null
+      setReadStateFace(null)
       setDetail(data.result as TicketDetail)
     } catch (err) {
       if (selectedIdRef.current === id) {
         const kind = (err as { kind?: unknown } | null)?.kind
-        if (kind === 'not_found') {
-          setOpMsg(`Ticket not found: ${id} (no such Temporal workflow)`)
-        } else if (kind === 'terminal') {
+        if (kind === 'terminal') {
           // t260919-02：终态不再是「只闪一句错误」——装配失败面视图（face 缺失/
           // 畸形由 terminalFaceView 显式降级为「原因不可得」，绝不空面板、绝不把
           // 终态当瞬时故障）；410 分级与「刷新无效」口径原样保留。
           setTerminalFace(terminalFaceView((err as { face?: unknown } | null)?.face,
             err instanceof Error ? err.message : String(err)))
           setOpMsg(String(err instanceof Error ? err.message : err))
+        } else if (isNamedReadKind(kind) || kind === 'not_found') {
+          // t261102-12: a read with a located cause is a NAMED state. It is never
+          // reported as a transient retry: no_poller, workflow_task_failed and a gone
+          // workflow read from (or missing) its retained record all get their own view,
+          // and the permanent ones are not re-polled at all.
+          const view = readStateView(kind, (err as { readFace?: unknown } | null)?.readFace
+            ?? (err as { face?: unknown } | null)?.face,
+            err instanceof Error ? err.message : String(err), id)
+          readStateRef.current = view
+          setReadStateFace(view)
+          setOpMsg(`${view.headline}${view.cause !== '' ? ` — ${view.cause}` : ''}`)
         } else {
           // 瞬时故障（超时/连接/取消）：不弹窗打断——保留占位提示，轮询自动补拉。
           setOpMsg(`Detail load failed (transient query error), retrying: ${String(err instanceof Error ? err.message : err)}`)
@@ -4003,6 +4017,8 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
     setOverlayNav(nav => closeOverlay(nav))
     setDetail(undefined)
     setTerminalFace(null)
+    setReadStateFace(null)      // t261102-12: the named read state never outlives its ticket
+    readStateRef.current = null
   }
 
   /** ArrowUp/Down ticket walk (only while the overlay is open; no walk in the epic content state — the list-walk semantics apply to the ticket detail only).
@@ -4221,15 +4237,34 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
   async function refreshDetailSilent(): Promise<PollOutcome> {
     const id = selectedIdRef.current
     if (!id) return 'ok'
+    // t261102-12: a permanent read state (deterministic workflow-task failure / terminal /
+    // retained record) is never re-read, by ANY caller — not only by the poll loop.
+    if (isPermanentReadState(readStateRef.current)) return 'ok'
     detailInFlight.current = true
+    lastDetailReadRef.current = Date.now()
     try {
       const data = await apiGet(`${API}/tickets/${encodeURIComponent(id)}`)
       if (data?.ok === true) {
-        if (selectedIdRef.current === id) setDetail(data.result as TicketDetail)
+        if (selectedIdRef.current === id) {
+          setDetail(data.result as TicketDetail)
+          // t261102-12: a successful read clears the named state (the workflow answers
+          // again — a no_poller that got its worker heals here, never silently hangs on).
+          readStateRef.current = null
+          setReadStateFace(null)
+        }
         return 'ok'
       }
       const out = classifyPollBody(data)
       if (out !== 'retryable' && selectedIdRef.current === id) {
+        // t261102-12: a silent re-read that lands on a named state names it too — the
+        // state may become permanent while the drawer is open (the workflow task fails
+        // after the read started).
+        const view = readStateView(data?.kind, data?.read_face ?? data?.face,
+          data?.error, id)
+        if (view.retry !== 'normal' || view.state === 'retained') {
+          readStateRef.current = view
+          setReadStateFace(view)
+        }
         setOpMsg(String(data?.error ?? 'ticket query failed'))
       }
       return out
@@ -4366,6 +4401,13 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
               本面板是抽屉唯一详情体（绝不空面板）；零操作入口（组件契约见定义处）。 */}
           {!detailLoading && overlayNav.current?.kind !== 'epic' && terminalFace !== null && (
             <TerminalFailurePanel view={terminalFace} />
+          )}
+          {/* t261102-12: the named read state (no_poller / workflow_task_failed / the
+              retained record). When this panel is the whole drawer body it is never
+              blank and never a spinner: it names the state and states whether the
+              detail will be re-read automatically. */}
+          {!detailLoading && overlayNav.current?.kind !== 'epic' && readStateFace !== null && (
+            <ReadStatePanel view={readStateFace} />
           )}
           {/* t260901-15 跳单守卫：详情与当前选中不一致不渲染（防在途旧响应顶替新详情）。 */}
           {!detailLoading && overlayNav.current?.kind !== 'epic' && detail !== undefined && detail.id === selectedId && (
@@ -4643,11 +4685,6 @@ function WorkbenchSection({ focusId, focusNonce, listNonce, projectKey }: {
               ) })()}
               {/* t260825-03：运行脉搏行 + 实时动态折叠面板（钉在状态行下，所有页签可见） */}
               <PulseLine detail={detail} />
-              {/* t261030-35: the artifact inventory and frame. No views in this slice —
-                  every row is metadata plus the original-bytes link; an unknown kind or
-                  unusable bytes render the degrade card. An inspection ticket has no
-                  artifact face and renders nothing here. */}
-              {detail.kind !== 'inspection' && <ArtifactFace detail={detail} />}
               <AgentLivePanel ticketId={detail.id} />
               <EvidenceImages ticketId={detail.id} />
               <D2Problems detail={detail} />
