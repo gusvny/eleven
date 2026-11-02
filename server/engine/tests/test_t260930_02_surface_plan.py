@@ -206,3 +206,116 @@ def test_marker_id_distinct_from_existing_gates():
     assert dl.SURFACE_PLAN_PATCH_ID == "dev-lane-surface-plan-v1"
     assert dl.SURFACE_PLAN_PATCH_ID not in (
         dl.TARGETED_RERUN_PATCH_ID, dl.TARGETED_RERUN_FILE_RADIUS_PATCH_ID)
+
+
+# ------- t261102-45 (KI-458): the change set is measured against BOTH sides -------
+#
+# Measured defect: a develop-buffer lane sits on its line AND has synced main, so a
+# change set measured against main alone charges the LINE's landed work to the ticket
+# (t261102-09: 21 integration paths the line owns, files main does not even have). The
+# surface planner then answers mode=full: 784 entries, ~885 s against a 900 s command
+# budget, and a measured 776-entry run took 1159 s wall - a full round structurally
+# cannot finish. The caliber below is the one the write-set item already uses (261012
+# host ruling): a ticket's OWN write is a file that differs from BOTH baselines.
+
+def _two_sided_worktree(tmp_path) -> str:
+    """A placeable worktree path: a temp dir carrying a `.git` marker is a repo root."""
+    wt = tmp_path / "lane"
+    wt.mkdir(parents=True, exist_ok=True)
+    (wt / ".git").mkdir(exist_ok=True)
+    return str(wt)
+
+
+def _rc2(stdout="", returncode=0, stderr=""):
+    class _P:
+        pass
+    p = _P()
+    p.returncode, p.stdout, p.stderr = returncode, stdout, stderr
+    return p
+
+
+def test_changed_files_two_sided_intersection_keeps_only_own_files(tmp_path):
+    wt = _two_sided_worktree(tmp_path)
+
+    def fake_git(args, cwd, timeout=60):
+        if args[0] == "diff":
+            ref = args[2]
+            if ref.startswith("MAIN..."):
+                # main side: the ticket's own file PLUS everything the line carries
+                return _rc2("integration/own/x.py\nintegration/t261030-35/line_only.mjs\n")
+            if ref.startswith("LINE..."):
+                return _rc2("integration/own/x.py\nserver/app.py\n")
+            raise AssertionError(args)
+        if args[0] == "status":
+            return _rc2("")
+        raise AssertionError(args)
+
+    orig_git, orig_mb = aa._git, aa._merge_base_ref
+    aa._git = fake_git
+    aa._merge_base_ref = lambda branch, repo, other="main": (
+        ("MAIN" if other == "main" else "LINE"), "")
+    try:
+        r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
+            ticket_id="t", worktree=wt, branch="lane-1", base_other_ref="develop-buffer")))
+    finally:
+        aa._git, aa._merge_base_ref = orig_git, orig_mb
+    assert isinstance(r, shared.ChangedFilesResult) and r.error == "", r.error
+    # the intersection: the line-only file and the main-only file are NOT this ticket's
+    assert r.files == ["integration/own/x.py"], r.files
+    assert r.basis == "develop-buffer", r.basis
+
+
+def test_changed_files_default_stays_main_only_and_is_named(tmp_path):
+    wt = _two_sided_worktree(tmp_path)
+
+    def fake_git(args, cwd, timeout=60):
+        if args[0] == "diff":
+            return _rc2("a.py\nb.py\n")
+        if args[0] == "status":
+            return _rc2("?? c.py\0")
+        raise AssertionError(args)
+
+    orig_git, orig_mb = aa._git, aa._merge_base_ref
+    aa._git = fake_git
+    aa._merge_base_ref = lambda branch, repo, other="main": ("BASE", "")
+    try:
+        r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
+            ticket_id="t", worktree=wt, branch="lane-1")))
+    finally:
+        aa._git, aa._merge_base_ref = orig_git, orig_mb
+    # byte-identical caliber: the main diff plus the dirty files, and the receipt says so
+    assert r.files == ["a.py", "b.py", "c.py"], r.files
+    assert r.error == "" and r.basis == "main", (r.error, r.basis)
+
+
+def test_changed_files_unreadable_line_side_fails_closed_by_name(tmp_path):
+    """An unreadable line side must WIDEN, never narrow: files=[] plus an error naming
+    the side (the caller's non-empty error arm runs everything)."""
+    wt = _two_sided_worktree(tmp_path)
+
+    def fake_git(args, cwd, timeout=60):
+        if args[0] == "diff":
+            return _rc2("a.py\n")
+        if args[0] == "status":
+            return _rc2("")
+        raise AssertionError(args)
+
+    orig_git, orig_mb = aa._git, aa._merge_base_ref
+    aa._git = fake_git
+    aa._merge_base_ref = lambda branch, repo, other="main": (
+        ("MAIN", "") if other == "main" else ("", "unknown revision develop-buffer"))
+    try:
+        r = asyncio.run(aa.changed_files(shared.ChangedFilesArgs(
+            ticket_id="t", worktree=wt, branch="lane-1", base_other_ref="develop-buffer")))
+    finally:
+        aa._git, aa._merge_base_ref = orig_git, orig_mb
+    assert r.files == [] and "develop-buffer" in r.error and "merge-base" in r.error, r.error
+
+
+def test_dev_lane_passes_the_line_side_for_buffer_tickets():
+    """Source lock: the blast-radius call site must hand the line side down, or the
+    whole line keeps being charged to the ticket (the measured defect itself)."""
+    src = (_ENGINE / "dev_lane.py").read_text(encoding="utf-8")
+    i = src.index("ChangedFilesArgs(")
+    block = src[i:i + 1200]
+    assert "base_other_ref=self._dev_buffer_write_set_other_side()" in block, block[:600]

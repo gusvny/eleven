@@ -764,6 +764,15 @@ class ChangedFilesArgs:
     ticket_id: str
     worktree: str = ""                          # 泳道根（git 命令 cwd；空=REPO_ROOT）
     branch: str = ""                            # 泳道分支（merge-base 对象；空=fail-closed）
+    # t261102-45 (KI-458): the OTHER side of the change-set diff. Empty = main, the
+    # historical caliber, byte for byte. A develop-buffer ticket passes its LINE branch
+    # here: such a lane sits on the line, so merge-base(main, lane) walks back to where
+    # the line and main diverged and the diff charges the LINE's landed work to this
+    # ticket - measured on t261102-09, where 21 integration paths the line owns (files
+    # main does not even have) read as the ticket's own change and the surface planner
+    # answered mode=full: 784 entries, ~885 s against a 900 s command budget. Same
+    # caliber as the write-set item's base_other_ref (t261012-caliber intersection).
+    base_other_ref: str = ""
 
 
 #: 面计划 mode 词表（真源=执行器 `--print-surface-plan` 的 JSON 契约）
@@ -862,6 +871,11 @@ class ChangedFilesResult:
     # t260925-12 闸段分相计时（additive）：活动自报墙钟秒（执行面，不含 Temporal
     # 调度等待）。0.0=未计时（老回放/旧 dict 回退重建点缺键=缺省值，零行为变化）。
     wall_s: float = 0.0
+    # t261102-45 (KI-458): which baseline the change set was measured against —
+    # "main" (the historical caliber, the only value a non-buffer ticket produces) or
+    # the LINE branch a develop-buffer ticket names. A reader must be able to tell the
+    # two calibers apart from the receipt alone. Empty on an old replay/dict fallback.
+    basis: str = ""
 
 
 def gate_phase_timings(phases, wall_s):

@@ -6001,7 +6001,14 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                             ChangedFilesArgs(
                                 ticket_id=self.ticket_id,
                                 worktree=str(self.meta.get("worktree") or ""),
-                                branch=str(self.meta.get("branch") or "")),
+                                branch=str(self.meta.get("branch") or ""),
+                                # t261102-45 (KI-458): a develop-buffer lane sits on
+                                # its line, so the change set is measured against BOTH
+                                # sides (the line's branch and main) and keeps only the
+                                # files this ticket itself wrote. Without it the whole
+                                # line reads as this ticket's change and the surface
+                                # planner is forced to a full round.
+                                base_other_ref=self._dev_buffer_write_set_other_side()),
                             start_to_close_timeout=INTEG_RUN_TO, retry_policy=RETRY)
                         gate_cf_s += max(0, self._now_epoch() - _cf_t)
                         _cf_files = list(getattr(_cf, "files", None) or [])
