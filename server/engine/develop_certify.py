@@ -1254,15 +1254,26 @@ def read_baseline(project, repo, main_tip):
     return obj
 
 
-def write_baseline(project, repo, main_tip, deterministic_fails, flaky):
+def write_baseline(project, repo, main_tip, deterministic_fails, flaky,
+                   run_id=None):
     """Persist the baseline (atomic: write-temp-then-rename, never a torn
-    cache a concurrent round could half-read)."""
+    cache a concurrent round could half-read).
+
+    ``run_id`` (t261103-06, KI-456) is ADDITIVE and optional: the id of the
+    run row the BASELINE-rebuild pass produced. It is the durable proof that
+    a run row was a relative-judgement observation and not a verdict on the
+    line (the heal reads it back), so it must survive this round's death —
+    which is exactly why it rides the cache instead of memory. A cache written
+    without it (a reused/ancestor baseline, an older cache) simply carries no
+    such claim."""
     p = baseline_path(project, repo, main_tip)
     p.parent.mkdir(parents=True, exist_ok=True)
     obj = {"main_tip": main_tip,
            "deterministic_fails": sorted(set(deterministic_fails)),
            "flaky": sorted(set(flaky)),
            "built_at": int(time.time() * 1000)}
+    if isinstance(run_id, str) and run_id.startswith("run-"):
+        obj["run"] = run_id
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False) + "\n", encoding="utf-8")
     os.replace(str(tmp), str(p))
@@ -1447,11 +1458,18 @@ def _ensure_baseline(project, repo, runner, flaky):
         return None, "baseline_run_failed:%s" % repo
     bl_fails = bl_header.get("failed_names") or []
     deterministic = sorted(set(bl_fails) - set(flaky))
-    write_baseline(project, repo, main_tip, deterministic, flaky)
-    return ({"main_tip": main_tip, "deterministic_fails": deterministic,
-             "flaky": sorted(set(flaky)), "baseline_source": "rebuilt",
-             "baseline_tip": main_tip, "judged_tip": main_tip},
-            "cache_built:%s@%s" % (repo, main_tip[:12]))
+    # t261103-06 (KI-456): this run is a BASELINE observation, not a verdict.
+    # Its run id is recorded in the cache so the tick-entry heal can refuse to
+    # book it as the line's certification even after this round is gone.
+    bl_run = bl_header.get("id")
+    write_baseline(project, repo, main_tip, deterministic, flaky,
+                   run_id=bl_run)
+    out = {"main_tip": main_tip, "deterministic_fails": deterministic,
+           "flaky": sorted(set(flaky)), "baseline_source": "rebuilt",
+           "baseline_tip": main_tip, "judged_tip": main_tip}
+    if isinstance(bl_run, str) and bl_run.startswith("run-"):
+        out["baseline_run"] = bl_run
+    return (out, "cache_built:%s@%s" % (repo, main_tip[:12]))
 
 
 def _known_red_rel():
@@ -1679,7 +1697,11 @@ def relative_round_verdict(project, candidate, header, runner, roster):
         # t261016-01: the record must NAME the baseline source — which tip
         # the fail set was measured at, which tip it is judging, and whether
         # the baseline was a cache hit, a named reuse, or a rebuild.
-        for k in ("baseline_source", "baseline_tip", "judged_tip"):
+        # t261103-06 (KI-456): a rebuild also names the RUN the baseline pass
+        # produced, so the relative-judgement input is a citable row — never
+        # mistakable for this line's certification.
+        for k in ("baseline_source", "baseline_tip", "judged_tip",
+                  "baseline_run"):
             if k in baseline:
                 detail[k] = baseline[k]
         per_repo[name] = detail
@@ -2948,6 +2970,13 @@ def run_line_round(line, trigger, guard_path, runner, read_rows, append_rows,
                 # resolved from the line worktree, and it refused 37 existing
                 # batteries whose records deliberately carry synthetic revision
                 # labels to exercise record logic without git.
+                # t261103-06 (KI-456): the citation is the CANDIDATE the
+                # engine itself resolved (the derived range's head, or the
+                # line's declared branch head for a manual round). The round's
+                # BASELINE-rebuild pass never reaches this line: it runs
+                # inside ``relative_round_verdict`` -> ``_ensure_baseline`` and
+                # its run row is refused as an observation by the tick-entry
+                # heal below — so a certification can never cite main's tip.
                 cert = build_certification(candidate, header, booked_red,
                                            judged_by, at_ms=now_ms, line=line)
                 batch = [cert]
@@ -3831,10 +3860,165 @@ LINE_ROUND_RUN_SOURCE = "lane:line-round"
 
 
 def _run_repos_key(repos):
-    """Canonical key of a candidate revision set, for landing matching."""
+    """Canonical key of a candidate revision set (repo + revision pairs).
+
+    Retained as the reader-side spelling of "one candidate set"; the heal's
+    pass identity (below) compares REVISIONS, because the suite's run header
+    names the repository it ran in, which need not be the name the project's
+    line declaration uses for the same repository."""
     if not _valid_repos(repos):
         return None
     return tuple(sorted((r["repo"], r["revision"]) for r in repos))
+
+
+# ---- which PASS a run row is: candidate verdict or baseline observation ------
+#
+# KI-456 (measured twice on 2026-11-03; ticket t261103-06). A line round has
+# TWO passes through the ONE runner seam:
+#   * the CANDIDATE pass judges the line head the round was asked about;
+#   * the BASELINE-rebuild pass runs the same suite at MAIN's tip, only so the
+#     relative caliber has something to compare the line against
+#     (``_ensure_baseline`` -> ``runner([{repo, revision: main_tip}])``).
+# Both passes leave one run row in the runs store, both wear the line round's
+# source, and the tick-entry heal used to take any such row that no delivery
+# row cited (``landing_repo_match``, else the ``sole_line`` take-anyway) and
+# book it as THIS line's certification. Measured consequence: a red BASELINE
+# pass booked a red certification for the line and opened a freeze on content
+# the line never took — cert-01M6D365 cited main tip 9897c555 and froze the
+# line while its candidate pass at a21c504c was 703/703 green; an hour later
+# cert-01M6F24K repeated it at 3d1727ed while 99c43b8c was 706/706 green. Each
+# freeze blocked every landing on the line until a human corrected the ledger.
+#
+# The booking rule (fail-closed, never a guessed revision):
+#   CANDIDATE  — every revision the row names is one this line can prove it
+#                has: a revision a landing on this line recorded, or the
+#                line's declared branch head (what a manual round judges).
+#                This is the ONLY kind that becomes a certification.
+#   BASELINE   — the row is an observation, not a verdict: its run id is
+#                recorded as a baseline rebuild's run (the durable proof), or
+#                every revision it names is a tip main's baseline was measured
+#                at (main's current tip, or a cached baseline key). Books
+#                NOTHING and opens no freeze.
+#   UNKNOWN    — the row can be tied to neither identity (an alias, a stale
+#                revision, a foreign runner): books NOTHING and NAMES the
+#                refusal, exactly like the reachability net (KI-429).
+# Note the baseline identity is checked BEFORE the revision identity only for
+# the run-id form: a run id is exact, so it wins even when main's tip happens
+# to equal the line head (the degenerate case where the two trees are the same
+# tree and the baseline pass's absolute reds would otherwise read as the
+# line's).
+
+PASS_CANDIDATE = "candidate"
+PASS_BASELINE = "baseline"
+PASS_UNKNOWN = "unknown"
+#: The row's repo set is not a well-formed candidate set at all: there is no
+#: identity to weigh, so the row keeps the pre-existing "header unjudgable"
+#: path below (one named range-growth row, no certification, no freeze).
+PASS_MALFORMED = "malformed"
+#: The refusal vocabulary for a run row the heal cannot place on either side of
+#: the round (t261103-06). The reachability net's words stay separate: this one
+#: answers "which pass was this", never "does the revision exist".
+REFUSE_PASS_UNKNOWN = "run_pass_unattributable"
+
+
+def _revision_set(repos):
+    """The revision set a run row / candidate row names, or ``None`` when the
+    shape is not a well-formed candidate set."""
+    if not _valid_repos(repos):
+        return None
+    return {r["revision"] for r in repos}
+
+
+def line_head_revision_map(project, line):
+    """{repo: revision} of the line's DECLARED branch tips — the identity a
+    round judging the line head cites (``line_head_candidate``). Empty when
+    the project/line cannot resolve one; the caller then has no head identity
+    and says so instead of guessing."""
+    if not (isinstance(project, str) and project.strip()):
+        return {}
+    try:
+        head, _why = line_head_candidate(project, line)
+    except Exception:  # noqa: BLE001 — an identity lookup never breaks a heal
+        return {}
+    if not _valid_repos(head):
+        return {}
+    return {r["repo"]: r["revision"] for r in head}
+
+
+def _baseline_cache_rows(project):
+    """Every readable baseline cache row under the project's baseline dir.
+    Unreadable lines/files are skipped: the caller then has no positive
+    baseline identity and answers "cannot tell", never a guess."""
+    out = []
+    if not (isinstance(project, str) and project.strip()):
+        return out
+    try:
+        files = sorted(_baseline_dir(project).glob("*.json"))
+    except Exception:  # noqa: BLE001 — a read probe never breaks a heal
+        return out
+    for p in files:
+        try:
+            obj = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+    return out
+
+
+def baseline_identity(project, repo_names):
+    """(tips, run_ids) the BASELINE pass is known to have run at and with.
+
+    ``tips`` holds today's main tip of every named repository plus every
+    cached baseline key (a cache outlives main advancing, so a rebuild run
+    stays recognisable after the tip moves). ``run_ids`` holds the run ids
+    those baseline rebuilds cited (``write_baseline``'s additive ``run``
+    field). Both empty = nothing readable = "cannot tell", never a guess."""
+    tips, runs = set(), set()
+    if not (isinstance(project, str) and project.strip()):
+        return tips, runs
+    for name in sorted({n for n in repo_names
+                        if isinstance(n, str) and n.strip()}):
+        try:
+            tip = _git_main_tip(_repo_worktree(project, name))
+        except Exception:  # noqa: BLE001 — a probe never breaks the heal
+            tip = ""
+        if _valid_full_sha(tip):
+            tips.add(tip)
+    for obj in _baseline_cache_rows(project):
+        tip = obj.get("main_tip")
+        if _valid_full_sha(tip):
+            tips.add(tip)
+        rid = obj.get("run")
+        if isinstance(rid, str) and rid.startswith("run-"):
+            runs.add(rid)
+    return tips, runs
+
+
+def run_pass_role(repos, run_id, landing_revs, head_revs, baseline_tips,
+                  baseline_runs):
+    """(role, rule, why) for ONE run row's candidate set.
+
+    ``role`` is PASS_CANDIDATE (a verdict on this line), PASS_BASELINE (a
+    relative-judgement observation: book nothing) or PASS_UNKNOWN (cannot
+    tell: book nothing and name the refusal). ``rule`` names the identity that
+    decided a candidate row; ``why`` carries the named reason otherwise."""
+    revs = _revision_set(repos)
+    if revs is None:
+        return PASS_MALFORMED, "", "candidate_set_malformed"
+    named = ",".join(sorted(r[:12] for r in revs)) or "-"
+    if isinstance(run_id, str) and run_id and run_id in set(baseline_runs):
+        return (PASS_BASELINE, "baseline_pass",
+                "run_is_a_baseline_rebuild:%s" % run_id)
+    if revs and revs <= set(landing_revs):
+        return PASS_CANDIDATE, "landing_repo_match", ""
+    if revs and revs <= set(head_revs):
+        return PASS_CANDIDATE, "line_head_match", ""
+    if revs and revs <= set(baseline_tips):
+        return (PASS_BASELINE, "baseline_pass",
+                "revision_is_a_main_baseline_tip:%s" % named)
+    return (PASS_UNKNOWN, "",
+            "revision_not_on_this_line:%s" % named)
 
 
 def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
@@ -3847,12 +4031,19 @@ def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
     id (a run already cited by a certification, or named by a range-growth
     reason, is never touched again — the heal is idempotent by replay).
 
-    Attribution: a run belongs to this line when its candidate revision set
-    equals a landing row's revision set (``landing_repo_match``); with no
-    match and ``sole_line`` (the project declares exactly this one line,
-    read fresh by the caller at heal time) the run is taken anyway
-    (``sole_line``). Otherwise NO row is written and the entry names the
-    ambiguity — a guessed line would forge a certification.
+    Attribution (t261103-06, KI-456 — the passes are told apart, never
+    guessed): a run row is booked only when every revision it names is one
+    this line can prove it has — a revision a landing on this line recorded
+    (``landing_repo_match``) or the line's declared branch head
+    (``line_head_match``). A row that is a BASELINE-rebuild observation (its
+    run id is a recorded baseline rebuild's, or every revision it names is a
+    tip main's baseline was measured at) books NOTHING: no certification and
+    no freeze — it is the round's relative-judgement input, not a verdict on
+    the line. A row tied to neither identity books NOTHING and writes one
+    range-growth row naming the refusal (never a guessed revision).
+    ``sole_line`` is kept for call compatibility and no longer grants
+    attribution: the take-anyway rule it used to enable is exactly what booked
+    a baseline pass as the line's certification.
 
     Heal mapping mirrors the settle block: a judgable header (``run-`` id,
     dict ``cases``, ran >= 1) becomes ONE certification whose ``judged_by``
@@ -3873,7 +4064,48 @@ def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
     growth_reasons = [str(r.get("reason")) for r in rows
                       if r.get("kind") == KIND_RANGE_GROWTH]
     landings = _of_kind(rows, KIND_LANDING, line)
-    landing_keys = {_run_repos_key(l.get("repos")) for l in landings}
+    landing_revs = set()
+    for _l in landings:
+        landing_revs |= (_revision_set(_l.get("repos")) or set())
+    # The head and baseline identities are resolved ONCE per line and only
+    # when a row actually needs them (the landing identity settles most rows).
+    # The baseline identity is memoised per named-repository set: a run row
+    # naming another repository must not inherit an answer probed for one it
+    # did not name.
+    _ident = {"head": None, "base": {}}
+
+    def _head_revs():
+        if _ident["head"] is None:
+            _ident["head"] = line_head_revision_map(project, line)
+        return set(_ident["head"].values())
+
+    def _base_ident(names):
+        key = tuple(sorted(names))
+        if key not in _ident["base"]:
+            _ident["base"][key] = baseline_identity(project, list(key))
+        return _ident["base"][key]
+
+    def _refuse_by_name(rid, blocked):
+        """The reachability refusal (t261030-25, KI-429): ONE range-growth row
+        naming the check, the repo@revision and this caller — no certification
+        and no freeze — so the next tick does not replay the same refusal
+        forever. Returns the named receipt entry (a failed append is named,
+        never raised)."""
+        why = unreachable_refusal(blocked, "reconciled:%s" % rid)
+        try:
+            batch = [could_not_run_row(
+                line, "unrecorded_round_refused:%s" % why, at_ms=now_ms)]
+            res = append_rows(batch)
+            if not isinstance(res, dict) or res.get("written") != len(batch):
+                raise CertifyError("heal_append_rejected:%r"
+                                   % (res.get("rejected")
+                                      if isinstance(res, dict) else res,))
+            return {"line": line, "state": "error", "run": rid,
+                    "error": why, "wrote": "range_growth"}
+        except Exception as e:  # noqa: BLE001 — named, never tick-fatal
+            return {"line": line, "state": "error", "run": rid,
+                    "error": "heal_failed:%s:%s" % (type(e).__name__, e)}
+
     seen_ids = set()
     for run in runs_rows:
         if not isinstance(run, dict):
@@ -3889,17 +4121,41 @@ def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
         if rid in cited_runs or any(rid in reason
                                     for reason in growth_reasons):
             continue
-        # attribution — never a guess
-        rule = None
-        if _run_repos_key(run.get("repos")) in landing_keys:
-            rule = "landing_repo_match"
-        elif sole_line:
-            rule = "sole_line"
-        else:
-            entries.append({"line": line, "state": "error",
-                            "run": rid,
-                            "error": "unrecorded_run:%s:line_ambiguous"
-                                     % rid})
+        # Which PASS is this row (KI-456)? The candidate pass is the verdict;
+        # the baseline-rebuild pass is a relative-judgement observation that
+        # books nothing; a row tied to neither identity books nothing and
+        # names the refusal. Never a guessed revision, never a take-anyway.
+        _names = sorted({r.get("repo") for r in run.get("repos") or []
+                         if isinstance(r, dict)
+                         and isinstance(r.get("repo"), str)})
+        _base_tips, _base_runs = _base_ident(_names)
+        role, rule, why = run_pass_role(run.get("repos"), rid, landing_revs,
+                                        _head_revs(), _base_tips,
+                                        _base_runs)
+        if role == PASS_BASELINE:
+            # the round's baseline observation: no certification for the line,
+            # no freeze, no ledger row. Named on the tick receipt so the skip
+            # is visible; the classification is derived, so a replay derives
+            # the same answer without any state.
+            entries.append({"line": line, "state": "skipped",
+                            "run": rid, "attribution_rule": rule,
+                            "reason": why})
+            continue
+        if role not in (PASS_CANDIDATE, PASS_MALFORMED):
+            # Not a candidate identity. Two refusals, both booking nothing:
+            # a revision the project cannot even produce keeps the KI-429
+            # net's own words and its one range-growth row (idempotent by
+            # replay); anything else is an unattributable pass, named on the
+            # receipt, with no ledger row and no id ever booked.
+            _blocked = unreachable_candidates(run.get("repos"), project) \
+                if project else []
+            if not _blocked:
+                entries.append(
+                    {"line": line, "state": "error", "run": rid,
+                     "error": "unrecorded_run:%s:line_ambiguous:%s:%s"
+                              % (rid, REFUSE_PASS_UNKNOWN, why)})
+                continue
+            entries.append(_refuse_by_name(rid, _blocked))
             continue
         cases = run.get("cases")
         judgable = (isinstance(cases, dict)
@@ -3908,29 +4164,12 @@ def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
         try:
             if judgable:
                 # t261030-25 (KI-429): the heal obeys the same reachability
-                # net as the settle path. A run row citing a revision this
-                # project cannot produce is refused BY NAME — no
-                # certification row, no freeze — and one range-growth row
-                # records the refusal (the same non-judgment vocabulary the
-                # unjudgable-header branch below uses), so the next tick does
-                # not replay the same refusal forever.
+                # net as the settle path (the landing identity can itself
+                # name a revision the repository cannot produce).
                 _blocked = unreachable_candidates(run.get("repos"), project) \
                     if project else []
                 if _blocked:
-                    _why = unreachable_refusal(_blocked,
-                                               "reconciled:%s" % rid)
-                    batch = [could_not_run_row(
-                        line, "unrecorded_round_refused:%s" % _why,
-                        at_ms=now_ms)]
-                    res = append_rows(batch)
-                    if not isinstance(res, dict) \
-                            or res.get("written") != len(batch):
-                        raise CertifyError("heal_append_rejected:%r"
-                                           % (res.get("rejected")
-                                              if isinstance(res, dict)
-                                              else res,))
-                    entries.append({"line": line, "state": "error", "run": rid,
-                                    "error": _why, "wrote": "range_growth"})
+                    entries.append(_refuse_by_name(rid, _blocked))
                     continue
                 cert = build_certification(
                     run.get("repos"), run, booked_red,

@@ -25,8 +25,17 @@ Legs:
 - R6 an append failure is a named error entry, never an exception.
 - T1 the full tick heals the witness and idles — no round, no second row.
 - T2 a malformed runs store is a named error entry, never a guess.
+- KI-456 (added by t261103-06) the round's TWO passes are told apart on the
+  booking side: the CANDIDATE pass (the line head the round judged) is the
+  only verdict — it books the certification and, when it is red, the freeze;
+  the BASELINE-rebuild pass (the same suite run at main's tip for the relative
+  comparison) books NOTHING and opens NO freeze, however red it is. A row tied
+  to neither identity books nothing and names the refusal, and the retired
+  ``sole_line`` take-anyway no longer grants a booking.
 
-Zero docker, zero Temporal, never touches 3099; no real runner.
+Zero docker, zero Temporal, never touches 3099; no real runner. The KI-456
+legs use real git fixture repos under an injected projects root and a temp
+ledger — no network, no store of any real project.
 """
 import json
 import sys
@@ -79,6 +88,86 @@ def rows_of(path):
     rows, bad = dc.read_rows(path)
     assert not bad
     return rows
+
+
+def heal(project, path, runs_rows, sole_line=True):
+    return dc.reconcile_unrecorded_rounds(
+        LINE, rows_of(path), runs_rows, writer(path), "tick", "booked-v1",
+        1792909089000, sole_line=sole_line, project=project)
+
+
+# ---- fixtures for the two-pass legs (KI-456 / t261103-06) -------------------
+
+def _git(argv, cwd):
+    import subprocess
+    subprocess.run(["git"] + argv, cwd=str(cwd), check=True,
+                   capture_output=True)
+
+
+def _rev(repo_dir, ref):
+    import subprocess
+    return subprocess.run(["git", "-C", str(repo_dir), "rev-parse", ref],
+                          check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def two_pass_repo(tmp_path, monkeypatch, repo="sandbar", project="proj",
+                  line=LINE):
+    """A project whose line worktree is a REAL git repository carrying TWO
+    commits: main's tip (what the round's baseline-rebuild pass runs at) and
+    the line branch tip (the candidate the round judged).
+
+    The projects root is injected through the same seam the engine reads and
+    ``lines.json`` declares the line branch, so ``line_head_candidate``
+    answers with the candidate revision while main's tip stays distinct.
+    Returns (project, main_rev, line_rev). No network, no docker, no real
+    store; the temp tree dies with tmp_path."""
+    projects = tmp_path / "projects"
+    develop = projects / project / "data" / "develop"
+    dive = develop / "wt" / repo
+    dive.mkdir(parents=True)
+    _git(["init", "-q", "-b", "main", "."], dive)
+    _git(["config", "user.email", "t@example.invalid"], dive)
+    _git(["config", "user.name", "t"], dive)
+    (dive / "file.txt").write_text("main\n", encoding="utf-8")
+    _git(["add", "-A"], dive)
+    _git(["commit", "-qm", "main-tip"], dive)
+    main_rev = _rev(dive, "refs/heads/main")
+    _git(["checkout", "-q", "-b", "line"], dive)
+    (dive / "line.txt").write_text("line\n", encoding="utf-8")
+    _git(["add", "-A"], dive)
+    _git(["commit", "-qm", "line-tip"], dive)
+    line_rev = _rev(dive, "HEAD")
+    _git(["checkout", "-q", "main"], dive)
+    (develop / "lines.json").write_text(
+        '[{"line_id": "%s", "repositories": [{"name": "%s", '
+        '"branch": "line"}]}]\n' % (line, repo), encoding="utf-8")
+    monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(projects))
+    return project, main_rev, line_rev
+
+
+def pass_run(rid, rev, verdict="green", failed_names=None, cases=None,
+             receipts=None, repo="sandbar"):
+    """One runner-persisted run row of ONE pass of a round (the shape the
+    line-round runner writes into the runs store)."""
+    run = {"v": "run-ledger-v1", "id": rid,
+           "source": dc.LINE_ROUND_RUN_SOURCE,
+           "repos": [{"repo": repo, "revision": rev}],
+           "verdict": verdict, "verdict_rule": "relative-content-v1"}
+    if cases is not None:
+        run["cases"] = cases
+    elif verdict == "green":
+        run["cases"] = {"ran": 703, "passed": 703, "failed": 0,
+                        "env_failed": 0}
+    else:
+        run["cases"] = {"ran": 696, "passed": 691, "failed": 3,
+                        "env_failed": 2}
+    if failed_names:
+        run["failed_names"] = list(failed_names)
+        run["new_regressions"] = list(failed_names)
+    if receipts is not None:
+        run["fail_receipts"] = receipts
+    return run
 
 
 def certs(rows):
@@ -170,15 +259,41 @@ def test_r1_witness_heals_one_green_cert_and_replay_writes_nothing(tmp_path):
     assert len(certs(rows_of(p))) == 1
 
 
-def test_r1b_sole_line_attribution_fires_without_landing_match(tmp_path):
+def test_r1b_line_head_identity_certifies_without_a_landing_match(tmp_path,
+                                                                 monkeypatch):
+    """A round that judged the line's declared head carries a revision no
+    landing cites yet (a manual round after a merge on the line): the head
+    identity books it, named ``line_head_match``. The retired ``sole_line``
+    take-anyway is NOT what books it — see the KI-456 section below."""
+    project, _main_rev, line_rev = two_pass_repo(tmp_path, monkeypatch)
+    p = ledger(tmp_path)
+    dc.append_rows([landing("sandbar", "older-rev")], p)
+    runs = [witness_run(rev=line_rev)]
+    out = heal(project, p, runs)
+    assert out[0]["state"] == "reconciled"
+    assert out[0]["attribution_rule"] == "line_head_match"
+    cs = certs(rows_of(p))
+    assert len(cs) == 1
+    assert cs[0]["repos"] == [{"repo": "sandbar", "revision": line_rev}]
+
+
+def test_r1c_unattributable_pass_books_nothing_even_when_sole_line(tmp_path):
+    """The retired take-anyway: a run row citing a revision that is neither a
+    landing on this line nor its declared head books NOTHING and names the
+    refusal. ``sole_line`` alone is not evidence of a candidate identity
+    (KI-456: it booked a round's baseline pass as the line's certification)."""
     p = ledger(tmp_path)
     dc.append_rows([landing("sandbar", "older-rev")], p)
     runs = [witness_run(rev="b3c3ca5b")]
     out = dc.reconcile_unrecorded_rounds(
         LINE, rows_of(p), runs, writer(p), "tick", "booked-v1",
         1792909089000, sole_line=True)
-    assert out[0]["attribution_rule"] == "sole_line"
-    assert len(certs(rows_of(p))) == 1
+    assert out[0]["state"] == "error"
+    assert dc.REFUSE_PASS_UNKNOWN in out[0]["error"]
+    assert "b3c3ca5b" in out[0]["error"]
+    rows = rows_of(p)
+    assert not [r for r in rows if r["kind"] == dc.KIND_CERT]
+    assert not growths(rows)             # nothing booked at all
 
 
 # ---- R2: an unjudgable header grows the range, naming the run id -----------
@@ -231,7 +346,13 @@ def test_r4_ambiguous_line_writes_nothing_and_names_the_run(tmp_path):
         LINE, rows_of(p), runs, writer(p), "tick", "booked-v1",
         1792909089000, sole_line=False)
     assert out[0]["state"] == "error"
-    assert out[0]["error"] == "unrecorded_run:%s:line_ambiguous" % RUN_ID
+    # the ambiguity is NAMED with the pass vocabulary (t261103-06: a run row
+    # that is neither this line's candidate nor its baseline is refused by
+    # name, never guessed at)
+    assert out[0]["error"] == (
+        "unrecorded_run:%s:line_ambiguous:%s:%s"
+        % (RUN_ID, dc.REFUSE_PASS_UNKNOWN,
+           "revision_not_on_this_line:b3c3ca5b"))
     assert rows_of(p) == rows_of(p)  # nothing appended below
 
 
@@ -337,3 +458,219 @@ def test_t2_malformed_runs_store_is_named_never_guessed(tmp_path):
     assert out["lines"][0]["state"] == "error"
     assert out["lines"][0]["error"] == "runs_store_has_malformed_lines:1"
     assert not certs(rows_of(p))
+
+
+# ---- KI-456 / t261103-06: candidate pass vs baseline-rebuild pass -----------
+#
+# A line round has TWO passes through the one runner seam: the CANDIDATE pass
+# on the line head being judged, and the BASELINE-rebuild pass on main's tip
+# (the relative caliber's comparison input). Both leave a run row wearing the
+# line round's source, so the booking side has to tell them apart. Measured
+# twice on 2026-11-03: the baseline pass's reds were booked as the LINE's
+# certification and opened a freeze while the candidate pass was green
+# (cert-01M6D365 on main tip 9897c555 vs line head a21c504c 703/703;
+# cert-01M6F24K on 3d1727ed vs 99c43b8c 706/706). These legs are that rule.
+
+def test_ki456_run_pass_role_truth_table():
+    """The pure identity table: a revision this line can prove it has is the
+    candidate; a run id recorded as a baseline rebuild is the baseline (exact
+    evidence wins even when the tips agree); anything else is unknown — never
+    a mixed guess across two identities."""
+    landing_revs = {"rev-landing"}
+    head_revs = {"rev-head"}
+    base_tips = {"rev-main"}
+    base_runs = {"run-BASE"}
+    one = lambda rev, repo="r": [{"repo": repo, "revision": rev}]  # noqa: E731
+    assert dc.run_pass_role(one("rev-landing"), "run-X", landing_revs,
+                            head_revs, base_tips, base_runs) == \
+        (dc.PASS_CANDIDATE, "landing_repo_match", "")
+    assert dc.run_pass_role(one("rev-head"), "run-X", landing_revs,
+                            head_revs, base_tips, base_runs) == \
+        (dc.PASS_CANDIDATE, "line_head_match", "")
+    assert dc.run_pass_role(one("rev-main"), "run-X", landing_revs,
+                            head_revs, base_tips, base_runs) == \
+        (dc.PASS_BASELINE, "baseline_pass",
+         "revision_is_a_main_baseline_tip:rev-main")
+    # the exact run id beats the revision identity (the degenerate case: main's
+    # tip IS the line head, so revision alone cannot separate the two passes)
+    assert dc.run_pass_role(one("rev-head"), "run-BASE", landing_revs,
+                            head_revs, base_tips, base_runs) == \
+        (dc.PASS_BASELINE, "baseline_pass",
+         "run_is_a_baseline_rebuild:run-BASE")
+    # a set spanning a candidate revision and a baseline tip is never split
+    mixed = one("rev-head") + one("rev-main", repo="r2")
+    assert dc.run_pass_role(mixed, "run-X", landing_revs, head_revs,
+                            base_tips, base_runs)[0] == dc.PASS_UNKNOWN
+    # a shape that is not a candidate set at all keeps the unjudgable path
+    assert dc.run_pass_role([], "run-X", landing_revs, head_revs, base_tips,
+                            base_runs)[0] == dc.PASS_MALFORMED
+
+
+def test_ki456_two_pass_round_books_only_the_candidate(tmp_path, monkeypatch):
+    """The incident shape: a two-pass round, candidate green on the line head
+    and baseline RED at main's tip. Exactly ONE certification is booked and it
+    cites the CANDIDATE revision; the baseline row books nothing and its skip
+    is named on the receipt. The baseline row is fed FIRST, so the answer does
+    not depend on the runs store's order."""
+    project, main_rev, line_rev = two_pass_repo(tmp_path, monkeypatch)
+    p = ledger(tmp_path)
+    base = pass_run("run-BASELINE", main_rev, verdict="red",
+                    failed_names=["main-red-1", "main-red-2", "main-red-3"])
+    cand = pass_run("run-CANDIDATE", line_rev)
+    out = heal(project, p, [base, cand])
+    rows = rows_of(p)
+    cs = certs(rows)
+    assert len(cs) == 1                                     # exactly one
+    assert cs[0]["repos"] == [{"repo": "sandbar", "revision": line_rev}]
+    assert cs[0]["run"] == "run-CANDIDATE"                  # the verdict's run
+    assert not [r for r in rows if r["kind"] == dc.KIND_FREEZE]
+    assert dc.freeze_state(rows, LINE)["frozen"] is False
+    by_run = {e["run"]: e for e in out}
+    assert by_run["run-CANDIDATE"]["state"] == "reconciled"
+    assert by_run["run-BASELINE"]["state"] == "skipped"
+    assert by_run["run-BASELINE"]["attribution_rule"] == "baseline_pass"
+
+
+def test_ki456_red_baseline_pass_alone_books_nothing(tmp_path, monkeypatch):
+    """The control: a RED baseline pass with no candidate pass in the store
+    books NOTHING AT ALL — no certification, no freeze, not even a range-growth
+    row (nothing was judged). It is the round's relative-judgement input."""
+    project, main_rev, _line_rev = two_pass_repo(tmp_path, monkeypatch)
+    p = ledger(tmp_path)
+    base = pass_run("run-BASELINE", main_rev, verdict="red",
+                    failed_names=["main-red-1"])
+    out = heal(project, p, [base])
+    assert rows_of(p) == []                                  # nothing booked
+    assert dc.freeze_state([], LINE)["frozen"] is False
+    assert out[0]["state"] == "skipped"
+    assert out[0]["reason"].startswith("revision_is_a_main_baseline_tip:")
+
+
+def test_ki456_planted_red_candidate_still_books_red_and_freezes(tmp_path,
+                                                                monkeypatch):
+    """The teeth this fix must never blunt: a planted RED CANDIDATE pass on
+    the line head still books the certification and still opens the freeze —
+    the baseline pass riding beside it changes none of that."""
+    project, main_rev, line_rev = two_pass_repo(tmp_path, monkeypatch)
+    p = ledger(tmp_path)
+    cand = pass_run("run-CANDIDATE", line_rev, verdict="red",
+                    failed_names=["planted-red"],
+                    receipts={"planted-red": {
+                        "reason": "assert_mismatch",
+                        "evidence": "AssertionError: planted red"}})
+    base = pass_run("run-BASELINE", main_rev)                 # a GREEN baseline
+    heal(project, p, [cand, base])
+    rows = rows_of(p)
+    cs = certs(rows)
+    assert len(cs) == 1
+    assert cs[0]["repos"] == [{"repo": "sandbar", "revision": line_rev}]
+    frz = [r for r in rows if r["kind"] == dc.KIND_FREEZE]
+    assert len(frz) == 1                                     # the freeze opens
+    assert frz[0]["cause"] == cs[0]["id"]
+    assert dc.freeze_state(rows, LINE)["frozen"] is True
+
+
+def test_ki456_recorded_baseline_run_id_wins_when_the_tips_agree(tmp_path,
+                                                                monkeypatch):
+    """The degenerate case: main's tip IS the line head (the line has not
+    advanced), so revision identity cannot separate the two passes. The
+    durable proof is the run id ``write_baseline`` records for a baseline
+    rebuild: that row books nothing, while the candidate pass on the very same
+    revision still books its certification."""
+    project, main_rev, _line_rev = two_pass_repo(tmp_path, monkeypatch)
+    dive = dc.line_repo_dir(project, "sandbar")
+    _git(["branch", "-f", "line", "main"], dive)             # line head = main
+    p = ledger(tmp_path)
+    dc.write_baseline(project, "sandbar", main_rev, ["main-red-1"], [],
+                      run_id="run-BASELINE")
+    base = pass_run("run-BASELINE", main_rev, verdict="red",
+                    failed_names=["main-red-1"])
+    cand = pass_run("run-CANDIDATE", main_rev)
+    out = heal(project, p, [base, cand])
+    rows = rows_of(p)
+    cs = certs(rows)
+    assert len(cs) == 1 and cs[0]["run"] == "run-CANDIDATE"
+    assert not [r for r in rows if r["kind"] == dc.KIND_FREEZE]
+    by_run = {e["run"]: e for e in out}
+    assert by_run["run-BASELINE"]["reason"] == \
+        "run_is_a_baseline_rebuild:run-BASELINE"
+
+
+def test_ki456_baseline_stays_recognised_after_main_moves(tmp_path, monkeypatch):
+    """A baseline rebuild ran at a tip main has since moved off: the cached
+    baseline key keeps the row recognisable (``_ensure_baseline`` writes it),
+    so a late heal still books nothing for it."""
+    project, old_main_rev, _line_rev = two_pass_repo(tmp_path, monkeypatch)
+    dc.write_baseline(project, "sandbar", old_main_rev, ["main-red-1"], [])
+    dive = dc.line_repo_dir(project, "sandbar")
+    (dive / "file.txt").write_text("main moved\n", encoding="utf-8")
+    _git(["add", "-A"], dive)
+    _git(["commit", "-qm", "main-moved"], dive)               # main advances
+    assert _rev(dive, "refs/heads/main") != old_main_rev
+    p = ledger(tmp_path)
+    base = pass_run("run-BASELINE", old_main_rev, verdict="red",
+                    failed_names=["main-red-1"])
+    out = heal(project, p, [base])
+    assert rows_of(p) == []
+    assert out[0]["state"] == "skipped"
+
+
+def test_ki456_unattributable_pass_books_nothing_and_names_the_refusal(
+        tmp_path, monkeypatch):
+    """Fail-closed: a run row citing a real commit that is neither a landing,
+    nor the line head, nor a baseline tip cannot be placed on either pass. It
+    books NOTHING (no certification, no freeze, no growth row) and the refusal
+    NAMES the pass check and the revision — never a guessed revision."""
+    project, _main_rev, line_rev = two_pass_repo(tmp_path, monkeypatch)
+    dive = dc.line_repo_dir(project, "sandbar")
+    _git(["checkout", "-q", "-b", "scratch", "line"], dive)
+    (dive / "scratch.txt").write_text("s\n", encoding="utf-8")
+    _git(["add", "-A"], dive)
+    _git(["commit", "-qm", "scratch"], dive)
+    stray_rev = _rev(dive, "HEAD")
+    _git(["checkout", "-q", "main"], dive)
+    assert stray_rev != line_rev
+    p = ledger(tmp_path)
+    out = heal(project, p, [pass_run("run-STRAY", stray_rev)])
+    rows = rows_of(p)
+    assert rows == []                       # nothing booked at all
+    assert out[0]["state"] == "error"
+    assert dc.REFUSE_PASS_UNKNOWN in out[0]["error"]
+    assert stray_rev[:12] in out[0]["error"]
+    # and the retired take-anyway still grants nothing
+    out2 = heal(project, p, [pass_run("run-STRAY", stray_rev)], sole_line=True)
+    assert rows_of(p) == [] and out2[0]["state"] == "error"
+
+
+def test_ki456_baseline_run_names_itself_on_the_round_record(tmp_path,
+                                                             monkeypatch):
+    """The baseline pass is a citable record, not an anonymous input: a
+    rebuild's run id lands in the cache AND on the round's relative detail, so
+    a reader can tell which observation the verdict was measured against."""
+    project, main_rev, line_rev = two_pass_repo(tmp_path, monkeypatch)
+    dive = dc.line_repo_dir(project, "sandbar")
+    calls = []
+
+    def runner(cand):
+        calls.append(cand)
+        if cand[0]["revision"] == main_rev:
+            return {"id": "run-BASELINE", "failed_names": ["main-red-1"],
+                    "cases": {"ran": 696, "passed": 695, "failed": 1,
+                              "env_failed": 0}}
+        return {"id": "run-CANDIDATE", "failed_names": [],
+                "cases": {"ran": 703, "passed": 703, "failed": 0,
+                          "env_failed": 0}}
+
+    header = {"id": "run-CANDIDATE", "failed_names": [],
+              "cases": {"ran": 703, "passed": 703, "failed": 0,
+                        "env_failed": 0}}
+    verdict, rel = dc.relative_round_verdict(
+        project, [{"repo": "sandbar", "revision": line_rev}], header, runner,
+        {"entries": []})
+    assert verdict == "green"
+    per_repo = rel["per_repo"]["sandbar"]
+    assert per_repo["baseline_source"] == "rebuilt"
+    assert per_repo["baseline_run"] == "run-BASELINE"
+    cached = dc.read_baseline(project, "sandbar", main_rev)
+    assert cached["run"] == "run-BASELINE"        # the durable proof
+    assert _rev(dive, "refs/heads/main") == main_rev
