@@ -22,6 +22,7 @@ import atexit
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -61,22 +62,53 @@ atexit.register(_reap_tmp)
 
 
 def _mk_repo(**pages: str) -> Path:
-    """Minimal library: index + README + the pages given as kwargs (rel → text)."""
-    repo = Path(tempfile.mkdtemp(prefix="docmech-ut-"))
-    _TMP_DIRS.append(repo)
-    (repo / "docs").mkdir()
-    index = {"docs": [{"path": rel[len("docs/"):] if rel.startswith("docs/") else rel}
-                      for rel in sorted(set(pages) | {"docs/README.md"})]}
-    (repo / "docs" / "index.json").write_text(json.dumps(index), encoding="utf-8")
+    """Minimal library: README + the pages given as kwargs (rel -> text).
+
+    t261103-17: the fixture also registers the tree as project `proj` and builds the
+    DERIVED index from those documents, because M1's index leg reads that artefact in
+    the project data directory and never a copy inside the repository."""
+    root = Path(tempfile.mkdtemp(prefix="docmech-ut-"))
+    _TMP_DIRS.append(root)
+    repo = root / "repo"
+    (repo / "docs").mkdir(parents=True)
     readme_rows = "\n".join("| `%s` | x |" % rel
                             for rel in sorted(set(pages) | {"docs/README.md"}))
     _write(repo, "docs/README.md", FM + "# docs index\n" + readme_rows + "\n")
     for rel, text in pages.items():
         _write(repo, rel, text)
+    _registry_entry(_projects(repo) / "proj", "proj", [str(repo)])
+    docs_index.rebuild("proj", _projects(repo))
     return repo
 
 
+def _projects(repo: Path) -> Path:
+    """The temp projects root that belongs to one fixture tree."""
+    return Path(repo).parent / "projects"
+
+
+def _derived_index(repo: Path, key: str = "proj") -> Path:
+    """The derived index path: the project data directory, outside the repository."""
+    return docs_roots.index_dir(key, _projects(repo)) / "index.json"
+
+
+def _rebuild(repo: Path, key: str = "proj") -> None:
+    """Rebuild the derived index from the documents as they are now."""
+    res = docs_index.rebuild(key, _projects(repo))
+    assert res["ok"], res.get("reason")
+
+
+def _edit_derived_index(repo: Path, mutate) -> None:
+    """Read the derived index, hand its payload to `mutate`, write it back unchanged in
+    every other respect (so the build time stays the one the rebuild recorded)."""
+    path = _derived_index(repo)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mutate(payload)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def _run(repo, **kw):
+    kw.setdefault("project_key", "proj")
+    kw.setdefault("docs_projects_root", str(_projects(repo)))
     return run_doc_mech(str(repo), **kw)
 
 
@@ -114,29 +146,34 @@ class FrontmatterTest(unittest.TestCase):
 
 
 class M1Test(unittest.TestCase):
+    """M1's index leg against the DERIVED index (t261103-17).
+
+    The fixture index lives in the project data directory and is current: these cases
+    plant drift in it the way the old in-repository index used to be edited."""
+
     def tearDown(self):
         _reap_tmp()
 
     def test_unregistered_page_fires(self):
         repo = _mk_repo(**{"docs/reference/a.md": FM + "a"})
-        # drop the page from the index: it exists but is not registered
-        (repo / "docs" / "index.json").write_text(
-            json.dumps({"docs": [{"path": "README.md"}]}), encoding="utf-8")
+        # current index, but it does not list the page: drift, not staleness
+        _edit_derived_index(repo, lambda p: p.__setitem__(
+            "docs", [d for d in p["docs"] if d["path"] != "reference/a.md"]))
         res = _run(repo)
         self.assertIn("doc-m1-index", _scans(res))
 
     def test_registered_missing_in_readme_fires_readme_leg(self):
         repo = _mk_repo(**{"docs/reference/a.md": FM + "a"})
-        # remove the README row the fixture wrote
+        # remove the README row the fixture wrote, then make the index current again
         (repo / "docs" / "README.md").write_text(FM + "# docs index\n", encoding="utf-8")
+        _rebuild(repo)
         res = _run(repo)
         self.assertIn("doc-m1-readme", _scans(res))
 
     def test_ghost_entry_fires(self):
         repo = _mk_repo()
-        idx = json.loads((repo / "docs" / "index.json").read_text())
-        idx["docs"].append({"path": "reference/gone.md"})
-        (repo / "docs" / "index.json").write_text(json.dumps(idx), encoding="utf-8")
+        _edit_derived_index(repo, lambda p: p["docs"].append(
+            {"path": "reference/gone.md", "category": "reference"}))
         res = _run(repo)
         m1 = [f for f in res["findings"] if f["scan"] == "doc-m1-index"
               and any("gone" in (e.get("quote") or "") or "gone" in f["subject"]
@@ -148,12 +185,18 @@ class M1Test(unittest.TestCase):
         res = _run(repo)
         self.assertIn("doc-m1-frontmatter", _scans(res))
 
-    def test_broken_index_degrades_with_caveat(self):
+    def test_broken_index_is_a_named_failure_not_unregistered_pages(self):
         repo = _mk_repo(**{"docs/reference/a.md": FM + "a"})
-        (repo / "docs" / "index.json").write_text("{not json", encoding="utf-8")
+        _derived_index(repo).write_text("{not json", encoding="utf-8")
         res = _run(repo)
         self.assertFalse(res["meta"]["heartbeat"])   # frontmatter/README legs still judged
-        self.assertTrue(any("index" in c for c in res["meta"]["caveats"]))
+        self.assertEqual(res["meta"]["docs_index_state"]["state"], "failed")
+        index_findings = [f for f in res["findings"] if f["scan"] == "doc-m1-index"]
+        self.assertEqual(len(index_findings), 1)
+        self.assertIn("not usable", index_findings[0]["subject"])
+        # the page is NOT reported unregistered because the index could not be read
+        self.assertFalse([f for f in res["findings"] if "unregistered" in f["subject"]])
+        self.assertTrue(any("docs_index_failed" in c for c in res["meta"]["caveats"]))
 
 
 EPIC_FM = "---\ncode: {code}\nretired: {retired}\nsummary: one sentence.\n---\n\n"
@@ -172,11 +215,11 @@ class EpicSchemaTest(unittest.TestCase):
         _reap_tmp()
 
     def _repo_with_epic(self, text: str):
+        # t261103-17: the derived index registers the epic under the `epics` category
+        # by itself (no fixed category list: the directory is the fallback), so the
+        # fixture no longer edits an index by hand — it rebuilds the real artefact.
         repo = _mk_repo(**{"docs/epics/alpha.md": text})
-        idx = json.loads((repo / "docs" / "index.json").read_text())
-        for d in idx["docs"]:
-            d["category"] = "epics" if d["path"].startswith("epics/") else "reference"
-        (repo / "docs" / "index.json").write_text(json.dumps(idx), encoding="utf-8")
+        _rebuild(repo)
         return repo
 
     def test_well_formed_epic_page_passes_both_rules(self):
@@ -211,7 +254,10 @@ class EpicSchemaTest(unittest.TestCase):
             EPIC_FM.format(code="alpha", retired="true") + "# alpha\n")
         (repo / "docs" / "README.md").write_text(
             FM + "# docs index\n\n| `docs/README.md` | x |\n", encoding="utf-8")
-        self.assertNotIn("doc-m1-readme", _scans(_run(repo)))
+        _rebuild(repo)      # the README edit made the index stale; compare a current one
+        res = _run(repo)
+        self.assertEqual(res["meta"]["docs_index_state"]["state"], "current")
+        self.assertNotIn("doc-m1-readme", _scans(res))
 
 
 class ReadmeRowResolutionTest(unittest.TestCase):
@@ -512,8 +558,12 @@ class FailClosedTest(unittest.TestCase):
     def test_unreadable_page_degrades(self):
         repo = _mk_repo(**{"docs/reference/a.md": FM + "a"})
         (repo / "docs" / "reference" / "bad.md").write_bytes(b"\xff\xfe\x00bad")
+        _rebuild(repo)          # the scan of the index skips the page it cannot read
         res = _run(repo)
         self.assertIn("doc-m1-index", _scans(res))   # scan continues past the bad page
+        self.assertTrue(any(e.get("path") == "docs/reference/bad.md"
+                            for f in res["findings"] if f["scan"] == "doc-m1-index"
+                            for e in f["evidence"]))
 
     def test_notes_library_without_docs_dir(self):
         # t261103-11 (design docs/design/project-docs-roots-v1.md goal 4): a tree
@@ -559,7 +609,11 @@ class ActivityShellTest(unittest.TestCase):
         self.assertFalse(res["ok"])
 
     def test_no_diff_scan_ok(self):
-        res = self._run(base_dir=str(self.repo), no_diff=True, project_key="sandbar")
+        # t261103-17: the index leg resolves the project's data directory, so the shell
+        # is handed this fixture's projects root instead of reading the operator's
+        # (~/.sandbar/projects) — the test stays hermetic and judges a current index.
+        res = self._run(base_dir=str(self.repo), no_diff=True, project_key="proj",
+                        docs_projects_root=str(_projects(self.repo)))
         self.assertTrue(res["ok"], res.get("error"))
         self.assertTrue(res["result"]["meta"]["heartbeat"])
         self.assertFalse(res["result"]["meta"]["diff_rules_ran"])
@@ -1039,17 +1093,29 @@ class DocsRootFollowsDeclarationTest(unittest.TestCase):
             "      - %s\npaths:\n%s" % (self.repo, block), encoding="utf-8")
 
     def library(self, root, pages):
-        """A minimal library at `root`: index + README + the given pages."""
+        """A minimal library at `root`: README + the given pages.
+
+        t261103-17: no in-repository index is written — M1's index leg reads the
+        derived index, so the cases build it (`build_index`) once the declaration
+        they test is in place."""
         (self.repo / root).mkdir(parents=True, exist_ok=True)
-        index = {"docs": [{"path": rel}
-                          for rel in sorted(set(pages) | {"README.md"})]}
-        (self.repo / root / "index.json").write_text(json.dumps(index),
-                                                     encoding="utf-8")
         rows = "\n".join("| `%s` | x |" % rel
                          for rel in sorted(set(pages) | {"README.md"}))
         _write(self.repo, root + "/README.md", self.FM + "# index\n" + rows + "\n")
         for rel, text in pages.items():
             _write(self.repo, root + "/" + rel, self.FM + text)
+
+    def build_index(self, drop=()):
+        """Build the derived index, then remove the given (root identity, path) rows:
+        a CURRENT index that does not list a page is drift, not staleness."""
+        res = docs_index.rebuild("probe", self.projects)
+        self.assertTrue(res["ok"], res.get("reason"))
+        if drop:
+            path = docs_roots.index_dir("probe", self.projects) / "index.json"
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload["docs"] = [d for d in payload["docs"]
+                               if (d.get("root"), d.get("path")) not in set(drop)]
+            path.write_text(json.dumps(payload), encoding="utf-8")
 
     def scans(self, res):
         return [f["scan"] for f in res["findings"]]
@@ -1071,8 +1137,10 @@ class DocsRootFollowsDeclarationTest(unittest.TestCase):
         (self.repo / "docs").mkdir()
         (self.repo / "docs" / "stale.md").write_text(self.FM + "s\n", encoding="utf-8")
         self.declaration("  docs_roots:\n    - repository: .\n      path: guide\n")
-        # an unregistered page in the declared root: M1 must fire on it
+        # an unregistered page in the declared root: M1 must fire on it (the derived
+        # index is current — it just does not list the page)
         _write(self.repo, "guide/reference/extra.md", self.FM + "e\n")
+        self.build_index(drop=[(".:guide", "reference/extra.md")])
         res = run_doc_mech(str(self.repo), project_key="probe")
         self.assertEqual(res["meta"]["docs_roots"]["source"], "declared")
         self.assertIn("doc-m1-index", self.scans(res))
@@ -1088,11 +1156,15 @@ class DocsRootFollowsDeclarationTest(unittest.TestCase):
                          "    - repository: .\n      path: manual\n")
         _write(self.repo, "guide/reference/extra.md", self.FM + "e\n")
         _write(self.repo, "manual/reference/extra.md", self.FM + "e\n")
+        self.build_index(drop=[(".:guide", "reference/extra.md"),
+                               (".:manual", "reference/extra.md")])
         res = run_doc_mech(str(self.repo), project_key="probe")
         self.assertEqual(len(res["meta"]["docs_roots"]["roots"]), 2)
         subjects = self.subjects(res)
         self.assertIn("guide/reference/extra.md", subjects)
         self.assertIn("manual/reference/extra.md", subjects)
+        # both roots hold the same relative path and neither shadows the other
+        self.assertEqual(len([s for s in subjects if s.endswith("extra.md")]), 2)
 
     def test_declared_but_absent_root_is_a_named_refusal(self):
         self.library("docs", {"reference/a.md": "a\n"})
@@ -1107,3 +1179,424 @@ class DocsRootFollowsDeclarationTest(unittest.TestCase):
         res = run_doc_mech(str(self.repo), docs_root="guide")
         self.assertEqual(res["meta"]["docs_roots"]["source"], "argument")
         self.assertEqual(res["meta"]["pages_scanned"], 2)
+
+
+# ======================================================================
+# t261103-17 — the docs-roots seam (design project-docs-roots-v1.md goals 5 and 6)
+#
+# M1's index leg reads the DERIVED index in the project data directory, resolved through
+# the ONE documentation-root resolution (docs_roots.index_dir) -- never a copy inside a
+# repository -- and it judges the states the readers distinguish. The legacy in-repository
+# builder is a stub that prints the new location and refuses to write. The control is a
+# project that declares nothing and owns docs/: its verdicts must stay byte-identical to
+# what the pre-change scan said.
+# ======================================================================
+
+SEAM_ENGINE = Path(__file__).resolve().parent.parent
+SEAM_ROOT = SEAM_ENGINE.parents[1]
+SEAM_BUILDER = SEAM_ROOT / "docs" / "scripts" / "build_index.py"
+
+
+def _derived_dir(projects: Path, key: str = "proj") -> Path:
+    """The derived artefacts' home: the project's own data directory."""
+    return docs_roots.index_dir(key, projects)
+
+
+def _seam_library(root: Path, pages: dict, readme_rows=None, key: str = "proj",
+                  block: str = ""):
+    """A library at `<repo>/docs`: README + pages, registered as one project."""
+    repo = root / "repo"
+    (repo / "docs").mkdir(parents=True)
+    rows = readme_rows if readme_rows is not None else sorted(
+        set(pages) | {"docs/README.md"})
+    _write(repo, "docs/README.md",
+           FM + "# docs index\n\n" + "\n".join("| `%s` | x |" % r for r in rows) + "\n")
+    for rel, text in pages.items():
+        _write(repo, rel, text)
+    projects = root / "projects"
+    _registry_entry(projects / key, key, [str(repo)], block)
+    return repo, projects
+
+
+def _m1_index_findings(res) -> list:
+    return [f for f in res["findings"] if f["scan"] == "doc-m1-index"]
+
+
+def _word_claims(res) -> str:
+    """Every finding subject: the one sentence a reader takes as the claim."""
+    return " | ".join(f["subject"] for f in res["findings"])
+
+
+def _findings_blob(findings) -> str:
+    return json.dumps(findings, sort_keys=True, ensure_ascii=False)
+
+# ----------------------------------------------------------------------
+# The control's expected verdicts, captured VERBATIM from the pre-change implementation
+# (`git show cd237cde:server/engine/inspection_doc_mech.py`) over the tree that
+# `_seam_control_tree` builds. It is data, not a re-implementation: the control compares the
+# new scan's findings byte for byte against what the old scan said.
+# ----------------------------------------------------------------------
+SEAM_GOLDEN_FINDINGS_JSON = r"""
+[
+    {
+        "evidence": [
+            {
+                "line": 1,
+                "path": "docs/design/gamma.md",
+                "quote": "---"
+            }
+        ],
+        "id": "dac726b395935a8a",
+        "scan": "doc-m1-frontmatter",
+        "severity": "med",
+        "subject": "frontmatter five-field check failed: status empty",
+        "suggestion": "Add or fix the frontmatter fields listed in the subject.",
+        "why": "Every other docs/ page carries YAML frontmatter with title/category/tags/status/updated (docs/README.md maintenance conventions)."
+    },
+    {
+        "evidence": [
+            {
+                "line": 9,
+                "path": "docs/reference/alpha.md",
+                "quote": "See `missing-target.md` for the shape."
+            }
+        ],
+        "id": "785fe86aa1a578bc",
+        "scan": "doc-m2-unreachable",
+        "severity": "med",
+        "subject": "referenced path does not exist: missing-target.md",
+        "suggestion": "Fix the path, or register the missing entry, or declare `<!-- doc-exempt: doc-m2-unreachable -->` if the surface is legitimately fixed.",
+        "why": "A normative-face page points at a path that exists under neither the document's own directory nor the repo root (missing-target.md)."
+    }
+]
+"""
+
+
+def _seam_control_tree(root: Path):
+    """The unchanged tree of the control: a project that declares NOTHING, owns docs/
+    at its repository root, and whose in-repository index copy agrees with the
+    documents. Two index-independent findings are planted (a reference page pointing at
+    a missing file, and a page missing one frontmatter field), so the control compares a
+    non-empty verdict list rather than an empty one."""
+    repo, projects = _seam_library(
+        root,
+        {"docs/reference/alpha.md": FM + "See `missing-target.md` for the shape.\n",
+         "docs/reference/beta.md": FM + "beta\n",
+         "docs/design/gamma.md": "---\ntitle: g\ncategory: design\ntags: [x]\n"
+                                 "updated: 2026-11-03\n---\n\n# gamma\n"},
+        key="ctrl")
+    # the legacy in-repository copy, consistent with the documents: the artefact the old
+    # M1 read, kept here so "unchanged tree" means unchanged
+    (repo / "docs" / "index.json").write_text(json.dumps({"docs": [
+        {"path": "README.md", "category": "reference"},
+        {"path": "reference/alpha.md", "category": "reference"},
+        {"path": "reference/beta.md", "category": "reference"},
+        {"path": "design/gamma.md", "category": "design"},
+    ]}), encoding="utf-8")
+    return repo, projects
+
+
+class SeamControlByteIdenticalTest(unittest.TestCase):
+    """Goal 3 / the ticket's control: a project that declares nothing and owns docs/
+    keeps byte-identical check verdicts on an unchanged tree."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="seam-control-"))
+        _TMP_DIRS.append(self.root)
+
+    def tearDown(self):
+        _reap_tmp()
+
+    def test_verdicts_match_the_pre_change_scan_byte_for_byte(self):
+        golden = json.loads(SEAM_GOLDEN_FINDINGS_JSON)
+        self.assertTrue(golden, "the control must compare a non-empty verdict list")
+
+        # (a) first pass: the derived index has never been built
+        repo, projects = _seam_control_tree(self.root / "first")
+        first = _run(repo, project_key="ctrl", docs_projects_root=str(projects))
+        self.assertEqual(first["meta"]["docs_index_state"]["state"], "absent")
+        self.assertEqual(_findings_blob(first["findings"]), _findings_blob(golden))
+
+        # (b) after an inspection pass: the derived index is current
+        repo, projects = _seam_control_tree(self.root / "current")
+        _rebuild(repo, "ctrl")
+        after = _run(repo, project_key="ctrl", docs_projects_root=str(projects))
+        self.assertEqual(after["meta"]["docs_index_state"]["state"], "current")
+        self.assertEqual(_findings_blob(after["findings"]), _findings_blob(golden))
+
+        # (c) a scan with no project key at all (no registry, no data directory)
+        repo, _projects = _seam_control_tree(self.root / "alone")
+        alone = run_doc_mech(str(repo))
+        self.assertEqual(alone["meta"]["docs_index_state"]["state"], "unlocated")
+        self.assertEqual(_findings_blob(alone["findings"]), _findings_blob(golden))
+
+    def test_every_shape_reports_the_same_scans(self):
+        """Ordering and the scan vocabulary are part of "byte identical"."""
+        repo, projects = _seam_control_tree(self.root / "t")
+        _rebuild(repo, "ctrl")
+        res = _run(repo, project_key="ctrl", docs_projects_root=str(projects))
+        self.assertEqual([f["scan"] for f in res["findings"]], ["doc-m1-frontmatter",
+                                                               "doc-m2-unreachable"])
+
+
+class SeamDerivedIndexStatesTest(unittest.TestCase):
+    """Goal 6: M1 judges the four derived-index states, and none of them reads as
+    "this page is unregistered"."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="seam-states-"))
+        _TMP_DIRS.append(self.root)
+
+    def tearDown(self):
+        _reap_tmp()
+
+    # ---- absent ---------------------------------------------------------
+    def test_absent_on_a_first_pass_is_not_a_finding(self):
+        repo, projects = _seam_library(self.root, {"docs/reference/a.md": FM + "a\n"})
+        res = _run(repo)
+        self.assertEqual(res["meta"]["docs_index_state"]["state"], "absent")
+        self.assertEqual(_m1_index_findings(res), [])
+        self.assertNotIn("unregistered", _word_claims(res))
+        self.assertTrue(any("docs_index_absent" in c for c in res["meta"]["caveats"]))
+        # the read path never creates the artefact it looked for
+        self.assertFalse(_derived_dir(projects).exists())
+
+    def test_a_copy_inside_the_repository_is_never_the_truth(self):
+        """A lying in-repository index (ghost row + missing rows) changes nothing."""
+        repo, projects = _seam_library(self.root, {"docs/reference/a.md": FM + "a\n"})
+        (repo / "docs" / "index.json").write_text(json.dumps({"docs": [
+            {"path": "reference/gone.md", "category": "reference"}]}), encoding="utf-8")
+        absent = _run(repo)
+        self.assertEqual(absent["findings"], [])
+        _rebuild(repo)
+        current = _run(repo)
+        self.assertEqual(current["meta"]["docs_index_state"]["state"], "current")
+        self.assertEqual(_m1_index_findings(current), [])
+
+    # ---- current --------------------------------------------------------
+    def test_current_index_drift_still_fires_per_page(self):
+        repo, projects = _seam_library(self.root, {"docs/reference/a.md": FM + "a\n"})
+        _rebuild(repo)
+        path = _derived_dir(projects) / "index.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["docs"] = [d for d in payload["docs"] if d["path"] != "reference/a.md"]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        res = _run(repo)
+        self.assertEqual(res["meta"]["docs_index_state"]["state"], "current")
+        found = _m1_index_findings(res)
+        self.assertEqual(len(found), 1)
+        # the implied default root keeps the sentences (and therefore the ids) this
+        # check has always used: goal 3, byte for byte
+        self.assertEqual(found[0]["subject"],
+                         "page exists but is not registered in docs/index.json")
+        self.assertEqual(found[0]["evidence"][0]["path"], "docs/reference/a.md")
+
+    def test_a_declared_root_names_itself_never_the_default_name(self):
+        """A moved root is described with its own index and its own README."""
+        repo, projects = _seam_library(self.root, {}, block=_roots_block([(".", "guide")]))
+        (repo / "guide").mkdir()
+        _write(repo, "guide/README.md", FM + "# index\n")
+        _write(repo, "guide/same.md", FM + "same\n")
+        _rebuild(repo)
+        path = _derived_dir(projects) / "index.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["docs"] = [d for d in payload["docs"] if d["path"] != "same.md"]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        res = _run(repo)
+        found = _m1_index_findings(res)
+        self.assertEqual(len(found), 1)
+        self.assertNotIn("docs/index.json", found[0]["subject"])
+        self.assertIn("derived index", found[0]["subject"])
+        self.assertNotIn("docs/index.json", found[0]["suggestion"])
+        readme = [f for f in res["findings"] if f["scan"] == "doc-m1-readme"]
+        self.assertTrue(readme)
+        for f in readme:
+            self.assertNotIn("docs/README.md", f["subject"] + f["why"] + f["suggestion"])
+            self.assertEqual(f["evidence"][0]["path"], "guide/README.md")
+
+    # ---- stale ----------------------------------------------------------
+    def test_stale_names_why_a_rebuild_is_due(self):
+        repo, projects = _seam_library(self.root, {"docs/reference/a.md": FM + "a\n"})
+        _rebuild(repo)
+        built_at = json.loads((_derived_dir(projects) / "index.json")
+                              .read_text(encoding="utf-8"))["built_at"]
+        # a document edited after the build: the index is stale, the page is NOT
+        # unregistered
+        _write(repo, "docs/reference/a.md", FM + "a, edited\n")
+        future = float(json.loads((_derived_dir(projects) / "index.json")
+                                  .read_text(encoding="utf-8"))["built_at_ts"]) + 60
+        os.utime(repo / "docs" / "reference" / "a.md", (future, future))
+        res = _run(repo)
+        state = res["meta"]["docs_index_state"]
+        self.assertEqual(state["state"], "stale")
+        self.assertEqual(state["built_at"], built_at)
+        found = _m1_index_findings(res)
+        self.assertEqual(len(found), 1)
+        self.assertIn("stale", found[0]["subject"])
+        self.assertIn("a rebuild is due", found[0]["subject"])
+        self.assertEqual(found[0]["evidence"][0]["quote"], "last built %s" % built_at)
+        self.assertIn("last built at %s" % built_at, found[0]["why"])
+        self.assertNotIn("unregistered", _word_claims(res))
+        self.assertTrue(any("docs_index_stale" in c for c in res["meta"]["caveats"]))
+
+    # ---- failed ---------------------------------------------------------
+    def test_failed_names_its_reason(self):
+        repo, projects = _seam_library(self.root, {"docs/reference/a.md": FM + "a\n"})
+        _rebuild(repo)
+        (_derived_dir(projects) / "rebuild-failed.json").write_text(json.dumps({
+            "schema": docs_index.SCHEMA, "project": "proj",
+            "failed_at": "2099-01-01T00:00:00", "failed_at_ts": 4.0e9,
+            "trigger": "inspection", "reason": "disk full", "code": "docs_index_x",
+            "declaration": ""}), encoding="utf-8")
+        res = _run(repo)
+        self.assertEqual(res["meta"]["docs_index_state"]["state"], "failed")
+        self.assertTrue(res["meta"]["index_leg_degraded"])
+        found = _m1_index_findings(res)
+        self.assertEqual(len(found), 1)
+        self.assertIn("not usable", found[0]["subject"])
+        self.assertIn("disk full", found[0]["why"])
+        self.assertNotIn("unregistered", _word_claims(res))
+        self.assertTrue(any("docs_index_failed" in c for c in res["meta"]["caveats"]))
+
+    def test_an_unreadable_index_is_failed_with_its_reason(self):
+        repo, projects = _seam_library(self.root, {"docs/reference/a.md": FM + "a\n"})
+        _rebuild(repo)
+        (_derived_dir(projects) / "index.json").write_text("{not json", encoding="utf-8")
+        res = _run(repo)
+        self.assertEqual(res["meta"]["docs_index_state"]["state"], "failed")
+        self.assertEqual(res["meta"]["docs_index_state"]["code"],
+                         "docs_index_unreadable")
+        found = _m1_index_findings(res)
+        self.assertEqual(len(found), 1)
+        self.assertIn("not usable", found[0]["subject"])
+        self.assertNotIn("unregistered", _word_claims(res))
+
+    # ---- unlocated ------------------------------------------------------
+    def test_a_pass_without_a_project_key_is_a_named_state(self):
+        repo, projects = _seam_library(self.root, {"docs/reference/a.md": FM + "a\n"})
+        res = run_doc_mech(str(repo))
+        self.assertEqual(res["meta"]["docs_index_state"]["state"], "unlocated")
+        self.assertEqual(_m1_index_findings(res), [])
+        self.assertTrue(any("docs_index_unlocated" in c
+                            for c in res["meta"]["caveats"]))
+        self.assertFalse(_derived_dir(projects).exists())
+
+    def test_the_inspection_pass_rebuilds_then_reads_the_same_artefact(self):
+        """The writer and the reader of the derived index are the same pass in the same
+        location: a doc-face pass that opted into the rebuild judges the fresh index."""
+        import asyncio
+
+        from activities import run_inspection_doc_mech as shell
+        repo, projects = _seam_library(self.root, {"docs/reference/a.md": FM + "a\n"})
+        old = os.environ.get("SANDBAR_PROJECTS_DIR")
+        os.environ["SANDBAR_PROJECTS_DIR"] = str(projects)
+        try:
+            res = asyncio.run(shell({"base_dir": str(repo), "no_diff": True,
+                                     "project_key": "proj",
+                                     "docs_index_rebuild": True}))
+        finally:
+            if old is None:
+                os.environ.pop("SANDBAR_PROJECTS_DIR", None)
+            else:
+                os.environ["SANDBAR_PROJECTS_DIR"] = old
+        self.assertTrue(res["ok"], res.get("error"))
+        meta = res["result"]["meta"]
+        self.assertEqual(meta["docs_index"]["state"], docs_index.ST_CURRENT)
+        self.assertEqual(meta["docs_index_state"]["state"], docs_index.ST_CURRENT)
+        self.assertEqual(_m1_index_findings(res["result"]), [])
+
+    def test_an_index_built_from_another_tree_is_named(self):
+        """The artefact is per project; a scan of another tree (a lane worktree) is told
+        so, and the verdicts keep the same rule (the condition is named, not guessed)."""
+        root = self.root
+        repo, projects = _seam_library(root / "checkout", {"docs/reference/a.md": FM + "a\n"})
+        _rebuild(repo)
+        lane = root / "lane" / "repo"
+        _write(lane, "docs/reference/a.md", FM + "a\n")
+        _write(lane, "docs/reference/b.md", FM + "b, added in the lane\n")
+        _write(lane, "docs/README.md",
+               FM + "# index\n\n| `docs/README.md` | x |\n| `docs/reference/b.md` | b |\n")
+        res = _run(lane, project_key="proj", docs_projects_root=str(projects))
+        self.assertEqual(res["meta"]["docs_index_state"]["state"], "current")
+        self.assertTrue(any("docs_index_other_tree" in c for c in res["meta"]["caveats"]))
+        # the same rule applies (the lane page is not in the checkout's index)
+        self.assertTrue([f for f in _m1_index_findings(res)
+                         if "not registered" in f["subject"]])
+
+    def test_the_index_location_comes_from_the_one_resolver(self):
+        repo, projects = _seam_library(self.root, {"docs/reference/a.md": FM + "a\n"})
+        _rebuild(repo)
+        res = _run(repo)
+        self.assertEqual(res["meta"]["docs_index_state"]["path"],
+                         str(docs_roots.index_dir("proj", projects)))
+
+    # ---- many roots -----------------------------------------------------
+    def test_each_root_is_compared_against_its_own_rows(self):
+        """Two roots holding the same relative path: neither shadows the other, and a
+        drift in one is never reported against the other."""
+        repo, projects = _seam_library(self.root, {}, block=_roots_block(
+            [(".", "guide"), (".", "manual")]))
+        for root in ("guide", "manual"):
+            (repo / root).mkdir()
+            _write(repo, root + "/README.md", FM + "# index\n")
+            _write(repo, root + "/same.md", FM + "same\n")
+        _rebuild(repo)
+        path = _derived_dir(projects) / "index.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["docs"] = [d for d in payload["docs"]
+                           if not (d["root"] == ".:guide" and d["path"] == "same.md")]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        res = _run(repo)
+        found = [f for f in _m1_index_findings(res) if "not registered" in f["subject"]]
+        self.assertEqual([f["evidence"][0]["path"] for f in found],
+                         ["guide/same.md"])
+
+
+class SeamRetiredBuilderTest(unittest.TestCase):
+    """Item 3 of the ticket: the legacy in-repository builder is a stub that prints the
+    new location and refuses to write. (Kept as a stub, not deleted: the knowledge
+    feature's documented rebuild path, retired scenario faces and operator notes still
+    name it, and all of them sit outside this ticket's write set.)"""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp(prefix="seam-builder-"))
+        _TMP_DIRS.append(self.root)
+
+    def tearDown(self):
+        _reap_tmp()
+
+    def _run_builder(self, *args, projects=None):
+        env = dict(os.environ)
+        env["SANDBAR_PROJECTS_DIR"] = str(projects or (self.root / "projects"))
+        env["PYTHONPYCACHEPREFIX"] = str(self.root / "pycache")
+        return subprocess.run([sys.executable, str(SEAM_BUILDER)] + list(args),
+                              capture_output=True, text=True, timeout=120, env=env,
+                              cwd=str(SEAM_ROOT))
+
+    def test_it_prints_the_derived_location_and_refuses(self):
+        projects = self.root / "projects"
+        proc = self._run_builder("--project", "proj", projects=projects)
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        expected = str(docs_roots.index_dir("proj", projects))
+        self.assertIn(expected, proc.stdout)
+        self.assertIn("python3 server/engine/docs_index.py --project proj", proc.stdout)
+        self.assertIn("Refused", proc.stderr)
+        self.assertIn("RETIRED", proc.stdout)
+
+    def test_it_writes_nothing_into_the_repository(self):
+        def snapshot():
+            return {p.relative_to(SEAM_ROOT): p.stat().st_mtime
+                    for p in (SEAM_ROOT / "docs").rglob("*") if p.is_file()}
+
+        before = snapshot()
+        proc = self._run_builder("--project", "proj")
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(snapshot(), before)
+        self.assertFalse((self.root / "projects" / "proj" / "data").exists())
+
+    def test_without_a_project_key_it_still_names_the_shape(self):
+        proc = self._run_builder()
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("data/docs/index.json", proc.stdout)
+        self.assertIn("<project key>", proc.stdout)
+

@@ -802,10 +802,14 @@ async def run_inspection_doc_mech(args: Dict[str, Any]) -> Dict[str, Any]:
                 # item): the inspection pass only says WHICH project it scanned for.
                 return inspection_rebuild(project_key, projects_dir)
 
+    # t261103-17: the index leg of M1 reads the derived index back (the reader and the
+    # writer must look in the SAME place), so the registry override the rebuild gets is
+    # handed to the scan as well.
     try:
         result = await asyncio.to_thread(
             run_doc_mech, repo_root, added, changed, ticket_exists, commit_exists,
-            base_head, None, project_key, index_rebuild)
+            base_head, None, project_key, index_rebuild,
+            args.get("docs_projects_root") or None)
     except DocMechError as e:
         return {"ok": False, "error": str(e)}
     activity.logger.info("doc-face mechanical layer: %d finding(s), pages=%s",

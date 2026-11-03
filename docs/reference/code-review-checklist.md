@@ -6,7 +6,7 @@ tags:
   - review-checklist
   - quality
 status: active
-updated: 2026-10-05
+updated: 2026-11-03
 ---
 
 # Code Review Checklist
@@ -103,9 +103,12 @@ Quoted rule text stays in the language of its source file (see
   of a diff and covers CJK text in `server/plugins/*/src/**`, `server/engine/**` and
   two integration face libs. Its boundary is narrow — added lines only, those paths
   only, language only — so style, structure, terminology and every untouched legacy
-  line stay human. Other partial face: `docs/scripts/build_index.py` flags missing
-  frontmatter and staleness across the doc library, but it does not check the 9-item
-  design-doc self-check list.
+  line stay human. Other partial face: the derived documentation index
+  (`server/engine/docs_index.py`, whose scan records missing frontmatter and stale
+  pages) and the doc-face mechanical layer's frontmatter rules flag those defects
+  across the doc library, but neither checks the 9-item design-doc self-check list.
+  `docs/scripts/build_index.py` is retired: it prints where the derived index lives
+  and refuses to write (design `docs/design/project-docs-roots-v1.md` goal 5).
 - Partial face (t261004-42): C9's marker SHAPE is scripted by the tier-marker lint
   (L21, `integration/lint_tests.py` + `integration/lib_tier_marker.py`): it reads
   added or changed registry lines only, expensive pools only, and checks presence

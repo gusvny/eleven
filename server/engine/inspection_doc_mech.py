@@ -15,10 +15,23 @@ notes/discussions/ (sections 2-3; the file name itself is Chinese by the notes
 naming convention, so it is not spelled out here — see docs/index.json).
 
 Rules (design section 3; severity per rule, stated once):
-  M1 doc-m1-*          index three-way consistency: docs/index.json ↔
-                       docs/README.md ↔ actual files (page exists but
-                       unregistered / registered but file gone / README leg
-                       drift / frontmatter fields missing). Frontmatter is
+  M1 doc-m1-*          index three-way consistency: the DERIVED index ↔
+                       the documentation root's README.md ↔ actual files
+                       (page exists but unregistered / registered but file
+                       gone / README leg drift / frontmatter fields missing).
+                       Since t261103-17 the index leg reads the derived index
+                       in the project's own data directory, resolved through
+                       the ONE documentation-root resolver (docs_roots.
+                       index_dir): never a copy inside a repository (design
+                       project-docs-roots-v1.md goal 5). The index leg judges
+                       the same states the readers distinguish (docs_index.
+                       read_index): absent (a first pass, NOT a finding),
+                       stale (one finding naming why a rebuild is due), failed
+                       (one finding naming its reason) -- plus "unlocated" for
+                       a scan that has no project key to look the artefact up
+                       with. None of them ever reads as "this page is
+                       unregistered", and no derived state is a crash.
+                       Frontmatter is
                        SCHEMA-AWARE (host ruling 261029): a page under
                        docs/epics/ is judged by the epic schema
                        (doc-m1-frontmatter-epic — required code / retired /
@@ -126,6 +139,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -174,6 +188,19 @@ RULE_M5_FILE = "doc-m5-file"
 RULE_M6 = "doc-m6-supersede"
 RULE_M7_PTR = "doc-m7-must-check"
 RULE_M7_STALE = "doc-m7-stale"
+
+# ---- t261103-17: the index leg reads the DERIVED index --------------------
+# The index leg never reads `<repository>/<root>/index.json` any more: a copy of the
+# index inside a repository is not the truth (design project-docs-roots-v1.md goal 5).
+# It reads the derived index in the project's own data directory, resolved through the
+# ONE documentation-root resolver (`docs_roots.index_dir`), and judges the states the
+# readers already distinguish (`docs_index.read_index`): absent / stale / failed /
+# current. `unlocated` is this scanner's own state for a pass that has no project key,
+# so the artefact cannot be looked up at all -- a named state, never a silent green
+# and never a crash.
+INDEX_STATE_UNLOCATED = "unlocated"
+#: The derived index states that are NOT a finding about any page (design goal 6).
+INDEX_STATES_QUIET = (INDEX_STATE_UNLOCATED, "absent")
 
 # M2 explicit path shapes (carried S10, narrowed): backtick or markdown-link
 # token, with a slash or a known suffix; globs and URLs never count.
@@ -504,50 +531,111 @@ def _missing(repo: Path, doc_rel: str, tok: str, bare_index: Optional[set]) -> b
     return True
 
 
-def rule_m1(repo: Path, pages: Dict[str, str], index: Any, index_err: Optional[str],
+def rule_m1(repo: Path, pages: Dict[str, str], index: Any,
             readme_rels: set, all_rels: List[str], exempts: Dict[str, set],
-            root: str = DOC_ROOT) -> List[Dict[str, Any]]:
-    """M1 three-way: index.json ↔ README ↔ actual files + frontmatter (S9 carried).
-    `root` is the documentation root in effect (the index and the README live
-    inside it)."""
+            root: str = DOC_ROOT, index_state: str = "current",
+            index_reason: str = "", index_built_at: str = "",
+            index_path: str = "") -> List[Dict[str, Any]]:
+    """M1 three-way: derived index ↔ README ↔ actual files + frontmatter (S9 carried).
+
+    `root` is the documentation root in effect (the README lives inside it); `index`
+    holds the derived index rows of THIS root, selected by the caller from the derived
+    index in the project data directory. `index_state` is the state the derived-index
+    reader reports (`docs_index.read_index`), and it decides what may be judged:
+
+      current   -- the rows are compared against the files (the three-way check);
+      absent    -- the index was never built (a first pass): NOT a finding, and no
+                   page is reported unregistered;
+      stale     -- ONE finding names why a rebuild is due and the time of the last
+                   build; the old rows are never compared as if they were current;
+      failed    -- ONE finding names the reason; no page is reported unregistered;
+      unlocated -- this pass has no project key, so the derived index cannot be looked
+                   up: no finding, and the caller names the state in a caveat.
+
+    The index-independent leg (a catalogue row that names a file that does not exist)
+    and the frontmatter checks are judged in every state.
+
+    Wording: the implied default root keeps the sentences this check has always used
+    (design goal 3: an undeclared project's verdicts stay byte for byte today's, ids
+    included). A DECLARED root names itself -- its own README path and its own derived
+    index -- so a moved root is never described with the default directory name.
+    """
+    default = root.rstrip("/") == DOC_ROOT
+    index_label = "docs/index.json" if default else "the derived index (%s)" % (
+        index_path or root)
+    catalogue = "docs/README.md" if default else "%s/README.md" % root
     out: List[Dict[str, Any]] = []
-    if index_err:
+    if index_state == "failed":
         out.append(_finding(
-            RULE_M1_INDEX, "docs/index.json is unreadable: degraded three-way check",
-            "docs/index.json", 1, index_err,
-            "The machine index failed to parse, so the index leg of the three-way "
-            "consistency check is absent this period.",
-            "Fix docs/index.json (run docs/scripts/build_index.py), then re-run."))
+            RULE_M1_INDEX,
+            "the derived documentation index is not usable: %s"
+            % (index_reason or "the last rebuild did not complete"),
+            index_path or root, 1, (index_reason or "")[:200],
+            "The derived index lives in the project data directory, outside every "
+            "repository, and the index leg of the three-way check needs it. The "
+            "recorded reason is: %s. No page is reported unregistered while the index "
+            "is unusable: a failure of the index is never a finding about a document."
+            % (index_reason or "not recorded"),
+            "Fix the cause named in this finding (design docs/design/"
+            "project-docs-roots-v1.md goal 6), then re-run. The next documentation "
+            "inspection pass rebuilds the index; an operator may rebuild it now: "
+            "python3 server/engine/docs_index.py --project <project key>."))
+    elif index_state == "stale":
+        out.append(_finding(
+            RULE_M1_INDEX,
+            "the derived documentation index is stale: a rebuild is due (%s)"
+            % (index_reason or "a document changed after the last build"),
+            index_path or root, 1,
+            "last built %s" % (index_built_at or "at an unrecorded time"),
+            "The derived index was last built at %s and no longer matches the "
+            "documents. Its rows are not compared against the files as if they were "
+            "current: a page added since the build would otherwise read as "
+            "unregistered." % (index_built_at or "an unrecorded time"),
+            "The documentation inspection rebuilds the index in its own periodic "
+            "pass; an operator may rebuild it now: python3 server/engine/"
+            "docs_index.py --project <project key>."))
     indexed = set()
     indexed_category: Dict[str, str] = {}
-    if isinstance(index, dict):
+    if index_state == "current" and isinstance(index, dict):
         for d in index.get("docs") or []:
             if isinstance(d, dict) and d.get("path"):
-                # index.json paths are docs/-relative ("design/x.md"); normalize to
+                # Derived rows are root-relative ("design/x.md"); normalize to
                 # repo-relative so they compare against the actual-file set.
                 p = _norm_slash(str(d["path"])).lstrip("./")
                 rel = p if p.startswith(root + "/") else root + "/" + p
                 indexed.add(rel)
                 indexed_category[rel] = str(d.get("category") or "")
     actual = {r for r in all_rels if _is_docs(r, root)}
-    # file vs index
-    for rel in sorted(actual - indexed):
-        if _exempted(exempts.get(rel, set()), RULE_M1_INDEX):
-            continue
-        out.append(_finding(
-            RULE_M1_INDEX, "page exists but is not registered in docs/index.json",
-            rel, 1, (pages.get(rel) or "").splitlines()[0][:200] if pages.get(rel) else "",
-            "The page exists under docs/ but the machine index has no entry for it; "
-            "plugins and agents consume the index.",
-            "Register the page (python3 docs/scripts/build_index.py) or move it out of docs/."))
-    for rel in sorted(indexed - actual):
-        if _exempted(exempts.get(rel, set()), RULE_M1_INDEX):
-            continue
-        out.append(_finding(
-            RULE_M1_INDEX, "index entry points at a file that does not exist",
-            "docs/index.json", 1, rel,
-            "docs/index.json registers %s but no such file exists — a ghost entry." % rel,
-            "Remove the ghost entry (rebuild the index) or restore the file."))
+    # file vs index (only when the index is current: see the state table above)
+    if index_state == "current":
+        for rel in sorted(actual - indexed):
+            if _exempted(exempts.get(rel, set()), RULE_M1_INDEX):
+                continue
+            out.append(_finding(
+                RULE_M1_INDEX,
+                "page exists but is not registered in %s" % index_label,
+                rel, 1,
+                (pages.get(rel) or "").splitlines()[0][:200] if pages.get(rel) else "",
+                ("The page exists under docs/ but the machine index has no entry for "
+                 "it; plugins and agents consume the index.") if default else (
+                 "The page exists under %s/ but the derived index has no entry for it; "
+                 "the console and the agents read that index." % root),
+                "Register the page (python3 docs/scripts/build_index.py) or move it "
+                "out of docs/." if default else (
+                 "Rebuild the derived index (the next documentation inspection pass, "
+                 "or python3 server/engine/docs_index.py --project <project key>) or "
+                 "move the page out of %s/." % root)))
+        for rel in sorted(indexed - actual):
+            if _exempted(exempts.get(rel, set()), RULE_M1_INDEX):
+                continue
+            out.append(_finding(
+                RULE_M1_INDEX, "index entry points at a file that does not exist",
+                ("docs/index.json" if default else (index_path or root)), 1, rel,
+                ("docs/index.json registers %s but no such file exists — a ghost "
+                 "entry." % rel) if default else (
+                 "The derived index registers %s but no such file exists — a ghost "
+                 "entry." % rel),
+                "Remove the ghost entry (rebuild the index) or restore the file."))
     # README leg (narrowed by class: the catalogue lists the knowledge-base
     # categories. A page registered under another category — the epic store, one
     # file per code — is catalogued by its own registry, so its absence from the
@@ -558,18 +646,22 @@ def rule_m1(repo: Path, pages: Dict[str, str], index: Any, index_err: Optional[s
         if _exempted(exempts.get(rel, set()), RULE_M1_README):
             continue
         out.append(_finding(
-            RULE_M1_README, "page registered in index.json but missing from docs/README.md catalogue",
-            "docs/README.md", 1, rel,
-            "The human-readable catalogue (docs/README.md) does not list a page that "
-            "exists and is indexed — the third leg of the three-way check.",
-            "Add a catalogue row in the matching category section of docs/README.md."))
+            RULE_M1_README,
+            ("page registered in index.json but missing from docs/README.md catalogue"
+             if default else "page registered in the derived index but missing from "
+                             "the %s/README.md catalogue" % root),
+            catalogue, 1, rel,
+            ("The human-readable catalogue (%s) does not list a page that exists and "
+             "is indexed — the third leg of the three-way check." % catalogue),
+            "Add a catalogue row in the matching category section of %s." % catalogue))
     for rel in sorted(readme_rels - actual):
         if _exempted(exempts.get(rel, set()), RULE_M1_README):
             continue
         out.append(_finding(
             RULE_M1_README, "catalogue row names a file that does not exist at that path",
-            "docs/README.md", 1, rel,
-            "docs/README.md lists %s but the file is not there (moved or gone)." % rel,
+            catalogue, 1, rel,
+            "%s lists %s but the file is not there (moved or gone)."
+            % (catalogue, rel),
             "Fix the catalogue path or restore the file."))
     # frontmatter (S9 carried; schema-aware since 261029 — docs/epics/ is judged
     # by the epic schema, everything else by the five knowledge-base fields)
@@ -605,6 +697,132 @@ def _build_bare_index(repo: Path) -> set:
         if p.is_file():
             out.add(p.name)
     return out
+
+
+# ---- the derived index (t261103-17) ---------------------------------------
+
+@dataclass(frozen=True)
+class DerivedIndex:
+    """What ONE read of the derived documentation index says (read-only).
+
+    `state` is one of docs_index STATES (`current` / `absent` / `stale` / `failed`) or
+    this scanner's `unlocated`; `payload` holds the built index (rows are selected per
+    scanned root by `_entries_of_root`)."""
+
+    state: str = INDEX_STATE_UNLOCATED
+    path: str = ""
+    built_at: str = ""
+    reason: str = ""
+    code: str = ""
+    declaration: str = ""
+    payload: Optional[Dict[str, Any]] = None
+
+    @property
+    def judged(self) -> bool:
+        """True only for a current index: the rows may be compared with the files."""
+        return self.state == "current"
+
+    def face(self) -> Dict[str, Any]:
+        return {"state": self.state, "path": self.path, "built_at": self.built_at,
+                "reason": self.reason, "code": self.code,
+                "declaration": self.declaration}
+
+
+def _read_derived_index(project_key: str,
+                        projects_root_dir: Optional[Any] = None) -> DerivedIndex:
+    """Read the derived index for ONE project. Never writes, never raises.
+
+    The location comes from the ONE resolver (`docs_roots.index_dir`): the project's
+    data directory, outside every repository. A pass with no project key cannot name
+    that directory at all, and says so as `unlocated` instead of guessing a path inside
+    the repository (design goal 5: a copy inside a repository is never the truth).
+    """
+    key = str(project_key or "")
+    if not key:
+        return DerivedIndex(
+            state=INDEX_STATE_UNLOCATED,
+            reason="no project key was supplied, so the derived documentation index "
+                   "(a per-project artefact in the project data directory) cannot be "
+                   "located: the index leg of M1 is not judged this period")
+    import docs_index
+    import docs_roots
+    try:
+        path = str(docs_roots.index_dir(key, projects_root_dir))
+    except docs_roots.DocsRootsStop as e:
+        return DerivedIndex(state=INDEX_STATE_UNLOCATED,
+                            reason=docs_roots.refusal_text(e), code=e.code)
+    try:
+        read = docs_index.read_index(key, projects_root_dir)
+    except Exception as e:      # noqa: BLE001 — a reader never takes the scan down
+        return DerivedIndex(state="failed", path=path,
+                            code="docs_index_read_failed", reason=str(e)[:300])
+    if read.state == "failed" and read.code == docs_roots.STOP_ABSENT:
+        # A project that declares nothing AND whose registry entry cannot name its
+        # project root has no derivable index home. Nothing failed and nothing was
+        # built: the artefact is unlocated (the scan root itself came from the tree).
+        return DerivedIndex(state=INDEX_STATE_UNLOCATED, path=path, code=read.code,
+                            reason=read.reason, declaration=read.declaration)
+    return DerivedIndex(state=read.state, path=path, built_at=read.built_at,
+                        reason=read.stale_reason or read.reason, code=read.code,
+                        declaration=read.declaration, payload=read.payload)
+
+
+def _built_dirs(derived: DerivedIndex) -> str:
+    """The tree(s) the read index was built from, as recorded in its own rows."""
+    dirs = sorted({str(r.get("directory") or "") for r
+                   in ((derived.payload or {}).get("roots") or [])
+                   if r.get("directory")})
+    return ", ".join(dirs)
+
+
+def _index_matches_tree(derived: DerivedIndex, repo: Path,
+                        roots: Sequence[Tuple[str, Optional[str]]]) -> bool:
+    """True when the read index was built from the tree this scan walks.
+
+    An index built elsewhere (a lane worktree scanning an index built from the main
+    checkout) is still a current index -- for ITS tree. The answer is used to NAME that
+    condition in a caveat, never to change a verdict (the row comparison stays the same
+    rule for every tree)."""
+    built = {str(Path(str(r.get("directory"))).resolve())
+             for r in ((derived.payload or {}).get("roots") or [])
+             if r.get("directory")}
+    if not built:
+        return True                      # nothing recorded: nothing to compare
+    walked = {str((Path(repo) / root).resolve()) for root, _ident in roots}
+    return bool(built & walked)
+
+
+def _entries_of_root(derived: DerivedIndex, root: str,
+                     identity: Optional[str]) -> Optional[Dict[str, Any]]:
+    """The derived index rows that belong to ONE scanned root.
+
+    Rows carry a root identity (repository + declared path, design goal 8), so a
+    multi-root project never mixes two roots into one comparison. An ops caller that
+    supplied the root by argument has no identity, and its rows fall back to the
+    declared path. None when the index is not current (nothing may be compared).
+    """
+    if not derived.judged:
+        return None
+    payload = derived.payload or {}
+    rows: List[Dict[str, str]] = []
+    # A row with no root field can only be described by an index that holds one root;
+    # such a row is still compared (a hand-edited row must not vanish from the check).
+    single_root_index = len(payload.get("roots") or []) <= 1
+    for d in (payload.get("docs") or []):
+        if not isinstance(d, dict) or not d.get("path"):
+            continue
+        row_root = d.get("root")
+        if identity:
+            if row_root:
+                if row_root != identity:
+                    continue
+            elif not single_root_index or d.get("root_path") not in (None, root):
+                continue
+        elif row_root or d.get("root_path") not in (None, root):
+            continue
+        rows.append({"path": str(d["path"]),
+                     "category": str(d.get("category") or "")})
+    return {"docs": rows}
 
 
 def rule_m2(repo: Path, pages: Dict[str, str], exempts: Dict[str, set],
@@ -923,10 +1141,16 @@ def _scan_root(repo: Path, root: str,
                added: Dict[str, Dict[int, str]], changed: List[str],
                ticket_exists: Optional[Callable[[str], bool]],
                commit_exists: Optional[Callable[[str], bool]],
-               base_head: str) -> Dict[str, Any]:
+               base_head: str, derived: Optional[DerivedIndex] = None,
+               root_identity: Optional[str] = None) -> Dict[str, Any]:
     """M1-M7 over ONE documentation root of one repository. The root is a
     parameter (the declared one, the implied default, or an explicitly supplied
-    one) -- never a directory name guessed here."""
+    one) -- never a directory name guessed here.
+
+    Since t261103-17 the index leg reads the DERIVED index (`derived`, read once per
+    pass from the project data directory through docs_roots), never a file inside this
+    repository, and it judges that artefact's state instead of assuming an index.
+    """
     root = root.rstrip("/") or DOC_ROOT
     rels, _unread = _read_pages(repo, root)
     pages: Dict[str, str] = {}
@@ -935,12 +1159,8 @@ def _scan_root(repo: Path, root: str,
         if t is not None:
             pages[rel] = t
 
-    index: Any = None
-    index_err: Optional[str] = None
-    try:
-        index = json.loads((repo / root / "index.json").read_text("utf-8"))
-    except (OSError, UnicodeDecodeError, ValueError) as e:
-        index_err = str(e)[:200]
+    derived = derived if derived is not None else _read_derived_index("")
+    index = _entries_of_root(derived, root, root_identity)
 
     readme_text = pages.get(root + "/README.md", "")
     readme_rels = _readme_rels(repo, readme_text, root) if readme_text else set()
@@ -955,12 +1175,23 @@ def _scan_root(repo: Path, root: str,
         caveats.append("M5 commit-existence predicate not supplied: commit check degraded this period")
     if not base_head and not added:
         caveats.append("no change surface supplied: M3 and the new-line part of M5 are skipped this period")
-    if index_err:
-        caveats.append("%s/index.json unreadable: index leg of M1 degraded" % root)
+    if derived.state in INDEX_STATES_QUIET:
+        caveats.append(
+            "docs_index_%s: the derived documentation index is not judged this period "
+            "(%s); the index leg of M1 and the part of the catalogue leg that needs it "
+            "are skipped, and no page is reported unregistered"
+            % (derived.state, derived.reason or "not built yet"))
+    elif derived.state in ("stale", "failed"):
+        caveats.append(
+            "docs_index_%s: the derived documentation index is not current, so the "
+            "index leg of M1 is a single finding naming that state and no page is "
+            "reported unregistered" % derived.state)
 
     findings: List[Dict[str, Any]] = []
     bare: Optional[set] = None
-    findings += rule_m1(repo, pages, index, index_err, readme_rels, rels, exempts, root)
+    findings += rule_m1(repo, pages, index, readme_rels, rels, exempts, root,
+                        index_state=derived.state, index_reason=derived.reason,
+                        index_built_at=derived.built_at, index_path=derived.path)
     findings += rule_m2(repo, pages, exempts, _build_bare_index(repo), root)
     if added:
         findings += rule_m3(rels, rels, pages, added, exempts, root)
@@ -971,13 +1202,19 @@ def _scan_root(repo: Path, root: str,
     if changed:
         findings += rule_m7(repo, pages, changed, exempts, _build_bare_index(repo))
     return {"findings": findings, "pages_scanned": len(pages),
-            "index_leg_degraded": bool(index_err), "exempted": exempts,
-            "caveats": caveats}
+            # The leg ran as designed only for a CURRENT index; `absent` is the
+            # designed first pass (not a degrade), while a stale, failed or
+            # unlocatable index means the per-page comparison did not happen.
+            "index_leg_degraded": derived.state in ("stale", "failed",
+                                                    INDEX_STATE_UNLOCATED),
+            "index_state": derived.state,
+            "exempted": exempts, "caveats": caveats}
 
 
-def _scan_roots(repo: Path, docs_root: Optional[str],
-                project_key: str) -> Tuple[Dict[str, Any], List[str]]:
-    """(the roots-in-effect face for meta, the root paths to scan).
+def _scan_roots(repo: Path, docs_root: Optional[str], project_key: str,
+                projects_root_dir: Optional[Any] = None
+                ) -> Tuple[Dict[str, Any], List[Tuple[str, Optional[str]]]]:
+    """(the roots-in-effect face for meta, the roots to scan as (path, identity)).
 
     t261103-11 (design docs/design/project-docs-roots-v1.md goal 2): the ONE
     resolution every consumer calls decides which roots this scan walks. An
@@ -986,17 +1223,26 @@ def _scan_roots(repo: Path, docs_root: Optional[str],
     or the implied default root. A refusal is raised by name (DocMechError
     carrying the code), never degraded into an empty library: "no documents" and
     "documents not found" must not read alike.
+
+    The root identity (repository + declared path, design goal 8) is carried along:
+    it is how M1 picks this root's rows out of the project-wide derived index, so two
+    roots that hold the same relative path never mix.
+
+    t261103-17: `projects_root_dir` is the same registry the derived index is read
+    from, so the resolution, the writer and the reader can never consult two different
+    registries.
     """
     if docs_root:
         one = str(docs_root).strip().rstrip("/") or DOC_ROOT
         return ({"source": "argument", "declaration": "", "tree": str(repo),
-                 "reason": "", "roots": [{"path": one}]}, [one])
+                 "reason": "", "roots": [{"path": one}]}, [(one, None)])
     import docs_roots
     try:
-        res = docs_roots.resolve(project_key, tree=repo)
+        res = docs_roots.resolve(project_key, tree=repo,
+                                 projects_root_dir=projects_root_dir)
     except docs_roots.DocsRootsStop as e:
         raise DocMechError(docs_roots.refusal_text(e)) from None
-    return (res.face(), [r.path for r in res.roots])
+    return (res.face(), [(r.path, r.identity) for r in res.roots])
 
 
 def run_doc_mech(repo_root: str,
@@ -1007,7 +1253,8 @@ def run_doc_mech(repo_root: str,
                  base_head: str = "",
                  docs_root: Optional[str] = None,
                  project_key: str = "",
-                 index_rebuild: Optional[Callable[[], Dict[str, Any]]] = None) -> Dict[str, Any]:
+                 index_rebuild: Optional[Callable[[], Dict[str, Any]]] = None,
+                 docs_projects_root: Optional[str] = None) -> Dict[str, Any]:
     """Run M1-M7 over the whole library. All inputs injectable; malformed input
     degrades item by item (never crashes). Returns {findings, meta} with
     findings in the exact agent shape.
@@ -1023,6 +1270,12 @@ def run_doc_mech(repo_root: str,
     repository (`docs_index.rebuild`), and its outcome lands in meta.docs_index. None
     means no rebuild this pass (unit tests, replay paths). A rebuild failure is
     recorded, never raised — a documentation refresh must not take the pass down.
+
+    t261103-17: the index leg of M1 reads that DERIVED index back (after the rebuild,
+    so a pass that rebuilt it judges the fresh one), resolved through docs_roots, and
+    the state it read lands in meta.docs_index_state. `docs_projects_root` is the same
+    registry override the rebuild gets, so the writer and the reader can never look in
+    two different places.
     """
     index_note: Optional[Dict[str, Any]] = None
     if index_rebuild is not None:
@@ -1035,7 +1288,8 @@ def run_doc_mech(repo_root: str,
         raise DocMechError("repo root does not exist: %s" % repo_root)
     added = added_lines or {}
     changed = [c for c in (changed_files or [])]
-    roots_face, roots = _scan_roots(repo, docs_root, project_key)
+    roots_face, roots = _scan_roots(repo, docs_root, project_key, docs_projects_root)
+    derived = _read_derived_index(project_key, docs_projects_root)
 
     findings: List[Dict[str, Any]] = []
     pages_scanned = 0
@@ -1048,9 +1302,22 @@ def run_doc_mech(repo_root: str,
         caveats.append("docs_roots_declared_elsewhere: the declaration names no "
                        "documentation root in this repository (%s)"
                        % (roots_face.get("declaration") or "no declaration"))
-    for root in roots:
+    if derived.judged and not _index_matches_tree(derived, repo, roots):
+        # The artefact is per PROJECT (docs_roots.index_dir); a scan of another tree
+        # of the project (a lane worktree, a second checkout) reads rows built from
+        # that other tree. Named here, never silently mixed into the verdicts: the
+        # rows are still compared (the index is current for its own tree), but a
+        # reader can see which tree the drift describes.
+        caveats.append(
+            "docs_index_other_tree: the derived documentation index was built from %s "
+            "but this scan walks %s -- the index describes another tree of the project, "
+            "so index-leg findings here may be that tree's state"
+            % (_built_dirs(derived) or "(unknown)",
+               str((repo / roots[0][0]).resolve()) if roots else str(repo)))
+    for root, identity in roots:
         part = _scan_root(repo, root, added, changed, ticket_exists,
-                          commit_exists, base_head)
+                          commit_exists, base_head, derived=derived,
+                          root_identity=identity)
         findings += part["findings"]
         pages_scanned += part["pages_scanned"]
         index_degraded = index_degraded or part["index_leg_degraded"]
@@ -1071,6 +1338,7 @@ def run_doc_mech(repo_root: str,
         "heartbeat": not findings,
         "caveats": caveats,
         "docs_roots": roots_face,
+        "docs_index_state": derived.face(),
     }
     if index_note is not None:
         meta["docs_index"] = index_note
@@ -1126,7 +1394,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                          "implied root of the repository)")
     ap.add_argument("--project", default="",
                     help="project key whose documentation-root declaration decides "
-                         "the scan roots")
+                         "the scan roots and whose derived index the index leg reads")
+    ap.add_argument("--projects-root", default=None,
+                    help="override the per-key projects root the derived index lives "
+                         "under (default: $SANDBAR_PROJECTS_DIR or ~/.sandbar/projects)")
     args = ap.parse_args(argv)
     try:
         if args.no_diff:
@@ -1137,7 +1408,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                               changed_files=changed,
                               base_head="" if args.no_diff else args.base,
                               docs_root=args.docs_root or None,
-                              project_key=args.project)
+                              project_key=args.project,
+                              docs_projects_root=args.projects_root)
         print(json.dumps({"ok": True, "result": result}, ensure_ascii=False)
               .encode("utf-8", "backslashreplace").decode("utf-8"))
         return 0

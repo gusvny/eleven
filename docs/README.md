@@ -5,7 +5,7 @@ tags:
   - index
   - knowledge-base
 status: active
-updated: 2026-09-28
+updated: 2026-11-03
 ---
 
 # docs index
@@ -23,8 +23,12 @@ updated: 2026-09-28
 >
 > History: 2026-08-21 the docs library was restructured as a knowledge base (four categories +
 > frontmatter + index.json + consumption by the suyou-knowledge plugin); this page is the
-> human-readable catalogue, the machine-readable one is `docs/index.json`, and the directory
-> structure and migration mapping are in `design/knowledge-base-design.md` (§2 / §6).
+> human-readable catalogue and the directory structure and migration mapping are in
+> `design/knowledge-base-design.md` (§2 / §6).
+> **The machine index is a derived artefact and lives outside the repository** (design
+> `design/project-docs-roots-v1.md` goal 5): the console and the knowledge feature read it from
+> the project's own data directory, the documentation inspection rebuilds it, and nothing reads
+> a copy stored in a repository.
 
 ## design (design — what the engine/plugins look like, and why)
 
@@ -75,7 +79,8 @@ updated: 2026-09-28
 ## Maintenance conventions
 
 - Every document carries YAML frontmatter: `title` (the first `#` heading) / `category` (design|content|ops|reference) / `tags` / `status` (active|draft|deprecated) / `updated` (date of the last substantive change).
-- The epic store under `docs/epics/` is the one exception (host ruling 261029): an epic keeps its own frontmatter — `code` (identical to the file name without `.md`) / `retired` (true|false) / `summary` (one English sentence) — defined by `design/epic-registry-v1.md`, and it is catalogued by that store instead of this table. The doc-mech checker and `docs/index.json` judge it by that schema.
-- Adding a document: put it in the matching category directory + add frontmatter, then run `python3 docs/scripts/build_index.py` to refresh `docs/index.json`.
+- The epic store under `docs/epics/` is the one exception (host ruling 261029): an epic keeps its own frontmatter — `code` (identical to the file name without `.md`) / `retired` (true|false) / `summary` (one English sentence) — defined by `design/epic-registry-v1.md`, and it is catalogued by that store instead of this table. The doc-mech checker and the derived documentation index judge it by that schema.
+- Adding a document: put it in the matching category directory and add its frontmatter, then add a catalogue row to this page. The machine index is derived from the documents, so nothing here has to be edited for it: the documentation inspection rebuilds it in its own periodic pass, and an operator may ask for a rebuild now with `python3 server/engine/docs_index.py --project <project key>`.
+- The index's home is the project's own data directory, outside every repository (`<projects root>/<project key>/data/docs/index.json`); it is rebuildable from the documents alone and is never a truth source. The committed `docs/index.json` is the legacy in-repository copy: no consumer reads it, and `docs/scripts/build_index.py` is retired — it prints the location above and refuses to write.
 - Related documents **link to each other** (relative paths; three relations: depends-on/depended-on-by, supersedes/superseded-by, practical reference — see `design/knowledge-base-design.md` §3.2).
 - The repository-root `CLAUDE.md` is the master handover entry point and this directory is its detailed knowledge base; process discussions and epic proposals live in `notes/` (division of labour and graduation policy in `notes/README.md`).
