@@ -24,7 +24,7 @@ import {
 // from a name of its own.
 import {
   indexBanner, locateRoot, newestDocMtime, parseRootToken, readIndexState, resolveDocsRoots,
-  type IndexRead, type RootsResolution, type ResolvedRoot,
+  type IndexRead, type RootsResolution, type ResolvedRoot, type ServedResolution,
 } from '../../../knowledge/src/shared/docs-roots.ts'
 
 /** 单篇大小上限（utf8 字符数；定稿库最大篇 ~60KB，2MB 上限=10 倍余量防误配大文件拖爆响应）。 */

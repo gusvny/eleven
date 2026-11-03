@@ -19,7 +19,8 @@
     }
   },
   "devDependencies": {
-    "tsdown": "0.22.2"
+    "tsdown": "0.22.2",
+    "typescript": "5.9.3"
   },
   "scripts": {
     "build": "bash build-client.sh",
