@@ -26,17 +26,30 @@ zero_change 非布尔）一律 ProduceParseError 点名——不猜、不静默�
     票3 随项目声明化）＝不跳过、不硬失败——产出 protected_overlap 清单进报告
     （file + 见报告 diff），人审可在**同一期票**内签 produce-protect-authorize 放行
     （A3；授权清单随 merge payload 作窄通旁路标记，path_gates 本体零改动）。
-  ③零 change 闸 check_zero_change：zero_change=true 须带 evidence 且 changes 为空；
-    有 changes 却声明零 change、或零 change 却无证据，均判红（A5——不许空壳、
-    不许为凑数造假改动）。**与文档自检红的交互**（review v2 附条件②）：本期本无
-    实质改动但自检出索引/链接红时，报告仍须带显式结论（自检红点名清单）——
-    selfcheck 结果无论红绿全量进报告，本闸只判「零 change 声明本身」的真伪。
-  ④文档自检 doc_selfcheck：改了文档不能让引用烂掉——索引双向一致性 / frontmatter /
-    显式路径引用存在性（含越出仓根点名）。**规则集可声明**（DocCheckRules，票1 缺省
-    =sandbar 同集；票3 通用化时随项目声明化——review v2 附条件①，引擎不写死
-    sandbar 文档约定）。与退役模块 inspection_scan_doc 的关系：**不接线本体**
-    （t260916-22 退役头注明令），其置顶规则词法常量按同值复制并互链，同集性由
-    UT fixture 对照锁住。
+  ③zero-change gate check_zero_change (A5): a zero_change=true claim needs evidence and
+    an empty changes list; changes declared as zero-change, or a zero-change claim with
+    no evidence, are both red (no empty shell, no invented work). Interaction with a red
+    document self-check (review v2 condition ②): a period with no substantive change but
+    a red self-check still carries an explicit conclusion (the named red list) -- the
+    whole self-check result, green or red, goes into the report, and this gate judges
+    only whether the zero-change claim itself is true.
+  ④doc self-check doc_selfcheck (t261103-21): what a produced documentation change
+    must not break -- the frontmatter lexical fields, and explicit path references
+    (an escape out of the tree is named). The INDEX leg is gone on purpose. The
+    documentation index is a derived artefact that lives in the project's own data
+    directory (design docs/design/project-docs-roots-v1.md goal 5): an
+    in-repository copy has no consumer and drifts, and the project-level derived
+    index describes a DIFFERENT tree than the lane worktree this self-check judges
+    -- reading either here would judge the wrong tree. Index consistency (derived
+    index <-> README <-> files, plus the absent/stale/failed states) is owned by
+    the doc-face mechanical layer M1 (inspection_doc_mech.py, doc-m1-*) on the
+    project tree, after the produced change is merged. The rule set stays
+    declarable (DocCheckRules; the engine never hard-codes one project's
+    documentation conventions), and a self-check that judged nothing says so by
+    name (doc_selfcheck_verdict's `not_judged`), never a bare empty list. Relation
+    to the retired module inspection_scan_doc: the body is never wired in
+    (t260916-22's retirement note), its top-of-file rule constants are copied by
+    value and cross-linked, and the same-set property is locked by UT fixtures.
 """
 
 from __future__ import annotations
@@ -238,12 +251,26 @@ def check_zero_change(changes: Optional[List[Dict[str, Any]]] = None,
 # 文档自检（doc_selfcheck；规则集可声明——review v2 附条件①）
 # ========================================================================================
 
+#: t261103-21: who judges documentation-index consistency now, and why it is not judged
+#: here. Named in the code (and reported in every verdict) so the dropped coverage cannot
+#: go quiet and announce itself as a pass.
+INDEX_CHECK_OWNER = "inspection_doc_mech.py M1 (doc-m1-*)"
+INDEX_CHECK_REASON = (
+    "the documentation index is a derived artefact in the project's own data directory, "
+    "outside every repository; the self-check judges the lane worktree it writes into, so "
+    "neither an in-repository copy nor the project-level index describes this tree. "
+    "Index consistency is judged by %s on the project tree after the change is merged."
+    % INDEX_CHECK_OWNER)
+
+
 @dataclass
 class DocCheckRules:
-    """文档自检规则集（票1 缺省=sandbar docs 同集；**票3 通用化时随项目声明化**——
-    引擎不写死 sandbar 文档约定）。frontmatter 词法与 inspection_scan_doc 置顶常量
-    同值（互链；同集性由 UT fixture 对照锁住）。"""
-    index_rel: str = "docs/index.json"      # 索引文件（相对仓根）
+    """The document self-check's rule set. The default values are the documentation
+    conventions of this project; a project declares its own (review v2 condition ①: the
+    engine never hard-codes one project's conventions). The frontmatter vocabulary is the
+    same set the retired module inspection_scan_doc kept at the top of its file (copied by
+    value and cross-linked; a UT fixture locks the same-set property). There is no index
+    rule field: see INDEX_CHECK_REASON (t261103-21)."""
     require_frontmatter: bool = True        # 是否查 frontmatter（非 md 约定项目可关）
     required_fields: Tuple[str, ...] = ("title", "category", "tags", "status", "updated")
     categories: Tuple[str, ...] = ("design", "content", "ops", "reference")
@@ -252,7 +279,7 @@ class DocCheckRules:
     ref_suffixes: Tuple[str, ...] = _REF_SUFFIXES
 
 
-#: 自检发现条目形状：{check, path, detail}；check ∈ index|frontmatter|ref
+#: A self-check finding's shape: {check, path, detail}; check in root|frontmatter|ref
 def _findings_add(out: List[Dict[str, str]], check: str, path: str, detail: str) -> None:
     out.append({"check": check, "path": path, "detail": detail})
 
@@ -292,47 +319,28 @@ def _extract_refs(text: str) -> List[str]:
     return refs
 
 
-def doc_selfcheck(repo_root: Path, docs_root: str,
-                  rules: Optional[DocCheckRules] = None) -> List[Dict[str, str]]:
-    """文档自检三查（在**泳道 worktree**上跑；返回发现清单，空=过）。
-    ①索引双向一致性；②frontmatter（rules.require_frontmatter 时）；
-    ③显式路径引用存在性（含越出仓根点名）。IO 故障逐条降级点名，不崩不假绿。"""
+def _doc_selfcheck_run(repo_root: Path, docs_root: str,
+                       rules: Optional[DocCheckRules] = None):
+    """The self-check proper: (findings, pages judged). Two checks, both judged against
+    the tree's OWN files (t261103-21 dropped the index leg -- INDEX_CHECK_REASON says
+    where that coverage went):
+      ① frontmatter (when rules.require_frontmatter);
+      ② explicit path references, including the escape out of the tree (named).
+    An IO fault degrades item by item with a named finding: never a crash, never a
+    silent pass."""
     rules = rules or DocCheckRules()
     root = Path(repo_root)
     out: List[Dict[str, str]] = []
     docs = root / docs_root.rstrip("/")
-    # ---- ①索引一致性（index 文件存在且在 docs_root 下才查；坏 JSON=逐条降级点名）----
-    index_path = root / rules.index_rel
-    indexed: List[str] = []
-    if index_path.is_file():
-        try:
-            data = json.loads(index_path.read_text(encoding="utf-8"))
-            entries = data.get("docs") if isinstance(data, dict) else data
-            if isinstance(entries, list):
-                for e in entries:
-                    if isinstance(e, dict) and isinstance(e.get("path"), str):
-                        indexed.append(e["path"])
-            else:
-                _findings_add(out, "index", rules.index_rel,
-                              "index.json docs 键缺失或非列表（口径漂移，逐条点名）")
-        except (OSError, ValueError) as e:
-            _findings_add(out, "index", rules.index_rel,
-                          "index.json 不可读/坏 JSON：%s: %s" % (type(e).__name__, e))
-    # docs/ 下实际 md 文件（rglob，sorted 确定性）
+    # The tree's own markdown pages under the declared root (rglob, sorted = deterministic)
     actual: List[str] = []
     if docs.is_dir():
         actual = sorted(
             (f"{docs_root.rstrip('/')}/{p.relative_to(docs).as_posix()}"
              for p in docs.rglob("*.md") if p.is_file()))
     elif not docs.exists():
-        _findings_add(out, "index", docs_root, "文档根不存在：%s" % docs_root)
-    if indexed:
-        idx_set, act_set = set(indexed), set(actual)
-        for ghost in sorted(idx_set - act_set):
-            _findings_add(out, "index", ghost, "幽灵条目：索引有、文件无")
-        for missing in sorted(act_set - idx_set):
-            _findings_add(out, "index", missing, "缺登记：文件在、索引无")
-    # ---- ②③逐篇 frontmatter + 引用存在性 ----
+        _findings_add(out, "root", docs_root, "documentation root absent: %s" % docs_root)
+    # ---- ①②: per page, the frontmatter fields and the explicit references ----
     for rel in actual:
         f = root / rel
         try:
@@ -376,7 +384,41 @@ def doc_selfcheck(repo_root: Path, docs_root: str,
                     _findings_add(out, "ref", rel, "引用 %r 目标不存在" % ref)
             except OSError as e:
                 _findings_add(out, "ref", rel, "引用 %r 解析失败：%s" % (ref, e))
-    return out
+    return out, len(actual)
+
+
+def doc_selfcheck(repo_root: Path, docs_root: str,
+                  rules: Optional[DocCheckRules] = None) -> List[Dict[str, str]]:
+    """The document self-check's findings (empty = pass). Runs on the LANE WORKTREE it
+    judges; every check is against that tree's own files. Kept as the findings-only face
+    for callers that only report a list; the full statement of what was and was not
+    judged is doc_selfcheck_verdict."""
+    return _doc_selfcheck_run(repo_root, docs_root, rules)[0]
+
+
+def doc_selfcheck_verdict(repo_root: Path, docs_root: str,
+                          rules: Optional[DocCheckRules] = None) -> Dict[str, Any]:
+    """The self-check's full statement: the findings, what was judged, and what was not.
+
+    Why a verdict and not a bare list (t261103-21): the index leg is gone, so a tree that
+    holds no page -- or any tree at all -- can produce zero findings while judging little.
+    An empty list would then read as "all clear". `not_judged` names the missing coverage
+    and its owner instead, so the report never claims more than the checks did.
+    """
+    root = Path(repo_root)
+    findings, pages = _doc_selfcheck_run(root, docs_root, rules)
+    judged = {"tree": str(root), "docs_root": docs_root.rstrip("/"),
+              "pages": pages, "checks": ["frontmatter", "ref"]}
+    if not (rules or DocCheckRules()).require_frontmatter:
+        judged["checks"] = ["ref"]
+    not_judged: List[Dict[str, str]] = [
+        {"check": "index", "owner": INDEX_CHECK_OWNER, "reason": INDEX_CHECK_REASON}]
+    if pages == 0:
+        not_judged.append({
+            "check": "docs", "owner": "doc_selfcheck",
+            "reason": ("no markdown page under %r in this tree: the frontmatter and "
+                       "reference checks had nothing to judge" % (docs_root.rstrip("/")))})
+    return {"findings": findings, "judged": judged, "not_judged": not_judged}
 
 
 # ========================================================================================

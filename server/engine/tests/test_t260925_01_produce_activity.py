@@ -158,12 +158,21 @@ def test_stub_zero_change_missing_evidence_red(lane, tmp_path, monkeypatch):
     assert "evidence" in r["result"]["selfcheck"]["zero_change_error"]
 
 
-def test_stub_doc_selfcheck_wired(lane, tmp_path, monkeypatch):
-    (lane / "docs" / "b.md").write_text("# B\n", encoding="utf-8")  # 缺登记
+def test_stub_doc_selfcheck_wired_without_index_leg(lane, tmp_path, monkeypatch):
+    """t261103-21: the self-check is wired and judges the produced tree, but it no longer
+    judges an in-repository index -- the `lane` fixture carries one on purpose (the old
+    "page not registered" trigger) and nothing may fire from it. The verdict names the
+    dropped leg and its owner instead of letting an empty list read as "all clear"."""
+    (lane / "docs" / "b.md").write_text("# B\n", encoding="utf-8")   # no frontmatter
     _stub(monkeypatch, GOOD, tmp_path)
     r = asyncio.run(aa.run_inspection_produce(_args(lane, tmp_path)))
-    finds = r["result"]["selfcheck"]["doc_findings"]
-    assert any(f["check"] == "index" and "缺登记" in f["detail"] for f in finds)
+    sc = r["result"]["selfcheck"]
+    assert not [f for f in sc["doc_findings"] if f["check"] == "index"]
+    assert any(f["check"] == "frontmatter" for f in sc["doc_findings"])
+    verdict = sc["doc_selfcheck"]
+    assert verdict["judged"]["pages"] == 2
+    named = {n["check"]: n for n in verdict["not_judged"]}
+    assert "inspection_doc_mech" in named["index"]["owner"]
 
 
 def test_stub_malformed_fixture_named(lane, tmp_path, monkeypatch):

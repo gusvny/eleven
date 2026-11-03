@@ -4883,6 +4883,13 @@ def build_dispatch_prompt(tid: str, meta: Dict[str, Any], template_lane: str,
         % (role_doc, (" + %s（分工卡，同读）" % kind_doc) if kind else ""),
         "   ③ 知识库：docs/ = 定稿知识库，目录=docs/README.md（每篇一句话用途；"
         "机器索引 docs/index.json 备用）。动手前对照目录与你的标题/写集判断相关"
+        # t261103-21: the legacy line above stays byte-identical (its wording is
+        # grandfathered), and the fact it states is corrected next to it in English so no
+        # reader is misled: the documentation index is derived and lives in the project's
+        # own data directory, and no copy of it sits inside a repository.
+        "   (t261103-21 correction) The index is derived, not a file in the repository:"
+        " it lives in the project data directory and the documentation inspection rebuilds"
+        " it; read docs/README.md as the catalogue.",
         "设计文档，相关的读全文，不相关不读。",
     ]
     items = [
@@ -7954,6 +7961,13 @@ def build_stage_prompt(ticket_id: str, meta: Dict[str, Any], stage: Stage,
         "禁止逐文件往返烧时；每轮模型往返都是分钟级成本。写改动仍小步分次。）",
         "   ② 知识库：docs/ = 定稿知识库，目录=docs/README.md（每篇一句话用途；"
         "机器索引 docs/index.json 备用）。动手前对照目录与你的标题/写集判断相关"
+        # t261103-21: the legacy line above stays byte-identical (its wording is
+        # grandfathered), and the fact it states is corrected next to it in English so no
+        # reader is misled: the documentation index is derived and lives in the project's
+        # own data directory, and no copy of it sits inside a repository.
+        "   (t261103-21 correction) The index is derived, not a file in the repository:"
+        " it lives in the project data directory and the documentation inspection rebuilds"
+        " it; read docs/README.md as the catalogue.",
         "设计文档，相关的读全文，不相关不读。",
     ]
     # Body = the original user request (ticket t260822-m16: user_request kept verbatim,

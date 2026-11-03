@@ -15094,7 +15094,7 @@ async def run_inspection_produce(args: Dict[str, Any]) -> Dict[str, Any]:
     from inspection_produce import (
         ProduceParseError, SelfcheckError, build_produce_prompt,
         check_protected_overlap, check_write_set, check_zero_change,
-        doc_selfcheck, mint_change_ids, parse_agent_changes,
+        doc_selfcheck_verdict, mint_change_ids, parse_agent_changes,
         produce_write_pin_patch)
 
     def _err(msg: str) -> Dict[str, Any]:
@@ -15204,10 +15204,14 @@ async def run_inspection_produce(args: Dict[str, Any]) -> Dict[str, Any]:
         from path_gates import PROTECTED_PATHS
         protected = check_protected_overlap(all_paths, PROTECTED_PATHS)
         zero_err = check_zero_change(agent_changes, zero_change, evidence)
-        doc_finds = doc_selfcheck(base, docs_root)
+        # t261103-21: the full verdict beside the findings -- what was judged and what was
+        # not (the index leg is M1's, on the project tree). The findings list stays the
+        # report's red count; the verdict is what keeps a quiet pass from reading as clear.
+        doc_verdict = doc_selfcheck_verdict(base, docs_root)
         return {"all_paths": all_paths, "out_of_root": out_of_root,
                 "protected_overlap": protected, "zero_change_error": zero_err,
-                "doc_findings": doc_finds, "diff_error": diff_err}
+                "doc_findings": doc_verdict["findings"], "doc_selfcheck": doc_verdict,
+                "diff_error": diff_err}
 
     # ---- 桩捷径（UT/场景；与真 agent 同围栏契约，差分/自检链照跑=桩-闸不同源防假绿） ----
     if os.environ.get("SANDBAR_PRODUCE_STUB") == "1":

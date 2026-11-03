@@ -9,11 +9,18 @@
   - 保护面闸（A3）：交集点名、前缀命中、不硬失败；
   - 零 change 闸（A5）：证据缺空/与 changes 并存/形态非法逐红；含 review v2 附条件②
     口径（文档自检红不混入零 change 判定）；
-  - 文档自检三查：索引双向、frontmatter 词法、显式引用存在性+越根点名（tmp 仓真
-    文件夹具，不靠真外部源）；规则集可声明（附条件①：换规则集即换行为）；
+  - document self-check: the frontmatter fields and the explicit references (+ the
+    out-of-tree escape, named) over a real tmp tree, never a real external source; the
+    rule set is declarable (condition 1: a different rule set is a different behaviour);
+    since t261103-21 the index leg is gone (index consistency is M1's, on the project
+    tree) and the verdict names, every call, what was NOT judged and who owns it;
+  - t261103-21 family guard: no shipped engine/plugin surface names an in-repository
+    documentation index (nor calls it the machine index), and the retired docs-face
+    scanner is imported by no live module;
   - 受限可写 pin：workspace-write 形态 + docs_root 进描述（A4：与只读钉形态可辨）；
   - 人审门/授权门载荷校验：agent 自签拒、gate 串门拒、授权清单越集拒。
 """
+import re
 import sys
 from pathlib import Path
 
@@ -143,17 +150,46 @@ def doc_repo(tmp_path):
     (tmp_path / "docs" / "sub" / "b.md").write_text(
         "---\ntitle: B\ncategory: design\ntags: [x]\nstatus: active\n"
         "updated: 2026-09-25\n---\n\n# B\n", encoding="utf-8")
+    # t261103-21: the tree carries a legacy in-repository index on purpose -- the
+    # self-check must IGNORE it (it judges no in-repository index at all any more).
     (tmp_path / "docs" / "index.json").write_text(
         '{"docs": [{"path": "docs/a.md"}, {"path": "docs/sub/b.md"},'
         ' {"path": "docs/ghost.md"}]}', encoding="utf-8")
     return tmp_path
 
 
-def test_doc_selfcheck_ghost_and_missing_ref(doc_repo):
+def test_doc_selfcheck_index_leg_gone_refs_still_judged(doc_repo):
+    """t261103-21: the in-repository index is not read (no "index" findings), while the
+    checks that judge THIS tree's own files keep firing."""
     finds = prod.doc_selfcheck(doc_repo, "docs")
-    by = {(f["check"], f["path"]) for f in finds}
-    assert ("index", "docs/ghost.md") in by          # 幽灵条目
-    assert ("ref", "docs/a.md") in by                # 引用 docs/ghost.md 不存在
+    assert [f for f in finds if f["check"] == "index"] == []
+    assert any("ghost.md" in f["detail"] for f in finds if f["check"] == "ref")
+
+
+def test_doc_selfcheck_verdict_names_dropped_index_leg(doc_repo):
+    """The dropped coverage is named, never a bare empty list: the verdict says what it
+    judged and hands the index leg to its owner by name."""
+    verdict = prod.doc_selfcheck_verdict(doc_repo, "docs")
+    assert set(verdict) == {"findings", "judged", "not_judged"}
+    assert verdict["judged"]["pages"] == 2
+    assert verdict["judged"]["checks"] == ["frontmatter", "ref"]
+    named = {n["check"]: n for n in verdict["not_judged"]}
+    assert "inspection_doc_mech" in named["index"]["owner"]
+    assert "project" in named["index"]["reason"]
+    assert "docs" not in named            # a tree with pages judged does not claim blindness
+
+
+def test_doc_selfcheck_verdict_names_a_quiet_face(tmp_path):
+    """A tree that holds no page CAN go quiet -- then the verdict says so by name."""
+    (tmp_path / "docs").mkdir()
+    verdict = prod.doc_selfcheck_verdict(tmp_path, "docs")
+    assert verdict["findings"] == [] and verdict["judged"]["pages"] == 0
+    named = {n["check"]: n for n in verdict["not_judged"]}
+    assert "nothing to judge" in named["docs"]["reason"]
+    # an absent root is a named finding, not a silent pass
+    (tmp_path / "docs").rmdir()
+    finds = prod.doc_selfcheck(tmp_path, "docs")
+    assert [f for f in finds if f["check"] == "root"]
 
 
 def test_doc_selfcheck_green_repo(tmp_path):
@@ -188,16 +224,23 @@ def test_doc_selfcheck_frontmatter_and_escape(doc_repo):
 
 
 def test_doc_selfcheck_rules_declarable(tmp_path):
-    """附条件①：规则集可声明——关掉 frontmatter 检查即零 frontmatter 发现，
-    换索引路径即按新路径查（引擎不写死 sandbar 约定）。"""
+    """Condition ①: the rule set is declarable -- turning the frontmatter check off
+    yields no frontmatter finding, and the verdict stops claiming that check."""
     (tmp_path / "kb").mkdir()
-    (tmp_path / "kb" / "a.md").write_text("纯正文，无 frontmatter\n", encoding="utf-8")
-    rules = prod.DocCheckRules(index_rel="kb/index.json", require_frontmatter=False,
+    (tmp_path / "kb" / "a.md").write_text("pure body, no frontmatter\n", encoding="utf-8")
+    rules = prod.DocCheckRules(require_frontmatter=False,
                                required_fields=(), categories=(), statuses=())
-    assert prod.doc_selfcheck(tmp_path, "kb", rules) == []
-    # 缺省规则（带 frontmatter 检查）同仓即红
+    verdict = prod.doc_selfcheck_verdict(tmp_path, "kb", rules)
+    assert verdict["findings"] == [] and verdict["judged"]["checks"] == ["ref"]
+    # default rules (frontmatter check on) red on the same tree
     assert any(f["check"] == "frontmatter"
                for f in prod.doc_selfcheck(tmp_path, "kb"))
+
+
+def test_doc_check_rules_carry_no_index_rule():
+    """The dropped index leg cannot regrow through the rule set: there is no index path
+    field to point at an in-repository copy."""
+    assert not hasattr(prod.DocCheckRules(), "index_rel")
 
 
 # ---------- 受限可写 pin ----------
@@ -260,3 +303,192 @@ def test_authorize_subset_enforced():
     _, err = prod.validate_authorize_payload(
         {"who": "宿主", "gate": prod.PRODUCE_AUTHORIZE_GATE_ID, "paths": []}, overlap)
     assert "paths" in err
+
+
+# ============================================================================
+# t261103-21 — the docs-index family guard: the family cannot regrow.
+#
+# What went wrong (the family): the documentation index used to be a file committed
+# inside the repository, and one seam after another read it as a truth source. The
+# index is a DERIVED artefact now and lives in the project's own data directory
+# (docs/design/project-docs-roots-v1.md goal 5), so an in-repository copy has no
+# consumer, sits outside every rebuild, and drifts while nothing notices. This
+# section locks the three shapes that let it come back:
+#   G1 a shipped module/asset names a repository-relative documentation index path;
+#   G2 a shipped string calls that in-repository file "the machine index";
+#   G3 the retired docs-face scanner is imported by a live module again.
+# The allowed set below is a named list, not a silent skip: each entry states why it
+# is legitimate, and a new site is red by construction.
+# ============================================================================
+
+ENGINE = Path(__file__).resolve().parent.parent          # server/engine
+REPO_ROOT = ENGINE.parent.parent                          # the repository root
+
+#: A repository-relative documentation index path. The derived home prints as
+#: `<projects root>/<key>/data/docs/index.json`, so `data/docs/index.json` is NOT a hit.
+REPO_INDEX_PATH_RE = re.compile(r"(?<!data/)docs/index\.json")
+#: The field/constant name a reader uses to point at such a path.
+INDEX_PATH_IDENT_RE = re.compile(r"\bindex_rel\b|\bINDEX_REL\b")
+#: The phrase that used to describe the in-repository file as if it were the artefact.
+#: The legacy Chinese form is written as \u escapes on purpose: this source carries no
+#: CJK literal (the copy-language gate) and no copy-marker exemption (t261004-36 banned
+#: the temporary `data` id), while the compiled pattern still matches the real phrase.
+MACHINE_INDEX_PHRASE_RE = re.compile(
+    r"machine[\s-]+index|" + "\u673a\u5668\u7d22\u5f15", re.IGNORECASE)
+
+#: G1: the only shipped files allowed to name an in-repository index, with the reason.
+IN_REPO_INDEX_ALLOWED = {
+    "server/engine/inspection_scan_doc.py": (
+        "retired static scanner (t260916-22): replay-only, kept one version, its S8 leg is "
+        "frozen and pinned by the module's own L1 battery and by the t260911-02 scenario; no "
+        "live module imports it (G3)"),
+    "server/engine/inspection_doc_mech.py": (
+        "M1 names the index artefact in its finding labels (`docs/index.json` is the label of "
+        "the default root, kept byte-compatible with pre-t261103-17 findings); the leg itself "
+        "reads the derived index through docs_roots.index_dir"),
+}
+
+#: G1/G2 heritage ceiling: the one legacy dispatch-prompt line pair that is grandfathered
+#: (host instruction, t261103-21) -- it stays BYTE-IDENTICAL to main instead of being
+#: rewritten, and the corrected fact ships as an English line right beside it. Pinned by
+#: line digest rather than by text on purpose: this source carries no CJK literal, and a
+#: rewrite to a NEW in-repository-index line has a different digest, so it goes red. The
+#: declared number is a CEILING: a later cleanup that deletes the legacy line is fine
+#: (delete the entry with it), but one more occurrence than declared is red.
+GRANDFATHERED_LINES = {
+    "3e76a865739e3893": (2, "two legacy agent-prompt lines in server/engine/shared.py: the "
+                            "'machine index + docs/index.json' wording, kept byte-identical to "
+                            "main with an English correction line beside it"),
+}
+
+#: Directories whose .py/.ts files are not shipped surfaces (test fixtures and builds).
+_NOT_SHIPPED = ("tests", "fixtures", "out", "bin", "node_modules", "lib")
+
+
+def _shipped(path: Path) -> bool:
+    rel = path.relative_to(REPO_ROOT)
+    return not any(part in _NOT_SHIPPED for part in rel.parts)
+
+
+def _shipped_sources():
+    """Every shipped source file of the two delivery surfaces this guard covers: the
+    engine (server/engine/**/*.py) and the plugin family (server/plugins/** .ts/.tsx/.mjs/
+    .json). Test fixtures and built bundles are not shipped strings and stay out."""
+    found = []
+    for path in sorted(ENGINE.rglob("*.py")):
+        if _shipped(path):
+            found.append(path)
+    for pattern in ("*.ts", "*.tsx", "*.mjs", "*.json", "*.cjs"):
+        for path in sorted((REPO_ROOT / "server" / "plugins").rglob(pattern)):
+            if _shipped(path):
+                found.append(path)
+    return found
+
+
+def _digest(line: str) -> str:
+    """The pin for a grandfathered line (see GRANDFATHERED_LINES)."""
+    import hashlib
+    return hashlib.sha256(line.strip().encode("utf-8")).hexdigest()[:16]
+
+
+def _grandfathered(line: str) -> bool:
+    return _digest(line) in GRANDFATHERED_LINES
+
+
+def _hits(regex, path: Path):
+    """(lineno, line) of every match, read as UTF-8 with a lossy decode so one odd file
+    never hides the rest of the scan."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:                      # an unreadable shipped file is not a pass
+        raise AssertionError("shipped file unreadable: %s (%s)" % (path, e))
+    return [(no, line) for no, line in enumerate(text.splitlines(), 1)
+            if regex.search(line)]
+
+
+def test_g1_no_shipped_source_names_an_in_repository_index():
+    """G1: the in-repository index has no reader left, so a shipped file that names it is
+    a regression -- unless it is one of the named retirements above."""
+    hits = {}
+    for path in _shipped_sources():
+        found = _hits(REPO_INDEX_PATH_RE, path)
+        if path.suffix == ".py":
+            found += _hits(INDEX_PATH_IDENT_RE, path)
+        found = [(no, line) for no, line in found if not _grandfathered(line)]
+        if found:
+            hits[str(path.relative_to(REPO_ROOT))] = found
+    unexpected = {p: v for p, v in hits.items() if p not in IN_REPO_INDEX_ALLOWED}
+    assert not unexpected, (
+        "an in-repository documentation index is named by a shipped file that is not a "
+        "declared retirement (the index is derived and lives outside the repository): %s"
+        % {p: ["%d: %s" % (no, line.strip()[:120]) for no, line in v]
+           for p, v in unexpected.items()})
+
+
+def test_g2_no_shipped_string_calls_the_in_repository_index_the_machine_index():
+    """G2: the phrase is legitimate only where it describes the DERIVED index. A line
+    that pairs the phrase with a repository-relative index path is the old claim."""
+    offenders = {}
+    for path in _shipped_sources():
+        for no, line in _hits(MACHINE_INDEX_PHRASE_RE, path):
+            if REPO_INDEX_PATH_RE.search(line) and not _grandfathered(line):
+                offenders.setdefault(str(path.relative_to(REPO_ROOT)), []).append(
+                    "%d: %s" % (no, line.strip()[:140]))
+    assert not offenders, (
+        "a shipped string calls the in-repository index 'the machine index' (the machine "
+        "index is the derived artefact in the project data directory): %s" % offenders)
+
+
+def test_g3_the_retired_docs_face_scanner_has_no_live_importer():
+    """G3: retiring the face=doc wiring (t261103-21) is worth nothing if the retired
+    scanner gets imported again somewhere else in the engine."""
+    importers = {}
+    for path in _shipped_sources():
+        if path.suffix != ".py" or path.name == "inspection_scan_doc.py":
+            continue
+        found = [ln for ln in _hits(re.compile(r"^\s*(from|import)\s+inspection_scan_doc\b"),
+                                    path)]
+        if found:
+            importers[str(path.relative_to(REPO_ROOT))] = ["%d" % no for no, _ in found]
+    assert not importers, (
+        "a live engine module imports the retired docs-face scanner (inspection_scan_doc, "
+        "t260916-22 / face=doc retired by t261103-21): %s" % importers)
+
+
+def test_g4_the_produce_selfcheck_holds_no_index_rule():
+    """G4 (module face of G1): the produce self-check cannot be re-pointed at an
+    in-repository index through its rule set, and its source names no such path."""
+    assert not hasattr(prod.DocCheckRules(), "index_rel")
+    src = (ENGINE / "inspection_produce.py").read_text(encoding="utf-8")
+    assert not REPO_INDEX_PATH_RE.search(src), (
+        "inspection_produce names a repository-relative documentation index path")
+
+
+def _grandfathered_over_cap(seen):
+    """Cap judge (pure, so it is provable on synthetic counts): each declared grandfathered
+    line may appear at most `cap` times across the scanned surfaces."""
+    over = []
+    for dig, (cap, reason) in GRANDFATHERED_LINES.items():
+        n = seen.get(dig, 0)
+        if n > cap:
+            over.append("%s: %d > cap %d (%s)" % (dig, n, cap, reason))
+    return over
+
+
+def test_g5_grandfathered_lines_are_capped_not_a_loophole():
+    """The heritage ceiling is a cap, not an exemption: the declared grandfathered line may
+    not appear more often than declared anywhere in the scanned surfaces, and the judge
+    itself is proven on synthetic counts (a green from a judge never seen red is not
+    trusted)."""
+    dig, (cap, _reason) = next(iter(GRANDFATHERED_LINES.items()))
+    assert _grandfathered_over_cap({dig: cap}) == []
+    assert _grandfathered_over_cap({dig: cap + 1}), "the cap judge must fire above the cap"
+    seen = {}
+    for path in _shipped_sources():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not (REPO_INDEX_PATH_RE.search(line) or MACHINE_INDEX_PHRASE_RE.search(line)):
+                continue
+            dig = _digest(line)
+            if dig in GRANDFATHERED_LINES:
+                seen[dig] = seen.get(dig, 0) + 1
+    assert _grandfathered_over_cap(seen) == []

@@ -64,24 +64,37 @@ def test_activity_default_face_is_test_and_dispatch_wiring():
 
 
 def test_activity_unwired_face_falls_back_to_test_with_annotation(tmp_path):
-    """分派行为锁（arbitrate code-fault 260910 修复面；t260911-02 更新）：doc 面已接线
-    （docs-sync 第二实例）→ 不再回落，走 doc 扫描器；夹具无 docs 目录=fail-closed
-    ok:false 点名（不回落不假绿）。回落语义只对真正未接线的面（bogus-face）生效，
-    回落绝不静默：meta.face_fallback 点名请求面与已接线清单（含 doc）。"""
+    """Dispatch behaviour lock (arbitrate code-fault 260910; t260911-02; re-pointed by
+    t261103-21). Two faces, two different contracts:
+      - face=doc is RETIRED by name: a named refusal carrying its code, the successor that
+        serves the docs face now (the M1-M7 mechanical layer in run_inspection_doc_mech) and
+        the caller that stops being served (a legacy in-flight period replaying
+        scan_face=doc through run_inspection_scan). It never falls back to the test face and
+        never silently reports a scan nobody trusts.
+      - a face with no wired scanner (bogus-face) still falls back to the test face, and the
+        fallback is never silent: meta.face_fallback names the requested face and the wired
+        set (the doc face named as retired)."""
     import asyncio
 
-    import activities  # noqa: E402  # 需 temporalio（venv 解释器）
+    import activities  # noqa: E402  # needs temporalio (venv interpreter)
 
     root = make_repo(tmp_path)
     r = asyncio.run(activities.run_inspection_scan({"repo_root": str(root), "face": "doc"}))
     assert r["ok"] is False, r
-    assert "docs 目录缺失" in str(r.get("error")), r
+    assert r.get("code") == "inspection_face_doc_retired", r
+    refusal = str(r.get("error") or "")
+    assert "run_inspection_doc_mech" in refusal, r          # the successor that serves it now
+    assert "M1-M7" in refusal, r                              # by name, not "somewhere else"
+    assert "run_inspection_scan" in refusal, r                # the caller that stops being served
+    # the retired scanner's answer is gone: the refusal carries a code at all, which the
+    # retired path never did (it answered ok:false with a bare error string).
     r = asyncio.run(activities.run_inspection_scan({"repo_root": str(root), "face": "bogus-face"}))
     assert r["ok"] is True, r
     res = r["result"]
     assert res["face"] == "test"
     note = str(res["meta"].get("face_fallback") or "")
     assert "bogus-face" in note and "doc" in note and "mechanism" in note, note
+    assert "retired" in note, note                            # the fallback copy names the retirement
 
 
 def test_activity_wired_faces_dispatch(tmp_path):

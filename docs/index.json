@@ -1,4 +1,9 @@
 {
+  "_legacy": {
+    "state": "legacy-and-unread",
+    "ticket": "t261103-21",
+    "note": "The in-repository documentation index was retired: the machine index is a derived artefact in the project's own data directory (<projects root>/<key>/data/docs/index.json, design docs/design/project-docs-roots-v1.md goal 5) and the documentation inspection rebuilds it. No engine or plugin consumer reads this copy, the builder (docs/scripts/build_index.py) refuses to write, and the family guard (server/engine/tests/test_t260925_01_produce_contract.py, t261103-21) fails if a shipped module opens it. This file is kept as a labelled historical datum only: it does not follow the documents any more, and nothing may make it a truth source again."
+  },
   "generated_at": "2026-10-29T13:36:33+08:00",
   "total": 57,
   "categories": [

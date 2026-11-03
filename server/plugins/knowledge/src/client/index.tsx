@@ -7,7 +7,7 @@
  * conversationViews/uiConversation 零消费、零注册。
  *
  * 功能（工单 t260821-09 → t260821-10 M2/M3）：
- *   ① the list filters by category (the docs/index.json categories:
+ *   ① the list filters by category (the index's categories:
  *      design/content/ops/reference/epics), tag and status; an epic row (the epics
  *      category) renders its own schema's code/retired/summary, and a field its schema
  *      does not have is an explicit 'n/a' — never a blank cell (t261029-49);
@@ -244,7 +244,7 @@ async function apiPost(path: string, body: unknown): Promise<any> {
 
 /* ---------------------------------------------------------------- 类型 */
 
-/** One docs/index.json row. The five keys are the knowledge-base frontmatter schema; an
+/** One derived-index row. The five keys are the knowledge-base frontmatter schema; an
  *  epic row (category='epics') carries its own schema — code/retired/summary — so a
  *  missing status/updated/tags is a legal shape, not missing data (t261029-49; the one
  *  projection lives in ../shared/doc-row.ts). Malformed rows take the optional keys. */
@@ -263,7 +263,7 @@ interface DocEntry {
 }
 
 interface IndexData {
-  /** 项目无 docs/index.json 时 host 回 {empty:true, reason}（人话降级）。 */
+  /** The host answers {empty:true, reason} (a readable downgrade) when no derived index exists. */
   empty?: boolean
   reason?: string
   generated_at: string

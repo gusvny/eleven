@@ -3,7 +3,7 @@
  * importable from plain node for tests).
  *
  * A list row always draws five cells: title / category / tags / status / updated.
- * Those five keys are the knowledge-base frontmatter schema (docs/index.json carries
+ * Those five keys are the knowledge-base frontmatter schema (the derived index carries
  * title/category/tags/status/updated). docs/epics/ is a different index category with
  * its own schema (code / retired / summary, see docs/design/epic-registry-v1.md): it
  * has no status, no updated and no tags key. Drawing such a row with the five-field
@@ -87,7 +87,7 @@ function retiredFlag(v: unknown): boolean | null {
   return null
 }
 
-/** Project any docs/index.json entry into the five cells the list draws. A malformed
+/** Project any derived-index entry into the five cells the list draws. A malformed
  *  entry lands on defined values (n/a / the path name) and never throws. */
 export function docRow(entry: unknown): DocRow {
   const e: Record<string, unknown> = entry && typeof entry === 'object' && !Array.isArray(entry)

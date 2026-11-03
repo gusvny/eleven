@@ -18,8 +18,12 @@ updated: 2026-11-03
 > incentives, construction, mastery model, reading annotations, agent persona, ancient-text
 > pipeline, reference research) stay in the frozen suyou repository as historical reference
 > (read-only, never written back).
-> The machine index has been regenerated (`docs/index.json`, 18 documents as of 260928);
-> **since 260928 the whole library is written in English** (host order) except `terminology.md`.
+> **Since 260928 the whole library is written in English** (host order) except `terminology.md`.
+> The in-repository index file this repository used to commit (`docs/index.json`) is
+> **labelled legacy-and-unread** (t261103-21): its own `_legacy` block says so, no engine or
+> plugin consumer reads it, the builder refuses to write, and it no longer follows the
+> documents. Do not treat it as a catalogue; this page is the catalogue and the derived
+> index (below) is the machine-readable one.
 >
 > History: 2026-08-21 the docs library was restructured as a knowledge base (four categories +
 > frontmatter + index.json + consumption by the suyou-knowledge plugin); this page is the

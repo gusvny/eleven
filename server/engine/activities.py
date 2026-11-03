@@ -579,9 +579,11 @@ async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
     rework r2 semantics):
       - face=test (also the default / missing key) → ticket-1 test-face scan, behavior
         identical to before ticket 2 (existing callers/scenarios unchanged);
-      - face=doc → docs-face scanner (t260911-02); face=stage → stage-capacity
-        scanner (t260915-18, stage_docker inventory read-only); face=mechanism/simplify
-        → the ticket-2 scanners;
+      - face=doc → RETIRED by name (t261103-21): a named refusal naming the successor
+        (the M1-M7 doc-face mechanical layer, run_inspection_doc_mech) and the caller
+        that stops being served; the retired scanner module is imported by nothing;
+      - face=stage → stage-capacity scanner (t260915-18, stage_docker inventory
+        read-only); face=mechanism/simplify → the ticket-2 scanners;
       - ANY OTHER face (a declared-but-unwired face, or a typo) → FALLBACK to
         the test-face scan with an explicit meta annotation (face_fallback naming the
         requested face and the wired scanners). Rationale (arbitrate code-fault 260910):
@@ -604,10 +606,23 @@ async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
             sp = args.get("scenarios_path")
             result = run_test_face_scan(root, Path(sp) if sp else None)
         elif face == "doc":
-            # t260911-02：docs 面接线（docs-sync 第二实例）——声明 scan_face=doc 的实例
-            # 不再回落 test 面（fallback 名单同步收窄）。
-            from inspection_scan_doc import run_doc_face_scan
-            result = run_doc_face_scan(root)
+            # t261103-21: the docs face is retired HERE, by name. Its scanner
+            # (inspection_scan_doc) is a retired static surface (t260916-22) with no
+            # successor role in this activity, and this activity itself is replay-only;
+            # the live documentation face is the mechanical layer M1-M7
+            # (activities.run_inspection_doc_mech, wired into the inspect stage behind
+            # DOC_MECH_PATCH_ID). The caller that stops being served is therefore a
+            # legacy in-flight inspection period whose declaration says scan_face=doc
+            # and which still asks this retired activity for that face: it now gets a
+            # named refusal instead of the retired scanner's output (a scan it could no
+            # longer trust, produced by a module no live path imports).
+            return {"ok": False, "code": "inspection_face_doc_retired",
+                    "error": "face=doc is retired (t261103-21): the docs face is served by "
+                             "the mechanical layer M1-M7 in run_inspection_doc_mech "
+                             "(inspect stage, DOC_MECH_PATCH_ID), not by this activity. "
+                             "Caller that stops being served: a legacy in-flight "
+                             "inspection period replaying scan_face=doc through "
+                             "run_inspection_scan."}
         elif face == "stage":
             # t260915-18：stage 面接线（stage-capacity 实例）——台面容量可见性，
             # inventory 只读清点；docker 缺席=响亮未检查（S14 不假绿）。
@@ -617,9 +632,11 @@ async def run_inspection_scan(args: Dict[str, Any]) -> Dict[str, Any]:
             result = run_face_scan(face, root)
         else:
             result = run_test_face_scan(root, None)
-            fallback_note = ("声明面 %r 未接线扫描器（已接线：doc、stage、mechanism、"
-                             "simplify）——回落 test 面扫描（票① 行为）；接线或改名"
-                             "走 dev-lane 工单" % face)
+            fallback_note = (
+                "the declared face %r has no wired scanner (wired: stage, mechanism, "
+                "simplify; the doc face is retired -- it lives in the M1-M7 mechanical "
+                "layer) -- falling back to the test-face scan (ticket 1 behaviour); wire "
+                "or rename it through a dev-lane ticket" % face)
             result.setdefault("meta", {})["face_fallback"] = fallback_note
             activity.logger.warning("巡检面回落：%s", fallback_note)
         activity.logger.info(

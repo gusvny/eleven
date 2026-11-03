@@ -5,17 +5,26 @@
  * （lib/client.js，主会话视图「知识库」页签）同源 fetch 使用：
  *
  *   GET /sandbar-knowledge/api/index?project=<key>
- *                                     → <项目主目录>/docs/index.json（结构化索引 + review，
- *                                        标题/分类/标签/状态/更新时间/路径）；
- *                                        项目无 docs/index.json → {empty:true, reason} 人话降级
- *   GET /sandbar-knowledge/api/doc?project=<key>&path=design/平台架构设计.md
- *                                     → 直读 <项目主目录>/docs/<path> 的全文（纯只读，
- *                                        path 白名单 = docs/index.json 的五个分类目录
- *                                        （词表见 doc-path-rule.json，含 epics）下的一层
- *                                        .md，规则单源该文件，防穿路径）
+ *                                     → the DERIVED documentation index, read from the
+ *                                        project's own data directory
+ *                                        (<projects root>/<key>/data/docs/index.json;
+ *                                        docs-roots.ts resolves it, never a copy inside a
+ *                                        repository): structured index + review (title /
+ *                                        category / tags / status / updated / path) and the
+ *                                        index state (absent / stale / failed / current).
+ *                                        No index yet, or no declared root → {empty:true,
+ *                                        reason} as a readable downgrade.
+ *   GET /sandbar-knowledge/api/doc?project=<key>&path=design/<page>.md
+ *                                     → the full text of <documentation root>/<path>, read
+ *                                        only; the path whitelist is one plain .md inside one
+ *                                        of the index's category directories (vocabulary in
+ *                                        server/plugins/knowledge/doc-path-rule.json,
+ *                                        including epics), one level down, traversal-proof.
  *   GET /sandbar-knowledge/api/refresh?project=<key>
- *                                     → 重建 index（spawn python3 <主目录>/docs/scripts/build_index.py；
- *                                        项目无该脚本 → 人话降级不可用）
+ *                                     → rebuild the derived index (spawns the engine builder,
+ *                                        python3 server/engine/docs_index.py --project <key>,
+ *                                        which writes into the project's data directory);
+ *                                        builder absent → a readable "unavailable" downgrade
  *   GET /sandbar-knowledge/api/diff?project=<key>&path=design/xx.md[&base=HEAD]
  *                                     → 该文档相对 base（git ref）的 block 级 diff：
  *                                        细粒度切块（标题/段落/列表项/表格行/代码块…，
@@ -30,8 +39,12 @@
  *                                     → 追加一轮 review 落盘（path 白名单同源校验），
  *                                        写 server/admin.log 同款 JSONL 审计 + 回 run-id。
  *
- * 多项目化（260823）：project 是逻辑概念（server/projects.yaml 注册表，1:N 目录），
- * 知识库 = 项目主目录（dirs 首个）的 docs/。**project 参数必传、无默认值**——缺/未知 key 一律 400。
+ * Project model (260823): `project` is a logical key (server/projects.yaml, 1:N
+ * directories). The documentation roots are DECLARED per project (`paths.docs_roots`,
+ * one or many, each naming one of its repositories), and every consumer resolves them
+ * through the engine's one resolver -- the knowledge feature reads the union of the
+ * roots in effect instead of guessing `<project root>/docs`. **The project parameter is
+ * mandatory with no default**: a missing or unknown key is a 400.
  * 审计仍落 suyou 仓库 server/admin.log（单一审计真源不随项目分流）。
  * headless profile 没有 webServer：apply 静默待命不报错。
  */
@@ -97,12 +110,12 @@ interface SuyouKnowledgeConfig {
  *
  * t261029-49: the rule is no longer hard-coded here — its one source is
  * doc-path-rule.json (this package root), the same file review_store.py reads.
- * docs/index.json now registers the `epics` category (docs/epics/, epic frontmatter
- * schema), so the docs list shows those rows while the path rule refused them — opening
- * one answered 404 'path 不合法'. Only the category vocabulary changed; the containment
- * does not: the path must start with a category name (so an absolute path cannot match),
- * the file segment is [^/]+ (so a traversal or a nested directory cannot match), and the
- * extension check stays .md. */
+ * The index registers the `epics` category (docs/epics/, epic frontmatter schema), so the
+ * docs list shows those rows while the path rule refused them — opening one answered 404
+ * 'path 不合法'. Only the category vocabulary changed; the containment does not: the path
+ * must start with a category name (so an absolute path cannot match), the file segment is
+ * [^/]+ (so a traversal or a nested directory cannot match), and the extension check
+ * stays .md. */
 interface DocPathRule {
   /** Category vocabulary (for the error copy; the order is the index's categories order). */
   categories: string[]
