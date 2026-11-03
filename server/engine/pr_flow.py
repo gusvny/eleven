@@ -79,15 +79,30 @@ WHAT IS HERE
    promise "no path rewrites history, forces an update or discards work" is
    mechanical rather than a comment.
 
+7. The wiring (t261103-13). Step (d) is not optional advice: the step (c)
+   close-out asks the act for an answer BEFORE it closes a ticket, and only a
+   receipt that says every declared repository reconciled may close. Every other
+   answer - the act's named stops, a partial reconciliation, a switch that was
+   turned off while the ticket was parked, an unreadable receipt - keeps the
+   ticket open with its named reason and remedy on the ticket face. The wiring
+   calls the act; it never builds a git command line of its own.
+
+8. Per-project park options (t261103-13). The `github_pr:` block may also carry
+   `beat_seconds` (how often the platform is asked) and `wake_entry` (the one
+   command an outside poller runs to wake a parked ticket). The values this module
+   shipped with are the defaults, so a declaration that names neither behaves
+   exactly as before; a value that is present but unusable is a named refusal
+   naming its own key.
+
 Light-import discipline: stdlib only, no temporalio, no `shared` import (this face
 must stay importable from a bare interpreter, and the registry root is mirrored
 from `shared.registry_root` by reading the same env, the way audit.py and
 event_ledger.py read their own additive sections).
 
 Tests: server/engine/tests/test_t261004_44_deliver_refusal.py (the delivery
-named-refusal carrier), section "PR flow step (a)"; step (b) and step (d) are
-covered in server/engine/tests/test_t261022_merge_slot_release.py (sections
-"t261103-05 (design step (b))" and "t261103-08 (design step (d))").
+named-refusal carrier), section "PR flow step (a)"; steps (b), (c), (d) and the
+close-out wiring are covered in server/engine/tests/test_t261022_merge_slot_release.py
+(sections "t261103-05", "t261103-07", "t261103-08" and "t261103-13").
 """
 from __future__ import annotations
 
@@ -121,6 +136,35 @@ PROJECT_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 _TRUE_WORDS = frozenset(("true", "yes", "on", "1"))
 _FALSE_WORDS = frozenset(("false", "no", "off", "0"))
+
+# ---- the park's per-project options (t261103-13) ----------------------------
+#
+# Step (c) left two park values as module constants: how often the platform is
+# asked (the beat), and which command an outside poller runs to wake a parked
+# ticket (the wake entry). Both are choices a PROJECT makes - one project wants a
+# faster beat, another has its own poller entry - so the same declaration block
+# may carry them, and the values this module shipped with stay the defaults: a
+# declaration that names neither behaves exactly as before. A value that is
+# present but unusable is refused by name (never read as "use the default",
+# which would decide a project's cadence on a typo).
+
+#: The two declaration keys, inside the `github_pr:` block.
+DECLARATION_BEAT_KEY = "beat_seconds"
+DECLARATION_WAKE_KEY = "wake_entry"
+#: One refusal per key, so the reason a reader sees names the field it must fix.
+STOP_DECLARATION_BEAT_INVALID = "github_pr_declaration_beat_invalid"
+STOP_DECLARATION_WAKE_INVALID = "github_pr_declaration_wake_invalid"
+#: The accepted beat range (seconds): below the floor the platform is hammered,
+#: above the ceiling a missed beat costs more than the ticket can wait.
+MIN_BEAT_SECONDS = 60
+MAX_BEAT_SECONDS = 86400
+#: A wake entry is one command line, not a script: bounded so a face stays readable.
+MAX_WAKE_ENTRY_CHARS = 400
+#: The defaults - the values step (c) shipped with (the beat constant keeps its
+#: historical name below; the wake entry is client.py's documented invocation).
+DEFAULT_BEAT_SECONDS = 300
+DEFAULT_WAKE_ENTRY = ("python3 -c \"import asyncio, client; print(asyncio.run("
+                      "client.remote_review_wake('<ticket_id>', '<note>')))\"")
 
 # ---- credential shape limits ------------------------------------------------
 
@@ -175,6 +219,11 @@ STOP_TABLE = {
     STOP_CREDENTIAL_MALFORMED: "the value is not one token on one line",
     STOP_CREDENTIAL_IN_WORKTREE: "the credential resolves inside a worktree",
     STOP_PROBE_FAILED: "the validity probe could not answer",
+    # t261103-13: the park's two per-project options. Each names its own key,
+    # because "the declaration is malformed" would not tell a reader which field
+    # to fix (an unusable value is never read as "keep the default").
+    STOP_DECLARATION_BEAT_INVALID: "the declared beat interval is not usable",
+    STOP_DECLARATION_WAKE_INVALID: "the declared wake entry is not usable",
 }
 
 
@@ -326,6 +375,25 @@ def declaration_path(project_key: str, projects_root_dir: Optional[Any] = None) 
 
 
 @dataclass(frozen=True)
+class FlowOptions:
+    """What a park needs to know about a project's OWN choices.
+
+    Not a secret and not a credential: a beat interval and one command line. The
+    defaults are this module's shipped values, so a declaration that declares
+    neither answer is the historical answer.
+    """
+
+    beat_seconds: int = DEFAULT_BEAT_SECONDS
+    wake_entry: str = DEFAULT_WAKE_ENTRY
+    source: str = "default"          # "default" | "declaration" | a fallback note
+
+    def face(self) -> Dict[str, Any]:
+        return {"beat_seconds": int(self.beat_seconds),
+                "wake_entry": redact(str(self.wake_entry)),
+                "source": str(self.source)}
+
+
+@dataclass(frozen=True)
 class SwitchDecision:
     """The switch as read from the declaration. Pure data, no secret."""
 
@@ -333,11 +401,82 @@ class SwitchDecision:
     reason: str                      # "absent" | "off" | "on"
     repositories: Tuple[str, ...] = ()
     declaration: str = ""
+    # t261103-13: the park's per-project options. 0 / "" mean "not declared", so
+    # `options()` - not this dataclass - is where the defaults are applied (the
+    # default values must stay single-sourced).
+    beat_seconds: int = 0
+    wake_entry: str = ""
 
     def face(self) -> Dict[str, Any]:
         return {"enabled": self.enabled, "reason": self.reason,
                 "repositories": list(self.repositories),
                 "declaration": redact(self.declaration)}
+
+    def options(self) -> FlowOptions:
+        """The park's options, with the shipped values as the defaults."""
+        declared = bool(self.beat_seconds) or bool(self.wake_entry)
+        return FlowOptions(beat_seconds=self.beat_seconds or DEFAULT_BEAT_SECONDS,
+                           wake_entry=self.wake_entry or DEFAULT_WAKE_ENTRY,
+                           source="declaration" if declared else "default")
+
+
+def flow_options(switch: Any) -> FlowOptions:
+    """The park's options for whatever decision a caller holds.
+
+    A decision that carries no options (an OFF switch, a decision object from a
+    caller that predates this seam) answers the shipped defaults: the park never
+    runs without a beat and never runs without a wake entry.
+    """
+    getter = getattr(switch, "options", None)
+    if callable(getter):
+        return getter()
+    return FlowOptions()
+
+
+def flow_options_from(raw: Any) -> FlowOptions:
+    """The park's options as recorded on the ticket face or on a receipt.
+
+    Absent options mean "a history/receipt recorded before this seam existed":
+    that ticket parks on exactly today's beat and wake entry, so absent is the
+    default, not a refusal. A value that is present but unusable cannot come from
+    a declaration (the read refuses it by name before it reaches here); it falls
+    back to the default AND says so in `source`, so a reader can see it happened.
+    """
+    block = raw if isinstance(raw, Mapping) else {}
+    opts = block.get("options")
+    if not isinstance(opts, Mapping) or not opts:
+        return FlowOptions()
+    notes: List[str] = []
+    beat = DEFAULT_BEAT_SECONDS
+    raw_beat = opts.get("beat_seconds")
+    try:
+        candidate = int(raw_beat)
+    except (TypeError, ValueError):
+        candidate = 0
+    if MIN_BEAT_SECONDS <= candidate <= MAX_BEAT_SECONDS:
+        beat = candidate
+    else:
+        notes.append("beat %r -> default" % (raw_beat,))
+    wake = str(opts.get("wake_entry") or "").strip()
+    if not wake or len(wake) > MAX_WAKE_ENTRY_CHARS or _has_control_chars(wake):
+        if wake:
+            notes.append("wake entry unusable -> default")
+        wake = DEFAULT_WAKE_ENTRY
+    return FlowOptions(beat_seconds=beat, wake_entry=wake,
+                       source=("default(fallback: %s)" % "; ".join(notes)) if notes
+                       else "recorded")
+
+
+def _has_control_chars(text: str) -> bool:
+    return any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in str(text or ""))
+
+
+def _unquote(value: str) -> str:
+    """Strip ONE layer of matching YAML quotes (a value keeps its own text)."""
+    text = str(value or "")
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        return text[1:-1]
+    return text
 
 
 def _switch_block(lines: List[str], label: str) -> Optional[List[Tuple[int, str]]]:
@@ -379,6 +518,11 @@ def parse_switch(text: str, label: str = "project.yaml") -> SwitchDecision:
     malformed repository entry, ON without repositories -- is a NAMED stop. An
     unusable switch is never quietly read as "off": that would let a typo pick
     the delivery mode.
+
+    The two park options (t261103-13) are additive and optional: when present,
+    `beat_seconds` must be a whole number of seconds inside the accepted range
+    and `wake_entry` one non-empty command line. Each refusal names its own key,
+    because a reader must not have to guess which field to fix.
     """
     lines = str(text or "").split("\n")
     block = _switch_block(lines, label)
@@ -387,6 +531,8 @@ def parse_switch(text: str, label: str = "project.yaml") -> SwitchDecision:
 
     enabled_raw = None      # type: Optional[str]
     repositories = []       # type: List[str]
+    beat_seconds = 0
+    wake_entry = ""
     in_repos = False
     for lineno, raw in block:
         content = raw.strip()
@@ -427,6 +573,20 @@ def parse_switch(text: str, label: str = "project.yaml") -> SwitchDecision:
                                  path=label)
             enabled_raw = value
             continue
+        if key == DECLARATION_BEAT_KEY:
+            if beat_seconds:
+                raise PrFlowStop(STOP_DECLARATION_MALFORMED,
+                                 "%s:%d duplicate %s:"
+                                 % (label, lineno, DECLARATION_BEAT_KEY), path=label)
+            beat_seconds = _beat_seconds_value(value, label=label, lineno=lineno)
+            continue
+        if key == DECLARATION_WAKE_KEY:
+            if wake_entry:
+                raise PrFlowStop(STOP_DECLARATION_MALFORMED,
+                                 "%s:%d duplicate %s:"
+                                 % (label, lineno, DECLARATION_WAKE_KEY), path=label)
+            wake_entry = _wake_entry_value(value, label=label, lineno=lineno)
+            continue
         raise PrFlowStop(STOP_DECLARATION_MALFORMED,
                          "%s:%d unrecognized %s key: %s" % (label, lineno, SECTION, key),
                          path=label)
@@ -437,7 +597,8 @@ def parse_switch(text: str, label: str = "project.yaml") -> SwitchDecision:
     word = enabled_raw.lower()
     if word in _FALSE_WORDS:
         return SwitchDecision(enabled=False, reason="off",
-                              repositories=tuple(repositories), declaration=label)
+                              repositories=tuple(repositories), declaration=label,
+                              beat_seconds=beat_seconds, wake_entry=wake_entry)
     if word not in _TRUE_WORDS:
         raise PrFlowStop(
             STOP_DECLARATION_MALFORMED,
@@ -449,7 +610,51 @@ def parse_switch(text: str, label: str = "project.yaml") -> SwitchDecision:
             "%s: %s.enabled is on but no repositories are declared (least "
             "privilege needs the declared set)" % (label, SECTION), path=label)
     return SwitchDecision(enabled=True, reason="on",
-                          repositories=tuple(repositories), declaration=label)
+                          repositories=tuple(repositories), declaration=label,
+                          beat_seconds=beat_seconds, wake_entry=wake_entry)
+
+
+def _beat_seconds_value(value: str, *, label: str, lineno: int) -> int:
+    """One declared beat -> seconds, or a refusal naming the key and the range."""
+    text = _unquote(value)
+    if not re.match(r"^\d+$", text):
+        raise PrFlowStop(
+            STOP_DECLARATION_BEAT_INVALID,
+            "%s:%d %s.%s is %r, which is not a whole number of seconds (accepted: "
+            "%d..%d)" % (label, lineno, SECTION, DECLARATION_BEAT_KEY, value,
+                         MIN_BEAT_SECONDS, MAX_BEAT_SECONDS), path=label)
+    seconds = int(text)
+    if not MIN_BEAT_SECONDS <= seconds <= MAX_BEAT_SECONDS:
+        raise PrFlowStop(
+            STOP_DECLARATION_BEAT_INVALID,
+            "%s:%d %s.%s is %d seconds, outside the accepted range %d..%d"
+            % (label, lineno, SECTION, DECLARATION_BEAT_KEY, seconds,
+               MIN_BEAT_SECONDS, MAX_BEAT_SECONDS), path=label)
+    return seconds
+
+
+def _wake_entry_value(value: str, *, label: str, lineno: int) -> str:
+    """One declared wake entry -> the command line, or a refusal naming the key."""
+    text = _unquote(value).strip()
+    if not text:
+        raise PrFlowStop(
+            STOP_DECLARATION_WAKE_INVALID,
+            "%s:%d %s.%s is empty; an empty wake entry cannot wake a parked ticket"
+            % (label, lineno, SECTION, DECLARATION_WAKE_KEY), path=label)
+    if len(text) > MAX_WAKE_ENTRY_CHARS:
+        raise PrFlowStop(
+            STOP_DECLARATION_WAKE_INVALID,
+            "%s:%d %s.%s is %d characters; a wake entry is one command line, at "
+            "most %d characters"
+            % (label, lineno, SECTION, DECLARATION_WAKE_KEY, len(text),
+               MAX_WAKE_ENTRY_CHARS), path=label)
+    if _has_control_chars(text):
+        raise PrFlowStop(
+            STOP_DECLARATION_WAKE_INVALID,
+            "%s:%d %s.%s carries a newline or a control character; a wake entry is "
+            "ONE command line" % (label, lineno, SECTION, DECLARATION_WAKE_KEY),
+            path=label)
+    return text
 
 
 def read_switch(project_key: str,
@@ -812,6 +1017,22 @@ _PRECONDITION_REMEDY = (
      "block - nothing was published"),
 )
 
+#: The two park-option refusals get their own remedy line: the generic
+#: declaration remedy would send a reader to `enabled`/`repositories` when the
+#: broken field is the beat or the wake entry (a wrong diagnosis costs more than
+#: no diagnosis).
+_PARK_OPTION_REMEDY = {
+    STOP_DECLARATION_BEAT_INVALID:
+        "set github_pr.%s to a whole number of seconds between %d and %d, or remove "
+        "the key to keep the default (%d s) - nothing was published"
+        % (DECLARATION_BEAT_KEY, MIN_BEAT_SECONDS, MAX_BEAT_SECONDS,
+           DEFAULT_BEAT_SECONDS),
+    STOP_DECLARATION_WAKE_INVALID:
+        "set github_pr.%s to ONE command line of at most %d characters, or remove "
+        "the key to keep the default entry - nothing was published"
+        % (DECLARATION_WAKE_KEY, MAX_WAKE_ENTRY_CHARS),
+}
+
 
 def is_delivery_stop(code: Any) -> bool:
     """True for every stop the delivery act raises (retry-safe by construction)."""
@@ -827,6 +1048,8 @@ def stop_remedy(code: Any) -> str:
     remedy a reader can act on.
     """
     name = str(code or "")
+    if name in _PARK_OPTION_REMEDY:
+        return _PARK_OPTION_REMEDY[name]
     if name in POLL_STOP_REMEDY:
         return POLL_STOP_REMEDY[name]
     if name in DELIVERY_STOP_REMEDY:
@@ -1088,6 +1311,10 @@ class DeliveryVerdict:
     detail: str = ""
     retryable: bool = False
     requests: List[Dict[str, Any]] = field(default_factory=list)
+    # t261103-13: the park's declared options (beat interval, wake entry) ride
+    # the delivery receipt, because a workflow may not read a declaration file.
+    # Empty means "no options recorded" - the park then uses the shipped defaults.
+    options: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """The activity receipt. Scrubbed: no secret can ride out on it."""
@@ -1099,6 +1326,7 @@ class DeliveryVerdict:
             "detail": self.detail,
             "retryable": bool(self.retryable),
             "requests": [dict(r) for r in self.requests],
+            "options": dict(self.options),
         })
 
 
@@ -1120,7 +1348,9 @@ def verdict_from(raw: Any) -> DeliveryVerdict:
         stop=str(raw.get("stop") or ""),
         detail=str(raw.get("detail") or ""),
         retryable=bool(raw.get("retryable")),
-        requests=[dict(r) for r in (raw.get("requests") or []) if isinstance(r, dict)])
+        requests=[dict(r) for r in (raw.get("requests") or []) if isinstance(r, dict)],
+        options=dict(raw.get("options") or {})
+        if isinstance(raw.get("options"), Mapping) else {})
 
 
 def stop_verdict(code: Any, detail: Any = "", requests: Iterable[Any] = (),
@@ -1439,7 +1669,9 @@ PR_FLOW_POLL_PATCH_ID = "dev-lane-pr-flow-poll-v1"
 #: The beat: one platform question per beat, on a slow timer. One beat does not
 #: loop and does not retry; a beat that cannot answer is a named state and the
 #: NEXT beat asks again (a missed beat costs minutes, never the ticket).
-POLL_BEAT_SECONDS = 300
+#: t261103-13: this is the DEFAULT now - a project declaration may declare its own
+#: `beat_seconds`, and `SwitchDecision.options()` is where the two are resolved.
+POLL_BEAT_SECONDS = DEFAULT_BEAT_SECONDS
 
 #: The poll's judgement outcomes. One word each, and only POLL_MERGED may end the
 #: ticket.
@@ -2641,6 +2873,14 @@ RECONCILE_STOP_CONTENT_MISMATCH = "github_pr_reconcile_content_mismatch"
 RECONCILE_STOP_PARTIAL_RECONCILIATION = "github_pr_reconcile_partial_reconciliation"
 RECONCILE_STOP_BRANCH_MISSING = "github_pr_reconcile_branch_missing"
 RECONCILE_STOP_SET_UNUSABLE = "github_pr_reconcile_repository_set_unusable"
+#: The two stops of the close-out's own judgement (t261103-13). They are not the
+#: act's answers: they are what the wiring says when the act cannot even be
+#: asked a meaningful question - the project turned the flow off between the
+#: merge and the close-out, or the act's receipt cannot be read. Both keep the
+#: ticket open, because "cannot prove the local branch caught up" is never "it
+#: did".
+RECONCILE_STOP_SWITCH_OFF = "github_pr_reconcile_switch_off"
+RECONCILE_STOP_RECEIPT_UNREADABLE = "github_pr_reconcile_receipt_unreadable"
 
 #: code -> what the stop means, in one line. `remote_unreachable` covers every
 #: state the act reads but cannot get an answer for (the remote, the platform, or
@@ -2659,6 +2899,10 @@ RECONCILE_STOP_TABLE = {
         "the target branch is absent locally or on the remote",
     RECONCILE_STOP_SET_UNUSABLE:
         "the repository set handed to the act is absent, empty or malformed",
+    RECONCILE_STOP_SWITCH_OFF:
+        "the project declaration no longer enables the review-request flow",
+    RECONCILE_STOP_RECEIPT_UNREADABLE:
+        "the reconciliation answered something that is not a receipt",
 }
 
 #: code -> the remedy a reader can act on (one line, no jargon).
@@ -2685,6 +2929,13 @@ RECONCILE_STOP_REMEDY = {
     RECONCILE_STOP_SET_UNUSABLE:
         "hand the act the delivery's repository set (what step (b) published) - "
         "nothing was reconciled",
+    RECONCILE_STOP_SWITCH_OFF:
+        "restore the project declaration's github_pr: switch (or land this delivery "
+        "by hand), then retry - the ticket closes only after the local target "
+        "branch is proved to carry the merged content",
+    RECONCILE_STOP_RECEIPT_UNREADABLE:
+        "retry - a receipt that cannot be read is not a reconciliation, and the "
+        "ticket closes only on a receipt that says every repository reconciled",
 }
 
 #: The act's outcomes. Only `reconciled` closes the reconciliation; a partial
@@ -3232,3 +3483,134 @@ def reconcile_text(verdict: ReconcileVerdict, ticket_id: str = "") -> str:
                         row.get("state") or "?",
                         row.get("detail") or "no detail recorded"))
     return redact(" | ".join(parts))
+
+
+# ===========================================================================
+# STEP (d) WIRED INTO THE STEP (c) CLOSE-OUT (t261103-13)
+# ===========================================================================
+#
+# Step (d) shipped the reconciliation act with nothing calling it, so a platform
+# merge could end a ticket while this machine's target branch stayed behind: the
+# NEXT ticket is then judged against a tree that does not contain what the
+# platform merged. This section is the wiring's brain, and it has three jobs:
+#
+#   1. decode the act's receipt (the workflow only ever holds a dict);
+#   2. decide whether a merged delivery may close - and only a receipt that says
+#      EVERY repository reconciled may. A stop, a partial reconciliation, a
+#      switch that was turned off while parked, an unreadable receipt: each keeps
+#      the ticket open with its named reason and the act's own remedy line;
+#   3. name every reconciled repository in the close-out's receipt.
+#
+# It CALLS the act (`reconcile_after_merge`). It does not re-derive a
+# fast-forward, does not read git and does not decide what "caught up" means:
+# that judgement stays in one place, so the never-force / never-reset property
+# has exactly one implementation to be true of.
+
+#: Replay gate for the workflow side of this wiring. A history recorded before
+#: this marker replays step (c)'s close-out verbatim: no reconciliation command
+#: is scheduled, and the ticket closes exactly the way that history recorded.
+PR_FLOW_RECONCILE_PATCH_ID = "dev-lane-pr-flow-reconcile-v1"
+
+
+def reconcile_verdict_from(raw: Any) -> ReconcileVerdict:
+    """Decode the reconciliation activity's receipt (the workflow's entry point).
+
+    Fail-closed by construction: a receipt that is not an object, or that names
+    no reconcilable state, is NOT read as "reconciled". It becomes a named refusal
+    that keeps the ticket open - the close-out must never close on silence.
+    """
+    if isinstance(raw, ReconcileVerdict):
+        return raw
+    if not isinstance(raw, Mapping):
+        return ReconcileVerdict(
+            state=ACTION_STOP, stop=RECONCILE_STOP_RECEIPT_UNREADABLE,
+            detail="the reconciliation returned %r, not a receipt, so it is not "
+                   "taken as a reconciliation" % type(raw).__name__,
+            terminal=False, keeps_ticket_open=True, retryable=True)
+    state = str(raw.get("state") or "")
+    stop = str(raw.get("stop") or "")
+    detail = str(raw.get("detail") or "")
+    rows = [dict(r) for r in (raw.get("repositories") or []) if isinstance(r, Mapping)]
+    if state not in (RECONCILE_RECONCILED, RECONCILE_PARTIAL, RECONCILE_OFF,
+                     ACTION_STOP):
+        return ReconcileVerdict(
+            state=ACTION_STOP, stop=stop or RECONCILE_STOP_RECEIPT_UNREADABLE,
+            detail=("the reconciliation answered state %r, which this engine cannot "
+                    "read, so nothing is taken as reconciled%s"
+                    % (state or "(absent)", (" (%s)" % detail) if detail else "")),
+            terminal=False, keeps_ticket_open=True, retryable=True, repositories=rows)
+    return ReconcileVerdict(
+        state=state, stop=stop, detail=detail,
+        terminal=bool(raw.get("terminal")),
+        keeps_ticket_open=bool(raw.get("keeps_ticket_open")),
+        retryable=bool(raw.get("retryable")), repositories=rows)
+
+
+def reconcile_allows_close(verdict: ReconcileVerdict) -> bool:
+    """True only for a delivery whose every repository is proved caught up.
+
+    Deliberately narrow: the act's own success state AND its `keeps_ticket_open`
+    flag must agree, so a receipt that says "reconciled" while also saying "keep
+    me open" cannot close a ticket. The `not_applicable` answer (the switch is
+    off) is NOT a close permission either - the delivery reached the close-out
+    because the flow was on, so "nothing to reconcile" means the engine lost the
+    ability to prove the branch caught up, not that it did.
+    """
+    return verdict.state == RECONCILE_RECONCILED and not verdict.keeps_ticket_open
+
+
+def reconciled_citations(verdict: ReconcileVerdict) -> List[Dict[str, Any]]:
+    """The repositories the act reconciled, one row each, for the receipt."""
+    out: List[Dict[str, Any]] = []
+    for row in verdict.repositories:
+        if str(row.get("state") or "") != REPO_STATE_RECONCILED:
+            continue
+        out.append(scrub({
+            "name": str(row.get("name") or row.get("repo") or ""),
+            "identity": str(row.get("identity") or ""),
+            "target": str(row.get("target") or ""),
+            "before": str(row.get("before") or ""),
+            "after": str(row.get("after") or ""),
+            "advanced": bool(row.get("advanced")),
+        }))
+    return out
+
+
+def reconcile_record(verdict: ReconcileVerdict, *, ticket_id: str,
+                     at_iso: str) -> Dict[str, Any]:
+    """The ticket-face record of one reconciliation attempt.
+
+    Everything a later reader needs without the console: the state, the stop with
+    its remedy, whether the ticket may close, every repository by name, and the
+    citations the close-out repeats.
+    """
+    rows = [dict(r) for r in verdict.repositories]
+    cited = ["%s (%s) %s %s -> %s"
+             % (c["name"] or "?", c["identity"] or "no identity",
+                c["target"] or "the target branch",
+                (c["before"] or "?")[:12], (c["after"] or "?")[:12])
+             for c in reconciled_citations(verdict)]
+    return scrub({
+        "ticket": str(ticket_id or ""),
+        "at": str(at_iso or ""),
+        "state": verdict.state,
+        "stop": verdict.stop,
+        "detail": verdict.detail,
+        "remedy": stop_remedy(verdict.stop) if verdict.stop else "",
+        "reconciled": reconcile_allows_close(verdict),
+        "keeps_ticket_open": not reconcile_allows_close(verdict),
+        "repositories": rows,
+        "cited": cited,
+    })
+
+
+def reconcile_citation(record: Any) -> str:
+    """One line naming every reconciled repository (the close-out's receipt line).
+
+    Reads the record `reconcile_record` wrote, so the close-out cannot cite
+    repositories the reconciliation did not actually confirm: an empty citation
+    is the honest answer when nothing reconciled.
+    """
+    src = record if isinstance(record, Mapping) else {}
+    cited = [str(x) for x in (src.get("cited") or []) if str(x).strip()]
+    return "; ".join(cited)

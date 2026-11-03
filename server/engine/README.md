@@ -1038,7 +1038,8 @@ preconditions - the per-project switch and the credential - inside the same
 module (`pr_flow.py`, sections "the declaration face" / "the credential" /
 "the gate consumed by steps (b)-(d)"). This step ships the DELIVERY ACT and the
 park. Polling and comment rounds (step (c)) and post-merge reconciliation
-(step (d)) are separate tickets.
+(step (d)) were separate tickets; both have landed, and t261103-13 wired the
+reconciliation into the close-out.
 
 **Where the fork sits.** Every merge phase site (dev-lane legacy, quickmanual,
 light lane) calls `DevLaneWorkflow._pr_flow_merge_step` behind
@@ -1117,11 +1118,14 @@ Design: `docs/design/github-pr-flow-v1.md` (requirements 4, 5, 6 and the failure
 faces of 8). Step (a) ships the switch and the credential, step (b) the delivery
 act and the park (`pr_flow.py`, sections "STEP (a)/(b)"). This step ships the
 poll, the platform verdict and the comment round. The post-merge reconciliation
-of the local target branch is step (d) (t261103-08, the section below): this step
-ends the TICKET, and step (d) then catches the local branch up.
+of the local target branch is step (d) (t261103-08, the section below); since
+t261103-13 it is WIRED into this step's close-out, so the ticket ends only after
+the local branch is proved to carry the merged content.
 
 **The beat.** A parked ticket asks the platform on a slow timer
-(`pr_flow.POLL_BEAT_SECONDS`, 300s) through `agent_activities.pr_flow_poll`. One
+(`pr_flow.POLL_BEAT_SECONDS` = 300 s, or the project declaration's own
+`beat_seconds` - see the "step (d) wired" section) through
+`agent_activities.pr_flow_poll`. One
 beat is ONE activity attempt (`dev_lane.PR_FLOW_POLL_RETRY =
 RetryPolicy(maximum_attempts=1)`) and one `poll_request` call per parked request
 (the port stops asking as soon as the platform stops answering). A beat never
@@ -1172,13 +1176,14 @@ rework landing field for field (same five meta fields, same stage memo), so the
 comment text rides on `meta.last_rework_note` and the working session sees exactly
 what a reviewer wrote. Nothing lands locally and nothing merges here.
 
-**What a merge ends.** On the merged verdict the merge phase archives the ticket
+**What a merge ends.** On the merged verdict the merge phase RECONCILES this
+machine's target branch first (step (d), wired below), then archives the ticket
 data, tears the lane down, finishes the merge stage and cites the platform merge
 (`meta.pr_flow.merge.cited`, one line per repository). The close-out takes NO
-merge claim and writes no main content: step (d) reconciles the local main branch.
-The merge is recorded on the face before the close-out runs, so a retry after a
-failed archive or teardown finishes the close-out and never re-runs the delivery
-act (a merged branch must not be republished as a second request).
+merge claim and writes no main content of its own. The merge is recorded on the
+face before the close-out runs, so a retry after a failed archive or teardown
+finishes the close-out and never re-runs the delivery act (a merged branch must
+not be republished as a second request).
 
 **Replay.** Step (c)'s workflow half sits behind
 `pr_flow.PR_FLOW_POLL_PATCH_ID`. A history recorded with step (b) only replays the
@@ -1213,6 +1218,64 @@ once with the text, a failed beat keeps the park and names itself, a closed
 request blocks by name, a pre-step-(c) history replays without a timer, and the
 wake entry (`client.remote_review_wake`) stamps the poller's source while every
 other source is refused.
+
+## Review-request flow, step (d) wired: no ticket ends before main catches up
+
+Measured while reviewing step (d) (t261103-13): the reconciliation act shipped
+with NOTHING calling it, so a platform merge could end a ticket while this
+machine's target branch stayed behind - and the next ticket was then judged
+against a tree that did not contain what the platform merged. The close-out now
+calls the act BEFORE it closes anything.
+
+**The order, inside `DevLaneWorkflow._pr_flow_finish_close`.** (1) the
+reconciliation activity (`agent_activities.pr_flow_reconcile` ->
+`pr_flow.reconcile_after_merge`, per repository); (2) only when its receipt says
+EVERY declared repository reconciled: archive the ticket data, (3) tear the lane
+down, (4) finish the merge stage citing the platform merge per repository AND the
+reconciled repositories (`meta.pr_flow.reconcile.cited`, one line each). A retry
+after a failed archive/teardown finishes the close-out and does not reconcile
+twice: the act's answer is kept on the face.
+
+**Every other answer keeps the ticket OPEN**, with the name and the remedy on the
+ticket face (`meta.pr_flow.reconcile`, the blocked reason, the timeline):
+`local_drift`, `content_mismatch`, `branch_missing`, `remote_unreachable`,
+`partial_reconciliation`, plus the wiring's own two - `switch_off` (the operator
+turned the flow off between the merge and the close-out) and
+`receipt_unreadable` (the act answered something that is not a receipt). Silence
+is never a close: the `not_applicable` answer is NOT a close permission either.
+The lane is not archived and not torn down while the branch is unproved, so the
+person who clears the stop still has the lane.
+
+**The act is called, never reimplemented.** The wiring (`dev_lane._pr_flow_reconcile_before_close`)
+schedules exactly one activity and builds no git command line; the single git
+chokepoint inside `pr_flow` remains the only place a command is spelled, which is
+what makes "never force, never reset" true end to end. The activity shell
+resolves what a workflow may not read (the declaration, the lane-relative
+repository paths from step (b)'s park record, the credential, the platform) and
+refuses a repository path that escapes the lane.
+
+**Replay.** The wiring sits behind `pr_flow.PR_FLOW_RECONCILE_PATCH_ID`: a history
+recorded before it replays step (c)'s close-out verbatim - no reconciliation
+command, and the ticket closes the way that history recorded.
+
+**Per-project park options (same ticket).** The `github_pr:` block may now carry
+`beat_seconds` (the park's beat interval) and `wake_entry` (the one command an
+outside poller runs to wake a parked ticket). Both default to the values this
+module shipped with (`POLL_BEAT_SECONDS` = 300 s and `client.remote_review_wake`),
+so a declaration that names neither behaves exactly as before; the resolved pair
+rides the delivery receipt onto the face (`meta.pr_flow.options`) because a
+workflow cannot read a declaration file. A value that is present but unusable is
+a named refusal naming its own key (`github_pr_declaration_beat_invalid`,
+`github_pr_declaration_wake_invalid`) - never a silent default.
+
+**Tests** (section "t261103-13" of the same anchored engine test file): the
+close-out order (reconcile before archive before teardown), the receipt naming
+each reconciled repository twice over (face and merge evidence/handoff), a retry
+not reconciling twice, every stop keeping the ticket open with its reason and
+remedy, a pre-wiring history closing without reconciling, the case that issues no
+destructive git verb (recording runner + argv allowlist + a wiring source lock), a
+real-repository case through the activity, the decoder's silence-is-not-a-close
+rule, and the beat/wake resolution truth table plus its malformed-value refusals.
 
 ## Review-request flow, step (d): reconciling the local branch after the merge
 

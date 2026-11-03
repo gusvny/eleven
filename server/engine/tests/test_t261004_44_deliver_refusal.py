@@ -791,13 +791,16 @@ def test_pr_flow_default_location_resolution_is_env_injectable(tmp_path, monkeyp
 
 
 def test_pr_flow_named_stops_are_terminal_and_never_read_as_off():
-    """One vocabulary, twelve names, every one terminal: a stop is raised once (no
+    """One vocabulary, fourteen names, every one terminal: a stop is raised once (no
     retry loop) and is never reported as "off" (that would pick the historical
-    delivery mode behind the operator's back)."""
+    delivery mode behind the operator's back).
+
+    t261103-13 grew the table by two: the park's `beat_seconds` and `wake_entry`
+    refusals (each naming its own key) belong to the same terminal vocabulary."""
     constants = {v for k, v in vars(pr_flow).items()
                  if k.startswith("STOP_") and isinstance(v, str)}
     assert constants == set(pr_flow.STOP_TABLE)
-    assert len(constants) == 12
+    assert len(constants) == 14
     for code in constants:
         assert pr_flow.is_named_stop(code) is True
     assert pr_flow.is_named_stop("") is False and pr_flow.is_named_stop("nope") is False

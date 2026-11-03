@@ -1066,13 +1066,16 @@ def test_pr_flow_repo_identity_parsing():
 
 # ---------- the workflow side: the park, the slot, no local landing ------
 
-def _pr_stub(recorded, receipt, poll=None, patches=None, beats=1):
+def _pr_stub(recorded, receipt, poll=None, reconcile=None, patches=None, beats=1):
     """The workflow facade of the review-request tests.
 
-    `poll` scripts what the poll activity answers (design step (c)); `patches`
-    limits which replay markers exist (None = all of them, the live case); `beats`
-    bounds how many beat timers the park may run before the run is parked (a
-    timer loop that never ends is exactly the busy loop the beat must not be).
+    `poll` scripts what the poll activity answers (design step (c)); `reconcile`
+    scripts what the post-merge reconciliation answers (design step (d), wired by
+    t261103-13; the default is a delivery whose repositories all reconciled);
+    `patches` limits which replay markers exist (None = all of them, the live
+    case); `beats` bounds how many beat timers the park may run before the run is
+    parked (a timer loop that never ends is exactly the busy loop the beat must
+    not be).
     """
 
     def _patched(pid):
@@ -1087,6 +1090,8 @@ def _pr_stub(recorded, receipt, poll=None, patches=None, beats=1):
             return receipt
         if name == "pr_flow_poll":
             return poll if poll is not None else {"action": "still_open", "beat": 1}
+        if name == "pr_flow_reconcile":
+            return reconcile if reconcile is not None else _reconciled_receipt()
         if name == "archive_ticket":
             return ArchiveResult(ok=True, archive_path="/tmp/ticket-archive")
         if name == "teardown_lane":
@@ -1116,6 +1121,7 @@ def _pr_stub(recorded, receipt, poll=None, patches=None, beats=1):
         # that already holds returns at once (a seeded poller wake). With a
         # timeout the beat fires until the budget is spent, then the run parks
         # (a beat that never stops would be the busy loop the design forbids).
+        recorded.append(("wait_condition", timeout))
         try:
             ready = bool(cond())
         except Exception:  # noqa: BLE001
@@ -1155,9 +1161,10 @@ class _EnteredStage(Exception):
 
 
 def _drive_pr(monkeypatch, receipt, seed_wake=None, poll=None, patches=None,
-              beats=1, stop_at_stage=None):
+              beats=1, stop_at_stage=None, reconcile=None):
     recorded = []
-    stub = _pr_stub(recorded, receipt, poll=poll, patches=patches, beats=beats)
+    stub = _pr_stub(recorded, receipt, poll=poll, reconcile=reconcile,
+                    patches=patches, beats=beats)
     monkeypatch.setattr(dev_lane, "workflow", stub)
     monkeypatch.setattr(base, "workflow", stub)
     orig_init = dev_lane.DevLaneWorkflow._init
@@ -1297,8 +1304,16 @@ def test_pr_flow_merge_sites_are_gated_and_poller_only():
     assert "pr_flow.PR_FLOW_POLL_PATCH_ID" in dev_src, (
         "the poll's replay gate is missing: a pre-step-(c) history would replay "
         "different commands")
-    assert "timeout=pr_flow.POLL_BEAT_SECONDS" in dev_src, (
+    # t261103-13: the beat is the PROJECT's declared interval, resolved once before
+    # the loop, and it falls back to pr_flow.POLL_BEAT_SECONDS (the shipped value).
+    assert "timeout=beat_seconds" in dev_src, (
         "the park does not wait on a beat TIMER: a bare wait would never poll")
+    assert ("beat_seconds = pr_flow.flow_options_from("
+            in dev_src), (
+        "the beat interval is not resolved from the park's declared options")
+    assert "POLL_BEAT_SECONDS = DEFAULT_BEAT_SECONDS" in (
+        ENGINE / "pr_flow.py").read_text(encoding="utf-8"), (
+        "the shipped beat and the module default drifted apart")
     assert "retry_policy=PR_FLOW_POLL_RETRY" in dev_src, (
         "the poll activity is scheduled without its bounded retry policy: an "
         "unreachable platform would be retried in place instead of on the next beat")
@@ -2720,3 +2735,508 @@ def test_the_github_adapter_reports_the_merged_tree_on_the_target_branch():
     with pytest.raises(pr_flow.PrFlowStop) as e:
         shapeless.merge_record(scope)
     assert e.value.code == pr_flow.DELIVERY_STOP_PLATFORM_AMBIGUOUS
+
+
+# ===========================================================================
+# t261103-13 (step (d) wired into the step (c) close-out) - a platform merge
+# never ends a ticket before this machine's target branch catches up
+#
+# The section lives in this file for the same reason steps (b), (c) and (d) do:
+# the write set is server/engine/ only, the shared anchor manifest
+# (integration/test_anchors.json) is owned by the integration role, and a NEW
+# server/engine/tests/test_*.py would be the L16 "anchor missing" error. This file
+# is already anchored and already carries the whole review-request flow, of which
+# this wiring is the last link.
+#
+# intent: the platform's merge settles the delivery but does not catch this
+# machine up. The close-out must therefore ask the EXISTING reconciliation act
+# first, per repository, and close only when every declared repository is proved
+# caught up; every named stop (local drift, content mismatch, partial
+# reconciliation, missing branch, unreachable remote) keeps the ticket OPEN with
+# its reason and remedy on the ticket face. A history recorded before this wiring
+# replays step (c)'s close-out verbatim (no reconciliation command). The park's
+# beat interval and wake entry come from the project declaration, with the shipped
+# values as the defaults, and a malformed value is a named refusal.
+#
+# hermetic: the git runner and the platform are injected (or a real LOCAL repo is
+# used through file transport), the credential is never resolved from ~/.sandbar,
+# no socket, no docker, no port 3099, no Temporal, no real project ledger.
+# ===========================================================================
+
+import inspect  # noqa: E402  (the source locks below read one method's own text)
+
+#: One reconciled repository, in the act's own row shape.
+RECONCILE_ROW_A = {"repo": "repo_a", "name": "repo_a", "identity": "owner/repo_a",
+                   "target": "main", "remote": "origin", "state": "reconciled",
+                   "stop": "", "remedy": "", "before": SHA_A, "after": SHA_B,
+                   "head": SHA_B, "advanced": True, "head_matches_reported": True,
+                   "detail": "fast-forwarded 'refs/heads/main' from aaaaaaaaaaaa "
+                             "to bbbbbbbbbbbb; tree equals the platform-reported tree"}
+RECONCILE_ROW_B = {"repo": "repo_b", "name": "repo_b", "identity": "owner/repo_b",
+                   "target": "main", "remote": "origin", "state": "reconciled",
+                   "stop": "", "remedy": "", "before": SHA_C, "after": SHA_A,
+                   "head": SHA_A, "advanced": True, "head_matches_reported": True,
+                   "detail": "fast-forwarded 'refs/heads/main' from cccccccccccc "
+                             "to aaaaaaaaaaaa"}
+
+
+def _reconciled_receipt(rows=None):
+    rows = [dict(r) for r in (rows or (RECONCILE_ROW_A,))]
+    return {"state": pr_flow.RECONCILE_RECONCILED, "stop": "",
+            "detail": "%d of %d repositories fast-forwarded and content-verified"
+                      % (len(rows), len(rows)),
+            "terminal": True, "keeps_ticket_open": False, "retryable": False,
+            "repositories": rows}
+
+
+def _reconcile_stop_receipt(code, rows=None, detail="a named stop"):
+    return {"state": pr_flow.ACTION_STOP, "stop": code, "detail": detail,
+            "terminal": False, "keeps_ticket_open": True, "retryable": True,
+            "repositories": [dict(r) for r in (rows or (RECONCILE_ROW_A,))]}
+
+
+def _partial_receipt():
+    stopped = dict(RECONCILE_ROW_B)
+    stopped.update({"state": pr_flow.REPO_STATE_STOPPED,
+                    "stop": pr_flow.RECONCILE_STOP_LOCAL_DRIFT,
+                    "remedy": pr_flow.stop_remedy(pr_flow.RECONCILE_STOP_LOCAL_DRIFT),
+                    "detail": "the local branch is not an ancestor of the fetched head"})
+    return {"state": pr_flow.RECONCILE_PARTIAL,
+            "stop": pr_flow.RECONCILE_STOP_PARTIAL_RECONCILIATION,
+            "detail": "1 of 2 repositories reconciled (repo_a) and 1 stopped (repo_b)",
+            "terminal": False, "keeps_ticket_open": True, "retryable": True,
+            "repositories": [dict(RECONCILE_ROW_A), stopped]}
+
+
+def _names(recorded):
+    return [n for n, _ in recorded]
+
+
+# ---------- 1. the close-out order: reconcile, then archive, then teardown ---
+
+def test_pr_flow_step_d_the_close_out_reconciles_before_it_closes(monkeypatch):
+    """A merged delivery closes ONLY after the reconciliation ran, and the receipt
+    names every reconciled repository."""
+    wf, recorded = _drive_pr(monkeypatch, _requests_open_receipt(),
+                             poll=_merged_poll_receipt(),
+                             reconcile=_reconciled_receipt(
+                                 [RECONCILE_ROW_A, RECONCILE_ROW_B]))
+    names = _names(recorded)
+    assert "pr_flow_reconcile" in names, names
+    assert names.index("pr_flow_reconcile") < names.index("archive_ticket"), (
+        "the ticket was archived before the local branch was reconciled: %r" % (names,))
+    assert names.index("pr_flow_reconcile") < names.index("teardown_lane"), names
+    assert wf.meta["status"] == "closed", wf.meta["status"]
+    record = wf.meta["pr_flow"]["reconcile"]
+    assert record["reconciled"] is True and record["keeps_ticket_open"] is False, record
+    # the receipt names each reconciled repository, twice over: on the face and in
+    # the merge stage's evidence/handoff (a reader must not need the console).
+    assert len(record["cited"]) == 2, record
+    assert "repo_a" in record["cited"][0] and "owner/repo_a" in record["cited"][0]
+    assert "repo_b" in record["cited"][1]
+    evidence = " ".join(str(c.get("evidence") or "")
+                        for c in wf.meta["checks"]["merge"])
+    assert "reconciled" in evidence and "repo_a" in evidence and "repo_b" in evidence, (
+        evidence)
+    summaries = [str(h.get("summary") or "") for h in wf.meta.get("handoffs") or []]
+    assert any("reconciled locally" in s and "repo_a" in s for s in summaries), summaries
+    # the platform merge is still the acceptance record
+    assert wf.meta["pr_flow"]["merge"]["cited"] == [
+        "owner/repo_a#11 merged at 2026-11-03T09:10:00Z (commit abc1234)"]
+
+
+def test_pr_flow_step_d_a_retry_after_a_failed_archive_does_not_reconcile_twice(
+        monkeypatch):
+    """A retry of the close-out after a failed archive repeats only what did not
+    finish: it archives again, and it does NOT fast-forward a branch it already
+    proved caught up. (The window simulated here is the measured one: the
+    reconciliation succeeded and the archive did not.)"""
+    wf, recorded = _drive_pr(monkeypatch, _requests_open_receipt(),
+                             poll=_merged_poll_receipt())
+    assert _names(recorded).count("pr_flow_reconcile") == 1, _names(recorded)
+    # the failed-archive window: nothing was archived, so the close-out did not
+    # record its completion - and the reconcile answer is already on the face.
+    wf.meta["pr_flow"].pop("closed_out", None)
+    assert asyncio.run(wf._pr_flow_finish_close()) == "done"
+    names = _names(recorded)
+    assert names.count("pr_flow_reconcile") == 1, (
+        "the retry fast-forwarded the branch again: %r" % (names,))
+    assert names.count("archive_ticket") == 2, names
+    evidence = " ".join(str(c.get("evidence") or "")
+                        for c in wf.meta["checks"]["merge"])
+    assert "reconciled" in evidence and "repo_a" in evidence, evidence
+
+
+# ---------- 2. every reconcile stop keeps the ticket open, named -----------
+
+@pytest.mark.parametrize("code", [
+    pr_flow.RECONCILE_STOP_LOCAL_DRIFT,
+    pr_flow.RECONCILE_STOP_CONTENT_MISMATCH,
+    pr_flow.RECONCILE_STOP_BRANCH_MISSING,
+    pr_flow.RECONCILE_STOP_REMOTE_UNREACHABLE,
+    pr_flow.RECONCILE_STOP_SWITCH_OFF,
+    pr_flow.RECONCILE_STOP_RECEIPT_UNREADABLE,
+    pr_flow.RECONCILE_STOP_SET_UNUSABLE,
+])
+def test_pr_flow_step_d_a_reconcile_stop_keeps_the_ticket_open(monkeypatch, code):
+    """The measured fault this ticket closes: the ticket closed while the local
+    branch stayed behind. Every stop now keeps it open, named, with its remedy -
+    and nothing is archived or torn down while the branch is unproved."""
+    wf, recorded = _drive_pr(monkeypatch, _requests_open_receipt(),
+                             poll=_merged_poll_receipt(),
+                             reconcile=_reconcile_stop_receipt(code))
+    names = _names(recorded)
+    assert "archive_ticket" not in names, (
+        "%s: the ticket was archived although the reconciliation stopped" % code)
+    assert "teardown_lane" not in names, (code, names)
+    assert wf.meta["status"] != "closed", "%s: the ticket closed anyway" % code
+    reason = str(wf.meta.get("blocked_reason") or "")
+    assert code in reason, (code, reason)
+    assert pr_flow.stop_remedy(code) in reason, (code, reason)
+    assert "post-merge reconciliation" in reason and "ticket stays open" in reason, reason
+    record = wf.meta["pr_flow"]["reconcile"]
+    assert record["keeps_ticket_open"] is True and record["stop"] == code, record
+    assert record["remedy"], record
+    assert any(t.get("state") == "blocked" for t in wf.timeline), wf.timeline
+    assert wf.meta["stage"] == "merge", wf.meta["stage"]
+
+
+def test_pr_flow_step_d_a_partial_reconciliation_names_both_repositories(monkeypatch):
+    """A partly reconciled delivery is the named non-terminal state: the caught-up
+    repository and the stopped one are both on the face, and the ticket waits."""
+    wf, recorded = _drive_pr(monkeypatch, _requests_open_receipt(),
+                             poll=_merged_poll_receipt(), reconcile=_partial_receipt())
+    reason = str(wf.meta.get("blocked_reason") or "")
+    assert pr_flow.RECONCILE_STOP_PARTIAL_RECONCILIATION in reason, reason
+    assert "repo_a" in reason and "repo_b" in reason, reason
+    assert wf.meta["status"] != "closed"
+    assert "archive_ticket" not in _names(recorded)
+
+
+# ---------- 3. replay safety: a pre-wiring history closes as it recorded ----
+
+def test_pr_flow_step_d_a_pre_wiring_history_closes_without_reconciling(monkeypatch):
+    """A history recorded before this wiring carries the delivery and poll markers
+    and nothing else: it replays step (c)'s close-out verbatim - archive, teardown,
+    closed - and schedules NO reconciliation command."""
+    wf, recorded = _drive_pr(
+        monkeypatch, _requests_open_receipt(), poll=_merged_poll_receipt(),
+        patches={pr_flow.PR_FLOW_DELIVERY_PATCH_ID, pr_flow.PR_FLOW_POLL_PATCH_ID})
+    names = _names(recorded)
+    assert "pr_flow_reconcile" not in names, (
+        "a pre-wiring history reconciled retroactively: %r" % (names,))
+    assert "archive_ticket" in names and "teardown_lane" in names, names
+    assert wf.meta["status"] == "closed", wf.meta["status"]
+    assert "reconcile" not in wf.meta["pr_flow"], wf.meta["pr_flow"]
+    assert "options" not in wf.meta["pr_flow"], (
+        "a pre-wiring history gained a face key it never recorded: %r"
+        % (wf.meta["pr_flow"],))
+
+
+def test_pr_flow_step_d_the_wiring_is_gated_at_exactly_one_place():
+    """Source lock: the reconciliation is called from the close-out and nowhere
+    else, behind its own patched() marker, and the wiring builds no git command."""
+    dev_src = DEV_LANE_PY.read_text(encoding="utf-8")
+    marker = "workflow.patched(pr_flow.PR_FLOW_RECONCILE_PATCH_ID)"
+    assert dev_src.count(marker) == 2, (
+        "the wiring's replay gate must guard exactly two places: the close-out's "
+        "reconciliation and the park-option stamping (found %d)" % dev_src.count(marker))
+    close_src = inspect.getsource(dev_lane.DevLaneWorkflow._pr_flow_finish_close)
+    assert ("if " + marker + ":") in close_src, close_src
+    assert close_src.index(marker) < close_src.index("archive_ticket"), (
+        "the reconciliation gate sits after the archive: the ticket could be "
+        "archived before the local branch was proved caught up")
+    assert dev_src.count("_pr_flow_reconcile_before_close(") == 2, (
+        "the close-out must call the reconciliation exactly once")
+    body = inspect.getsource(dev_lane.DevLaneWorkflow._pr_flow_reconcile_before_close)
+    assert "pr_flow_reconcile" in body and "execute_activity" in body, body
+    assert body.count("execute_activity") == 1, (
+        "the wiring schedules more than the one act: %r" % (body,))
+    for token in ("git ", "subprocess", "_git_argv", "rev-parse", "--ff-only"):
+        assert token not in body, (
+            "the wiring builds its own git command (%r): the act is the one "
+            "implementation" % token)
+
+
+# ---------- 4. no destructive git verb on the close-out path ----------------
+
+class _RecordingGit:
+    """A git runner that records every argv the act's chokepoint built, and hands
+    each one to ONE scripted repository (so its modelled branch state persists
+    from command to command)."""
+
+    def __init__(self, inner=None):
+        self.inner = inner or _FakeGit()
+        self.calls = []
+
+    def __call__(self, argv, env, timeout):
+        self.calls.append(list(argv))
+        return self.inner(argv, env, timeout)
+
+    def verbs(self):
+        return [argv[3] for argv in self.calls]
+
+
+def _reconcile_activity_payload(worktree, requests=None, **over):
+    base = {"ticket_id": "t261103ut", "project": "proj-alpha",
+            "worktree": str(worktree),
+            "requests": [dict(r) for r in (requests if requests is not None else [
+                {"repo": "", "name": "root", "identity": "owner/repo_a",
+                 "branch": "lane/x", "number": 11}])],
+            "target_branch": "main"}
+    base.update(over)
+    return base
+
+
+def _on_switch(**over):
+    decision = pr_flow.SwitchDecision(
+        enabled=True, reason="on", repositories=("owner/repo_a",),
+        declaration="/sandbox/projects/proj-alpha/project.yaml",
+        beat_seconds=over.get("beat_seconds", 0),
+        wake_entry=over.get("wake_entry", ""))
+    return decision
+
+
+def _wire_activity(monkeypatch, platform, switch=None):
+    import agent_activities as aa
+    monkeypatch.setattr(pr_flow, "read_switch",
+                        lambda *a, **k: switch or _on_switch())
+    monkeypatch.setattr(pr_flow, "resolve_credential",
+                        lambda **k: pr_flow.Credential(secret="ghp_" + "a" * 30))
+    monkeypatch.setattr(pr_flow, "platform_from_credential",
+                        lambda credential, **k: platform)
+    return aa
+
+
+def test_pr_flow_step_d_the_close_out_path_issues_no_destructive_git_verb(
+        tmp_path, monkeypatch):
+    """The property the design forbids breaking, measured on the path the close-out
+    actually takes: the act's chokepoint built every command line, the only
+    mutating one is a fast-forward to the merged head, and no command in the list
+    rewrites history, forces an update or discards work."""
+    git = _RecordingGit()
+    monkeypatch.setattr(pr_flow, "_default_git_runner", git)
+    aa = _wire_activity(monkeypatch, _FakeMergePlatform(sha=SHA_B, tree=TREE_B))
+    lane = tmp_path / "lane"
+    lane.mkdir()
+    out = asyncio.run(aa.pr_flow_reconcile(_reconcile_activity_payload(lane)))
+    assert out["state"] == pr_flow.RECONCILE_RECONCILED, out
+    assert out["keeps_ticket_open"] is False, out
+    assert git.calls, "the act issued no git command at all"
+    for argv in git.calls:
+        assert argv[0] == "git" and argv[1] == "-C", argv
+        verb = argv[3]
+        assert verb in pr_flow.ALLOWED_GIT_VERBS, argv
+        for token in argv[4:]:
+            assert token not in pr_flow.FORBIDDEN_GIT_VERBS, argv
+            assert token not in pr_flow.FORBIDDEN_GIT_ARGS, argv
+            assert not token.startswith(pr_flow.FORCED_UPDATE_PREFIX), argv
+    assert git.verbs().count("merge") == 1, git.calls
+    merge_argv = [argv for argv in git.calls if argv[3] == "merge"][0]
+    assert merge_argv[4:] == ["--ff-only", SHA_B], merge_argv
+    # every command ran in the lane this ticket owns
+    assert {argv[2] for argv in git.calls} == {str(lane)}, git.calls
+    # and the act is the one implementation: the shell calls it by name
+    shell = inspect.getsource(aa.pr_flow_reconcile)
+    assert "pr_flow.reconcile_after_merge(" in shell, shell
+    assert "_git_argv" not in shell and "subprocess" not in shell, shell
+    assert aa.pr_flow_reconcile in aa.ALL_AGENT_ACTIVITIES
+
+
+def test_pr_flow_step_d_the_reconcile_activity_refuses_before_any_git_call(
+        tmp_path, monkeypatch):
+    """The shell's own refusals: a switch turned off while parked, and a park
+    record that resolves outside the lane. Both keep the ticket open by name and
+    touch neither git nor the platform."""
+    git = _RecordingGit()
+    monkeypatch.setattr(pr_flow, "_default_git_runner", git)
+    platform = _FakeMergePlatform(sha=SHA_B, tree=TREE_B)
+    lane = tmp_path / "lane"
+    lane.mkdir()
+
+    off = _wire_activity(monkeypatch, platform,
+                         switch=pr_flow.SwitchDecision(enabled=False, reason="off",
+                                                       repositories=(),
+                                                       declaration="project.yaml"))
+    out = asyncio.run(off.pr_flow_reconcile(_reconcile_activity_payload(lane)))
+    assert out["stop"] == pr_flow.RECONCILE_STOP_SWITCH_OFF, out
+    assert out["keeps_ticket_open"] is True
+    assert pr_flow.stop_remedy(pr_flow.RECONCILE_STOP_SWITCH_OFF) not in (
+        "retry after the named condition is removed",)
+
+    on = _wire_activity(monkeypatch, platform)
+    escaping = asyncio.run(on.pr_flow_reconcile(_reconcile_activity_payload(
+        lane, [{"repo": "../outside", "name": "root", "identity": "owner/repo_a"}])))
+    assert escaping["stop"] == pr_flow.RECONCILE_STOP_SET_UNUSABLE, escaping
+    assert "escapes the lane" in escaping["detail"], escaping
+    assert escaping["keeps_ticket_open"] is True
+    norequests = asyncio.run(on.pr_flow_reconcile(_reconcile_activity_payload(
+        lane, [])))
+    assert norequests["stop"] == pr_flow.RECONCILE_STOP_SET_UNUSABLE, norequests
+    assert git.calls == [], git.calls
+    assert platform.calls == [], platform.calls
+
+
+def test_pr_flow_step_d_the_activity_reconciles_a_real_repository(real_clone,
+                                                                 monkeypatch):
+    """End to end on a real repository, through the activity the close-out calls:
+    the local branch ends on the merged content (file bytes included), and the
+    worktree stays clean."""
+    origin, seed, clone = real_clone
+    _advance_origin(seed)
+    head = _git(["rev-parse", "refs/heads/main"], cwd=origin)
+    tree = _git(["rev-parse", "refs/heads/main^{tree}"], cwd=origin)
+    assert _git(["rev-parse", "refs/heads/main"], cwd=clone) != head
+
+    aa = _wire_activity(monkeypatch, _FakeMergePlatform(sha=head, tree=tree))
+    out = asyncio.run(aa.pr_flow_reconcile(_reconcile_activity_payload(
+        clone, [{"repo": ".", "name": "root", "identity": "owner/repo_a",
+                 "branch": "lane/x", "number": 11}])))
+    assert out["state"] == pr_flow.RECONCILE_RECONCILED, out
+    assert _git(["rev-parse", "refs/heads/main"], cwd=clone) == head
+    assert _git(["rev-parse", "refs/heads/main^{tree}"], cwd=clone) == tree
+    assert (clone / "second.txt").read_text(encoding="utf-8") == "second\n"
+    assert _git(["status", "--porcelain"], cwd=clone) == ""
+    assert out["repositories"][0]["advanced"] is True
+
+
+# ---------- 5. the wiring's decoder: silence is never a close --------------
+
+def test_pr_flow_step_d_an_unreadable_receipt_is_a_refusal_not_a_close():
+    for raw in ({}, {"state": "whatever"}, "not-a-receipt", None, 7):
+        verdict = pr_flow.reconcile_verdict_from(raw)
+        assert pr_flow.reconcile_allows_close(verdict) is False, raw
+        record = pr_flow.reconcile_record(verdict, ticket_id="t", at_iso="now")
+        assert record["reconciled"] is False and record["keeps_ticket_open"] is True
+        assert record["stop"] == pr_flow.RECONCILE_STOP_RECEIPT_UNREADABLE, record
+        assert record["remedy"] and record["detail"], record
+    # a receipt that says both "reconciled" and "keep me open" cannot close
+    contradictory = pr_flow.reconcile_verdict_from({
+        "state": pr_flow.RECONCILE_RECONCILED, "keeps_ticket_open": True,
+        "repositories": [dict(RECONCILE_ROW_A)]})
+    assert pr_flow.reconcile_allows_close(contradictory) is False
+    # and the act's own answer round-trips
+    ok = pr_flow.reconcile_verdict_from(_reconciled_receipt())
+    assert pr_flow.reconcile_allows_close(ok) is True
+    citation = pr_flow.reconcile_citation(
+        pr_flow.reconcile_record(ok, ticket_id="t", at_iso="now"))
+    assert "owner/repo_a" in citation and "main" in citation, citation
+
+
+def test_pr_flow_step_d_the_off_answer_is_not_a_close_permission():
+    """The act answers `not_applicable` when the switch is off. On the close-out
+    path that must never read as "the branch already caught up"."""
+    off = pr_flow.reconcile_verdict_from({
+        "state": pr_flow.RECONCILE_OFF, "detail": "the project switch is off",
+        "terminal": False, "keeps_ticket_open": False, "repositories": []})
+    assert pr_flow.reconcile_allows_close(off) is False
+    record = pr_flow.reconcile_record(off, ticket_id="t", at_iso="now")
+    assert record["keeps_ticket_open"] is True and record["cited"] == []
+
+
+# ---------- 6. the beat interval and the wake entry come from the declaration
+
+def _declaration(**block):
+    lines = ["github_pr:", "  enabled: true", "  repositories:", "    - owner/repo_a"]
+    for key, value in block.items():
+        lines.insert(2, "  %s: %s" % (key, value))
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize("text,beat,wake,source", [
+    (_declaration(), pr_flow.DEFAULT_BEAT_SECONDS, pr_flow.DEFAULT_WAKE_ENTRY,
+     "default"),
+    (_declaration(beat_seconds=120), 120, pr_flow.DEFAULT_WAKE_ENTRY, "declaration"),
+    (_declaration(wake_entry="my-poller --ticket <ticket_id>"),
+     pr_flow.DEFAULT_BEAT_SECONDS, "my-poller --ticket <ticket_id>", "declaration"),
+    (_declaration(beat_seconds=600, wake_entry="'/opt/bin/wake <ticket_id>'"),
+     600, "/opt/bin/wake <ticket_id>", "declaration"),
+    (_declaration(beat_seconds=pr_flow.MIN_BEAT_SECONDS),
+     pr_flow.MIN_BEAT_SECONDS, pr_flow.DEFAULT_WAKE_ENTRY, "declaration"),
+    (_declaration(beat_seconds=pr_flow.MAX_BEAT_SECONDS),
+     pr_flow.MAX_BEAT_SECONDS, pr_flow.DEFAULT_WAKE_ENTRY, "declaration"),
+])
+def test_pr_flow_step_d_the_park_options_resolve_from_the_declaration(
+        text, beat, wake, source):
+    """Truth table: a declaration that names neither keeps the shipped values, a
+    declared value is used as written, and the face says where each came from."""
+    switch = pr_flow.parse_switch(text)
+    assert switch.enabled is True, switch
+    options = switch.options()
+    assert options.beat_seconds == beat, options
+    assert options.wake_entry == wake, options
+    assert options.source == source, options
+    assert options.face()["beat_seconds"] == beat
+    # and the option never rides on the switch's own face (that face is asserted
+    # key for key by the step (a) section)
+    assert set(switch.face()) == {"enabled", "reason", "repositories", "declaration"}
+
+
+@pytest.mark.parametrize("key,value,code", [
+    ("beat_seconds", "abc", pr_flow.STOP_DECLARATION_BEAT_INVALID),
+    ("beat_seconds", "-5", pr_flow.STOP_DECLARATION_BEAT_INVALID),
+    ("beat_seconds", "5", pr_flow.STOP_DECLARATION_BEAT_INVALID),
+    ("beat_seconds", "0", pr_flow.STOP_DECLARATION_BEAT_INVALID),
+    ("beat_seconds", "120.5", pr_flow.STOP_DECLARATION_BEAT_INVALID),
+    ("beat_seconds", str(pr_flow.MAX_BEAT_SECONDS + 1),
+     pr_flow.STOP_DECLARATION_BEAT_INVALID),
+    ("wake_entry", "''", pr_flow.STOP_DECLARATION_WAKE_INVALID),
+    ("wake_entry", "a\tb", pr_flow.STOP_DECLARATION_WAKE_INVALID),
+    ("wake_entry", "x" * (pr_flow.MAX_WAKE_ENTRY_CHARS + 1),
+     pr_flow.STOP_DECLARATION_WAKE_INVALID),
+])
+def test_pr_flow_step_d_a_malformed_park_option_is_a_named_refusal(key, value, code):
+    """A present-but-unusable value is never read as "use the default": the
+    refusal names the key, and its remedy names the key too."""
+    with pytest.raises(pr_flow.PrFlowStop) as e:
+        pr_flow.parse_switch(_declaration(**{key: value}))
+    assert e.value.code == code, (key, value, e.value.code)
+    assert key in e.value.message(), e.value.message()
+    assert key in pr_flow.stop_remedy(code), pr_flow.stop_remedy(code)
+    assert pr_flow.stop_remedy(code) != "retry after the named condition is removed"
+
+
+def test_pr_flow_step_d_the_park_uses_the_declared_beat(monkeypatch):
+    """The park's timer is the project's declared interval, and the face records
+    both options so an outside poller knows how to wake this ticket."""
+    receipt = dict(_requests_open_receipt())
+    receipt["options"] = {"beat_seconds": 120,
+                          "wake_entry": "my-poller --ticket <ticket_id>",
+                          "source": "declaration"}
+    poll = {"action": pr_flow.POLL_STILL_OPEN, "beat": 1, "stop": "", "detail": "",
+            "requests": [_open_poll()], "merged": [], "round": {}}
+    wf, recorded = _drive_pr(monkeypatch, receipt, poll=poll, beats=2)
+    timeouts = {arg for name, arg in recorded if name == "wait_condition" and arg}
+    assert timeouts == {120}, timeouts
+    opts = wf.meta["pr_flow"]["options"]
+    assert opts["beat_seconds"] == 120, opts
+    assert opts["wake_entry"] == "my-poller --ticket <ticket_id>", opts
+
+
+def test_pr_flow_step_d_an_older_receipt_parks_on_the_shipped_beat(monkeypatch):
+    """Replay: a delivery receipt recorded before the option existed carries no
+    options at all, and the park must then beat exactly as it always did."""
+    poll = {"action": pr_flow.POLL_STILL_OPEN, "beat": 1, "stop": "", "detail": "",
+            "requests": [_open_poll()], "merged": [], "round": {}}
+    wf, recorded = _drive_pr(monkeypatch, _requests_open_receipt(), poll=poll,
+                             beats=1)
+    timeouts = {arg for name, arg in recorded if name == "wait_condition" and arg}
+    assert timeouts == {pr_flow.POLL_BEAT_SECONDS}, timeouts
+    opts = wf.meta["pr_flow"]["options"]
+    assert opts["beat_seconds"] == pr_flow.POLL_BEAT_SECONDS, opts
+    assert opts["source"] == "default", opts
+
+
+def test_pr_flow_step_d_an_unusable_recorded_option_falls_back_and_says_so():
+    """The receipt decoder's own edge: a value that cannot come from a validated
+    declaration (a hand-edited face) falls back to the shipped value AND names the
+    fallback, so it is never a silent substitution."""
+    for raw in (None, {}, {"options": None}, {"options": []}, {"options": {}}):
+        options = pr_flow.flow_options_from(raw)
+        assert options.beat_seconds == pr_flow.DEFAULT_BEAT_SECONDS, raw
+        assert options.wake_entry == pr_flow.DEFAULT_WAKE_ENTRY, raw
+    bad = pr_flow.flow_options_from({"options": {"beat_seconds": "soon",
+                                                 "wake_entry": "\x00"}})
+    assert bad.beat_seconds == pr_flow.DEFAULT_BEAT_SECONDS
+    assert bad.wake_entry == pr_flow.DEFAULT_WAKE_ENTRY
+    assert "fallback" in bad.source, bad
