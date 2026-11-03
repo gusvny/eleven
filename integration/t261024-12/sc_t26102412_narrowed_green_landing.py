@@ -56,6 +56,9 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# t261103-26: private projects root for the fixture's project key (created in main()).
+PROJECTS_ROOT = tempfile.mkdtemp(prefix="t261024-12-projects-")
+
 ENGINE = os.path.join(ROOT, "server", "engine")
 if not os.path.isdir(ENGINE):
     print("ENV_FAIL: engine tree missing: %s" % ENGINE)
@@ -168,6 +171,15 @@ def _record(targeted, ran=3):
 def main():
     dev_lane.workflow = _StubWf
     repo, proven, main_new = make_fixture_repo()
+    # t261103-26: the landing face resolves the ticket's project key before any
+    # revision guard (t261103-23), so the fixture must OWN a project store entry
+    # for the key it names - otherwise the key refusal shadows the contains-main
+    # diagnosis this scenario exists to pin. Temp root only; nothing touches the
+    # real project store.
+    os.makedirs(PROJECTS_ROOT, exist_ok=True)
+    os.makedirs(os.path.join(PROJECTS_ROOT, "p"), exist_ok=True)
+    _prev_projects = os.environ.get("SANDBAR_PROJECTS_DIR")
+    os.environ["SANDBAR_PROJECTS_DIR"] = PROJECTS_ROOT
     try:
         # ---------- A: narrowed green round -> honest face, judged by name
         _StubWf.sha = proven
@@ -304,6 +316,12 @@ def main():
 
     finally:
         shutil.rmtree(repo, ignore_errors=True)
+        # t261103-26: reclaim the private projects root and restore the env.
+        shutil.rmtree(PROJECTS_ROOT, ignore_errors=True)
+        if _prev_projects is None:
+            os.environ.pop("SANDBAR_PROJECTS_DIR", None)
+        else:
+            os.environ["SANDBAR_PROJECTS_DIR"] = _prev_projects
 
     if FAIL:
         print("FAIL t26102412-narrowed-green-landing: %d leg(s) red" % FAIL)
