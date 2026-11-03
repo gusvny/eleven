@@ -480,6 +480,17 @@ const WORKFLOW_TABLE = {
 	"inspection-lite": "Inspection",
 	"chore-lane": "Chore Lane"
 };
+/** Artifact view kind → English (truth source: engine shared.ARTIFACT_KINDS, epic
+*  artifact-face). A kind says what a human does with an artifact, not what it looks
+*  like; an unknown value falls back to the raw identifier (labelOf rule). */
+const ARTIFACT_KIND_TABLE = {
+	image: "Image",
+	text: "Text",
+	structure: "Structure",
+	diff: "Diff",
+	ledger: "Ledger",
+	external: "External"
+};
 /**
 * t261102-12: the engine's NAMED read states -> English chips. Truth source = the
 * engine's own words (client.py read_state values); an unknown value falls back to the
@@ -498,17 +509,6 @@ const READ_STATE_TABLE = {
 function readStateLabel(id) {
 	return labelOf$1(READ_STATE_TABLE, id);
 }
-/** Artifact view kind → English (truth source: engine shared.ARTIFACT_KINDS, epic
-*  artifact-face). A kind says what a human does with an artifact, not what it looks
-*  like; an unknown value falls back to the raw identifier (labelOf rule). */
-const ARTIFACT_KIND_TABLE = {
-	image: "Image",
-	text: "Text",
-	structure: "Structure",
-	diff: "Diff",
-	ledger: "Ledger",
-	external: "External"
-};
 const STATE_LABEL = STATE_TABLE;
 function stageLabel(id) {
 	return labelOf$1(STAGE_TABLE, id);
@@ -2527,6 +2527,567 @@ function findingView(f, i) {
 		evidence,
 		evidenceFallback
 	};
+}
+//#endregion
+//#region src/client/file-pane-model.ts
+/**
+* file-pane-model.ts — pure rules for the middle-column file pane (t261102-09).
+*
+* The ticket takes over text-file links from the right-column chat: an
+* extension-band tab type claims `dsh-resource://file/**` for text-like paths,
+* its body forwards the file to the middle column, and the pane reads the bytes
+* through one guarded route. This module holds every rule that decision needs,
+* so the rules run under plain node (type stripping), with no React and no DOM:
+*
+*   - the address grammar (a mirror, see the note below);
+*   - the claim rule (which paths the extension band takes over);
+*   - the text kind, the title, line numbering and line clamping;
+*   - the refusal wording (a failure always names the path and the reason);
+*   - the structural shapes of the two dsh faces the plugin reads through
+*     `ctx.get`, kept here so no module augmentation is needed.
+*
+* Address grammar note: `@deepseek-ai/dsh-util-workspace-path` owns the grammar,
+* but this build externalizes every `@deepseek-ai/*` package and dsh inlines
+* that helper into its own bundles, so it is not on the platform module table.
+* The grammar is mirrored here, and the claim test pins both scopes, the
+* percent-encoded segments, the drive letter, the UNC form and the malformed
+* inputs.
+*/
+/** Scheme and type every file address opens with (mirrors the dsh helper). */
+const FILE_ADDRESS_PREFIX = "dsh-resource://file/";
+/**
+* Read a `dsh-resource://file/…` address into its parts.
+* @param address - a candidate address (untrusted: it arrives from a tab record).
+* @returns the parts, or null when the string is not a file address in a known
+*   scope, has no path, or carries a segment that is not validly encoded.
+*/
+function parseFileAddress(address) {
+	if (typeof address !== "string") return null;
+	if (!address.startsWith(FILE_ADDRESS_PREFIX)) return null;
+	const end = address.search(/[?#]/);
+	const segments = address.slice(20, end === -1 ? void 0 : end).split("/");
+	const scope = segments[0];
+	try {
+		if (scope === "session") {
+			const id = segments[1];
+			const rest = segments.slice(2);
+			if (id === void 0 || id === "" || rest.length === 0) return null;
+			return {
+				scope: "session",
+				sessionId: decodeURIComponent(id),
+				path: rest.map(decodeURIComponent).join("/")
+			};
+		}
+		if (scope === "absolute") {
+			const tail = segments.slice(1);
+			const unc = tail[0] === "" && tail.length > 1;
+			const parts = (unc ? tail.slice(1) : tail).map(decodeURIComponent);
+			if (parts.length === 0 || parts[0] === "") return null;
+			if (unc) return {
+				scope: "absolute",
+				sessionId: "",
+				path: `//${parts.join("/")}`
+			};
+			const joined = parts.join("/");
+			return {
+				scope: "absolute",
+				sessionId: "",
+				path: /^[A-Za-z]:$/.test(parts[0]) ? joined : `/${joined}`
+			};
+		}
+	} catch {
+		return null;
+	}
+	return null;
+}
+/** Last path segment of a path or address, decoded when possible. */
+function baseNameOf(path) {
+	const cut = path.replace(/\\/g, "/");
+	const name = cut.slice(cut.lastIndexOf("/") + 1);
+	if (name === "") return "";
+	try {
+		return decodeURIComponent(name);
+	} catch {
+		return name;
+	}
+}
+/**
+* The tab chip text for one address.
+* @param address - a candidate address (untrusted).
+* @returns the decoded basename, or the address itself when it has none.
+*/
+function fileTitleOf(address) {
+	const parsed = parseFileAddress(address);
+	if (parsed === null) return typeof address === "string" ? address : "file";
+	const name = baseNameOf(parsed.path);
+	return name === "" ? typeof address === "string" ? address : "file" : name;
+}
+/** Lower-case extension of a path, without the dot; '' when the path has none. */
+function extensionOf(path) {
+	if (typeof path !== "string") return "";
+	const name = path.replace(/\\/g, "/").slice(path.replace(/\\/g, "/").lastIndexOf("/") + 1);
+	const dot = name.lastIndexOf(".");
+	if (dot <= 0 || dot === name.length - 1) return "";
+	return name.slice(dot + 1).toLowerCase();
+}
+const MARKDOWN_EXTENSIONS = /* @__PURE__ */ new Set([
+	"md",
+	"markdown",
+	"mdx"
+]);
+const PLAIN_EXTENSIONS = /* @__PURE__ */ new Set([
+	"txt",
+	"log",
+	"csv",
+	"tsv",
+	"ini",
+	"conf",
+	"rst"
+]);
+const DATA_EXTENSIONS = /* @__PURE__ */ new Set([
+	"json",
+	"jsonc",
+	"jsonl",
+	"yaml",
+	"yml",
+	"toml"
+]);
+const SOURCE_EXTENSIONS = /* @__PURE__ */ new Set([
+	"ts",
+	"tsx",
+	"mts",
+	"cts",
+	"js",
+	"jsx",
+	"mjs",
+	"cjs",
+	"py",
+	"sh",
+	"bash",
+	"zsh",
+	"go",
+	"rs",
+	"java",
+	"c",
+	"h",
+	"cpp",
+	"hpp",
+	"cs",
+	"kt",
+	"kts",
+	"rb",
+	"php",
+	"sql",
+	"css",
+	"scss",
+	"patch",
+	"diff"
+]);
+/** Every extension the extension band takes over (the claim table of the plan). */
+const CLAIMED_EXTENSIONS = [
+	...MARKDOWN_EXTENSIONS,
+	...PLAIN_EXTENSIONS,
+	...DATA_EXTENSIONS,
+	...SOURCE_EXTENSIONS
+];
+/**
+* Whether the extension band takes over one address (the tab type's `canOpen`).
+*
+* Text-like paths only. An image, PDF or HTML path returns false, which leaves
+* the address to the builtin preview exactly as it is today. An address the
+* grammar rejects returns false too, so it falls back instead of throwing in the
+* tab slot.
+* @param address - the address a caller wants opened.
+* @returns whether this type claims it.
+*/
+function claimsTextFile(address) {
+	const parsed = parseFileAddress(address);
+	if (parsed === null) return false;
+	if (parsed.path === "") return false;
+	const ext = extensionOf(parsed.path);
+	return ext !== "" && CLAIMED_EXTENSIONS.includes(ext);
+}
+/**
+* The render kind of one path.
+* @param path - a path inside an address, or a plain path.
+* @returns 'markdown' for a markdown suffix, 'plain' for everything else.
+*/
+function textKindOf(path) {
+	return MARKDOWN_EXTENSIONS.has(extensionOf(path)) ? "markdown" : "plain";
+}
+/**
+* Rows the source view renders at most.
+*
+* The read face caps a file at 1 MiB, which can still be tens of thousands of rows;
+* rendering them all would freeze the column. The pane renders this many and NAMES the
+* clip on screen, so a long file is never silently cut.
+*/
+const SOURCE_ROW_LIMIT = 5e3;
+/**
+* Split file content into display rows, without one trailing empty row.
+* @param content - the file text.
+* @returns the rows; an empty file has one empty row, so a number still shows.
+*/
+function numberedLines(content) {
+	const rows = (typeof content === "string" ? content : "").split("\n");
+	if (rows.length > 1 && rows[rows.length - 1] === "") rows.pop();
+	return rows.length === 0 ? [""] : rows;
+}
+function planSourceRows(content) {
+	const all = numberedLines(content);
+	const total = all.length;
+	if (total > 5e3) return {
+		rows: all.slice(0, SOURCE_ROW_LIMIT),
+		total,
+		clipped: true
+	};
+	return {
+		rows: all,
+		total,
+		clipped: false
+	};
+}
+/**
+* Clamp a requested line to a row that exists.
+* @param line - the requested line (untrusted: a tab param).
+* @param lineCount - the number of rows the content produced.
+* @returns a 1-based row, or 0 for "no line" (absent, malformed, or no content).
+*/
+function clampLine(line, lineCount) {
+	const wanted = typeof line === "number" ? line : typeof line === "string" && line.trim() !== "" ? Number(line) : NaN;
+	const total = typeof lineCount === "number" && Number.isFinite(lineCount) ? Math.floor(lineCount) : 0;
+	if (!Number.isFinite(wanted) || total < 1) return 0;
+	const row = Math.floor(wanted);
+	if (row < 1) return 0;
+	return row > total ? total : row;
+}
+/**
+* Decide the line note for one request.
+* @param requested - the requested line (untrusted).
+* @param rowCount - the rows the view actually rendered.
+* @returns the note and the row to reveal, or null when no line applies.
+*/
+function lineNoteOf(requested, rowCount) {
+	const row = clampLine(requested, rowCount);
+	if (row < 1) return null;
+	const total = typeof rowCount === "number" && Number.isFinite(rowCount) ? Math.floor(rowCount) : 0;
+	const wanted = typeof requested === "number" ? requested : typeof requested === "string" && requested.trim() !== "" ? Number(requested) : NaN;
+	if (Number.isFinite(wanted) && Math.floor(wanted) > total) return {
+		row: total,
+		text: `line ${Math.floor(wanted)} is past the end of this file (${total} line${total === 1 ? "" : "s"})`
+	};
+	return {
+		row,
+		text: `line ${row}`
+	};
+}
+/**
+* The line a tab navigation carries.
+* @param params - `tab.navigation.params` (untrusted).
+* @returns the line when it is a positive integer, else 0.
+*/
+function lineOfParams(params) {
+	if (typeof params !== "object" || params === null) return 0;
+	const raw = params.line;
+	return typeof raw === "number" && Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 0;
+}
+/**
+* Which view a request opens in.
+*
+* A line-carrying request opens the SOURCE view for every claimed kind, so the
+* line always lands somewhere visible; markdown without a line opens rendered.
+* @param kind - the render kind of the path.
+* @param line - the requested line, 0 for none.
+* @returns the view to open.
+*/
+function initialViewKind(kind, line) {
+	if (line >= 1) return "source";
+	return kind === "markdown" ? "rendered" : "source";
+}
+const REASON_TEXT = {
+	"outside-roots": "the path is outside every registered project directory",
+	"not-found": "the file does not exist",
+	"is-directory": "the path is a directory, not a file",
+	"too-large": "the file is larger than the 1 MiB read limit",
+	"not-utf8": "the file is not UTF-8 text",
+	unreadable: "the file could not be read",
+	"no-registered-roots": "no registered project directory is available",
+	"session-workspace-unknown": "the session workspace cannot be resolved",
+	"bad-path": "the path parameter is missing or malformed",
+	"bad-session": "the session parameter is malformed",
+	address: "the address cannot be parsed"
+};
+/**
+* One refusal line: the path, then the reason. Never an empty pane.
+* @param reason - the stable reason code the route answered.
+* @param path - the path the person asked for.
+* @param detail - optional extra words from the server (its own message).
+* @returns a single human line naming both facts.
+*/
+function fileRefusalLine(reason, path, detail) {
+	const code = typeof reason === "string" && Object.prototype.hasOwnProperty.call(REASON_TEXT, reason) ? reason : "unreadable";
+	return `Cannot open ${typeof path === "string" && path !== "" ? path : "(no path)"}: ${REASON_TEXT[code]}${typeof detail === "string" && detail !== "" ? ` — ${detail}` : ""}`;
+}
+/**
+* Turn a failed read answer into a named reason and message.
+*
+* A route that is not served at all answers with something that is not JSON
+* (the console runs old code after a client rebuild: KI-052). That case gets its
+* own name and its own hint, never a generic network error.
+* @param status - the HTTP status the fetch resolved with.
+* @param bodyText - the raw response text.
+* @param path - the requested path, for the message.
+* @returns the reason code and the message to show.
+*/
+function describeReadFailure(status, bodyText, path) {
+	const code = typeof status === "number" && Number.isFinite(status) ? status : 0;
+	let body = null;
+	try {
+		body = typeof bodyText === "string" && bodyText !== "" ? JSON.parse(bodyText) : null;
+	} catch {
+		body = null;
+	}
+	const answer = typeof body === "object" && body !== null ? body : null;
+	if (answer !== null && answer.ok === false) {
+		const reason = typeof answer.reason === "string" && answer.reason !== "" ? answer.reason : "unreadable";
+		const detail = typeof answer.error === "string" ? answer.error : "";
+		return {
+			reason,
+			message: fileRefusalLine(reason, typeof answer.path === "string" && answer.path !== "" ? answer.path : path, detail)
+		};
+	}
+	if (code === 404) return {
+		reason: "route-missing",
+		message: `Cannot open ${typeof path === "string" && path !== "" ? path : "(no path)"}: the file route is not served — the console may run old code, restart it.`
+	};
+	return {
+		reason: code === 0 ? "network" : `http-${code}`,
+		message: `Cannot open ${typeof path === "string" && path !== "" ? path : "(no path)"}: the read answered ${code === 0 ? "nothing" : `HTTP ${code}`}.`
+	};
+}
+//#endregion
+//#region src/client/file-open-request.ts
+const HOLDER_KEY$1 = Symbol.for("sandbar.workbench.fileOpen.v1");
+function createStore() {
+	const state = {
+		current: null,
+		seq: 0,
+		revision: 0,
+		listeners: /* @__PURE__ */ new Set()
+	};
+	const changed = () => {
+		for (const listener of [...state.listeners]) try {
+			listener();
+		} catch {}
+	};
+	const requestFileOpen = (intent) => {
+		const sessionId = typeof intent.sessionId === "string" ? intent.sessionId : "";
+		const scope = intent.scope === "session" || intent.scope === "absolute" ? intent.scope : sessionId !== "" ? "session" : "absolute";
+		const line = typeof intent.line === "number" && Number.isFinite(intent.line) && intent.line >= 1 ? Math.floor(intent.line) : 0;
+		const address = typeof intent.address === "string" ? intent.address : "";
+		const held = state.current;
+		state.revision += 1;
+		if (held !== null && held.address === address) {
+			const next = {
+				...held,
+				line,
+				revision: state.revision
+			};
+			state.current = next;
+			changed();
+			return next;
+		}
+		state.seq += 1;
+		const next = {
+			address,
+			scope,
+			sessionId,
+			path: typeof intent.path === "string" ? intent.path : "",
+			line,
+			revision: state.revision,
+			seq: state.seq
+		};
+		state.current = next;
+		changed();
+		return next;
+	};
+	return {
+		requestFileOpen,
+		readFileOpenRequest: () => state.current,
+		subscribeFileOpen: (listener) => {
+			state.listeners.add(listener);
+			return () => {
+				state.listeners.delete(listener);
+			};
+		},
+		closeFileOpen: () => {
+			if (state.current === null) return;
+			state.current = null;
+			changed();
+		}
+	};
+}
+/** The published store; created once per page evaluation and anchored on globalThis. */
+function anchor() {
+	const slot = globalThis;
+	const held = slot[HOLDER_KEY$1];
+	if (held !== void 0 && typeof held.readFileOpenRequest === "function") return held;
+	const created = createStore();
+	slot[HOLDER_KEY$1] = created;
+	return created;
+}
+/**
+* Hand one file to the middle column.
+* @param intent - the address, the session it came from, and the line.
+* @returns the request now in the slot.
+*/
+function requestFileOpen(intent) {
+	return anchor().requestFileOpen(intent);
+}
+/** The request on show, or null. Reference-stable between changes. */
+function readFileOpenRequest() {
+	return anchor().readFileOpenRequest();
+}
+/**
+* Observe request changes.
+* @param listener - a synchronous callback.
+* @returns the unsubscribe callback.
+*/
+function subscribeFileOpen(listener) {
+	return anchor().subscribeFileOpen(listener);
+}
+/** Close the pane: the slot empties and the middle column shows what was under it. */
+function closeFileOpen() {
+	anchor().closeFileOpen();
+}
+//#endregion
+//#region src/client/file-bridge.tsx
+/**
+* file-bridge.tsx — the right-column tab body that hands a file to the middle
+* column and gets out of the way (t261102-09).
+*
+* Life of one click on a file link in the chat:
+*   1. the chat calls `ctx.sidebarRight.openResource(address)`, which reveals the
+*      column and opens a tab of the extension-band type this plugin registers;
+*   2. this body reads its own tab (address, line, revision) and forwards the file
+*      to the middle column through `file-open-request.ts`;
+*   3. it closes its own tab, and collapses the column again when it is still
+*      expanded with no tab left. `openResource` revealed the column, so leaving it
+*      open here is exactly the "expanded and empty" refusal the ticket names.
+*
+* Shape: the seat renders this component as a normal React element and hands the
+* injected hooks in as props named `use<Name>`. The body is kept as ONE component on
+* purpose — the tab-info hook then has exactly one call site per render (`readTabInfo`,
+* a stable site whichever branch it comes from) and every refusal lives in the same
+* file. Nested components would render fine here; a shallow test renderer is the only
+* thing that would not see through them, and that is a harness property, not a rule of
+* the seat.
+*
+* Refusals kept by this file:
+*   - an address the grammar rejects does NOT throw in the slot: the claim rule
+*     (`claimsTextFile`) already leaves such addresses to the builtin preview, and a
+*     RESTORED tab that still carries one renders a named banner instead;
+*   - a missing injected hook, a throwing tab-info read, a throwing close or a
+*     throwing collapse never escapes the slot: each renders a banner or logs one line.
+*/
+/**
+* The service probe, bound once at plugin apply time.
+*
+* Why a binding and not a prop: the seat passes ONLY the injected hooks as props, so
+* the plugin's own `ctx.get` handle has nowhere to travel. One binding per page
+* evaluation, set from `apply(ctx)`.
+*/
+let serviceProbe;
+/**
+* Bind the plugin's service probe for the bridge body.
+* @param get - the `ctx.get` handle bound to the client context.
+*/
+function bindBridgeService(get) {
+	serviceProbe = get;
+}
+/** Empty tab info: what a missing or throwing hook is read as. */
+const EMPTY_TAB_INFO = {};
+/**
+* Read the tab info, or an empty record when the hook cannot answer.
+*
+* One call site for every branch, so the hook order never changes between renders.
+* @param hook - the injected tab-info hook (untrusted: it arrives as a slot prop).
+* @returns the tab information, or an empty record.
+*/
+function readTabInfo(hook) {
+	if (typeof hook !== "function") return EMPTY_TAB_INFO;
+	try {
+		return hook() ?? EMPTY_TAB_INFO;
+	} catch (err) {
+		console.warn("[workbench] file bridge: reading its tab failed:", err);
+		return EMPTY_TAB_INFO;
+	}
+}
+/**
+* The tab body registered under `sidebar.right.pane.tab`.
+* @param props - the slot props (the injected tab-info hook among them).
+* @returns the forwarding body, or a named banner when the tab cannot be read.
+*/
+function FileBridgeBody(props) {
+	const tab = readTabInfo(props.useTabInfo).tab;
+	const address = typeof tab?.contentId === "string" ? tab.contentId : "";
+	const revision = typeof tab?.navigation?.revision === "number" ? tab.navigation.revision : 0;
+	const tabId = tab === void 0 ? "" : String(tab.id ?? "");
+	const parsed = parseFileAddress(address);
+	const line = lineOfParams(tab?.navigation?.params);
+	(0, react.useEffect)(() => {
+		if (parsed === null) return;
+		requestFileOpen({
+			address,
+			scope: parsed.scope,
+			sessionId: parsed.sessionId,
+			path: parsed.path,
+			line
+		});
+		try {
+			tab?.actions?.close?.();
+		} catch (err) {
+			console.warn("[workbench] file bridge: closing its tab failed:", err);
+		}
+		try {
+			const right = serviceProbe?.("sidebarRight");
+			if (right !== void 0 && right !== null && typeof right.isExpanded === "function" && right.isExpanded() === true && right.active() === void 0) right.toggleExpanded();
+		} catch (err) {
+			console.warn("[workbench] file bridge: collapsing the column failed:", err);
+		}
+	}, [
+		tabId,
+		address,
+		revision
+	]);
+	if (typeof props.useTabInfo !== "function") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+		className: "wb-file-bridge wb-file-bridge-refused",
+		"data-file-bridge-refused": "",
+		"data-file-bridge-address": "",
+		role: "alert",
+		children: "Cannot read this tab: the tab-info hook is missing."
+	});
+	if (parsed === null) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-file-bridge wb-file-bridge-refused",
+		"data-file-bridge-refused": "",
+		"data-file-bridge-address": address,
+		role: "alert",
+		children: [
+			"Cannot open this tab: the address cannot be parsed (",
+			address || "(empty)",
+			")."
+		]
+	});
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-file-bridge",
+		"data-file-bridge": address,
+		role: "status",
+		children: [
+			"Opening ",
+			fileTitleOf(address),
+			" in the middle column…"
+		]
+	});
 }
 //#endregion
 //#region src/host/session-charter.ts
@@ -5007,6 +5568,278 @@ function ProjectSessionRow(props) {
 				"data-wb-psess-notice": "",
 				role: "status",
 				children: notice
+			})
+		]
+	});
+}
+//#endregion
+//#region src/client/file-route.ts
+/**
+* file-route.ts — the one path the guarded file read is served on (t261102-09).
+*
+* Why this module exists: the middle-column pane fetches a route that the node
+* half registers. Two literals in two halves drift, and the drift is invisible
+* to a source lock that checks each half on its own (the "dead button" shape).
+* Both halves import this constant instead. The module has NO imports, so it is
+* safe for the browser bundle and for the node half alike; a source lock pins
+* the zero-import rule.
+*
+* Precedent: `src/client/session-entry.tsx` reads `SESSION_CHARTER_PATH` from a
+* shared module for the same reason.
+*/
+/** Path of the guarded file-read route (node.ts registers it; the pane calls it). */
+const FILE_READ_PATH = "/sandbar-workbench/api/wf/file";
+//#endregion
+//#region src/client/file-pane.tsx
+/**
+* file-pane.tsx — the middle-column file sheet (t261102-09).
+*
+* What it is: a layer over the middle column that shows one file the chat handed
+* over. It is a SIBLING of `.wb-right-content` inside `.wb-sb-right`, not a
+* replacement for it, so the ticket detail and the executor panel stay mounted
+* underneath and Back needs no restore stack — it closes the sheet and the view
+* that was there is exactly as it was.
+*
+* Layer rule: the UI-3 "one layer deep" invariant governs the overlay host's
+* CONTENT (ticket and epic swap in one entry). This sheet is a second, separate
+* surface and there is exactly one of it: z-index 91 sits above the ticket
+* drawer (90) and below every modal (99) and the lightbox (120).
+*
+* Honest naming: every failure renders a banner that carries the path and the
+* reason. A read that never answers (a console that runs old code does not serve
+* this route) is named as such, never as a generic network error.
+*/
+/**
+* The sheet itself.
+* @returns the sheet, or null when no request is open (the mount is conditional
+*   too; the guard keeps a stale render harmless).
+*/
+function FilePane() {
+	const request = (0, react.useSyncExternalStore)(subscribeFileOpen, readFileOpenRequest, readFileOpenRequest);
+	const [load, setLoad] = (0, react.useState)({ phase: "loading" });
+	const [attempt, setAttempt] = (0, react.useState)(0);
+	const [override, setOverride] = (0, react.useState)(null);
+	const [copied, setCopied] = (0, react.useState)(false);
+	const hitRef = (0, react.useRef)(null);
+	const copyTimer = (0, react.useRef)(null);
+	const path = request?.path ?? "";
+	const kind = textKindOf(path);
+	const requestKey = request === null ? "" : `${request.address}#${request.revision}`;
+	const autoView = request === null ? "source" : initialViewKind(kind, request.line);
+	const view = override !== null && override.key === requestKey ? override.view : autoView;
+	const plan = load.phase === "ok" ? planSourceRows(load.content) : {
+		rows: [],
+		total: 0,
+		clipped: false
+	};
+	const rows = plan.rows;
+	const lineNote = lineNoteOf(request?.line, rows.length);
+	const line = lineNote === null ? 0 : lineNote.row;
+	(0, react.useEffect)(() => {
+		if (request === null) return;
+		const controller = new AbortController();
+		const query = new URLSearchParams({ path: request.path });
+		if (request.scope === "session" && request.sessionId !== "") query.set("session", request.sessionId);
+		setLoad({ phase: "loading" });
+		fetch(`${FILE_READ_PATH}?${query.toString()}`, { signal: controller.signal }).then(async (res) => ({
+			status: res.status,
+			text: await res.text()
+		})).then(({ status, text }) => {
+			if (controller.signal.aborted) return;
+			let body = null;
+			try {
+				body = JSON.parse(text);
+			} catch {
+				body = null;
+			}
+			const answer = typeof body === "object" && body !== null ? body : null;
+			const result = answer !== null && typeof answer.result === "object" && answer.result !== null ? answer.result : null;
+			if (answer !== null && answer.ok === true && result !== null && typeof result.content === "string") {
+				setLoad({
+					phase: "ok",
+					content: result.content
+				});
+				return;
+			}
+			const failure = describeReadFailure(status, text, request.path);
+			setLoad({
+				phase: "failed",
+				reason: failure.reason,
+				message: failure.message
+			});
+		}).catch((err) => {
+			if (controller.signal.aborted) return;
+			const detail = err instanceof Error ? err.message : String(err);
+			setLoad({
+				phase: "failed",
+				reason: "network",
+				message: `Cannot open ${request.path}: the read did not complete (${detail}).`
+			});
+		});
+		return () => {
+			controller.abort();
+		};
+	}, [requestKey, attempt]);
+	(0, react.useEffect)(() => {
+		if (request === null) return;
+		const onKey = (ev) => {
+			if (ev.key === "Escape") {
+				ev.preventDefault();
+				ev.stopPropagation();
+				closeFileOpen();
+				return;
+			}
+			if (ev.key === "ArrowUp" || ev.key === "ArrowDown") ev.stopPropagation();
+		};
+		window.addEventListener("keydown", onKey, true);
+		return () => {
+			window.removeEventListener("keydown", onKey, true);
+		};
+	}, [request === null]);
+	(0, react.useEffect)(() => {
+		if (load.phase !== "ok" || view !== "source" || line < 1) return;
+		const node = hitRef.current;
+		if (node !== null && typeof node.scrollIntoView === "function") node.scrollIntoView({ block: "center" });
+	}, [
+		load,
+		view,
+		line
+	]);
+	(0, react.useEffect)(() => () => {
+		if (copyTimer.current !== null) clearTimeout(copyTimer.current);
+	}, []);
+	const copyPath = (0, react.useCallback)(() => {
+		try {
+			navigator.clipboard?.writeText(path);
+			setCopied(true);
+			if (copyTimer.current !== null) clearTimeout(copyTimer.current);
+			copyTimer.current = setTimeout(() => {
+				setCopied(false);
+			}, 1200);
+		} catch {
+			setCopied(false);
+		}
+	}, [path]);
+	if (request === null) return null;
+	const title = fileTitleOf(request.address);
+	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+		className: "wb-file-pane",
+		"data-file-pane": "",
+		"data-file-pane-address": request.address,
+		role: "region",
+		"aria-label": `File ${path === "" ? title : path}`,
+		children: [
+			/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-file-pane-head",
+				"data-file-pane-head": "",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "wb-file-pane-btn",
+						"data-file-pane-back": "",
+						title: "Back to the view underneath",
+						onClick: closeFileOpen,
+						children: "← Back"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "wb-file-pane-title",
+						"data-file-pane-path": "",
+						title: path,
+						children: path === "" ? title : path
+					}),
+					kind === "markdown" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						className: "wb-file-pane-toggle",
+						"data-file-pane-view": view,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "wb-file-pane-btn",
+							"data-file-pane-rendered": "",
+							"data-active": view === "rendered",
+							onClick: () => setOverride({
+								key: requestKey,
+								view: "rendered"
+							}),
+							children: "Rendered"
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "wb-file-pane-btn",
+							"data-file-pane-source": "",
+							"data-active": view === "source",
+							onClick: () => setOverride({
+								key: requestKey,
+								view: "source"
+							}),
+							children: "Source"
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "wb-file-pane-btn",
+						"data-file-pane-copy": "",
+						onClick: copyPath,
+						children: copied ? "Copied" : "Copy path"
+					})
+				]
+			}),
+			lineNote !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-file-pane-line-note",
+				"data-file-pane-line": lineNote.row,
+				children: lineNote.text
+			}),
+			load.phase === "loading" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-file-pane-status",
+				"data-file-pane-loading": "",
+				children: "Loading file…"
+			}),
+			load.phase === "failed" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-file-pane-banner",
+				"data-file-pane-refused": load.reason,
+				role: "alert",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: load.message }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: "wb-file-pane-btn",
+					"data-file-pane-retry": "",
+					onClick: () => setAttempt((n) => n + 1),
+					children: "Retry"
+				})]
+			}),
+			load.phase === "ok" && view === "rendered" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-file-md wb-md",
+				"data-file-pane-md": "",
+				dangerouslySetInnerHTML: { __html: renderMarkdown(load.content) }
+			}),
+			load.phase === "ok" && view === "source" && plan.clipped && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "wb-file-pane-line-note",
+				"data-file-pane-row-clip": rows.length,
+				children: [
+					"showing the first ",
+					rows.length,
+					" of ",
+					plan.total,
+					" lines"
+				]
+			}),
+			load.phase === "ok" && view === "source" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "wb-file-pane-src",
+				"data-file-pane-src": "",
+				children: rows.map((text, index) => {
+					const number = index + 1;
+					const hit = number === line;
+					return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "wb-file-pane-row",
+						"data-file-line": number,
+						"data-file-line-hit": hit ? "" : void 0,
+						ref: hit ? hitRef : void 0,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-file-pane-ln",
+							"aria-hidden": "true",
+							children: number
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "wb-file-pane-lc",
+							children: text === "" ? " " : text
+						})]
+					}, number);
+				})
 			})
 		]
 	});
@@ -10280,6 +11113,43 @@ const CSS$2 = `${DERIVE_TOKENS_CSS}
 .wb-right-content > .wb-executor-view { flex:1; min-height:0; }
 .wb-right-content > .wb-placeholder { flex:none; }
 .wb-placeholder { padding:32px; color:var(--dsw-derive-muted,#57606a); font-size:13px; line-height:1.8; }
+/* t261102-09: the middle-column file sheet (where a chat file link lands). It is a
+   SIBLING of .wb-right-content and is positioned inside .wb-sb-right (already
+   position:relative — the ticket drawer's containing block), so the ticket detail and
+   the executor panel stay mounted below it with their state intact and Back only closes
+   this layer. z-index 91 sits above the drawer (index.tsx .wb-drawer, 90) and below every
+   modal (.wb-modal 99, lightbox 120). The geometry matches the drawer's 12px inset, but
+   the box is .wb-sb-right's box, so the sheet also covers the stale-build banner row
+   (accepted: the banner returns when the sheet closes, and a stale console gets its own
+   named banner instead of a silent gap). */
+.wb-file-pane { position:absolute; top:12px; right:12px; bottom:12px; left:12px; z-index:91;
+  display:flex; flex-direction:column; min-height:0; background:var(--dsw-derive-canvas,#ffffff);
+  border:1px solid var(--dsw-derive-border,#d0d7de); border-radius:10px;
+  box-shadow:0 12px 40px rgba(31,35,40,.35); font-size:13px; color:var(--dsw-derive-fg,#1f2328); }
+.wb-file-pane-head { flex:none; display:flex; align-items:center; gap:8px; padding:8px 12px;
+  border-bottom:1px solid var(--dsw-derive-border,#d0d7de); }
+.wb-file-pane-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+.wb-file-pane-btn { flex:none; font:inherit; font-size:12px; border:1px solid var(--dsw-derive-border,#d0d7de);
+  background:transparent; color:var(--dsw-derive-accent,#0969da); border-radius:6px; padding:2px 8px; cursor:pointer; }
+.wb-file-pane-btn:hover { background:var(--dsw-derive-surface,#f6f8fa); }
+.wb-file-pane-btn[data-active=true] { background:var(--dsw-derive-surface,#f6f8fa); color:var(--dsw-derive-fg,#1f2328); }
+.wb-file-pane-toggle { flex:none; display:inline-flex; gap:4px; }
+.wb-file-pane-line-note { flex:none; padding:2px 12px; font-size:11px; color:var(--dsw-derive-muted,#57606a); }
+.wb-file-pane-status { padding:16px 12px; color:var(--dsw-derive-muted,#57606a); }
+.wb-file-pane-banner { margin:12px; padding:10px 12px; display:flex; flex-direction:column; gap:8px;
+  border:1px solid var(--dsw-derive-danger,#cf222e); border-radius:8px;
+  background:var(--dsw-derive-danger-bg,#ffebe9); color:var(--dsw-derive-danger,#cf222e); font-size:12.5px; }
+.wb-file-pane-banner .wb-file-pane-btn { align-self:flex-start; }
+.wb-file-pane-src { flex:1; min-height:0; overflow:auto; padding:8px 0 20px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; line-height:1.55; }
+.wb-file-pane-row { display:flex; gap:10px; padding:0 12px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.wb-file-pane-row[data-file-line-hit] { background:var(--dsw-derive-warn-bg,#fff8c5); }
+.wb-file-pane-ln { flex:none; width:48px; text-align:right; color:var(--dsw-derive-muted,#57606a); user-select:none; }
+.wb-file-pane-lc { flex:1; min-width:0; }
+.wb-file-md { flex:1; min-height:0; overflow:auto; padding:12px 16px 24px; }
+.wb-file-bridge { padding:16px; font-size:12.5px; color:var(--dsw-derive-muted,#57606a); }
+.wb-file-bridge-refused { color:var(--dsw-derive-danger,#cf222e); }
 
 /* 顶部会话入口行样式已随票② R8 退役（t260904-05，顶部行样式族全清）。 */
 `;
@@ -10339,6 +11209,7 @@ function useHideFactoryNewSession(rootRef, wide) {
 }
 function WorkbenchSidebar(props) {
 	const { wide, expandSidebar, sessions, views, open: slotOpen, workspaces, getService } = props;
+	const fileOpen = (0, react.useSyncExternalStore)(subscribeFileOpen, readFileOpenRequest, readFileOpenRequest);
 	const [projects, setProjects] = (0, react.useState)([]);
 	/** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
 	const [ticketsByProject, setTicketsByProject] = (0, react.useState)({});
@@ -11289,6 +12160,7 @@ function WorkbenchSidebar(props) {
 							closeTicketOverlay: () => setListNonce((n) => n + 1)
 						})] })]
 					}),
+					fileOpen !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(FilePane, {}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "wb-sb-foot",
 						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "wb-sb-foot-sp" })
@@ -17327,6 +18199,10 @@ const INITIAL_POLL_STATE = {
 *  中列同一时刻只挂一个视图，模块单态安全。空串=不拼参（host 会 400，UI 先显占位）。
 *  t260828-06：单态本体迁到 shared/view-project.ts——hero 接管组件（root 作用域，
 *  不在中列组件树内）也要读它做「当前项目」推导。 */
+/** This implementation's identity (the slot key and the registry id must match). */
+const FILE_TAB_ID = "sandbar-workbench/file-bridge";
+/** The tab kind (kept apart from the id: the kind discriminates resources, the id names this implementation). */
+const FILE_TAB_KIND = "sandbar-workbench.file-bridge";
 const name = "sandbar-workbench/client";
 const inject = [
 	"slots",
@@ -19201,10 +20077,46 @@ function D2Problems({ detail }) {
 		}), rows]
 	});
 }
-/** t261001-11 第二缺陷：槽条目渲染崩溃曾把整个 sidebar.workspaces 条目打掉
-*  （dsh 整条回收 → 退回默认 UI）。本地错误边界兜住：崩了只在本面板画一行
-*  点名故障的 inline note（slotFaultMessage），其余 UI 存活；console.error 留痕。 */
-var SlotErrorBoundary = class extends react.Component {
+/**
+* The local error boundary of a slot entry (t261001-11, second defect): a crash while
+* rendering the sidebar used to take the whole `sidebar.workspaces` entry with it (dsh
+* reclaims the entry and the UI falls back to the stock column). Contained here, a crash
+* paints one inline note that names the fault (`slotFaultMessage`), the rest of the UI
+* survives, and `console.error` keeps the trace.
+*
+* t261102-09 (send-back): the base class is chosen ONCE at module evaluation, so a host
+* whose module table hands a partial React (hooks but no class base) degrades to a
+* pass-through instead of throwing. `class extends undefined` throws while the module is
+* being evaluated, so the whole bundle fails to boot — the same "one crashed entry takes
+* the column down" failure this boundary exists to contain, one level earlier. The
+* degradation is declared: on that path children render unchanged and nothing is caught.
+*/
+var SlotBoundaryPassThrough = class {
+	props;
+	state = { message: null };
+	constructor(props) {
+		this.props = props;
+	}
+	static getDerivedStateFromError() {
+		return { message: null };
+	}
+	setState() {}
+	render() {
+		return this.props.children;
+	}
+};
+/** Whether a value can be a class base (`extends` accepts a constructor only). */
+function isConstructibleBase(value) {
+	if (typeof value !== "function") return false;
+	try {
+		Reflect.construct(Object, [], value);
+		return true;
+	} catch {
+		return false;
+	}
+}
+const SlotBoundaryBase = isConstructibleBase(react.Component) ? react.Component : SlotBoundaryPassThrough;
+var SlotErrorBoundary = class extends SlotBoundaryBase {
 	state = { message: null };
 	static getDerivedStateFromError(error) {
 		return { message: slotFaultMessage(error) };
@@ -22347,6 +23259,22 @@ function apply(ctx) {
 		views: { overlay: WorkbenchSection },
 		...props
 	}) })));
+	const sidebarRightTabs = getService?.("sidebarRightTabs");
+	if (sidebarRightTabs !== void 0 && sidebarRightTabs !== null && typeof sidebarRightTabs.register === "function") ctx.effect(() => sidebarRightTabs.register({
+		id: FILE_TAB_ID,
+		kind: FILE_TAB_KIND,
+		patterns: ["dsh-resource://file/**"],
+		priority: "extension",
+		canOpen: claimsTextFile,
+		title: fileTitleOf
+	}), "sandbar-workbench: middle-column file claim");
+	else console.warn("[workbench] file claim skipped: ctx.get(\"sidebarRightTabs\") is unavailable (the right column keeps its stock behavior)");
+	bindBridgeService(getService);
+	ctx.effect(() => ctx.slots.inject("sidebar.right.pane.tab", () => ctx.slots.register({
+		name: "sidebar.right.pane.tab",
+		key: FILE_TAB_ID,
+		inject: { hooks: { tabInfo: (_standard, useTabInfo) => useTabInfo } }
+	}, FileBridgeBody)), "sandbar-workbench: middle-column file body");
 }
 //#endregion
 exports.ReadStatePanel = ReadStatePanel;

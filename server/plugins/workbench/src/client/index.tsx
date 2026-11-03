@@ -99,6 +99,15 @@ import { LaneMap, ChecksDetail } from './lane-map.tsx'
 // t260926-05：巡检报告面纯函数层（asText/套件证据段/泛化 face 行/报告摘要/发现项防御视图）。
 import { asText, suiteSectionView, faceRows, reportDigest, findingView } from './inspection-report-model.ts'
 import type { DigestLine } from './inspection-report-model.ts'
+// t261102-09: the chat's file links are hijacked into the middle column — the claim
+// rule lives in a pure model, the tab body in the bridge.
+import { claimsTextFile, fileTitleOf, type TabKindRegistry } from './file-pane-model.ts'
+import { bindBridgeService, FileBridgeBody } from './file-bridge.tsx'
+
+/** This implementation's identity (the slot key and the registry id must match). */
+const FILE_TAB_ID = 'sandbar-workbench/file-bridge'
+/** The tab kind (kept apart from the id: the kind discriminates resources, the id names this implementation). */
+const FILE_TAB_KIND = 'sandbar-workbench.file-bridge'
 // t261008-36: the ProvidersSection import retired here — Model routes opens from
 // the executor panel's Settings tab; executor-view.tsx is now the component's one
 // importer (one face, one home).
@@ -2182,10 +2191,49 @@ function D2Problems({ detail }: { detail: TicketDetail }) {
   )
 }
 
-/** t261001-11 第二缺陷：槽条目渲染崩溃曾把整个 sidebar.workspaces 条目打掉
- *  （dsh 整条回收 → 退回默认 UI）。本地错误边界兜住：崩了只在本面板画一行
- *  点名故障的 inline note（slotFaultMessage），其余 UI 存活；console.error 留痕。 */
-class SlotErrorBoundary extends Component<{ children: ReactNode }, { message: string | null }> {
+/**
+ * The local error boundary of a slot entry (t261001-11, second defect): a crash while
+ * rendering the sidebar used to take the whole `sidebar.workspaces` entry with it (dsh
+ * reclaims the entry and the UI falls back to the stock column). Contained here, a crash
+ * paints one inline note that names the fault (`slotFaultMessage`), the rest of the UI
+ * survives, and `console.error` keeps the trace.
+ *
+ * t261102-09 (send-back): the base class is chosen ONCE at module evaluation, so a host
+ * whose module table hands a partial React (hooks but no class base) degrades to a
+ * pass-through instead of throwing. `class extends undefined` throws while the module is
+ * being evaluated, so the whole bundle fails to boot — the same "one crashed entry takes
+ * the column down" failure this boundary exists to contain, one level earlier. The
+ * degradation is declared: on that path children render unchanged and nothing is caught.
+ */
+class SlotBoundaryPassThrough {
+  props: { children?: ReactNode }
+  state: { message: string | null } = { message: null }
+  constructor(props: { children?: ReactNode }) {
+    this.props = props
+  }
+  static getDerivedStateFromError() {
+    return { message: null }
+  }
+  setState() {
+    // Nothing is caught on this path, so no state ever changes.
+  }
+  render() {
+    return this.props.children
+  }
+}
+/** Whether a value can be a class base (`extends` accepts a constructor only). */
+function isConstructibleBase(value: unknown): boolean {
+  if (typeof value !== 'function') return false
+  try {
+    Reflect.construct(Object, [], value as unknown as new () => unknown)
+    return true
+  } catch {
+    return false
+  }
+}
+const SlotBoundaryBase: any = isConstructibleBase(Component) ? Component : SlotBoundaryPassThrough
+
+class SlotErrorBoundary extends SlotBoundaryBase {
   state = { message: null as string | null }
   static getDerivedStateFromError(error: unknown) {
     return { message: slotFaultMessage(error) }
@@ -4965,4 +5013,45 @@ export function apply(ctx: ClientContext): void {
   // t261005-10 (UI-2): the metrics footer.action slot registration retires with
   // the three-level entrance — Metrics lives in the panel Metrics tab and the slot
   // goes back to the platform (an unregistered slot occupies nothing).
+
+  // t261102-09: a file link in the chat opens in the middle column (host ruling 261016,
+  // option a: claim the file tab, then forward it). Two registrations, the same way the
+  // platform registers its own types:
+  //   (1) the type (extension band) — it outranks the builtin documentpreview type at
+  //       the fallback band and claims text-like suffixes only (claimsTextFile). Images,
+  //       PDF and HTML return false, so the builtin preview stays exactly as it is.
+  //   (2) the body (keyed sidebar.right.pane.tab, keyed by this implementation's id) —
+  //       the bridge reads its own tab, hands the file to the middle column, and closes
+  //       itself.
+  //
+  // Both services are probed through `ctx.get` (the property form throws without inject;
+  // see the 260923 note above). A missing service registers NOTHING and leaves the right
+  // column at stock behavior with one warn line — a declared degradation, no silent
+  // reroute and no throw.
+  const sidebarRightTabs = getService?.('sidebarRightTabs') as TabKindRegistry | undefined
+  if (sidebarRightTabs !== undefined && sidebarRightTabs !== null && typeof sidebarRightTabs.register === 'function') {
+    ctx.effect(() => sidebarRightTabs.register({
+      id: FILE_TAB_ID,
+      kind: FILE_TAB_KIND,
+      patterns: ['dsh-resource://file/**'],
+      priority: 'extension',
+      canOpen: claimsTextFile,
+      title: fileTitleOf,
+    }), 'sandbar-workbench: middle-column file claim')
+  } else {
+    console.warn('[workbench] file claim skipped: ctx.get("sidebarRightTabs") is unavailable (the right column keeps its stock behavior)')
+  }
+
+  // The bridge reads the plugin's service probe through this binding: the seat hands
+  // only the injected hooks to the body as props, so `ctx.get` has no other road in.
+  bindBridgeService(getService)
+  // Owned by the plugin lifetime, like the type registration above (the platform's own
+  // document preview wraps its body the same way): unload disposes both stages.
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+    name: 'sidebar.right.pane.tab',
+    key: FILE_TAB_ID,
+    // The platform's own types connect it the same way: pass the slot framework's
+    // tab-info reader through unchanged instead of inventing a hook.
+    inject: { hooks: { tabInfo: (_standard: unknown, useTabInfo: unknown) => useTabInfo } },
+  }, FileBridgeBody)), 'sandbar-workbench: middle-column file body')
 }

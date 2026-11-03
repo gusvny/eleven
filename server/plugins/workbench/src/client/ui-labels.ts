@@ -71,6 +71,18 @@ const WORKFLOW_TABLE: Record<string, string> = {
   'chore-lane': 'Chore Lane',
 }
 
+/** Artifact view kind → English (truth source: engine shared.ARTIFACT_KINDS, epic
+ *  artifact-face). A kind says what a human does with an artifact, not what it looks
+ *  like; an unknown value falls back to the raw identifier (labelOf rule). */
+const ARTIFACT_KIND_TABLE: Record<string, string> = {
+  image: 'Image',
+  text: 'Text',
+  structure: 'Structure',
+  diff: 'Diff',
+  ledger: 'Ledger',
+  external: 'External',
+}
+
 /**
  * t261102-12: the engine's NAMED read states -> English chips. Truth source = the
  * engine's own words (client.py read_state values); an unknown value falls back to the
@@ -89,18 +101,6 @@ const READ_STATE_TABLE: Record<string, string> = {
 
 export function readStateLabel(id: unknown): string {
   return labelOf(READ_STATE_TABLE, id)
-}
-
-/** Artifact view kind → English (truth source: engine shared.ARTIFACT_KINDS, epic
- *  artifact-face). A kind says what a human does with an artifact, not what it looks
- *  like; an unknown value falls back to the raw identifier (labelOf rule). */
-const ARTIFACT_KIND_TABLE: Record<string, string> = {
-  image: 'Image',
-  text: 'Text',
-  structure: 'Structure',
-  diff: 'Diff',
-  ledger: 'Ledger',
-  external: 'External',
 }
 
 export const STAGE_LABEL: Record<string, string> = STAGE_TABLE

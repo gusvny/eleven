@@ -182,6 +182,15 @@ async function attachStub(page) {
         if (sub === 'agent-usage') return body({ ok: true, result: { exists: false, files: 0, total: { input: 0, output: 0, cacheRead: 0 }, byStage: {}, models: [] } });
         if (sub === 'agent-live') return body({ ok: true, result: { exists: false, events: [], truncated: false } });
         if (sub === 'agent-logs') return body({ ok: true, result: { lines: [] } });
+        // t261102-09 (acceptance round 14): the develop-line merge put the artifact
+        // panel into the ticket detail, and it reads this route on open. This journey
+        // declares no artifacts, so the honest face is an EMPTY inventory — the panel
+        // renders its own "This ticket declares no artifacts." line instead of a
+        // failure. A 404 here is console noise T7 cannot tell apart from a product
+        // fault (the product route exists: node.ts handleTicketArtifacts).
+        // The per-artifact bytes route (/artifacts/<stage>/<id>/bytes) needs no line:
+        // an empty inventory offers nothing to click, so the journey never reads bytes.
+        if (sub === 'artifacts') return body({ ok: true, result: { rows: [], stats: {}, refusals: [], listSource: 'handoffs' } });
         return body({ ok: false, error: `fixture stub: unsupported sub-resource ${sub}` }, 404);
       }
       return body({ ok: false, error: 'fixture stub: unsupported' }, 400);

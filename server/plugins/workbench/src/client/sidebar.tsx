@@ -63,6 +63,11 @@ import { ProjectSessionRow } from './project-session-row.tsx'
 import { backfillProjectSeqs, labelOf, rowLabelOf } from '../shared/sessions.ts'
 import { displayHandle } from '../shared/session-handles.ts'
 import { fetchProjectLedger, getLedgerSnapshot, persistLedger } from './session-ledger-store.ts'
+// t261102-09: the middle-column file sheet (where a hijacked chat file link lands) and
+// its one-slot request store. Neither module touches session or ticket data; the sheet
+// reads bytes through the named REST route only.
+import { FilePane } from './file-pane.tsx'
+import { readFileOpenRequest, subscribeFileOpen } from './file-open-request.ts'
 // 插件陈旧全局提醒（t260902-03 立；t260905-07 KI-052 握手矩阵接线）：useStaleBanner
 // 单例挂本组件；横幅渲染在 .wb-sb-right 共享容器，文案常量同源消费（banner-text.ts，
 // 场景断言锚 KI-051 纪律）。
@@ -596,6 +601,43 @@ const CSS = `${DERIVE_TOKENS_CSS}
 .wb-right-content > .wb-executor-view { flex:1; min-height:0; }
 .wb-right-content > .wb-placeholder { flex:none; }
 .wb-placeholder { padding:32px; color:var(--dsw-derive-muted,#57606a); font-size:13px; line-height:1.8; }
+/* t261102-09: the middle-column file sheet (where a chat file link lands). It is a
+   SIBLING of .wb-right-content and is positioned inside .wb-sb-right (already
+   position:relative — the ticket drawer's containing block), so the ticket detail and
+   the executor panel stay mounted below it with their state intact and Back only closes
+   this layer. z-index 91 sits above the drawer (index.tsx .wb-drawer, 90) and below every
+   modal (.wb-modal 99, lightbox 120). The geometry matches the drawer's 12px inset, but
+   the box is .wb-sb-right's box, so the sheet also covers the stale-build banner row
+   (accepted: the banner returns when the sheet closes, and a stale console gets its own
+   named banner instead of a silent gap). */
+.wb-file-pane { position:absolute; top:12px; right:12px; bottom:12px; left:12px; z-index:91;
+  display:flex; flex-direction:column; min-height:0; background:var(--dsw-derive-canvas,#ffffff);
+  border:1px solid var(--dsw-derive-border,#d0d7de); border-radius:10px;
+  box-shadow:0 12px 40px rgba(31,35,40,.35); font-size:13px; color:var(--dsw-derive-fg,#1f2328); }
+.wb-file-pane-head { flex:none; display:flex; align-items:center; gap:8px; padding:8px 12px;
+  border-bottom:1px solid var(--dsw-derive-border,#d0d7de); }
+.wb-file-pane-title { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+.wb-file-pane-btn { flex:none; font:inherit; font-size:12px; border:1px solid var(--dsw-derive-border,#d0d7de);
+  background:transparent; color:var(--dsw-derive-accent,#0969da); border-radius:6px; padding:2px 8px; cursor:pointer; }
+.wb-file-pane-btn:hover { background:var(--dsw-derive-surface,#f6f8fa); }
+.wb-file-pane-btn[data-active=true] { background:var(--dsw-derive-surface,#f6f8fa); color:var(--dsw-derive-fg,#1f2328); }
+.wb-file-pane-toggle { flex:none; display:inline-flex; gap:4px; }
+.wb-file-pane-line-note { flex:none; padding:2px 12px; font-size:11px; color:var(--dsw-derive-muted,#57606a); }
+.wb-file-pane-status { padding:16px 12px; color:var(--dsw-derive-muted,#57606a); }
+.wb-file-pane-banner { margin:12px; padding:10px 12px; display:flex; flex-direction:column; gap:8px;
+  border:1px solid var(--dsw-derive-danger,#cf222e); border-radius:8px;
+  background:var(--dsw-derive-danger-bg,#ffebe9); color:var(--dsw-derive-danger,#cf222e); font-size:12.5px; }
+.wb-file-pane-banner .wb-file-pane-btn { align-self:flex-start; }
+.wb-file-pane-src { flex:1; min-height:0; overflow:auto; padding:8px 0 20px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; line-height:1.55; }
+.wb-file-pane-row { display:flex; gap:10px; padding:0 12px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.wb-file-pane-row[data-file-line-hit] { background:var(--dsw-derive-warn-bg,#fff8c5); }
+.wb-file-pane-ln { flex:none; width:48px; text-align:right; color:var(--dsw-derive-muted,#57606a); user-select:none; }
+.wb-file-pane-lc { flex:1; min-width:0; }
+.wb-file-md { flex:1; min-height:0; overflow:auto; padding:12px 16px 24px; }
+.wb-file-bridge { padding:16px; font-size:12.5px; color:var(--dsw-derive-muted,#57606a); }
+.wb-file-bridge-refused { color:var(--dsw-derive-danger,#cf222e); }
 
 /* 顶部会话入口行样式已随票② R8 退役（t260904-05，顶部行样式族全清）。 */
 `
@@ -657,6 +699,11 @@ function useHideFactoryNewSession(rootRef: { current: HTMLElement | null }, wide
 
 export function WorkbenchSidebar(props: SidebarProps) {
   const { wide, expandSidebar, sessions, views, open: slotOpen, workspaces, getService } = props
+  // t261102-09: a chat file link reaches the middle column through the one-slot store;
+  // this component only subscribes to that same snapshot. While the middle column is not
+  // mounted (rail-only shell, no project selected) the request waits in the store and
+  // opens when the column returns — it is never dropped.
+  const fileOpen = useSyncExternalStore(subscribeFileOpen, readFileOpenRequest, readFileOpenRequest)
   const [projects, setProjects] = useState<Project[]>([])
   /** 项目 key → 该项目的工单行（按 ?project= 逐组拉取，来源即归属，不做路径猜测）。 */
   const [ticketsByProject, setTicketsByProject] = useState<Record<string, Ticket[]>>({})
@@ -1677,6 +1724,13 @@ export function WorkbenchSidebar(props: SidebarProps) {
             </>
           )}
         </div>
+        {/* t261102-09: the middle-column file sheet. It mounts as a SIBLING of
+            .wb-right-content (never a child of it), so its containing block is
+            .wb-sb-right (already position:relative, the ticket drawer's block): the
+            drawer's box does not move, .wb-right-content gains no position, and no view
+            below it unmounts. One surface only — z-index 91, above the drawer, below any
+            modal, no stack. */}
+        {fileOpen !== null && <FilePane />}
         {/* Bottom strip: since t261008-21 the gear Settings popover (with the
             dwell input and the M2c placeholder) is retired — host order 261008
             option A pins the dwell window at 24 h (rule lives in sandbar-dwell).

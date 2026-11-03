@@ -1,25 +1,24 @@
 {
+  "server/plugins/knowledge/src/client/index.tsx": [
+    575,
+    582
+  ],
   "server/plugins/workbench/src/client/docs.tsx": [
     275,
     277,
     278
   ],
-  "server/plugins/knowledge/src/client/index.tsx": [
-    575,
-    582
+  "server/plugins/providers/src/host/routes-edit.ts": [
+    87
+  ],
+  "server/plugins/workbench/src/client/lane-durations.ts": [
+    253
   ],
   "server/plugins/workbench/src/client/epics.tsx": [
     412,
     413,
     414,
     415
-  ],
-  "server/plugins/workbench/node.ts": [
-    326
-  ],
-  "server/plugins/workbench/src/client/inspection-report-model.ts": [
-    76,
-    77
   ],
   "server/plugins/executor-panel/src/host/panel-page.ts": [
     118,
@@ -30,40 +29,41 @@
     1905,
     2086
   ],
-  "server/plugins/workbench/src/client/lane-durations.ts": [
-    253
-  ],
-  "server/plugins/workbench/src/client/index.tsx": [
-    1461,
-    1465,
-    1496,
-    1533,
-    1764,
-    1837,
-    1846,
-    2174,
-    2314,
-    2571,
-    2573,
-    2589,
-    2609,
-    2618,
-    2619,
-    2912,
-    2919,
-    2966,
-    2967,
-    3677,
-    3679
+  "server/plugins/workbench/src/client/inspection-report-model.ts": [
+    76,
+    77
   ],
   "server/plugins/providers/src/client/index.tsx": [
     483
   ],
+  "server/plugins/workbench/node.ts": [
+    515
+  ],
   "server/plugins/workbench/src/shared/parts.ts": [
     33
   ],
-  "server/plugins/providers/src/host/routes-edit.ts": [
-    87
+  "server/plugins/workbench/src/client/index.tsx": [
+    1470,
+    1474,
+    1505,
+    1542,
+    1773,
+    1846,
+    1855,
+    2183,
+    2362,
+    2619,
+    2621,
+    2637,
+    2657,
+    2666,
+    2667,
+    2960,
+    2967,
+    3014,
+    3015,
+    3725,
+    3727
   ],
   "_generated_by": [
     " ",

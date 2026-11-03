@@ -146,7 +146,15 @@ const lightLaneGate = {
   ok(src.includes('gateProblemRows(detail)'), 'D: D2Problems 消费 gateProblemRows')
   ok(!src.includes('g.checks.filter'), 'D: 旧 g.checks.filter 表达式已退役')
   ok(/checks\?:/.test(src), 'D: GateRun.checks 已改可选')
-  ok(src.includes('class SlotErrorBoundary extends Component'), 'D: 错误边界类在场')
+  // t261102-09: the base is now chosen once at module evaluation, because a host whose
+  // module table hands a partial React made `class extends undefined` throw WHILE the
+  // module was evaluated (the artifact did not boot at all). The class must still exist,
+  // the base must come from the constructibility probe, and a missing base must degrade
+  // to the declared pass-through — the lock is narrowed to those three facts.
+  ok(src.includes('class SlotErrorBoundary extends SlotBoundaryBase'), 'D: the error boundary class is present (base chosen by the probe)')
+  ok(src.includes('isConstructibleBase(Component) ? Component : SlotBoundaryPassThrough'),
+    'D: a missing React class base degrades to the pass-through instead of throwing at evaluation')
+  ok(src.includes('class SlotBoundaryPassThrough'), 'D: the declared pass-through base exists')
   ok(src.includes('getDerivedStateFromError') && src.includes('componentDidCatch'),
     'D: 边界两钩子齐备')
   // 槽条目注册位被边界包住：<SlotErrorBoundary><WorkbenchSidebar … /></SlotErrorBoundary>

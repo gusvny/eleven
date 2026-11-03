@@ -65,6 +65,14 @@
  *   GET  /sandbar-workbench/api/wf/book?path=books/hanshu/jizhuan.json&limit=5
  *                                               → 内容预览（审批前过目）：只读 app/public/data/<path>，
  *                                                 返回 meta + 前 limit 章（标题+段落）；path 白名单防穿路径
+ *   GET  /sandbar-workbench/api/wf/file?session=<id>&path=<p>
+ *                                               → middle-column file read (t261102-09): a registered
+ *                                                 project-directory whitelist (the lexical test runs
+ *                                                 first, realpath follows), a 1 MiB cap and strict
+ *                                                 UTF-8. A target fault is 200+{ok:false,reason};
+ *                                                 only a malformed request is 400. The path constant
+ *                                                 is shared with the client pane.
+ *                                                 (no session = the absolute scope)
  *   GET  /sandbar-workbench/api/wf/worker-staleness → worker 陈旧度对比（只读，t261008-29 KI-227）：
  *                                                 运行中 worker 指纹 vs 当前 HEAD + 当前活动注册集；
  *                                                 stale=警告（observe-only，绝不阻断/重启 worker）
@@ -147,7 +155,7 @@
 
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { appendFile, readFile, readdir } from 'node:fs/promises'
+import { appendFile, readFile, readdir, realpath, stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve, sep } from 'node:path'
 import { existsSync } from 'node:fs'
@@ -167,6 +175,10 @@ import { ProjectCliError, runProjectCli } from './src/host/project-admin.ts'
 // 降级/白名单/句柄终态口径见该模块头注（R1 取舍清单 2）。
 import { listDocs, readDoc } from './src/host/docs.ts'
 import { isDocsScope } from './src/shared/docs-model.ts'
+// The middle-column file endpoint constant (t261102-09): one value for the client pane
+// and this file's route. Two literals drift into "the click does nothing" while each
+// side's source lock stays green (the KI-01M4HMCZAM4ZBC2CKN15HDBZHP shape).
+import { FILE_READ_PATH } from './src/client/file-route.ts'
 
 function projectRootsFor(projectKey: unknown): string[] {
   // 跨项目工单（t260903-11/-12）：票所属项目注册目录=实时态/日志读取的合法根。
@@ -178,6 +190,183 @@ function projectRootsFor(projectKey: unknown): string[] {
     const p = findProject(projectKey)
     return p ? p.dirs.filter((d): d is string => typeof d === 'string') : []
   } catch { return [] }
+}
+
+/* ---------------------------------------------------- guarded file read (t261102-09)
+ *
+ * The middle column reads a file through ONE door: the guards below plus one route in
+ * this file. Rules (plan v3 §3.3; review rounds R15/S1/S2/S5):
+ *
+ *   - The roots are the dirs of every registry entry, read per request (loadRegistry).
+ *     A missing registry root throws; an empty or all-quarantined registry is an empty
+ *     table. Both answer the same named refusal, no-registered-roots, never a 500.
+ *   - Roots carry two spellings: the declared value (raw) and its realpath (real). The
+ *     lexical test runs first over both and touches NO file system, so a path outside
+ *     the roots answers outside-roots whether it exists or not: this route is not an
+ *     existence oracle. A second test over the real path follows the realpath call, and
+ *     that one is what stops a symlink escape.
+ *   - A session-scope address must resolve its workspace (Session.header.cwd:
+ *     dsh-session/lib/types/index.d.ts:116 and types.d.ts:69; meta is only the INPUT of
+ *     create). An unresolvable workspace is the named refusal
+ *     session-workspace-unknown, and it does NOT fall back to the roots: that fallback
+ *     can resolve the same relative path under another project and serve the wrong file
+ *     with no banner.
+ *   - A target fault answers 200 + {ok:false, reason, path, error}, the read-face
+ *     convention of this repo (see the handleTicketTimeFile note above). Only a
+ *     malformed request answers 400 (bad-path / bad-session).
+ *   - At most 1 MiB per read, decoded as strict UTF-8 (TextDecoder with fatal). Every
+ *     failure names the check it failed.
+ */
+
+/** Byte cap per read: over it is the named too-large (the message carries the count); never a truncated body posing as the whole file. */
+const FILE_READ_MAX_BYTES = 1024 * 1024
+
+/** Session id shape (external route input): no slash, no whitespace, no control character, 1..200 characters. */
+const FILE_SESSION_ID_RE = /^[A-Za-z0-9._:@-]{1,200}$/
+
+interface GuardedFileFailure {
+  ok: false
+  reason: string
+  path: string
+  message: string
+}
+
+interface GuardedFileSuccess {
+  ok: true
+  absolutePath: string
+  size: number
+  lines: number
+  content: string
+}
+
+interface GuardedFileRoots {
+  ok: true
+  raw: string[]
+  real: string[]
+}
+
+function guardedFailure(reason: string, path: string, message: string): GuardedFileFailure {
+  return { ok: false, reason, path, message }
+}
+
+/** The three absolute spellings: POSIX, a Windows drive letter, and UNC (the dsh workspace-path rule). */
+function isAbsoluteWorkspacePath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:[/\\]/.test(path) || path.startsWith('\\\\')
+}
+
+/** Separator-bounded containment (the three existing spots in this file); a bare startsWith lets a same-prefix sibling through. */
+function withinRoot(root: string, abs: string): boolean {
+  return abs === root || abs.startsWith(root + sep)
+}
+
+/**
+ * The registered directories, in both spellings.
+ *
+ * A loader throw, an empty table, or every entry failing realpath answers
+ * no-registered-roots (named, never a 500). One unresolvable entry is skipped with one
+ * log line; it does not refuse the other roots.
+ */
+async function registeredFileRoots(onSkip?: (message: string) => void): Promise<GuardedFileRoots | GuardedFileFailure> {
+  let projects: ProjectEntry[]
+  try {
+    projects = loadRegistry().projects
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return guardedFailure('no-registered-roots', '', `the project registry could not be loaded: ${msg}`)
+  }
+  const raw: string[] = []
+  const real: string[] = []
+  for (const p of projects) {
+    for (const dir of Array.isArray(p?.dirs) ? p.dirs : []) {
+      if (typeof dir !== 'string' || dir === '') continue
+      raw.push(dir)
+      try {
+        real.push(await realpath(dir))
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        onSkip?.(`registered project directory does not resolve, skipped: ${dir} (${msg})`)
+      }
+    }
+  }
+  if (raw.length === 0 || real.length === 0) {
+    return guardedFailure('no-registered-roots', '', 'no registered project directory is available')
+  }
+  return { ok: true, raw, real }
+}
+
+/**
+ * Resolve and guard one file read (no content is read here).
+ *
+ * Fixed order: session workspace, lexical containment (no file system), realpath,
+ * containment on the real path (the symlink-escape gate), stat, size, read, UTF-8.
+ * Every step fails with its own reason and message.
+ */
+async function resolveGuardedFile(input: {
+  roots: GuardedFileRoots
+  scope: 'session' | 'absolute'
+  sessionCwd?: string
+  path: string
+}): Promise<{ ok: true; absolutePath: string } | GuardedFileFailure> {
+  const requested = input.path
+  let base = ''
+  if (input.scope === 'session') {
+    if (typeof input.sessionCwd !== 'string' || input.sessionCwd === '') {
+      return guardedFailure('session-workspace-unknown', requested, 'the session workspace cannot be resolved for this address')
+    }
+    try {
+      base = await realpath(input.sessionCwd)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return guardedFailure('session-workspace-unknown', requested, `the session workspace does not resolve: ${input.sessionCwd} (${msg})`)
+    }
+  }
+  if (input.scope === 'absolute' && !isAbsoluteWorkspacePath(requested)) {
+    return guardedFailure('bad-path', requested, 'an absolute address must carry an absolute path')
+  }
+  const abs = isAbsoluteWorkspacePath(requested)
+    ? resolve(requested)
+    : resolve(base === '' ? requested : base, requested)
+  const lexical = [...input.roots.raw, ...input.roots.real]
+  if (!lexical.some((root) => withinRoot(root, abs))) {
+    return guardedFailure('outside-roots', requested, 'the path is outside every registered project directory')
+  }
+  let realAbs: string
+  try {
+    realAbs = await realpath(abs)
+  } catch (err: any) {
+    if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') {
+      return guardedFailure('not-found', requested, `no such file: ${abs}`)
+    }
+    return guardedFailure('unreadable', requested, `realpath failed (${String(err?.code ?? err)})`)
+  }
+  if (!input.roots.real.some((root) => withinRoot(root, realAbs))) {
+    return guardedFailure('outside-roots', requested, `the path resolves outside every registered project directory (${realAbs})`)
+  }
+  let info
+  try {
+    info = await stat(realAbs)
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') return guardedFailure('not-found', requested, `no such file: ${realAbs}`)
+    return guardedFailure('unreadable', requested, `stat failed (${String(err?.code ?? err)})`)
+  }
+  if (info.isDirectory()) return guardedFailure('is-directory', requested, 'the path is a directory, not a file')
+  if (!info.isFile()) return guardedFailure('unreadable', requested, 'the path is not a regular file')
+  if (info.size > FILE_READ_MAX_BYTES) {
+    return guardedFailure('too-large', requested, `the file is ${info.size} bytes; the read limit is ${FILE_READ_MAX_BYTES}`)
+  }
+  return { ok: true, absolutePath: realAbs }
+}
+
+/** The session workspace (Session.header.cwd; the probe shape is read from the installed tree, not a contract). */
+function sessionCwdOf(ctx: Context, sessionId: string): string | undefined {
+  try {
+    const sessions = (ctx as any)?.get?.('sessions')
+    const session = typeof sessions?.get === 'function' ? sessions.get(sessionId) : undefined
+    const cwd = session?.header?.cwd
+    return typeof cwd === 'string' && cwd !== '' ? cwd : undefined
+  } catch {
+    return undefined
+  }
 }
 
 import { computeTicketDiff, type TicketForDiff } from './src/host/changes.ts'
@@ -2759,6 +2948,87 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     }
   }
 
+  /**
+   * Middle-column file read (t261102-09): GET /sandbar-workbench/api/wf/file?session=<id>&path=<p>.
+   *
+   * A hijacked chat file link lands in the middle column, and the middle column reads
+   * bytes through this route only. It NEVER reads an arbitrary absolute path: the
+   * target must sit inside a registered project directory (see the resolveGuardedFile
+   * note). No session means the absolute scope (a dsh-resource://file/absolute/...
+   * address carries no session).
+   *
+   * Transport (the handleTicketTimeFile family): a malformed request answers 400
+   * (bad-path / bad-session); a target fault answers 200 + {ok:false, reason, path,
+   * error}. The client names both cases from the body's reason.
+   */
+  async function handleFileRead(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Read-only across the method: a write verb never returns file content.
+    if (req.method !== undefined && req.method !== 'GET' && req.method !== 'HEAD') {
+      sendJson(res, 405, { ok: false, reason: 'method-not-allowed', error: `${String(req.method)} is not allowed on the file read (GET only)` })
+      return
+    }
+    const url = new URL(req.url ?? '/', 'http://x')
+    const requested = url.searchParams.get('path')
+    if (requested === null || requested === '') {
+      sendJson(res, 400, {
+        ok: false, reason: 'bad-path',
+        error: 'path is required: a session/project-relative path, or an absolute path inside a project directory',
+      })
+      return
+    }
+    const rawSession = url.searchParams.get('session')
+    if (rawSession !== null && !FILE_SESSION_ID_RE.test(rawSession)) {
+      sendJson(res, 400, {
+        ok: false, reason: 'bad-session',
+        error: `session has an illegal shape (1..200 characters, no slash, no whitespace, no control character): '${rawSession.slice(0, 60)}'`,
+      })
+      return
+    }
+    const roots = await registeredFileRoots((msg) => logger?.warn?.(`[file-read] ${msg}`))
+    if (roots.ok !== true) {
+      sendJson(res, 200, { ok: false, reason: roots.reason, path: requested, error: roots.message })
+      return
+    }
+    const scope: 'session' | 'absolute' = rawSession === null ? 'absolute' : 'session'
+    const sessionCwd = scope === 'session' ? sessionCwdOf(ctx, rawSession as string) : undefined
+    const resolved = await resolveGuardedFile({ roots, scope, sessionCwd, path: requested })
+    if (resolved.ok !== true) {
+      sendJson(res, 200, { ok: false, reason: resolved.reason, path: requested, error: resolved.message })
+      return
+    }
+    let bytes: Buffer
+    try {
+      bytes = await readFile(resolved.absolutePath)
+    } catch (err: any) {
+      sendJson(res, 200, {
+        ok: false, reason: 'unreadable', path: requested,
+        error: `the file could not be read (${String(err?.code ?? err?.message ?? err)})`,
+      })
+      return
+    }
+    let content: string
+    try {
+      // Strict decode: a file that is not UTF-8 text is refused by name, never
+      // rendered as replacement characters.
+      content = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    } catch {
+      sendJson(res, 200, {
+        ok: false, reason: 'not-utf8', path: requested,
+        error: 'the file is not valid UTF-8 text',
+      })
+      return
+    }
+    sendJson(res, 200, {
+      ok: true,
+      result: {
+        path: resolved.absolutePath,
+        size: Buffer.byteLength(content, 'utf8'),
+        lines: content === '' ? 1 : content.split('\n').length,
+        content,
+      },
+    })
+  }
+
   /** 把路由挂到 webServer（同一 effect，卸载随插件生命周期）。 */
   const attach = (ws: any): void => {
     ctx.effect(() => {
@@ -2787,6 +3057,10 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         ws.register({ kind: 'exact', path: EPICS_PREFIX, handler: handleEpics }),
         ws.register({ kind: 'prefix', path: EPICS_PREFIX, handler: handleEpicRoute }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/workspaces', handler: handleWorkspaceList }),
+        // t261102-09: the middle-column file read (the only byte entry after a chat file
+        // link is hijacked; registered-directory whitelist + named refusals + the
+        // 200+reason transport). The path constant is shared with the client pane.
+        ws.register({ kind: 'exact', path: FILE_READ_PATH, handler: handleFileRead }),
         // Per-project session ledger (sessions.json, UI-5 t261005-06): GET read
         // (executor projection included) + POST register (id-union merge + atomic
         // write; KI-193 stance in the handleSessionsPost doc).

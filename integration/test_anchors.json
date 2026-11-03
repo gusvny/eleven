@@ -3,7 +3,7 @@
     "basis": "default behaviour; every file that signal-hit a production-file or source-text scan was classified by reading the hit lines in context",
     "labelled_counts": {
       "engine_tests": 385,
-      "scenarios": 875
+      "scenarios": 877
     },
     "vocab": [
       "behaviour",
@@ -6213,6 +6213,14 @@
     "integration/t261102-40/sc_t261102_40_prelude_named_degrade.py": {
       "anchor": "behaviour",
       "note": "t261102-40: the nested-round journey of the guard against an unavailable bench module - a real suite round over a lane that does not carry process_bench.py degrades to the named NO TEST TARGET outcome, names the missing file and still runs its children; a lane that carries the assets finishes inside the bounded prelude and resolves its own target (never the parent round's ambient statement); a present-but-broken module is named as a code fault, never as a missing file. Assertions land on the round's exit code, its stderr copy, its INTEG_SUMMARY test_target face, the prelude-legs line and on-disk execution markers."
+    },
+    "integration/t261102-09/sc_t26110209_read_face_http.mjs": {
+      "anchor": "contract",
+      "note": "t261102-09: the guarded read face over real HTTP - the path the served bundle calls is the path the host registers, a text file under a registered root is served whole (session-relative and absolute), every target fault is refused by name with the requested path in the answer (outside-roots including sibling-prefix and symlink escapes, not-found, is-directory, too-large, not-utf8, no-registered-roots, session-workspace-unknown), a missing outside path answers outside-roots rather than not-found (no existence oracle), a malformed request is a 4xx naming the parameter, a write method returns no content, and disposing the plugin unregisters the route."
+    },
+    "integration/t261102-09/sc_t26110209_takeover_seam.mjs": {
+      "anchor": "contract",
+      "note": "t261102-09: the shipped workbench bundle registers a file tab type at the extension band (so it outranks the builtin), the canOpen veto claims text-like files and refuses image/PDF/HTML so the builtin keeps them, the seat body forwards one middle-column request and closes its own tab without ever re-opening the right column, the column collapses only when expanded and empty, a bad address renders a named banner without closing the tab, a second click keeps one request, a throwing close/collapse cannot undo the forward, and disposing the plugin returns the address to the builtin."
     }
   }
 }
