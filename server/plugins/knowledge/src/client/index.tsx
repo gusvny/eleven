@@ -667,10 +667,11 @@ export function KnowledgeSection({ projectKey }: { projectKey?: string }) {
           </div>
 
           {error !== '' && <div className="kb-err">{error}{'\n'}（知识库 API 未挂载？headless profile 无 webServer。）</div>}
-          {/* t261103-12: the derived index state, always labelled — absent, stale (with
-              the last build time), failed (with its reason) or current. The rows below are
-              read from the declared roots, never from a stale index. */}
-          <DocsRootsFace data={data} />
+          {/* t261103-19: no index-state banner here. This section is mounted by no
+              client entry (`apply()` registers nothing), so a banner in it shipped
+              nowhere and could only disagree with the one a reader sees. The live
+              documents face renders the index state from the same host wording, in the
+              executor panel's Docs tab. */}
 
           {showReview && review !== undefined && (
             <div className="kb-review-box">
@@ -948,54 +949,4 @@ export function KnowledgeSection({ projectKey }: { projectKey?: string }) {
  */
 export function apply(_ctx: ClientContext): void {
   /* 无注册：视图经 sandbar-workbench 侧栏中栏承载 */
-}
-
-/* ---------------------------------------------------------------------------
- * t261103-12 — derived index state + documentation roots in effect.
- *
- * Declared here (not next to the other interfaces) on purpose: the placeholder
- * literals of this page are line-keyed in the face-dash exemption table, so the
- * component's own line numbers must stay stable. `interface IndexData` merges with
- * the declaration above.
- * ------------------------------------------------------------------------- */
-
-interface IndexData {
-  state?: string
-  banner?: string
-  built_at?: string
-  stale_reason?: string
-  entries_source?: string
-  roots?: { id: string; repository: string; path: string; state: string; declared?: boolean }[]
-  resolution?: { state: string; declared: boolean; declaration: string; reason: string }
-}
-
-const DOCS_ROOTS_CSS = `
-/* roots in effect + derived index state (a stale index never reads as current). */
-.kb-index-state{font-size:11px;color:#57606a;padding:6px 0 0;overflow-wrap:anywhere}
-.kb-index-state[data-kb-index-state="stale"],.kb-index-state[data-kb-index-state="failed"],.kb-index-state[data-kb-index-state="absent"]{color:#9a6700}
-.kb-index-state b{color:#1f2328;font-weight:600}
-`
-
-/** The state face of the list branch (rendered beside the rows, never instead of them). */
-function DocsRootsFace({ data }: { data?: IndexData }) {
-  const banner = typeof data?.banner === 'string' ? data.banner : ''
-  const roots = Array.isArray(data?.roots) ? data!.roots! : []
-  return (
-    <>
-      <style>{DOCS_ROOTS_CSS}</style>
-      {banner !== '' && (
-        <div className="kb-index-state" data-kb-index-state={String(data?.state ?? '')}
-          data-kb-index-banner="">{banner}</div>
-      )}
-      {roots.length > 0 && (
-        <div className="kb-index-state" data-kb-roots="">
-          <b>{roots.length === 1 ? 'Root' : 'Roots'} in effect</b>{': '}
-          {roots.map((r) => `${r.repository}/${r.path} (${r.state})`).join(' · ')}
-          {data?.resolution?.declared === true
-            ? ` — declared in ${data.resolution.declaration}`
-            : ' — implied default (no declaration)'}
-        </div>
-      )}
-    </>
-  )
 }

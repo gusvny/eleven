@@ -401,7 +401,7 @@ const EMBEDDED = EMBED_CONSTS + [
   // t261006-17 (CL-2): concurrency knob + chip classifier (same single implementation).
   String(limitStep), String(concChipState),
   // t261008-19: docs tree page count + the mock's two entry rows (same single implementation).
-  String(countDocsTree), String(docEntryRow),
+  String(countDocsTree), String(docEntryRow), String(docsIndexStateView), String(docsIndexBannerHtml), // t261103-19: the docs face's derived-index state (tone only; the sentence is the host's)
   // t261009-44 + t261012-03: the Certification tab's render core and the
   // rounds-faces helpers + the round dialog core (closure-free; the copy
   // tables ride as JSON below).
@@ -647,7 +647,7 @@ input.tab{position:absolute;opacity:0;pointer-events:none}
 .doneWrap[data-open="false"] .doneList{display:none}
 .empty{color:var(--muted);padding:22px 4px}
 .banner{border:1px solid var(--amber);color:var(--amber);background:var(--warn-soft);border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:12px}
-.banner.red{border-color:var(--red);color:var(--red);background:var(--danger-soft)}
+.banner.red{border-color:var(--red);color:var(--red);background:var(--danger-soft)}.banner.ok{border-color:var(--green);color:var(--green);background:transparent} /* t261103-19: index current */
 .knob{display:grid;grid-template-columns:200px 1fr 240px;gap:6px;padding:5px 12px;border-bottom:1px solid var(--line-soft);align-items:center;font-size:12px}
 .knob .src{color:var(--muted);font-size:11px;font-family:ui-monospace,monospace}
 table{width:100%;border-collapse:collapse;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
@@ -2562,7 +2562,7 @@ th{color:var(--muted);font-weight:600;font-size:11px}
     // both shapes: the envelope (t261016-07 family) and a bare tree.
     var d=(state.docs && state.docs.result) ? state.docs.result : state.docs;
     if(!d){ e.innerHTML=bannerHtml('The doc tree could not be reached (the workbench plugin may not be loaded).', true); tree.innerHTML=''; return; }
-    e.innerHTML='';
+    e.innerHTML=(d.state==='refused') ? '' : docsIndexBannerHtml(d, esc); // t261103-19: the derived index state (absent/current/stale/failed), read-only; a refused root is its own answer
     // t261021-13: an empty tree states its own named reason; the document page
     // above owns the reader face, so nothing else can be wiped here.
     if(d.empty===true){ tree.innerHTML='<div class="empty">'+esc(d.reason||emptyCopyOf('docs_tree'))+'</div>'; return; }
@@ -3470,3 +3470,14 @@ th{color:var(--muted);font-weight:600;font-size:11px}
 </html>`
 
 export const PANEL_HTML = PANEL_PAGE_HTML // 兼容别名（本票内部引用）
+
+// t261103-19: the docs face's derived-index state (absent / current / stale / failed).
+// The sentence is the host face's own copy — produced once by the shared index face
+// (knowledge/src/shared/docs-roots.ts -> indexBanner) and handed to this page as
+// result.index.banner — so there is one wording and the page cannot drift from it. The
+// module renders nothing when the face is malformed, and it never starts a rebuild.
+// Declared at the END of this file on purpose: an import above the page template would
+// shift every line-keyed face-dash exemption site below it (integration/face_dash_exemptions.json,
+// renumbered only by its own generator), and the sites in this file are all above it.
+// ESM hoists the declaration, so the module scope sees it at the embedded-array line.
+import { docsIndexStateView, docsIndexBannerHtml } from './docs-index-view.ts'

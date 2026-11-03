@@ -951,7 +951,6 @@ function KnowledgeSection({ projectKey }) {
 					"（知识库 API 未挂载？headless profile 无 webServer。）"
 				]
 			}),
-			/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DocsRootsFace, { data }),
 			showReview && review !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "kb-review-box",
 				children: [
@@ -1486,36 +1485,6 @@ function KnowledgeSection({ projectKey }) {
 * 双轨探测——见 ./inject-contract 白名单纪律。
 */
 function apply(_ctx) {}
-const DOCS_ROOTS_CSS = `
-/* roots in effect + derived index state (a stale index never reads as current). */
-.kb-index-state{font-size:11px;color:#57606a;padding:6px 0 0;overflow-wrap:anywhere}
-.kb-index-state[data-kb-index-state="stale"],.kb-index-state[data-kb-index-state="failed"],.kb-index-state[data-kb-index-state="absent"]{color:#9a6700}
-.kb-index-state b{color:#1f2328;font-weight:600}
-`;
-/** The state face of the list branch (rendered beside the rows, never instead of them). */
-function DocsRootsFace({ data }) {
-	const banner = typeof data?.banner === "string" ? data.banner : "";
-	const roots = Array.isArray(data?.roots) ? data.roots : [];
-	return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-		/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: DOCS_ROOTS_CSS }),
-		banner !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-			className: "kb-index-state",
-			"data-kb-index-state": String(data?.state ?? ""),
-			"data-kb-index-banner": "",
-			children: banner
-		}),
-		roots.length > 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-			className: "kb-index-state",
-			"data-kb-roots": "",
-			children: [
-				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("b", { children: [roots.length === 1 ? "Root" : "Roots", " in effect"] }),
-				": ",
-				roots.map((r) => `${r.repository}/${r.path} (${r.state})`).join(" · "),
-				data?.resolution?.declared === true ? ` — declared in ${data.resolution.declaration}` : " — implied default (no declaration)"
-			]
-		})
-	] });
-}
 //#endregion
 exports.KnowledgeSection = KnowledgeSection;
 exports.apply = apply;

@@ -314,23 +314,11 @@ export function DocsSection({ projectKey: shellProjectKey }: { projectKey?: stri
         />
       </header>
       {projErr !== '' && <div className="wb-doc-project-error" data-wb-doc-project-error="">Project list unavailable: {projErr}</div>}
-      {tree?.index && (
-        // The derived index state, always labelled: absent, stale (with the last build
-        // time), failed (with its reason) or current. A stale index is never presented
-        // as current — and the listing below is read from the roots, never from it.
-        <div className="wb-doc-index-state" data-wb-doc-index-state={tree.index.state}
-          data-wb-doc-index-banner="">{tree.index.banner}</div>
-      )}
-      {tree?.state === 'served' && (tree.roots?.length ?? 0) > 0 && (
-        <div className="wb-doc-roots" data-wb-doc-roots="">
-          <b>{tree.roots!.length === 1 ? 'Root' : 'Roots'} in effect</b>
-          {': '}
-          {tree.roots!.map((r) => `${r.repository}/${r.path} (${r.state})`).join(' · ')}
-          {tree.declared === true
-            ? ` — declared in ${tree.declaration}`
-            : ' — implied default (no declaration)'}
-        </div>
-      )}
+      {/* t261103-19: the derived-index banner and the roots-in-effect line are NOT
+          rendered here. This component is imported by no client entry (the documents
+          face lives in the executor panel's Docs tab), so a second banner here could
+          only ever disagree with the one a reader actually sees. The panel renders the
+          index state from the same host face — one wording, one surface. */}
       <div className={`wb-doc-frame ${selected ? 'has-doc' : ''}`} data-wb-docs-frame="">
         <nav className="wb-doc-toc" data-wb-docs-toc="" aria-label="Docs browser">
           <div className="wb-doc-side">
@@ -439,14 +427,12 @@ export function DocsSection({ projectKey: shellProjectKey }: { projectKey?: stri
  * t261103-12 — the docs view over the project's RESOLVED documentation roots
  *
  * The host (src/host/docs.ts) resolves the roots, merges them and reads the derived
- * index's state; this half only renders what it is told:
- *   - `tree.roots` — the roots in effect (repository + path + served/empty), and whether
- *     they were declared or are the implied default;
- *   - `tree.index` — the derived index state (absent / stale with the last build time /
- *     failed with its reason / current), always labelled; a stale index never reads as
- *     current, and the listing itself always comes from the roots;
- *   - `tree.state === 'refused'` — a named refusal in place of the listing (never an
- *     empty view for a missing root).
+ * index's state. This component renders the listing over those roots and a named
+ * refusal in place of it; the derived-index banner is NOT rendered here (t261103-19 —
+ * see the comment at the render site): the live documents face is the executor panel's
+ * Docs tab, and one banner surface is what keeps the wording from disagreeing.
+ * The index face therefore stays declared-but-unrendered below: it is part of the
+ * host's answer shape this component still types.
  *
  * With more than one root a file row's `rel` is a selection token `@<n>/<rel>` (the
  * transport form the page sends back); `displaySelection` strips it for the copy the
@@ -493,14 +479,7 @@ function displaySelection(selection: string): string {
 }
 
 const ROOTS_STYLE = `
-/* t261103-12: roots in effect + derived index state (a stale index never reads as current). */
-.wb-doc-roots { font-size:11px; color:var(--dsw-derive-muted,#57606a); padding:2px 8px 8px; line-height:1.6; overflow-wrap:anywhere; }
-.wb-doc-roots b { color:var(--dsw-derive-fg,#1f2328); font-weight:600; }
-.wb-doc-index-state { font-size:11px; padding:4px 12px; border-bottom:1px solid var(--dsw-derive-border,#d0d7de);
-  color:var(--dsw-derive-muted,#57606a); overflow-wrap:anywhere; }
-.wb-doc-index-state[data-wb-doc-index-state="stale"],
-.wb-doc-index-state[data-wb-doc-index-state="failed"],
-.wb-doc-index-state[data-wb-doc-index-state="absent"] { color:var(--dsw-derive-warn,#9a6700); }
+/* t261103-12: the named refusal keeps the warn colour of the design's refusal state. */
 .wb-doc-refused { color:var(--dsw-derive-warn,#9a6700); padding:12px; line-height:1.7; font-size:12px;
   border:1px solid var(--dsw-derive-border,#d0d7de); border-radius:8px; margin:8px; overflow-wrap:anywhere; }
 `
