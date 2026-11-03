@@ -24,7 +24,7 @@ import {
 // from a name of its own.
 import {
   indexBanner, locateRoot, newestDocMtime, parseRootToken, readIndexState, resolveDocsRoots,
-  type RootsResolution, type ResolvedRoot,
+  type IndexRead, type RootsResolution, type ResolvedRoot,
 } from '../../../knowledge/src/shared/docs-roots.ts'
 
 /** 单篇大小上限（utf8 字符数；定稿库最大篇 ~60KB，2MB 上限=10 倍余量防误配大文件拖爆响应）。 */
@@ -214,6 +214,43 @@ export interface DocsRootsOpts {
   noDeclaration?: boolean
 }
 
+/** Admission gate for the path part of one selection. The transport prefix `@<n>/` is
+ *  stripped before this runs, so what remains must be ONE plain safe relative `.md`
+ *  path: a nested token, an absolute path, a `..` segment, a backslash or a leftover
+ *  `%` escape is refused. The shape rule itself is the shared model's whitelist — this
+ *  only adds the "no second transport prefix" door (t261103-24: the call site named this
+ *  predicate but no definition existed, so every readable page threw and answered 500). */
+export function isPlainDocRel(rel: unknown): rel is string {
+  if (typeof rel !== 'string') return false
+  if (rel.startsWith('@')) return false
+  return isSafeDocRel(rel)
+}
+
+/** The derived-index face that travels with a documents answer. It NEVER throws: when the
+ *  state cannot be computed in this context (no project data directory, an unreadable
+ *  index record) the face names that in `reason` + `banner` and the caller still serves
+ *  its page — a missing index state is a labelled degradation, never a failed read. */
+export function docsIndexFace(projectKey: string, resolution: RootsResolution,
+  newestMtime?: number | null): DocsIndexFace {
+  let read: IndexRead
+  try {
+    read = newestMtime === undefined
+      ? readIndexState(projectKey, resolution)
+      : readIndexState(projectKey, resolution, { newestMtime })
+  } catch (err: any) {
+    read = {
+      state: 'failed', project: projectKey, builtAt: '', staleReason: '',
+      reason: `the derived index state could not be read in this context (${String(err?.message ?? err)})`,
+      code: 'docs_index_state_unreadable', entries: [], roots: [], total: 0,
+      review: { missing_frontmatter: [], deprecated: [], stale: [] },
+    }
+  }
+  return {
+    state: read.state, built_at: read.builtAt, stale_reason: read.staleReason,
+    reason: read.reason, code: read.code, banner: indexBanner(read), total: read.total,
+  }
+}
+
 /** Split a selection token into (root index | null, root-relative path). One
  *  implementation for both the host and the page: the shared module's parser. */
 export function splitSelection(selection: string): { rootIndex: number | null; rel: string } {
@@ -245,18 +282,10 @@ export function resolveDocsFor(projectKey: string, opts: DocsRootsOpts = {}): Ro
 export async function docsRootsTree(projectKey: string,
   opts: DocsRootsOpts = {}): Promise<DocsRootsTreeResult> {
   const resolution: RootsResolution = resolveDocsRoots(projectKey, opts)
-  const indexRead = readIndexState(projectKey, resolution, {
-    newestMtime: resolution.state === 'served' ? newestDocMtime(resolution.roots) : null,
-  })
-  const index: DocsIndexFace = {
-    state: indexRead.state,
-    built_at: indexRead.builtAt,
-    stale_reason: indexRead.staleReason,
-    reason: indexRead.reason,
-    code: indexRead.code,
-    banner: indexBanner(indexRead),
-    total: indexRead.total,
-  }
+  // The index face is computed defensively (`docsIndexFace`): an index state this
+  // context cannot read is a labelled degradation, not a failed listing.
+  const index: DocsIndexFace = docsIndexFace(projectKey, resolution,
+    resolution.state === 'served' ? newestDocMtime(resolution.roots) : null)
   if (resolution.state === 'refused') {
     return {
       // `empty:true` is the legacy key the console page renders a named reason from;
@@ -335,25 +364,34 @@ export async function docsRootsTree(projectKey: string,
 /** Read one page of the docs scope from the root it came from.
  *
  * The three refusal shapes stay distinct: a refused declaration, an unknown selection
- * token and a page the loader refuses each answer with their own reason. */
+ * token and a page the loader refuses each answer with their own reason. Every answer
+ * also carries the derived-index face: the page is always read from the roots, so an
+ * index state this context cannot compute is a labelled annotation on a served page,
+ * never a failed read. */
 export async function readDocsSelection(projectKey: string, opts: DocsRootsOpts,
-  selection: string): Promise<{ state: 'refused'; reason: string } |
-    { state: 'served'; root: string; result: DocReadResult }> {
+  selection: string): Promise<{ state: 'refused'; reason: string; index: DocsIndexFace } |
+    { state: 'served'; root: string; result: DocReadResult; index: DocsIndexFace }> {
   const resolution = resolveDocsRoots(projectKey, opts)
+  const index = docsIndexFace(projectKey, resolution,
+    resolution.state === 'served' ? newestDocMtime(resolution.roots) : undefined)
   if (resolution.state === 'refused') {
-    return { state: 'refused', reason: resolution.reason }
+    return { state: 'refused', reason: resolution.reason, index }
   }
   const { rootIndex, rel } = parseRootToken(selection)
+  // Shape first, existence second: a value that cannot be one plain safe relative page
+  // is refused by THAT reason, not by "no root holds it" (report what failed).
+  if (!isPlainDocRel(rel)) {
+    return { state: 'refused', index,
+      reason: `path not admitted (a safe .md path inside the root): ${selection}` }
+  }
   const located = rootIndex === null
     ? locateRoot(resolution, rel, null)
     : (resolution.roots[rootIndex] !== undefined
       ? { root: resolution.roots[rootIndex] }
       : { reason: `unknown root selection '@${rootIndex}' (roots in effect: ${resolution.roots.map((r, i) => `@${i}=${r.id}`).join(', ')})` })
   if ('reason' in located) {
-    return { state: 'refused', reason: located.reason }
+    return { state: 'refused', reason: located.reason, index }
   }
-  if (!isPlainDocRel(rel)) {
-    return { state: 'refused', reason: `path not admitted (a safe .md path inside the root): ${rel}` }
-  }
-  return { state: 'served', root: located.root.id, result: await readDoc(located.root.directory, rel) }
+  return { state: 'served', root: located.root.id, index,
+    result: await readDoc(located.root.directory, rel) }
 }

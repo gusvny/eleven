@@ -153,7 +153,7 @@ import { anchorEnv, resolveProjectAnchor, resolvedMark, type ProjectAnchor } fro
 import { ProjectCliError, runProjectCli } from './src/host/project-admin.ts'
 // 「文档」视图宿主半（t260905-06；KI-070 起按项目根解析）：docs/ 定稿库 + notes/ 观察窗只读枚举/读取。
 // 降级/白名单/句柄终态口径见该模块头注（R1 取舍清单 2）。
-import { docsRootsTree, listDocs, readDocsSelection } from './src/host/docs.ts'
+import { docsRootsTree, listDocs, readDoc, readDocsSelection } from './src/host/docs.ts'
 import { isDocsScope } from './src/shared/docs-model.ts'
 
 function projectRootsFor(projectKey: unknown): string[] {
@@ -961,6 +961,9 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     if (anchor === null) return
     try {
       if (scope === 'notes') {
+        // t261103-24: the notes scope reads one page straight from the project root
+        // with the loader's own admission + named reasons — it never goes through the
+        // docs-root resolution (the notes library is outside that declaration).
         const r = await readDoc(join(anchor.root, scope), rel)
         // 降级走 200 + {empty,reason}（人话可见，同 book/scan-report 风格——路径问题不是服务器错）
         sendJson(res, 200, { ok: true, result: r, resolved: resolvedMark(anchor) })
@@ -979,11 +982,16 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       }, rel)
       if (picked.state === 'refused') {
         // A refusal is an answer, not an empty page: its named reason travels with it.
-        sendJson(res, 200, { ok: true, resolved: resolvedMark(anchor), result: {
-          empty: true, reason: picked.reason, rel, title: '', meta: {}, body: '' } })
+        // The derived-index face rides along on every answer (t261103-24), so a page
+        // reader can label an index state this context cannot compute instead of the
+        // worth-nothing alternative: a 500 that hides the document.
+        sendJson(res, 200, { ok: true, resolved: resolvedMark(anchor), index: picked.index,
+          result: {
+            empty: true, reason: picked.reason, rel, title: '', meta: {}, body: '' } })
         return
       }
-      sendJson(res, 200, { ok: true, result: picked.result, resolved: resolvedMark(anchor) })
+      sendJson(res, 200, { ok: true, result: picked.result, resolved: resolvedMark(anchor),
+        index: picked.index })
     } catch (err: any) {
       sendJson(res, 500, { ok: false, error: `docs 篇章读取失败: ${String(err?.message ?? err)}` })
     }

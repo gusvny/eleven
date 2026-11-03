@@ -605,7 +605,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                                      trigger=args.trigger)}
     except Exception as e:      # noqa: BLE001 — CLI contract: one JSON line, never a traceback
         payload = {"ok": False, "error": str(e)[:500]}
-    print(json.dumps(payload, ensure_ascii=False))
+    # Bad-character contract (t261103-24): a lone surrogate in the payload (a project key
+    # or a document title comes from outside) must come out as a VISIBLE escape, never
+    # take the receipt down. backslashreplace turns it into \udcXX; every other byte is
+    # unchanged.
+    print(json.dumps(payload, ensure_ascii=False)
+          .encode("utf-8", "backslashreplace").decode("utf-8"))
     return 0 if payload.get("ok") else 1
 
 
