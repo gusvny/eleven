@@ -8503,22 +8503,49 @@ class ProjectPathsError(ValueError):
     a declared anchor missing or misplaced."""
 
 
-#: 条目文件里由**各自读面**拥有的 additive 顶层段：本解析器（①d，只管 schema/project/
-#: paths）整体透传其缩进块，不看其形状——与注册表装载器 parse_project_file 同一口径。
-#: 来历（260928 实案，KI-149 第三处读面）：此处漏放 `event_ledger:` 时，本函数抛
-#: ProjectPathsError → dsh_bin_for_spawn/project_paths 全线红 → **该项目的 agent 一律
-#: spawn 不出来**（票 t260928-20 因此在 create_plan 直接 blocked）。凡引擎读者新增一个
-#: 顶层段名，本表与 parse_project_file 必须同批放行；跨模块一致性锁见
-#: integration/t260928-13/sc_registry_additive_keys.py A2（从读者源码派生段名，逐个断言
-#: 每个读面都容忍——不以报错文案为判据，以机制为判据）。
-ADDITIVE_TOP_LEVEL_SECTIONS = ("admin_log", "event_ledger")
+#: THE declared list of a project declaration's additive top-level sections: every
+#: top-level section outside the two structural ones (schema:/project:). Each section has
+#: exactly one owning reader that judges its shape (paths -> project_paths below; admin_log
+#: -> engine audit.py; event_ledger -> engine event_ledger.py; github_pr -> engine
+#: pr_flow.py). Every other reader of the file passes the block through untouched, so one
+#: declaration loads identically in all of them.
+#:
+#: The list is declared twice, once per language, because the readers live in two
+#: processes: server/project-registry.ts carries the same list in
+#: ADDITIVE_TOP_LEVEL_SECTIONS. The cross-reader guard
+#: (server/plugins/workbench/tests/registry-loader.mjs section 11) compares the two lists
+#: and drives BOTH readers over them, so a section a Python reader accepts without a
+#: matching tolerance on the TS side goes red in seconds.
+#:
+#: History (the same failure repeated three times, KI-149 shape): `admin_log:`
+#: (t260916-21), `event_ledger:` (t260928 - this reader missed it and every agent of that
+#: project stopped spawning), `github_pr:` (t261103-04 - parse_project_file was taught the
+#: section, this reader and the TS loader were not; t261103-15). Adding a section here
+#: is therefore one edit per reader, and the guard test lists the readers.
+ADDITIVE_TOP_LEVEL_SECTIONS = ("paths", "admin_log", "event_ledger", "github_pr")
+
+#: The additive sections this reader passes through untouched: every declared section
+#: except the one it owns (paths, whose declared values it validates). Derived from the
+#: declared list, so a new section is tolerated here without a second edit - the missing
+#: second edit is exactly how `github_pr:` broke spawns (t261103-15).
+PATHS_FACE_PASS_THROUGH_SECTIONS = tuple(
+    s for s in ADDITIVE_TOP_LEVEL_SECTIONS if s != "paths")
+
+
+def _accepted_top_level_label() -> str:
+    """The accepted top-level set of the registry readers, spelled for a refusal message.
+    One spelling for every refusal, so a message cannot drift from the whitelist and send
+    the reader after the wrong check."""
+    return "/".join("%s:" % s for s in ("schema", "project") + ADDITIVE_TOP_LEVEL_SECTIONS)
 
 
 def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]], Optional[str]]:
     """Minimal parse of the entry file: returns (the paths declaration dict or None, the
     first dirs item or None).
     An unparseable top-level shape = ProjectPathsError (never a fallback — R1: a broken
-    file must go red)."""
+    file must go red). The blocks of the declared additive sections this reader does not
+    own pass through untouched (PATHS_FACE_PASS_THROUGH_SECTIONS); an UNDECLARED
+    top-level section is still refused by name."""
     schema: Optional[str] = None
     paths: Optional[Dict[str, str]] = None
     main_dir: Optional[str] = None
@@ -8529,22 +8556,23 @@ def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]],
         if not line.strip():
             continue
         if not raw[:1].isspace():
-            # 段名允许下划线（`event_ledger:`；旧式 `[a-z]+` 会把它误判成「无法解析」）
+            # Section names may carry underscores (`event_ledger:`, `github_pr:`; an
+            # old-style `[a-z]+` read them as unparseable).
             m = re.match(r"^([a-z_]+):(.*)$", line)
             if not m:
                 raise ProjectPathsError(
-                    "%s:%d unparseable top-level line (only schema:/project:/paths:/%s: are recognized): %s"
-                    % (label, i, "/".join(ADDITIVE_TOP_LEVEL_SECTIONS), line.strip()[:60]))
+                    "%s:%d unparseable top-level line (only %s are recognized): %s"
+                    % (label, i, _accepted_top_level_label(), line.strip()[:60]))
             key, val = m.group(1), m.group(2).strip()
-            if key in ADDITIVE_TOP_LEVEL_SECTIONS:
+            if key in PATHS_FACE_PASS_THROUGH_SECTIONS:
                 if val:
                     raise ProjectPathsError("%s:%d %s: must be followed by a newline with content" % (label, i, key))
-                section = key        # 其缩进块整体透传（形状归该段的读面，本解析器不看）
+                section = key        # its block passes through untouched (that section's reader owns the shape)
                 continue
             if key not in ("schema", "project", "paths"):
                 raise ProjectPathsError(
-                    "%s:%d top level only accepts schema:/project:/paths:/%s:; found %s:"
-                    % (label, i, "/".join(ADDITIVE_TOP_LEVEL_SECTIONS), key))
+                    "%s:%d top level only accepts %s (found: %s:)"
+                    % (label, i, _accepted_top_level_label(), key))
             if key in ("project", "paths") and val:
                 raise ProjectPathsError("%s:%d %s: must be followed by a newline with content" % (label, i, key))
             if key == "schema":
@@ -8557,8 +8585,8 @@ def _entry_paths_parse(text: str, label: str) -> Tuple[Optional[Dict[str, str]],
                 paths = {}
             section = key
             continue
-        if section in ADDITIVE_TOP_LEVEL_SECTIONS:
-            continue        # additive 段的缩进块：整体透传（未识别的键仍由其读面负责点名）
+        if section in PATHS_FACE_PASS_THROUGH_SECTIONS:
+            continue        # a declared additive block: pass through (an unknown key inside is still named by that section's reader)
         if section == "paths":
             if paths_block:
                 if len(line) - len(line.lstrip(" ")) > 2:
@@ -8987,60 +9015,36 @@ def parse_project_file(text, label):
             dirs:
               - /abs/path
 
-    Top-level tolerance (additive fields, t260916-21): paths:, admin_log: and
-    event_ledger: sections pass through unparsed — old readers never break when a new
-    field lands (the admin_log block's semantics live in engine audit.py's config reader;
-    the event_ledger block's live in engine event_ledger.py's reader; this loader only
-    tolerates their presence).
+    Top-level tolerance: the blocks of the DECLARED additive sections
+    (ADDITIVE_TOP_LEVEL_SECTIONS: paths:, admin_log:, event_ledger:, github_pr:) pass
+    through unparsed — an old reader never breaks when a newer field lands, and each
+    block's shape is judged by the reader that owns it (paths -> project_paths below;
+    admin_log -> engine audit.py; event_ledger -> engine event_ledger.py; github_pr ->
+    engine pr_flow.py; this loader only tolerates their presence). An UNDECLARED
+    top-level section is still refused by name: the tolerance is the declared list, not a
+    blanket pass, because a typo must still go red.
 
     The key whitelist check happens here; verifying that the key equals the directory
     name is the loader's job."""
     cur = None
     in_dirs = False
     saw_project = False
-    in_paths = False   # ①d: the top-level paths: section passes through the loader unparsed (semantics / anchors are fail-closed in
-    in_admin_log = False  # t260916-21: the top-level admin_log: section (admin.log 轮转面配置，additive 字段)
-    in_event_ledger = False  # t260928: the top-level event_ledger: section (事件账开关，additive 字段；读面在 engine event_ledger.py)
-    # t261103-04: the top-level github_pr: section (the PR-flow switch, an additive
-    # field). This loader only tolerates its presence -- the shape is judged by the
-    # section's own reader (engine pr_flow.py), because a switch that the loader
-    # silently dropped would make an enabled project look disabled.
-    in_github_pr = False
-    schema = None      # shared.project_paths's ①d reader)
+    in_section = None  # the declared additive section currently passing through (None = none open)
+    schema = None
     for i, raw in enumerate(text.split('\n'), 1):  # the shape of fields inside project: belongs to the loader
         line = strip_registry_line(raw)
         if line is None:
             continue
-        if in_paths:
+        if in_section is not None:
             if raw[:1].isspace():
-                continue    # a line inside the paths section: pass through (the ①d reader owns shape and anchors)
-            in_paths = False    # a non-indented line = the paths section is over, back to normal top-level handling
-        if in_admin_log:
-            if raw[:1].isspace():
-                continue    # a line inside the admin_log section: pass through (audit.py 的配置读面 owns shape——engine 读「引擎所属项目」条目，宿主 260916 定稿)
-            in_admin_log = False
-        if in_event_ledger:
-            if raw[:1].isspace():
-                continue    # a line inside the event_ledger section: pass through (event_ledger.py 的配置读面 owns shape——enabled/keep_days/max_mb)
-            in_event_ledger = False
-        if in_github_pr:
-            if raw[:1].isspace():
-                continue    # a line inside the github_pr section: pass through (pr_flow.py's reader owns shape -- enabled/repositories)
-            in_github_pr = False
-        if line == 'paths:':
-            in_paths = True
-            continue
-        if line == 'admin_log:':
-            in_admin_log = True
-            continue
-        if line == 'event_ledger:':
-            in_event_ledger = True
-            continue
-        if line == 'github_pr:':
-            in_github_pr = True
+                continue    # a line inside the block: pass through (that section's reader owns the shape)
+            in_section = None   # a non-indented line closes the block
+        if line.endswith(':') and line[:-1] in ADDITIVE_TOP_LEVEL_SECTIONS:
+            in_section = line[:-1]
             continue
         if not raw[:1].isspace() and line != 'project:' and not line.startswith('schema:') and i > 1:
-            raise ValueError('%s:%d top level only accepts schema:/project:/paths:/admin_log:/event_ledger:/github_pr:' % (label, i))
+            raise ValueError('%s:%d top level only accepts %s (found: %s)'
+                             % (label, i, _accepted_top_level_label(), line.strip()[:60]))
         if line == 'project:':
             if saw_project:
                 raise ValueError('%s:%d duplicate project:' % (label, i))
@@ -9049,13 +9053,15 @@ def parse_project_file(text, label):
         m_top = re.match(r'^([a-z]+):\s*(.+)$', line)
         if m_top and not saw_project and not raw[:1].isspace():
             if m_top.group(1) != 'schema':
-                raise ValueError('%s:%d top level only accepts schema: and project:' % (label, i))
+                raise ValueError('%s:%d top level only accepts %s (found: %s)'
+                                 % (label, i, _accepted_top_level_label(), line.strip()[:60]))
             schema = m_top.group(2).strip()
             if schema != 'v1':
                 raise ValueError('%s:%d unsupported schema version: declared %s, supported set {v1}' % (label, i, schema))
             continue
         if not saw_project:
-            raise ValueError('%s:%d top level only accepts schema: and project:' % (label, i))
+            raise ValueError('%s:%d top level only accepts %s (found: %s)'
+                             % (label, i, _accepted_top_level_label(), line.strip()[:60]))
         m_item = re.match(r'^\s+-\s+(.+)$', line)
         m_kv = re.match(r'^\s+([a-z]+):\s*(.*)$', line)
         if m_item:

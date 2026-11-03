@@ -16,9 +16,12 @@
  *   9. 迁移：逐条出仓 + .migrated、幂等零重写、源写坏→抛错、含 # 值拒绝迁移、序列化可往返
  *   9b. 无标记三类现场（修订 v2.1）：崩溃残留→续迁补齐、人工注册表→接受、混合现场→fail-closed
  *  10. legacy env（SANDBAR_PROJECTS_YAML）旧单文件模式回归
+ *  11. declared additive top-level sections: the TS loader and BOTH Python readers of the
+ *      same declaration file agree on one list (t261103-15's cross-reader lock)
  */
 
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,6 +31,16 @@ const { loadRegistry, loadProjects, findProject, parseProjectYaml, migrateRegist
 
 //: 仓库根（本文件 = <repo>/server/plugins/workbench/tests/）
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
+
+//: The project key of the migration seed (server/projects.yaml), READ FROM THE SEED.
+//: Never hardcode it: the seed's key was renamed once already (261005) and the hardcoded
+//: copy outlived it, which killed this whole file with an ENOENT before section 11 could
+//: run - a lock that cannot run is not a lock.
+const SEED_KEY = (() => {
+  const mm = readFileSync(join(REPO, 'server/projects.yaml'), 'utf8')
+    .match(/^\s*-\s+key:\s*([a-z0-9][a-z0-9-]*)\s*$/m)
+  return mm ? mm[1] : ''
+})()
 
 let passed = 0
 let failed = 0
@@ -166,8 +179,9 @@ section('8 空注册表三分支（全显式，无静默）')
   // (a) 根不存在 + 种子在位 → 自动迁移（见第 9 节）；根存在但零条目同样触发迁移
   const root = freshRoot()
   mkdirSync(root, { recursive: true })
-  const reg = loadRegistry()  // 空根 → 从仓库种子迁移（种子=server/projects.yaml，含 suyou）
-  ok(reg.projects.length >= 1 && reg.projects.some(p => p.key === 'suyou'), '空根→自动迁移出 suyou')
+  const reg = loadRegistry()  // empty root -> migrate from the repo seed (server/projects.yaml)
+  ok(reg.projects.length >= 1 && reg.projects.some(p => p.key === SEED_KEY),
+    `empty root -> the seed entry is migrated (seed key read from the seed: ${SEED_KEY})`)
   // (b) 全隔离 → 抛错列原因
   const root2 = freshRoot()
   writeFileSync(join(root2, '.migrated'), 'source: test\n', 'utf8')
@@ -218,8 +232,10 @@ section('9 迁移：出仓/幂等/坏源/拒 #/往返')
 
 section('9b 无标记三类现场（修订 v2.1）：续迁 / 人工注册表 / 混合 fail-closed')
 {
-  // 说明：装载路径的 ensureMigrated 固定用仓库种子（key=suyou）；多 key 续迁场景
-  // 用导出的 resumeMigration/expectedEntries 直测，单 key 集成场景走装载路径。
+  // Note: the load path's ensureMigrated always uses the repo seed (its key is read from
+  // the seed: SEED_KEY); the multi-key resume cases below drive
+  // resumeMigration/expectedEntries directly, and the single-key case goes through the
+  // load path.
   const tmp = mkdtempSync(join(tmpdir(), 'sandbar-scenes-'))
   const seed = join(tmp, 'projects.yaml')
   const seedText = `projects:\n  - key: one\n    name: 壹\n    dirs:\n      - /d1\n  - key: two\n    name: 贰\n    dirs:\n      - /d2\n`
@@ -238,31 +254,31 @@ section('9b 无标记三类现场（修订 v2.1）：续迁 / 人工注册表 / 
   ok(existsSync(join(resumed, '.migrated')), '续迁补写 .migrated')
   // (a2) 装载路径集成（仓库种子）：迁移后丢标记 → 自动续迁补标记、条目不重写
   const integ = freshRoot()
-  ok(loadProjects().some(p => p.key === 'suyou'), '空根装载触发迁移（集成）')
+  ok(loadProjects().some(p => p.key === SEED_KEY), '空根装载触发迁移（集成）')
   const markerPath = join(integ, '.migrated')
   ok(existsSync(markerPath), '迁移写标记（集成）')
-  const suyouBefore = statSync(join(integ, 'suyou', 'project.yaml')).mtimeMs
+  const seedEntryBefore = statSync(join(integ, SEED_KEY, 'project.yaml')).mtimeMs
   rmSync(markerPath)
-  ok(loadProjects().some(p => p.key === 'suyou'), '丢标记后装载照常（续迁接受）')
+  ok(loadProjects().some(p => p.key === SEED_KEY), '丢标记后装载照常（续迁接受）')
   ok(existsSync(markerPath), '续迁补回标记（集成）')
-  ok(statSync(join(integ, 'suyou', 'project.yaml')).mtimeMs === suyouBefore, '续迁不重写已有条目（集成）')
+  ok(statSync(join(integ, SEED_KEY, 'project.yaml')).mtimeMs === seedEntryBefore, '续迁不重写已有条目（集成）')
   // (b) 纯人工注册表（与种子零交集）→ 接受，无需标记
   const hand = freshRoot()
   writeEntry(hand, 'userreg', GOOD('userreg'))
   ok(loadProjects()[0].key === 'userreg' && !existsSync(join(hand, '.migrated')), '人工注册表接受，不写标记')
-  // (c) 混合现场：种子 key（suyou）但字节被人工改过 → fail-closed 抛错
+  // (c) 混合现场：种子 key 但字节被人工改过 → fail-closed 抛错
   const mixed = freshRoot()
-  mkdirSync(join(mixed, 'suyou'), { recursive: true })
-  writeFileSync(join(mixed, 'suyou', 'project.yaml'), GOOD('suyou', '被改过', ['/elsewhere']), 'utf8')
+  mkdirSync(join(mixed, SEED_KEY), { recursive: true })
+  writeFileSync(join(mixed, SEED_KEY, 'project.yaml'), GOOD(SEED_KEY, '被改过', ['/elsewhere']), 'utf8')
   throws(() => loadProjects(), '混合现场（种子 key 非种子字节）→ fail-closed', '无法判定')
   try { loadProjects() } catch (e) {
     ok(String(e.message).includes('混合现场'), '抛错指明混合现场与处置口径')
   }
   // (d) 混合现场：种子 key + 隔离条目共存 → fail-closed
   const mixed2 = freshRoot()
-  mkdirSync(join(mixed2, 'suyou'), { recursive: true })
-  writeFileSync(join(mixed2, 'suyou', 'project.yaml'),
-    readFileSync(join(integ, 'suyou', 'project.yaml'), 'utf8'), 'utf8')  // 精确种子字节
+  mkdirSync(join(mixed2, SEED_KEY), { recursive: true })
+  writeFileSync(join(mixed2, SEED_KEY, 'project.yaml'),
+    readFileSync(join(integ, SEED_KEY, 'project.yaml'), 'utf8'), 'utf8')  // 精确种子字节
   writeEntry(mixed2, 'sick', 'schema: v1\nproject:\n  - key: sick\n    name: 名\n')
   throws(() => loadProjects(), '混合现场（种子条目+坏条目）→ fail-closed', '无法判定')
   rmSync(tmp, { recursive: true, force: true })
@@ -284,28 +300,215 @@ section('10 legacy env（SANDBAR_PROJECTS_YAML）旧单文件模式回归')
   delete process.env.SANDBAR_PROJECTS_YAML
 }
 
-section('11 顶层 additive 段容忍（与 python 装载器同锁：引擎读者声明的段名不得放倒条目）')
-// 来历（宿主 260928 实报停机）：事件账开关写在 project.yaml 顶层 event_ledger:，
-// 而装载器的顶层键白名单没含它 ⇒ 整条条目被隔离、控制台里该项目整块消失。python 侧
-// 修于 0c0ee58，TS 侧同款缺陷同步修；本段是两边的**反停机锁**：段名从引擎读者源码
-// 派生（新增第三个段会被自动要求放行），派生为空=红（防闸空转）。
+//: The Python half of the cross-reader guard. Both Python readers of the declaration file
+//: are driven here through PUBLIC entry points (parse_project_file for the registry loader,
+//: project_paths for the (1)d reader behind every spawn), so the lock binds to what the
+//: engine promises, not to private helper names. Its own temp roots, its own cleanup,
+//: no network, no docker, no Temporal.
+const PY_READER_PROBE = String.raw`
+import importlib.util, json, os, pathlib, shutil, sys, tempfile
+
+payload = json.loads(sys.argv[1])
+
+def load_module(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod          # py3.9 dataclasses look the module up by name
+    spec.loader.exec_module(mod)
+    return mod
+
+shared = load_module("guard_shared", payload["shared_path"])
+
+DECL = ("schema: v1\n"
+        "project:\n  - key: probe-entry\n    name: probe\n    dirs:\n      - {home}\n"
+        "{block}")
+
+def loader_face(text):
+    try:
+        shared.parse_project_file(text, "probe.yaml")
+        return {"ok": True, "error": ""}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)[:240]}
+
+def paths_face(text):
+    with tempfile.TemporaryDirectory() as td:
+        proj = pathlib.Path(td) / "projects" / "probe-entry"
+        proj.mkdir(parents=True)
+        (proj / "project.yaml").write_text(text, encoding="utf-8")
+        old = os.environ.get("SANDBAR_PROJECTS_DIR")
+        os.environ["SANDBAR_PROJECTS_DIR"] = str(pathlib.Path(td) / "projects")
+        try:
+            shared.project_paths("probe-entry")
+            return {"ok": True, "error": ""}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:240]}
+        finally:
+            if old is None:
+                os.environ.pop("SANDBAR_PROJECTS_DIR", None)
+            else:
+                os.environ["SANDBAR_PROJECTS_DIR"] = old
+
+home = tempfile.mkdtemp(prefix="sandbar-reg-py-")
+try:
+    def decl(block):
+        return DECL.format(home=home, block=block)
+
+    out = {"declared_list": list(shared.ADDITIVE_TOP_LEVEL_SECTIONS), "declared": {}, "unknown": {}}
+    for name, block in payload["sections"].items():
+        text = decl(block)
+        out["declared"][name] = {"loader": loader_face(text), "paths": paths_face(text)}
+    unknown = decl(payload["unknown_block"])
+    out["unknown"] = {"loader": loader_face(unknown), "paths": paths_face(unknown)}
+    # the tolerated github_pr: block must be the shape its OWN reader consumes -- a loader
+    # that "tolerated" a block the switch reader could not read would look enabled here and
+    # be disabled in the engine.
+    pr_flow = load_module("guard_pr_flow", str(pathlib.Path(payload["shared_path"]).with_name("pr_flow.py")))
+    decision = pr_flow.parse_switch(decl(payload["sections"]["github_pr"]))
+    out["switch"] = {"enabled": bool(decision.enabled), "repositories": list(decision.repositories)}
+finally:
+    shutil.rmtree(home, ignore_errors=True)
+
+print(json.dumps(out))
+`
+
+section('11 declared additive top-level sections: both readers of one declaration file agree')
+// Why this section exists (host-reported 260928 outage, then repeated by t261103-15): a
+// top-level section of project.yaml has SEVERAL readers (the Python registry loader, the
+// (1)d paths reader behind every spawn, and this TS loader behind the console). A section
+// taught to one reader and not the others is a silent break: 260928 the event_ledger:
+// switch quarantined the whole entry (the project vanished from the left column);
+// t261103-15 the github_pr: switch was accepted by the Python loader, refused by this
+// loader, and refused by the (1)d reader (every spawn of that project red).
+//
+// The lock, in the order it judges things:
+//   A. ONE declared list, declared once per language: TS ADDITIVE_TOP_LEVEL_SECTIONS and
+//      the Python runtime value must be item-equal. A section added on one side without
+//      the other goes red here -- that asymmetry IS the defect class.
+//   B. every declared section has a real-shape fixture below (a declaration added without
+//      a shape to drive it would otherwise pass as an empty loop).
+//   C. mechanism derivation on the Python side: a section literal hand-written inside a
+//      Python reader function (the old `if line == 'github_pr:'` shape) must be declared,
+//      so a bespoke tolerance cannot slip past the list.
+//   D. mechanism derivation on the owning readers (audit.py / event_ledger.py /
+//      pr_flow.py): a section the engine itself consumes must be declared.
+//   E/F. this loader's behaviour: every declared section loads, an undeclared one is still
+//      refused BY NAME (the tolerance is the list, not a blanket pass -- a typo is a typo).
+//   G/H. BOTH Python readers' behaviour on the same fixtures (spawned engine python, temp
+//      roots): tolerated when declared, refused by name when not.
 {
-  const READER_KEY_RE = /in_block\s*=\s*\(\s*\w+\s*==\s*'([a-z_]+):'\s*\)/g
-  const keys = []
-  for (const mod of ['audit.py', 'event_ledger.py']) {
-    const src = readFileSync(join(REPO, 'server/engine', mod), 'utf8')
-    for (const mm of src.matchAll(READER_KEY_RE)) if (!keys.includes(mm[1])) keys.push(mm[1])
+  //: Real shapes, owned by each section's own reader (so the fixture is a declaration a
+  //: project would really write, not a shape invented for the test).
+  const SECTION_BLOCKS = {
+    paths: 'paths:\n  dsh_bin: /bin/sh\n',
+    admin_log: 'admin_log:\n  keep_days: 14\n  max_mb: 512\n',
+    event_ledger: 'event_ledger:\n  enabled: true\n  keep_days: 14\n  max_mb: 512\n',
+    github_pr: 'github_pr:\n  enabled: true\n  repositories:\n    - owner/name\n',
   }
-  ok(keys.length > 0, `从引擎读者源码派生出顶层段名（空=闸空转）：${keys.join(', ')}`)
-  const root = freshRoot()
-  for (const k of keys) {
-    writeEntry(root, 'probe-entry', GOOD('probe-entry') + `${k}:\n  enabled: true\n  keep_days: 14\n`)
+  const UNKNOWN_BLOCK = 'no_such_section:\n  x: 1\n'
+  const tsList = [...(m.ADDITIVE_TOP_LEVEL_SECTIONS ?? [])]
+  ok(tsList.length > 0, `TS side declares the additive section list (empty = the gate spins): ${tsList.join(', ')}`)
+
+  // ---- G/H fixture pipe: one python process, both Python readers, temp roots ----------
+  const pyPayload = {
+    sections: SECTION_BLOCKS,
+    unknown_block: UNKNOWN_BLOCK,
+    shared_path: join(REPO, 'server/engine/shared.py'),
+  }
+  let py = null
+  try { readFileSync(join(REPO, 'server/engine/.venv/bin/python')); py = join(REPO, 'server/engine/.venv/bin/python') } catch { py = 'python3' }
+  const pyOut = (() => {
+    try {
+      const raw = execFileSync(py, ['-B', '-c', PY_READER_PROBE, JSON.stringify(pyPayload)], { encoding: 'utf8', timeout: 120000 })
+      return JSON.parse(raw)
+    } catch (e) {
+      return { error: String(e && e.message ? e.message : e).slice(0, 400) }
+    }
+  })()
+  ok(!pyOut.error, `the Python readers answered the probe (interpreter=${py})${pyOut.error ? ' -- ' + pyOut.error : ''}`)
+  const pyList = Array.isArray(pyOut.declared_list) ? pyOut.declared_list : []
+
+  // ---- A. one list, declared twice -----------------------------------------------
+  ok(pyList.length > 0, `Python side declares the additive section list (empty = the gate spins): ${pyList.join(', ')}`)
+  // membership, not declaration order (a reorder is not an asymmetry)
+  ok(tsList.slice().sort().join(',') === pyList.slice().sort().join(','),
+     `the two declared lists are item-equal -- an accepted-but-undeclared asymmetry is the defect class: TS=[${tsList}] PY=[${pyList}]`)
+
+  // ---- B. every declared section has a real-shape fixture -------------------------
+  const fixtureKeys = Object.keys(SECTION_BLOCKS)
+  ok(fixtureKeys.slice().sort().join(',') === tsList.slice().sort().join(','),
+     `each declared section carries a real-shape fixture (declared=[${tsList}] fixtures=[${fixtureKeys}])`)
+
+  // ---- C. no hand-written section literal inside the Python readers ----------------
+  const STRUCTURAL = new Set(['schema', 'project', 'paths'])   // schema/project: the fixed core; paths: owned by the (1)d reader
+  const declaredSet = new Set([...tsList, ...pyList])
+  const sharedSrc = readFileSync(join(REPO, 'server/engine/shared.py'), 'utf8')
+  const pythonFunctionBody = (src, name) => {
+    const start = src.indexOf(`def ${name}(`)
+    if (start < 0) return ''
+    const rest = src.slice(start + 1)
+    const next = rest.search(/\n(def |class )/)
+    return next < 0 ? rest : rest.slice(0, next)
+  }
+  const derivedLiterals = new Set()
+  for (const fn of ['parse_project_file', '_entry_paths_parse']) {
+    // a hand-written section literal: the colon sits INSIDE the quotes (`== 'github_pr:'`),
+    // not the statement colon after a dict key (`{'key': ...}`)
+    for (const mm of pythonFunctionBody(sharedSrc, fn).matchAll(/'([a-z][a-z_]*):'/g)) derivedLiterals.add(mm[1])
+  }
+  ok(derivedLiterals.size > 0, `derived the section literals out of the Python readers (empty = nothing checked): ${[...derivedLiterals].join(', ')}`)
+  const undeclaredLiterals = [...derivedLiterals].filter(n => !STRUCTURAL.has(n) && !declaredSet.has(n))
+  ok(undeclaredLiterals.length === 0,
+     `every section literal written by hand inside a Python reader is declared (undeclared=[${undeclaredLiterals}])`)
+
+  // ---- D. engine-consuming readers' sections must be declared ----------------------
+  const READER_KEY_RE = /in_block\s*=\s*\(\s*\w+\s*==\s*'([a-z_]+):'\s*\)/g
+  const SECTION_CONST_RE = /^SECTION = "([a-z_]+)"$/gm
+  const readerKeys = []
+  for (const mod of ['audit.py', 'event_ledger.py']) {
+    for (const mm of readFileSync(join(REPO, 'server/engine', mod), 'utf8').matchAll(READER_KEY_RE)) {
+      if (!readerKeys.includes(mm[1])) readerKeys.push(mm[1])
+    }
+  }
+  for (const mm of readFileSync(join(REPO, 'server/engine/pr_flow.py'), 'utf8').matchAll(SECTION_CONST_RE)) {
+    if (!readerKeys.includes(mm[1])) readerKeys.push(mm[1])
+  }
+  ok(readerKeys.length > 0, `derived the sections the engine's own readers consume (empty = nothing checked): ${readerKeys.join(', ')}`)
+  ok(readerKeys.every(k => declaredSet.has(k)),
+     `every section an engine reader consumes is declared in the shared list (readers=[${readerKeys}] declared=[${[...declaredSet]}])`)
+
+  // ---- E/F. this loader's own behaviour -------------------------------------------
+  {
+    const root = freshRoot()
+    for (const [name, block] of Object.entries(SECTION_BLOCKS)) {
+      writeEntry(root, 'probe-entry', GOOD('probe-entry') + block)
+      const reg = loadRegistry()
+      const err = reg.quarantined[0]?.error ?? ''
+      ok(reg.quarantined.length === 0 && reg.projects.length === 1,
+         `declared section ${name}: this loader tolerates it (the declaring project stays loadable) ${err}`)
+    }
+    writeEntry(root, 'probe-entry', GOOD('probe-entry') + UNKNOWN_BLOCK)
     const reg = loadRegistry()
     const err = reg.quarantined[0]?.error ?? ''
-    ok(reg.quarantined.length === 0 && reg.projects.length === 1,
-       `读者段 ${k}: TS 装载器容忍（引擎自己声明的键不放倒自己的注册条目）${err}`)
+    ok(reg.quarantined.length === 1 && reg.projects.length === 0, 'an undeclared section is still refused (tolerance is the list, not a blanket pass)')
+    ok(err.includes('no_such_section') && err.includes('top level only accepts'),
+       `the refusal names the offending section AND the accepted set: ${err}`)
+    rmSync(root, { recursive: true, force: true })     // 本段自带回收（勿再添 sandbar-reg- 残件）
   }
-  rmSync(root, { recursive: true, force: true })     // 本段自带回收（勿再添 sandbar-reg- 残件）
+
+  // ---- G/H. both Python readers' behaviour on the same fixtures --------------------
+  for (const name of Object.keys(SECTION_BLOCKS)) {
+    const got = pyOut.declared?.[name] ?? {}
+    ok(got.loader?.ok === true,
+       `declared section ${name}: the Python registry loader tolerates it ${got.loader?.error ?? ''}`)
+    ok(got.paths?.ok === true,
+       `declared section ${name}: the (1)d paths reader tolerates it (a red here = that project cannot spawn) ${got.paths?.error ?? ''}`)
+  }
+  ok(pyOut.unknown?.loader?.ok === false && String(pyOut.unknown?.loader?.error ?? '').includes('no_such_section'),
+     `the Python registry loader still refuses an undeclared section by name: ${pyOut.unknown?.loader?.error ?? '(no refusal)'}`)
+  ok(pyOut.unknown?.paths?.ok === false && String(pyOut.unknown?.paths?.error ?? '').includes('no_such_section'),
+     `the (1)d paths reader still refuses an undeclared section by name: ${pyOut.unknown?.paths?.error ?? '(no refusal)'}`)
+  ok(pyOut.switch?.enabled === true && (pyOut.switch?.repositories ?? []).join(',') === 'owner/name',
+     `the tolerated github_pr: block is the real switch shape its own reader consumes (enabled=${pyOut.switch?.enabled} repos=${pyOut.switch?.repositories})`)
 }
 
 // 清理所有 temp 目录

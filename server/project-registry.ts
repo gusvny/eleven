@@ -44,6 +44,40 @@ export interface QuarantinedEntry {
 /** 项目 key 白名单形状：SA Keyword 值 + URL query 参数双安全（小写字母/数字/中划线）。 */
 export const PROJECT_KEY_RE = /^[a-z0-9][a-z0-9-]{0,40}$/
 
+/**
+ * THE declared list of a project declaration's additive top-level sections: every
+ * top-level section outside the two structural ones (schema:, project:). Each section has
+ * exactly one owning reader that judges its shape (paths -> server/engine/shared.py
+ * project_paths; admin_log -> server/engine/audit.py; event_ledger ->
+ * server/engine/event_ledger.py; github_pr -> server/engine/pr_flow.py). Every other
+ * reader of the file passes the block through untouched, so one declaration loads
+ * identically in all of them.
+ *
+ * The list is declared twice, once per language, because the readers live in two
+ * processes: server/engine/shared.py carries the same list in
+ * ADDITIVE_TOP_LEVEL_SECTIONS. The cross-reader guard
+ * (server/plugins/workbench/tests/registry-loader.mjs section 11) compares the two lists
+ * and drives BOTH readers over them, so a section a Python reader accepts without a
+ * matching tolerance here goes red in seconds.
+ *
+ * History: paths: (contract (1)d), admin_log: (t260916-21), event_ledger: (t260928),
+ * github_pr: (t261103-04, tolerated here since t261103-15 - before that, enabling the PR
+ * flow quarantined the whole entry in this loader while the Python loader accepted it).
+ */
+export const ADDITIVE_TOP_LEVEL_SECTIONS = ['paths', 'admin_log', 'event_ledger', 'github_pr'] as const
+
+/** The accepted top-level set of the registry readers, spelled for a refusal message.
+ *  One spelling for every refusal, so a message cannot drift from the whitelist and send
+ *  the reader after the wrong check. */
+export function acceptedTopLevelSectionsLabel(): string {
+  return ['schema', 'project', ...ADDITIVE_TOP_LEVEL_SECTIONS].map(s => `${s}:`).join('/')
+}
+
+/** True for a declared additive top-level section name. */
+function isAdditiveSection(name: string): boolean {
+  return (ADDITIVE_TOP_LEVEL_SECTIONS as readonly string[]).includes(name)
+}
+
 /** per-key 注册表根目录（每次调用现读 env：不做模块级常量化）。 */
 function registryRoot(): string {
   return process.env.SANDBAR_PROJECTS_DIR ?? join(homedir(), '.sandbar', 'projects')
@@ -140,10 +174,11 @@ export function parseProjectsYaml(text: string, fileLabel = 'projects.yaml'): Pr
  *       dirs:
  *         - /abs/path
  *
- * 顶层透传键（additive，t260916-21 起 python 侧同款）：paths: / admin_log: /
- * event_ledger: 三个节整体透传不解析——旧读器不会因为新字段落盘就炸；各节的语义
- * 归各自读面（paths → python project_paths；admin_log → engine audit.py；
- * event_ledger → engine event_ledger.py）。此处只容其存在。
+ * Additive top-level sections (tolerance, declared in ADDITIVE_TOP_LEVEL_SECTIONS):
+ * paths:, admin_log:, event_ledger: and github_pr: blocks pass through unparsed - an old
+ * reader never breaks when a newer field lands, and each block's shape is judged by the
+ * reader that owns it. An UNDECLARED top-level section is still refused by name: the
+ * tolerance is the declared list, not a blanket pass (a typo must still go red).
  *
  * key 白名单校验在此做；key 与目录名全等的核对由装载方做（需要目录名上下文）。
  */
@@ -152,30 +187,25 @@ export function parseProjectYaml(text: string, fileLabel: string): ProjectEntry 
   let inDirs = false
   let sawProject = false
   let schema: string | null = null
-  let inPaths = false   // ①d 放开（t260903 切换夜）：顶层 paths: 透传不解析
-  let inAdminLog = false     // t260916-21 同源：顶层 admin_log: 透传（读面在 engine audit.py）
-  let inEventLedger = false  // t260928 同源：顶层 event_ledger: 透传（读面在 engine event_ledger.py）
+  // The declared additive section currently passing through (null = none open). One
+  // variable driven by ADDITIVE_TOP_LEVEL_SECTIONS: the three hand-kept flags this
+  // replaced are exactly how `github_pr:` went missing (t261103-15).
+  let openSection: string | null = null
   const lines = text.split('\n')
   for (let i = 0; i < lines.length; i++) {
     const line = stripLine(lines[i])
     if (line === null) continue
-    if (inPaths) {
-      if (/^\s/.test(lines[i])) continue        // ①d 放开：paths 节透传（python 侧 project_paths 负责语义）
-      inPaths = false
+    if (openSection !== null) {
+      if (/^\s/.test(lines[i])) continue   // a line inside the block: its owning reader judges the shape
+      openSection = null                   // a non-indented line closes the block
     }
-    if (inAdminLog) {
-      if (/^\s/.test(lines[i])) continue
-      inAdminLog = false
+    const sectionName = line.endsWith(':') ? line.slice(0, -1) : ''
+    if (sectionName !== '' && isAdditiveSection(sectionName)) {
+      openSection = sectionName
+      continue
     }
-    if (inEventLedger) {
-      if (/^\s/.test(lines[i])) continue
-      inEventLedger = false
-    }
-    if (line === 'paths:') { inPaths = true; continue }
-    if (line === 'admin_log:') { inAdminLog = true; continue }
-    if (line === 'event_ledger:') { inEventLedger = true; continue }
     if (!/^\s/.test(lines[i]) && line !== 'project:' && !line.startsWith('schema:') && i + 1 > 1) {
-      throw new Error(`${fileLabel}:${i + 1} 顶层只认 schema:/project:/paths:/admin_log:/event_ledger:`)
+      throw new Error(`${fileLabel}:${i + 1} top level only accepts ${acceptedTopLevelSectionsLabel()} (found: ${line.trim()})`)
     }
     if (line === 'project:') {
       if (sawProject) throw new Error(`${fileLabel}:${i + 1} project: 重复`)
@@ -184,13 +214,15 @@ export function parseProjectYaml(text: string, fileLabel: string): ProjectEntry 
     }
     const topKv = line.match(/^([a-z]+):\s*(.+)$/)
     if (topKv && !sawProject && !/^\s/.test(lines[i])) {
-      // project: 之前的顶层键：只认 schema
-      if (topKv[1] !== 'schema') throw new Error(`${fileLabel}:${i + 1} 顶层只认 schema: 与 project:`)
+      // a top-level key-value before project: - only schema is accepted
+      if (topKv[1] !== 'schema') {
+        throw new Error(`${fileLabel}:${i + 1} top level only accepts ${acceptedTopLevelSectionsLabel()} (found: ${line.trim()})`)
+      }
       schema = topKv[2].trim()
       if (schema !== 'v1') throw new Error(`${fileLabel}:${i + 1} schema 版本不支持：声明 ${schema}，支持集 {v1}`)
       continue
     }
-    if (!sawProject) throw new Error(`${fileLabel}:${i + 1} 顶层只认 schema: 与 project:`)
+    if (!sawProject) throw new Error(`${fileLabel}:${i + 1} top level only accepts ${acceptedTopLevelSectionsLabel()} (found: ${line.trim()})`)
     const itemMatch = line.match(/^\s+-\s+(.+)$/)
     const kvMatch = line.match(/^\s+([a-z]+):\s*(.*)$/)
     if (itemMatch) {
