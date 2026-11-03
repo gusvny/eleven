@@ -10,10 +10,19 @@ import（与 inspection_decl 同纪律：被测纯函数层 stdlib-only 直接 i
 契约面（与 create_plan v2 + review_plan conditional 意见对齐，实现必须兑现的公开面）：
   - inspection_decl：实例键 mode（词表 report|produce，缺省 report）与 docs_root
     （缺省 'docs'），坏值 fail-closed 点名，排程 payload 带两键。
-  - inspection_produce（新模块，零 temporalio）公开契约五函数：
-    validate_output_schema / check_write_set / check_zero_change /
-    check_protected_overlap / doc_selfcheck（函数名即本场景锁定的模块契约；
-    实现未落地=FAIL 红，TDD 信号，arbitrate/merge 期必须绿）。
+  - inspection_produce (new module, zero temporalio): the public contract this rod locks
+    is six functions - validate_output_schema / check_write_set / check_zero_change /
+    check_protected_overlap / doc_selfcheck / doc_selfcheck_verdict. The function name
+    is the module contract; a not-yet-landed implementation is FAIL (TDD signal), and
+    arbitrate/merge must be green.
+    t261103-22 re-points the document self-check legs: t261103-21 dropped its index leg
+    (the documentation index is a derived artefact in the project data directory,
+    outside every repository), so this rod no longer plants an in-repository
+    docs/index.json — it locks the verdict face instead: the tree's own pages are
+    judged (frontmatter + explicit references) and the index is reported NOT JUDGED by
+    a named entry whose owner is M1 (inspection_doc_mech). A tree with no page names
+    "nothing to judge"; a bare empty list, or a claim to have judged the index, fails
+    the rod.
   - inspection_flow：InspectionProduceWorkflow 类、两个新门 id（produce-close /
     produce-protect-authorize，不复用 inspection-close 字面值）、reject 留痕
     （落账先于拆道）。
@@ -120,7 +129,7 @@ except Exception as e:
 
 if prod is not None:
     for fn in ("validate_output_schema", "check_write_set", "check_zero_change",
-               "check_protected_overlap", "doc_selfcheck"):
+               "check_protected_overlap", "doc_selfcheck", "doc_selfcheck_verdict"):
         ok(callable(getattr(prod, fn, None)), "模块契约函数在位：%s" % fn)
 
     if callable(getattr(prod, "validate_output_schema", None)):
@@ -165,23 +174,81 @@ if prod is not None:
         ok("docs/design" in blob and "terminology" not in blob,
            "A3 保护面点名仅列交集（docs/design 进清单、非保护不进）")
 
+    # ---- document self-check, re-pointed (t261103-22) ----
+    # The in-repository index fixture is GONE: t261103-21 dropped the index leg (the
+    # documentation index is a derived artefact in the project data directory, outside
+    # every repository, so neither an in-repository copy nor the project-level index
+    # describes the tree this self-check judges). A rod that plants <tree>/docs/index.json
+    # certifies a shape production no longer has. The rod now locks the verdict face:
+    # what the check judged, and the named statement of what it did NOT judge.
     if callable(getattr(prod, "doc_selfcheck", None)):
         with tempfile.TemporaryDirectory() as td:
             tdp = Path(td)
             (tdp / "docs").mkdir()
-            (tdp / "docs" / "a.md").write_text("# a\n", "utf-8")
-            # 索引引用了不存在的文件 → 自检红且点名
-            (tdp / "docs" / "index.json").write_text(
-                '{"docs":[{"path":"docs/missing.md"}]}', "utf-8")
-            r = prod.doc_selfcheck(tdp, "docs")
-            ok("missing.md" in repr(r), "文档自检：索引指向缺失文件判红且点名")
-            # 畸形 index.json → 逐条降级不崩
-            (tdp / "docs" / "index.json").write_text("{not json", "utf-8")
-            try:
-                r2 = prod.doc_selfcheck(tdp, "docs")
-                ok(True, "畸形 index.json 降级不崩（返回 %s）" % type(r2).__name__)
-            except Exception as e:
-                ok(False, "畸形 index.json 不得炸场景（%s）" % e)
+            (tdp / "docs" / "a.md").write_text(
+                "---\ntitle: a\ncategory: design\ntags: [x]\nstatus: active\n"
+                "updated: 2026-09-25\n---\n\n# a\n", "utf-8")
+            ok(not (tdp / "docs" / "index.json").exists(),
+               "no in-repository index.json is planted (the retired shape is not "
+               "certified; t261103-22)")
+            verdict = getattr(prod, "doc_selfcheck_verdict", None)
+            if not callable(verdict):
+                ok(False, "self-check verdict face in place (doc_selfcheck_verdict): "
+                          "without it the face can only return a bare list, and an "
+                          "empty list reads as 'nothing to report' (t261103-21)")
+            else:
+                v = verdict(tdp, "docs")
+                # anti-silence ①: a statement, never a bare list.
+                ok(isinstance(v, dict) and "judged" in v and "not_judged" in v,
+                   "verdict is a statement (judged + not_judged), not a bare empty "
+                   "list — a bare [] fails this leg (anti-silence)")
+                judged = (v.get("judged") if isinstance(v, dict) else None) or {}
+                checks = judged.get("checks") or []
+                nj = (v.get("not_judged") if isinstance(v, dict) else None) or []
+                ok(judged.get("pages") == 1,
+                   "judged names what it judged: pages=1 for the single page in the tree")
+                ok("index" not in checks,
+                   "the self-check does not claim to have judged the index")
+                ok(bool(checks) and all(c in ("frontmatter", "ref") for c in checks),
+                   "judged names the checks it did run (frontmatter + explicit "
+                   "references), all of them on the tree's own files")
+                idx = [e for e in nj if isinstance(e, dict) and e.get("check") == "index"]
+                ok(len(idx) == 1,
+                   "the index is reported NOT JUDGED by a named entry (no index leg "
+                   "runs on this tree)")
+                owner = (idx[0].get("owner") or "") if idx else ""
+                ok("inspection_doc_mech" in owner and "doc_selfcheck" not in owner,
+                   "the not-judged index entry names the owner elsewhere: M1 "
+                   "(inspection_doc_mech), not the self-check itself")
+                ok(bool(nj) and all(isinstance(e, dict) and bool(e.get("reason"))
+                                    for e in nj),
+                   "every not-judged entry carries a stated reason (a named entry, "
+                   "not a stub)")
+                # anti-silence ②: the shape that read as an all-clear — a tree with no
+                # page judges nothing, so the face must say exactly that.
+                with tempfile.TemporaryDirectory() as td2:
+                    t2 = Path(td2)
+                    (t2 / "docs").mkdir()
+                    v2 = verdict(t2, "docs")
+                    j2 = (v2.get("judged") if isinstance(v2, dict) else None) or {}
+                    nj2 = (v2.get("not_judged") if isinstance(v2, dict) else None) or []
+                    ok(j2.get("pages") == 0 and (v2.get("findings") or []) == [],
+                       "tree with no page: zero findings, zero pages judged — exactly "
+                       "the shape that used to read green")
+                    named = [e for e in nj2
+                             if isinstance(e, dict) and e.get("check") == "docs"]
+                    ok(len(named) == 1 and bool(named[0].get("reason")),
+                       "tree with no page: the face names 'nothing to judge' instead "
+                       "of passing silently over an empty tree")
+
+    # ---- anti-silence ③: the statement has to reach the produce report ----
+    # A verdict nobody records leaves the receipt as green as before. Source lock (the
+    # produce activity is not importable in this stdlib-only scenario, and period wiring
+    # is t261006-11-doc-mech-wiring's face).
+    prod_act_src = (ENGINE / "agent_activities.py").read_text("utf-8")
+    ok("doc_selfcheck_verdict" in prod_act_src,
+       "the produce report records the self-check verdict, so not_judged reaches the "
+       "receipt (a findings-only call would drop the caveat)")
 
 # ---------- C. workflow 接线源码锁（A1/A3/C3/C5 面） ----------
 section("C workflow 源码锁（两门 id、reject 留痕次序、KI-113 队列口径）")

@@ -3678,7 +3678,7 @@
     },
     "integration/t260925-01/sc_inspection_produce_doc.py": {
       "anchor": "behaviour",
-      "note": "",
+      "note": "t261103-22 re-points the document self-check legs from an in-repository index fixture (a retired shape) to the verdict face: judged{pages,checks} + not_judged with the index owned by M1 (inspection_doc_mech), the empty-tree 'nothing to judge' statement, and the report recording that verdict; assertions stay on the public contract, the existing workflow/report source locks keep their kind",
       "sync_path": ""
     },
     "integration/t260925-04/sc_t260925_04_file_blast_radius.py": {
