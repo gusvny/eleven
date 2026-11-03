@@ -32,6 +32,14 @@ Legs:
   comparison) books NOTHING and opens NO freeze, however red it is. A row tied
   to neither identity books nothing and names the refusal, and the retired
   ``sole_line`` take-anyway no longer grants a booking.
+- t261103-10 the BASELINE role is decided by DURABLE EVIDENCE ONLY: the
+  row's run id recorded in the baseline cache as a baseline rebuild's run.
+  Being a main baseline tip is not proof — a line head created from main IS
+  the main tip — so that identity no longer skips a run row: it only sharpens
+  the refusal text, and a completed, attributable round whose head equals the
+  main tip heals with exactly ONE row. The tick hands its own declaration to
+  the heal, so the head identity is the one the round ran with, not a second
+  store read.
 
 Zero docker, zero Temporal, never touches 3099; no real runner. The KI-456
 legs use real git fixture repos under an injected projects root and a temp
@@ -470,12 +478,24 @@ def test_t2_malformed_runs_store_is_named_never_guessed(tmp_path):
 # certification and opened a freeze while the candidate pass was green
 # (cert-01M6D365 on main tip 9897c555 vs line head a21c504c 703/703;
 # cert-01M6F24K on 3d1727ed vs 99c43b8c 706/706). These legs are that rule.
+#
+# t261103-10 narrows WHICH proof decides PASS_BASELINE. t261103-06 also let
+# "every revision it names is a main baseline tip" decide on its own, and that
+# arm skipped an attributable completed round: a line head created from main IS
+# the main tip (measured on main 68385732, leg A of
+# integration/t261025-11/sc_t261025_11_unrecorded_round_healed.py: the tick
+# answered state=skipped/attribution_rule=baseline_pass and wrote zero rows).
+# The durable run id written by ``write_baseline(..., run_id=)`` is what proves
+# the baseline pass; a tip alone is UNKNOWN and books nothing, exactly as
+# fail-closed requires. The assertions below that used to pin the tips arm now
+# pin THAT: never a booking, never a guessed role.
 
 def test_ki456_run_pass_role_truth_table():
     """The pure identity table: a revision this line can prove it has is the
     candidate; a run id recorded as a baseline rebuild is the baseline (exact
-    evidence wins even when the tips agree); anything else is unknown — never
-    a mixed guess across two identities."""
+    evidence wins even when the tips agree); a main baseline tip with no
+    recorded run is UNKNOWN — it books nothing and says why. A tip never
+    decides a role on its own (t261103-10)."""
     landing_revs = {"rev-landing"}
     head_revs = {"rev-head"}
     base_tips = {"rev-main"}
@@ -487,16 +507,21 @@ def test_ki456_run_pass_role_truth_table():
     assert dc.run_pass_role(one("rev-head"), "run-X", landing_revs,
                             head_revs, base_tips, base_runs) == \
         (dc.PASS_CANDIDATE, "line_head_match", "")
+    # the tips identity is diagnostic only: no durable proof, no BASELINE role
     assert dc.run_pass_role(one("rev-main"), "run-X", landing_revs,
                             head_revs, base_tips, base_runs) == \
-        (dc.PASS_BASELINE, "baseline_pass",
-         "revision_is_a_main_baseline_tip:rev-main")
+        (dc.PASS_UNKNOWN, "",
+         "revision_is_a_main_baseline_tip_without_a_recorded_run:rev-main")
     # the exact run id beats the revision identity (the degenerate case: main's
     # tip IS the line head, so revision alone cannot separate the two passes)
     assert dc.run_pass_role(one("rev-head"), "run-BASE", landing_revs,
                             head_revs, base_tips, base_runs) == \
         (dc.PASS_BASELINE, "baseline_pass",
          "run_is_a_baseline_rebuild:run-BASE")
+    # the head identity still wins over a tip that equals it (leg A shape)
+    assert dc.run_pass_role(one("rev-main"), "run-X", landing_revs,
+                            {"rev-main"}, base_tips, base_runs) == \
+        (dc.PASS_CANDIDATE, "line_head_match", "")
     # a set spanning a candidate revision and a baseline tip is never split
     mixed = one("rev-head") + one("rev-main", repo="r2")
     assert dc.run_pass_role(mixed, "run-X", landing_revs, head_revs,
@@ -527,14 +552,21 @@ def test_ki456_two_pass_round_books_only_the_candidate(tmp_path, monkeypatch):
     assert dc.freeze_state(rows, LINE)["frozen"] is False
     by_run = {e["run"]: e for e in out}
     assert by_run["run-CANDIDATE"]["state"] == "reconciled"
-    assert by_run["run-BASELINE"]["state"] == "skipped"
-    assert by_run["run-BASELINE"]["attribution_rule"] == "baseline_pass"
+    # no run id in the baseline cache: no durable proof, so the row is UNKNOWN
+    # (t261103-10) — still books nothing, and names the refusal
+    assert by_run["run-BASELINE"]["state"] == "error"
+    assert dc.REFUSE_PASS_UNKNOWN in by_run["run-BASELINE"]["error"]
 
 
 def test_ki456_red_baseline_pass_alone_books_nothing(tmp_path, monkeypatch):
     """The control: a RED baseline pass with no candidate pass in the store
     books NOTHING AT ALL — no certification, no freeze, not even a range-growth
-    row (nothing was judged). It is the round's relative-judgement input."""
+    row (nothing was judged). It is the round's relative-judgement input.
+
+    t261103-10: with no run id recorded in the baseline cache there is no
+    durable proof this row was the baseline pass, so it is UNKNOWN — still
+    books nothing, and names the refusal. The tips identity only colours the
+    text; it never decides a role."""
     project, main_rev, _line_rev = two_pass_repo(tmp_path, monkeypatch)
     p = ledger(tmp_path)
     base = pass_run("run-BASELINE", main_rev, verdict="red",
@@ -542,8 +574,11 @@ def test_ki456_red_baseline_pass_alone_books_nothing(tmp_path, monkeypatch):
     out = heal(project, p, [base])
     assert rows_of(p) == []                                  # nothing booked
     assert dc.freeze_state([], LINE)["frozen"] is False
-    assert out[0]["state"] == "skipped"
-    assert out[0]["reason"].startswith("revision_is_a_main_baseline_tip:")
+    assert out[0]["state"] == "error"
+    assert dc.REFUSE_PASS_UNKNOWN in out[0]["error"]
+    assert out[0]["error"].endswith(
+        "revision_is_a_main_baseline_tip_without_a_recorded_run:%s"
+        % main_rev[:12])
 
 
 def test_ki456_planted_red_candidate_still_books_red_and_freezes(tmp_path,
@@ -596,10 +631,13 @@ def test_ki456_recorded_baseline_run_id_wins_when_the_tips_agree(tmp_path,
         "run_is_a_baseline_rebuild:run-BASELINE"
 
 
-def test_ki456_baseline_stays_recognised_after_main_moves(tmp_path, monkeypatch):
-    """A baseline rebuild ran at a tip main has since moved off: the cached
-    baseline key keeps the row recognisable (``_ensure_baseline`` writes it),
-    so a late heal still books nothing for it."""
+def test_ki456_cached_tip_without_a_recorded_run_is_unknown(tmp_path,
+                                                            monkeypatch):
+    """A baseline rebuild ran at a tip main has since moved off, and its cache
+    carries no run id (an older cache, or one written before the run id rode
+    the cache). The tip key alone is not durable proof (t261103-10): the row
+    books nothing and is named UNKNOWN. A cache that DOES carry the run id is
+    the durable case — see the recorded-run-id leg above."""
     project, old_main_rev, _line_rev = two_pass_repo(tmp_path, monkeypatch)
     dc.write_baseline(project, "sandbar", old_main_rev, ["main-red-1"], [])
     dive = dc.line_repo_dir(project, "sandbar")
@@ -611,8 +649,16 @@ def test_ki456_baseline_stays_recognised_after_main_moves(tmp_path, monkeypatch)
     base = pass_run("run-BASELINE", old_main_rev, verdict="red",
                     failed_names=["main-red-1"])
     out = heal(project, p, [base])
+    assert rows_of(p) == []                                  # nothing booked
+    assert out[0]["state"] == "error"
+    assert dc.REFUSE_PASS_UNKNOWN in out[0]["error"]
+    # the same row with the run id recorded IS the baseline pass: nothing booked
+    dc.write_baseline(project, "sandbar", old_main_rev, ["main-red-1"], [],
+                      run_id="run-BASELINE")
+    out2 = heal(project, p, [base])
     assert rows_of(p) == []
-    assert out[0]["state"] == "skipped"
+    assert out2[0]["state"] == "skipped"
+    assert out2[0]["reason"] == "run_is_a_baseline_rebuild:run-BASELINE"
 
 
 def test_ki456_unattributable_pass_books_nothing_and_names_the_refusal(
@@ -674,3 +720,159 @@ def test_ki456_baseline_run_names_itself_on_the_round_record(tmp_path,
     cached = dc.read_baseline(project, "sandbar", main_rev)
     assert cached["run"] == "run-BASELINE"        # the durable proof
     assert _rev(dive, "refs/heads/main") == main_rev
+
+
+# ---- t261103-10: durable evidence decides BASELINE, never a main tip --------
+#
+# The measured regression (main 68385732, after t261103-06): a line head
+# created from main IS the main tip, so the tips arm classified an
+# attributable, completed round as a baseline observation and wrote nothing
+# (leg A of integration/t261025-11/sc_t261025_11_unrecorded_round_healed.py).
+# These legs run the REAL tick call site with the fixture shape that produced
+# it: a project whose line worktree has ONE commit, so the main tip, the line
+# head and the judged revision are the same object.
+
+class Decl:
+    """A declared line as the tick's ``load_lines`` seam answers it: an id and
+    the declared repositories (name + declared head)."""
+
+    def __init__(self, line_id, repos):
+        self.line_id = line_id
+        self.repositories = [type("R", (), {"name": n, "branch": b})()
+                             for n, b in repos]
+
+
+def tick_with_decl(tmp_path, project, decls, run_rows, backstop_ms=None):
+    """One tick through the real call site: the declaration comes from the
+    ``load_lines`` seam (as in production), the runs store is a real file."""
+    store = tmp_path / "ledger" / "scenario-runs.jsonl"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text("".join(json.dumps(r) + "\n" for r in run_rows),
+                     encoding="utf-8")
+    return dc.line_round_tick(
+        project, load_lines=lambda pk: decls,
+        read_rows=reader(ledger(tmp_path)),
+        append_rows=writer(ledger(tmp_path)),
+        resolve_runner_fn=lambda line, env: (
+            lambda candidate: (_ for _ in ()).throw(
+                AssertionError("no round may run after a heal"))),
+        guard_path=tmp_path / "ledger" / "tick-anchor",
+        now_ms=1792909089000, backstop_ms=backstop_ms,
+        runs_store=str(store))
+
+
+def test_t261103_10_declared_head_resolution_is_never_a_guess(tmp_path,
+                                                             monkeypatch):
+    """The identity resolver: a declared branch resolves to its commit, a
+    declaration that pins a revision resolves too, and a declaration whose
+    head git cannot produce answers EMPTY — no identity, never a guess."""
+    project, main_rev, line_rev = two_pass_repo(tmp_path, monkeypatch)
+    by_branch = dc.line_decl_head_revision_map(
+        project, Decl(LINE, [("sandbar", "line")]))
+    assert by_branch == {"sandbar": line_rev}
+    by_revision = dc.line_decl_head_revision_map(
+        project, Decl(LINE, [("sandbar", line_rev)]))
+    assert by_revision == {"sandbar": line_rev}
+    fabricated = dc.line_decl_head_revision_map(
+        project, Decl(LINE, [("sandbar", "f" * 40)]))
+    assert fabricated == {}
+    no_tree = dc.line_decl_head_revision_map(
+        "proj-undeclared", Decl(LINE, [("sandbar", line_rev)]))
+    assert no_tree == {}
+    assert main_rev != line_rev
+
+
+def test_t261103_10_line_head_equal_to_the_main_tip_heals_one_row(
+        tmp_path, monkeypatch):
+    """The regression shape, healed: the line worktree has ONE commit, so main's
+    tip IS the line head IS the judged revision, and no baseline cache records
+    the run. The tick must heal the completed round with exactly ONE
+    certification citing that revision (rule ``line_head_match``), not skip it
+    as a baseline observation."""
+    p = ledger(tmp_path)
+    rev = _line_tree_with_commit(tmp_path, monkeypatch)          # main == HEAD
+    assert dc._git_main_tip(
+        tmp_path / "projects" / "proj" / "data" / "develop" / "wt"
+        / "sandbar") == rev
+    runs = [witness_run(rev=rev)]
+    out = tick_with_decl(tmp_path, "proj",
+                         {LINE: Decl(LINE, [("sandbar", rev)])}, runs)
+    states = [e.get("state") for e in out["lines"]]
+    assert "reconciled" in states, out
+    cs = certs(rows_of(p))
+    assert len(cs) == 1                                          # exactly one
+    assert cs[0]["run"] == RUN_ID
+    assert cs[0]["repos"] == [{"repo": "sandbar", "revision": rev}]
+    assert cs[0]["judged_by"] == "reconciled:%s" % RUN_ID
+    by_run = {e.get("run"): e for e in out["lines"]}
+    assert by_run[RUN_ID]["attribution_rule"] == "line_head_match"
+    # replay: the certification cites the run id, so nothing is written twice
+    out2 = tick_with_decl(tmp_path, "proj",
+                          {LINE: Decl(LINE, [("sandbar", rev)])}, runs)
+    assert len(certs(rows_of(p))) == 1
+    assert RUN_ID not in {e.get("run") for e in out2["lines"]}
+
+
+def test_t261103_10_recorded_baseline_run_still_books_nothing(
+        tmp_path, monkeypatch):
+    """The KI-456 proof survives the narrowing: the SAME degenerate shape (the
+    line head equals the main tip) with the run id durably recorded as a
+    baseline rebuild's run books NOTHING — no certification, no freeze, no
+    growth row — and the tick names the skip."""
+    p = ledger(tmp_path)
+    rev = _line_tree_with_commit(tmp_path, monkeypatch)
+    dc.write_baseline("proj", "sandbar", rev, ["main-red-1"], [],
+                      run_id=RUN_ID)                            # durable proof
+    runs = [pass_run(RUN_ID, rev, verdict="red",
+                     failed_names=["main-red-1"])]
+    out = tick_with_decl(tmp_path, "proj",
+                         {LINE: Decl(LINE, [("sandbar", rev)])}, runs)
+    assert rows_of(p) == []                                     # nothing booked
+    by_run = {e.get("run"): e for e in out["lines"]
+              if isinstance(e, dict) and e.get("run")}
+    assert by_run[RUN_ID]["state"] == "skipped"
+    assert by_run[RUN_ID]["reason"] == "run_is_a_baseline_rebuild:%s" % RUN_ID
+
+
+def test_t261103_10_planted_red_candidate_on_the_main_tip_freezes(
+        tmp_path, monkeypatch):
+    """The teeth: a planted RED CANDIDATE on that same revision (head == main
+    tip, no baseline run recorded) still books the certification and still
+    opens the freeze. Narrowing the BASELINE role must not blunt the red."""
+    p = ledger(tmp_path)
+    rev = _line_tree_with_commit(tmp_path, monkeypatch)
+    red = pass_run(RUN_ID, rev, verdict="red", failed_names=["planted-red"],
+                   receipts={"planted-red": {"reason": "assert_mismatch",
+                                             "evidence": "AssertionError: x"}})
+    tick_with_decl(tmp_path, "proj", {LINE: Decl(LINE, [("sandbar", rev)])},
+                   [red])
+    rows = rows_of(p)
+    cs = certs(rows)
+    assert len(cs) == 1 and cs[0]["repos"] == [{"repo": "sandbar",
+                                                "revision": rev}]
+    frz = [r for r in rows if r["kind"] == dc.KIND_FREEZE]
+    assert len(frz) == 1                                         # the freeze
+    assert dc.freeze_state(rows, LINE)["frozen"] is True
+
+
+def test_t261103_10_unattributable_row_on_a_multi_line_project_writes_no_row(
+        tmp_path, monkeypatch):
+    """Fail-closed, and no row: an unattributable run row in a project that
+    declares more than one line is named as ambiguous on the receipt and
+    writes NO ledger row — the reachability net does not turn the ambiguity
+    into a row (leg D of the L3 scenario). Before this leg's fix the net
+    wrote one, so the "never a guess" contract was red."""
+    p = ledger(tmp_path)
+    _line_tree_with_commit(tmp_path, monkeypatch)                # real tree,
+    run = witness_run(rev="d" * 40)                              # fake revision
+    out = dc.reconcile_unrecorded_rounds(
+        LINE, rows_of(p), [run], writer(p), "tick", "booked-v1",
+        1792909089000, sole_line=False, project="proj")
+    rows = rows_of(p)
+    assert rows == []                                    # no row, never a guess
+    assert out[0]["state"] == "error"
+    assert out[0]["error"].startswith(
+        "unrecorded_run:%s:line_ambiguous:%s:" % (RUN_ID,
+                                                  dc.REFUSE_PASS_UNKNOWN))
+    assert out[0]["error"].endswith("revision_not_on_this_line:%s"
+                                    % ("d" * 40)[:12])

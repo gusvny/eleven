@@ -3545,7 +3545,13 @@ def line_round_tick(project_key, load_lines, read_rows, append_rows,
             healed = reconcile_unrecorded_rounds(
                 line, rows, runs_rows, append_rows, judged_by, booked_red,
                 now_ms, sole_line=(len(lines) == 1),
-                guard_held=guard_held(guard_path), project=project_key)
+                guard_held=guard_held(guard_path), project=project_key,
+                # The declaration this tick already loaded (t261103-10): the
+                # heal attributes with it instead of reading the store a
+                # second time. A caller seam that answers only the line ids
+                # (a plain iterable) hands over nothing, and the heal falls
+                # back to its own read.
+                line_decl=lines.get(line) if isinstance(lines, dict) else None)
             if healed:
                 entries.extend(healed)
                 # the heal may have closed the range: re-read before the ask
@@ -3895,18 +3901,29 @@ def _run_repos_key(repos):
 #                line's declared branch head (what a manual round judges).
 #                This is the ONLY kind that becomes a certification.
 #   BASELINE   — the row is an observation, not a verdict: its run id is
-#                recorded as a baseline rebuild's run (the durable proof), or
-#                every revision it names is a tip main's baseline was measured
-#                at (main's current tip, or a cached baseline key). Books
+#                recorded as a baseline rebuild's run in the baseline cache
+#                (``write_baseline(..., run_id=)``). That durable proof is the
+#                ONLY thing that makes a row BASELINE (t261103-10). Books
 #                NOTHING and opens no freeze.
 #   UNKNOWN    — the row can be tied to neither identity (an alias, a stale
-#                revision, a foreign runner): books NOTHING and NAMES the
-#                refusal, exactly like the reachability net (KI-429).
-# Note the baseline identity is checked BEFORE the revision identity only for
-# the run-id form: a run id is exact, so it wins even when main's tip happens
-# to equal the line head (the degenerate case where the two trees are the same
-# tree and the baseline pass's absolute reds would otherwise read as the
-# line's).
+#                revision, a foreign runner, a baseline tip with no recorded
+#                run id): books NOTHING and NAMES the refusal, exactly like
+#                the reachability net (KI-429).
+# The baseline run id is checked BEFORE the revision identities: a run id is
+# exact, so it wins even when main's tip happens to equal the line head (the
+# degenerate case where the two trees are the same tree and the baseline
+# pass's absolute reds would otherwise read as the line's).
+#
+# t261103-06 first ALSO decided BASELINE from "every revision it names is a
+# main baseline tip". That arm decided alone, and it skipped a completed,
+# attributable round: a line head created from main IS the main tip, so the
+# witness the heal exists for was classified as an observation and dropped
+# (measured on main 68385732: leg A of
+# integration/t261025-11/sc_t261025_11_unrecorded_round_healed.py answered
+# ``{"state": "skipped", "attribution_rule": "baseline_pass", "reason":
+# "revision_is_a_main_baseline_tip:c9114974607e"}`` and wrote no row). The
+# tips identity is not proof of which pass ran — the durable run id is — so
+# the tips set now only sharpens the refusal text.
 
 PASS_CANDIDATE = "candidate"
 PASS_BASELINE = "baseline"
@@ -3929,11 +3946,73 @@ def _revision_set(repos):
     return {r["revision"] for r in repos}
 
 
-def line_head_revision_map(project, line):
+def line_decl_head_revision_map(project, line_decl):
+    """{repo: revision} of the heads a DECLARED line names, resolved in the
+    project's line worktrees (t261103-10).
+
+    The heal must attribute a run row with the SAME declaration the tick ran
+    with. The tick already holds it (its ``load_lines`` seam), so the heal
+    takes it from the caller instead of reading the store a second time: a
+    second read can disagree with the declaration the round actually used,
+    and then an attributable round has no identity at all.
+
+    A declaration names its head with a branch; a declaration that pins a
+    revision is resolved too. Every answer comes from git in that repository
+    — a repository whose head does not resolve is left OUT, so the caller has
+    no identity for it and never a guessed revision."""
+    out = {}
+    if not (isinstance(project, str) and project.strip()):
+        return out
+    try:
+        import shared  # local: certify -> shared, no cycle
+        wt_root = shared.develop_dir(project) / "wt"
+    except Exception:  # noqa: BLE001 — an identity lookup never breaks a heal
+        return out
+    for repo_meta in getattr(line_decl, "repositories", []) or []:
+        name = getattr(repo_meta, "name", "")
+        if not (isinstance(name, str) and name.strip()):
+            continue
+        rev = _declared_head_revision(wt_root / name,
+                                      getattr(repo_meta, "branch", ""))
+        if rev:
+            out[name] = rev
+    return out
+
+
+def _declared_head_revision(repo_dir, declared):
+    """The revision a declaration's head field names, or "" when git in
+    ``repo_dir`` cannot resolve it to a COMMIT.
+
+    Two declared shapes are accepted: a branch name (the declared form) and a
+    pinned 40-hex revision. Nothing else is resolved — an arbitrary rev
+    expression (``HEAD``, ``@{upstream}``, a tag) is not a declared head, and
+    reading one as the line's content is exactly the mislabel the manual
+    round's declared-branch rule exists to avoid."""
+    if not (isinstance(declared, str) and declared.strip()):
+        return ""
+    rev = _git_ref(repo_dir, "refs/heads/%s" % declared)
+    if _valid_full_sha(rev):
+        return rev
+    if not _valid_full_sha(declared):
+        return ""
+    rev = _git_ref(repo_dir, "%s^{commit}" % declared)
+    return rev if _valid_full_sha(rev) else ""
+
+
+def line_head_revision_map(project, line, line_decl=None):
     """{repo: revision} of the line's DECLARED branch tips — the identity a
     round judging the line head cites (``line_head_candidate``). Empty when
     the project/line cannot resolve one; the caller then has no head identity
-    and says so instead of guessing."""
+    and says so instead of guessing.
+
+    ``line_decl`` is the declaration the caller already loaded: when it
+    resolves, it wins, because it is the declaration the tick ran with
+    (t261103-10). The store read below is the fallback for a caller that
+    holds no declaration."""
+    if line_decl is not None:
+        head = line_decl_head_revision_map(project, line_decl)
+        if head:
+            return head
     if not (isinstance(project, str) and project.strip()):
         return {}
     try:
@@ -3969,11 +4048,16 @@ def _baseline_cache_rows(project):
 def baseline_identity(project, repo_names):
     """(tips, run_ids) the BASELINE pass is known to have run at and with.
 
+    ``run_ids`` holds the run ids the cached baseline rebuilds cited
+    (``write_baseline``'s additive ``run`` field). It is the DURABLE evidence,
+    and it is the only thing that decides PASS_BASELINE (t261103-10).
+
     ``tips`` holds today's main tip of every named repository plus every
-    cached baseline key (a cache outlives main advancing, so a rebuild run
-    stays recognisable after the tip moves). ``run_ids`` holds the run ids
-    those baseline rebuilds cited (``write_baseline``'s additive ``run``
-    field). Both empty = nothing readable = "cannot tell", never a guess."""
+    cached baseline key. It is DIAGNOSTIC ONLY: a revision being a main
+    baseline tip does not prove the row was the baseline pass — a line head
+    created from main IS the main tip — so the tips set colours the refusal
+    TEXT and never decides a role. Both empty = nothing readable = "cannot
+    tell", never a guess."""
     tips, runs = set(), set()
     if not (isinstance(project, str) and project.strip()):
         return tips, runs
@@ -4002,7 +4086,16 @@ def run_pass_role(repos, run_id, landing_revs, head_revs, baseline_tips,
     ``role`` is PASS_CANDIDATE (a verdict on this line), PASS_BASELINE (a
     relative-judgement observation: book nothing) or PASS_UNKNOWN (cannot
     tell: book nothing and name the refusal). ``rule`` names the identity that
-    decided a candidate row; ``why`` carries the named reason otherwise."""
+    decided a candidate row; ``why`` carries the named reason otherwise.
+
+    BASELINE is decided by DURABLE EVIDENCE ONLY (t261103-10): the row's run
+    id is recorded in the baseline cache as a baseline rebuild's run
+    (``write_baseline(..., run_id=)``). ``baseline_tips`` is DIAGNOSTIC: it
+    names a row that looks like a baseline observation but carries no durable
+    proof, and that row is UNKNOWN — it books nothing. A tip no longer decides
+    a role on its own, because it cannot: a line head created from main IS the
+    main tip, and the old tips-only arm dropped exactly such a completed,
+    attributable round."""
     revs = _revision_set(repos)
     if revs is None:
         return PASS_MALFORMED, "", "candidate_set_malformed"
@@ -4015,8 +4108,9 @@ def run_pass_role(repos, run_id, landing_revs, head_revs, baseline_tips,
     if revs and revs <= set(head_revs):
         return PASS_CANDIDATE, "line_head_match", ""
     if revs and revs <= set(baseline_tips):
-        return (PASS_BASELINE, "baseline_pass",
-                "revision_is_a_main_baseline_tip:%s" % named)
+        return (PASS_UNKNOWN, "",
+                "revision_is_a_main_baseline_tip_without_a_recorded_run:%s"
+                % named)
     return (PASS_UNKNOWN, "",
             "revision_not_on_this_line:%s" % named)
 
@@ -4024,7 +4118,7 @@ def run_pass_role(repos, run_id, landing_revs, head_revs, baseline_tips,
 def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
                                 judged_by, booked_red, now_ms,
                                 sole_line=False, guard_held=False,
-                                project=None):
+                                project=None, line_decl=None):
     """Heal completed line-round runs that no delivery-ledger row cites.
 
     Returns named entries; every append happens HERE, exactly once per run
@@ -4034,16 +4128,20 @@ def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
     Attribution (t261103-06, KI-456 — the passes are told apart, never
     guessed): a run row is booked only when every revision it names is one
     this line can prove it has — a revision a landing on this line recorded
-    (``landing_repo_match``) or the line's declared branch head
-    (``line_head_match``). A row that is a BASELINE-rebuild observation (its
-    run id is a recorded baseline rebuild's, or every revision it names is a
-    tip main's baseline was measured at) books NOTHING: no certification and
-    no freeze — it is the round's relative-judgement input, not a verdict on
-    the line. A row tied to neither identity books NOTHING and writes one
-    range-growth row naming the refusal (never a guessed revision).
-    ``sole_line`` is kept for call compatibility and no longer grants
-    attribution: the take-anyway rule it used to enable is exactly what booked
-    a baseline pass as the line's certification.
+    (``landing_repo_match``) or the line's declared head (``line_head_match``,
+    resolved from ``line_decl`` when the caller holds the declaration the tick
+    ran with). A row that is a BASELINE-rebuild observation books NOTHING: no
+    certification and no freeze — it is the round's relative-judgement input,
+    not a verdict on the line. The ONLY proof of that pass is durable: its run
+    id is recorded in the baseline cache as a baseline rebuild's run
+    (t261103-10). A main-baseline tip does not prove it, because a line head
+    created from main IS the main tip. A row tied to neither identity books
+    NOTHING and names the refusal (never a guessed revision): a project that
+    declares more than one line gets the ambiguity refusal on the receipt and
+    writes no ledger row, and with a single declared line the reachability net
+    keeps its one named row. ``sole_line`` is kept for call compatibility and
+    grants no attribution: the take-anyway rule it used to enable is exactly
+    what booked a baseline pass as the line's certification.
 
     Heal mapping mirrors the settle block: a judgable header (``run-`` id,
     dict ``cases``, ran >= 1) becomes ONE certification whose ``judged_by``
@@ -4076,7 +4174,7 @@ def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
 
     def _head_revs():
         if _ident["head"] is None:
-            _ident["head"] = line_head_revision_map(project, line)
+            _ident["head"] = line_head_revision_map(project, line, line_decl)
         return set(_ident["head"].values())
 
     def _base_ident(names):
@@ -4142,18 +4240,28 @@ def reconcile_unrecorded_rounds(line, rows, runs_rows, append_rows,
                             "reason": why})
             continue
         if role not in (PASS_CANDIDATE, PASS_MALFORMED):
-            # Not a candidate identity. Two refusals, both booking nothing:
-            # a revision the project cannot even produce keeps the KI-429
-            # net's own words and its one range-growth row (idempotent by
-            # replay); anything else is an unattributable pass, named on the
-            # receipt, with no ledger row and no id ever booked.
+            # Not a candidate identity. Every branch here books NO
+            # certification and NO freeze, and names its refusal:
+            #   * a project declaring MORE THAN ONE line cannot tell which
+            #     line the row belongs to — the ambiguity is named on the
+            #     receipt and writes no ledger row (t261025-11 leg D). The
+            #     reachability net answers a different question ("can this
+            #     revision be produced at all"), and a guessed line is the
+            #     one thing neither refusal may do;
+            #   * with a single declared line the KI-429 net keeps its own
+            #     words and its one range-growth row (idempotent by replay);
+            #     a reachable revision leaves the receipt's refusal.
+            why_unknown = "unrecorded_run:%s:line_ambiguous:%s:%s" % (
+                rid, REFUSE_PASS_UNKNOWN, why)
+            if not sole_line:
+                entries.append({"line": line, "state": "error", "run": rid,
+                                "error": why_unknown})
+                continue
             _blocked = unreachable_candidates(run.get("repos"), project) \
                 if project else []
             if not _blocked:
-                entries.append(
-                    {"line": line, "state": "error", "run": rid,
-                     "error": "unrecorded_run:%s:line_ambiguous:%s:%s"
-                              % (rid, REFUSE_PASS_UNKNOWN, why)})
+                entries.append({"line": line, "state": "error", "run": rid,
+                                "error": why_unknown})
                 continue
             entries.append(_refuse_by_name(rid, _blocked))
             continue
