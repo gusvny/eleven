@@ -26,18 +26,6 @@
  *                                               → 进展行 enrichment（t260904-17）：主响应零 show；
  *                                                 enrich 阶段逐票 show 短超时+并发上限+allSettled
  *   GET  /sandbar-workbench/api/wf/tickets/<id>   → ticket show（详情全文）
- *   GET  /sandbar-workbench/api/wf/tickets/<id>/artifacts
- *                                               → artifact inventory (t261030-35, epic artifact-face
- *                                                 slice 2): the canonical row list read from the
- *                                                 ticket snapshot, plus one metadata record per row
- *                                                 (state, size, mtime). Rows are never dropped because
- *                                                 their bytes are unavailable — the state names why.
- *   GET  /sandbar-workbench/api/wf/tickets/<id>/artifacts/<stage>/<id>/bytes
- *                                               → the ORIGINAL BYTES of one declared artifact. The
- *                                                 source is resolved from the snapshot, never from the
- *                                                 request; an id declared twice in one stage is a 409,
- *                                                 over-cap is a 413, a saturated read pool is a 503.
- *                                                 Read-only: any other method is a 405
  *   GET  /sandbar-workbench/api/wf/tickets/<id>/file?path=&mode=settle|base|current
  *                                               → 「本票时刻」只读文件（t260915-17，mock 260904
  *                                                 标注 D）：settle=收口版（该票的提交版本）/base=
@@ -65,14 +53,6 @@
  *   GET  /sandbar-workbench/api/wf/book?path=books/hanshu/jizhuan.json&limit=5
  *                                               → 内容预览（审批前过目）：只读 app/public/data/<path>，
  *                                                 返回 meta + 前 limit 章（标题+段落）；path 白名单防穿路径
- *   GET  /sandbar-workbench/api/wf/file?session=<id>&path=<p>
- *                                               → middle-column file read (t261102-09): a registered
- *                                                 project-directory whitelist (the lexical test runs
- *                                                 first, realpath follows), a 1 MiB cap and strict
- *                                                 UTF-8. A target fault is 200+{ok:false,reason};
- *                                                 only a malformed request is 400. The path constant
- *                                                 is shared with the client pane.
- *                                                 (no session = the absolute scope)
  *   GET  /sandbar-workbench/api/wf/worker-staleness → worker 陈旧度对比（只读，t261008-29 KI-227）：
  *                                                 运行中 worker 指纹 vs 当前 HEAD + 当前活动注册集；
  *                                                 stale=警告（observe-only，绝不阻断/重启 worker）
@@ -155,7 +135,7 @@
 
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { appendFile, readFile, readdir, realpath, stat } from 'node:fs/promises'
+import { appendFile, readFile, readdir } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve, sep } from 'node:path'
 import { existsSync } from 'node:fs'
@@ -173,12 +153,8 @@ import { anchorEnv, resolveProjectAnchor, resolvedMark, type ProjectAnchor } fro
 import { ProjectCliError, runProjectCli } from './src/host/project-admin.ts'
 // 「文档」视图宿主半（t260905-06；KI-070 起按项目根解析）：docs/ 定稿库 + notes/ 观察窗只读枚举/读取。
 // 降级/白名单/句柄终态口径见该模块头注（R1 取舍清单 2）。
-import { listDocs, readDoc } from './src/host/docs.ts'
+import { docsRootsTree, listDocs, readDocsSelection } from './src/host/docs.ts'
 import { isDocsScope } from './src/shared/docs-model.ts'
-// The middle-column file endpoint constant (t261102-09): one value for the client pane
-// and this file's route. Two literals drift into "the click does nothing" while each
-// side's source lock stays green (the KI-01M4HMCZAM4ZBC2CKN15HDBZHP shape).
-import { FILE_READ_PATH } from './src/client/file-route.ts'
 
 function projectRootsFor(projectKey: unknown): string[] {
   // 跨项目工单（t260903-11/-12）：票所属项目注册目录=实时态/日志读取的合法根。
@@ -192,195 +168,8 @@ function projectRootsFor(projectKey: unknown): string[] {
   } catch { return [] }
 }
 
-/* ---------------------------------------------------- guarded file read (t261102-09)
- *
- * The middle column reads a file through ONE door: the guards below plus one route in
- * this file. Rules (plan v3 §3.3; review rounds R15/S1/S2/S5):
- *
- *   - The roots are the dirs of every registry entry, read per request (loadRegistry).
- *     A missing registry root throws; an empty or all-quarantined registry is an empty
- *     table. Both answer the same named refusal, no-registered-roots, never a 500.
- *   - Roots carry two spellings: the declared value (raw) and its realpath (real). The
- *     lexical test runs first over both and touches NO file system, so a path outside
- *     the roots answers outside-roots whether it exists or not: this route is not an
- *     existence oracle. A second test over the real path follows the realpath call, and
- *     that one is what stops a symlink escape.
- *   - A session-scope address must resolve its workspace (Session.header.cwd:
- *     dsh-session/lib/types/index.d.ts:116 and types.d.ts:69; meta is only the INPUT of
- *     create). An unresolvable workspace is the named refusal
- *     session-workspace-unknown, and it does NOT fall back to the roots: that fallback
- *     can resolve the same relative path under another project and serve the wrong file
- *     with no banner.
- *   - A target fault answers 200 + {ok:false, reason, path, error}, the read-face
- *     convention of this repo (see the handleTicketTimeFile note above). Only a
- *     malformed request answers 400 (bad-path / bad-session).
- *   - At most 1 MiB per read, decoded as strict UTF-8 (TextDecoder with fatal). Every
- *     failure names the check it failed.
- */
-
-/** Byte cap per read: over it is the named too-large (the message carries the count); never a truncated body posing as the whole file. */
-const FILE_READ_MAX_BYTES = 1024 * 1024
-
-/** Session id shape (external route input): no slash, no whitespace, no control character, 1..200 characters. */
-const FILE_SESSION_ID_RE = /^[A-Za-z0-9._:@-]{1,200}$/
-
-interface GuardedFileFailure {
-  ok: false
-  reason: string
-  path: string
-  message: string
-}
-
-interface GuardedFileSuccess {
-  ok: true
-  absolutePath: string
-  size: number
-  lines: number
-  content: string
-}
-
-interface GuardedFileRoots {
-  ok: true
-  raw: string[]
-  real: string[]
-}
-
-function guardedFailure(reason: string, path: string, message: string): GuardedFileFailure {
-  return { ok: false, reason, path, message }
-}
-
-/** The three absolute spellings: POSIX, a Windows drive letter, and UNC (the dsh workspace-path rule). */
-function isAbsoluteWorkspacePath(path: string): boolean {
-  return path.startsWith('/') || /^[A-Za-z]:[/\\]/.test(path) || path.startsWith('\\\\')
-}
-
-/** Separator-bounded containment (the three existing spots in this file); a bare startsWith lets a same-prefix sibling through. */
-function withinRoot(root: string, abs: string): boolean {
-  return abs === root || abs.startsWith(root + sep)
-}
-
-/**
- * The registered directories, in both spellings.
- *
- * A loader throw, an empty table, or every entry failing realpath answers
- * no-registered-roots (named, never a 500). One unresolvable entry is skipped with one
- * log line; it does not refuse the other roots.
- */
-async function registeredFileRoots(onSkip?: (message: string) => void): Promise<GuardedFileRoots | GuardedFileFailure> {
-  let projects: ProjectEntry[]
-  try {
-    projects = loadRegistry().projects
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err)
-    return guardedFailure('no-registered-roots', '', `the project registry could not be loaded: ${msg}`)
-  }
-  const raw: string[] = []
-  const real: string[] = []
-  for (const p of projects) {
-    for (const dir of Array.isArray(p?.dirs) ? p.dirs : []) {
-      if (typeof dir !== 'string' || dir === '') continue
-      raw.push(dir)
-      try {
-        real.push(await realpath(dir))
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        onSkip?.(`registered project directory does not resolve, skipped: ${dir} (${msg})`)
-      }
-    }
-  }
-  if (raw.length === 0 || real.length === 0) {
-    return guardedFailure('no-registered-roots', '', 'no registered project directory is available')
-  }
-  return { ok: true, raw, real }
-}
-
-/**
- * Resolve and guard one file read (no content is read here).
- *
- * Fixed order: session workspace, lexical containment (no file system), realpath,
- * containment on the real path (the symlink-escape gate), stat, size, read, UTF-8.
- * Every step fails with its own reason and message.
- */
-async function resolveGuardedFile(input: {
-  roots: GuardedFileRoots
-  scope: 'session' | 'absolute'
-  sessionCwd?: string
-  path: string
-}): Promise<{ ok: true; absolutePath: string } | GuardedFileFailure> {
-  const requested = input.path
-  let base = ''
-  if (input.scope === 'session') {
-    if (typeof input.sessionCwd !== 'string' || input.sessionCwd === '') {
-      return guardedFailure('session-workspace-unknown', requested, 'the session workspace cannot be resolved for this address')
-    }
-    try {
-      base = await realpath(input.sessionCwd)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return guardedFailure('session-workspace-unknown', requested, `the session workspace does not resolve: ${input.sessionCwd} (${msg})`)
-    }
-  }
-  if (input.scope === 'absolute' && !isAbsoluteWorkspacePath(requested)) {
-    return guardedFailure('bad-path', requested, 'an absolute address must carry an absolute path')
-  }
-  const abs = isAbsoluteWorkspacePath(requested)
-    ? resolve(requested)
-    : resolve(base === '' ? requested : base, requested)
-  const lexical = [...input.roots.raw, ...input.roots.real]
-  if (!lexical.some((root) => withinRoot(root, abs))) {
-    return guardedFailure('outside-roots', requested, 'the path is outside every registered project directory')
-  }
-  let realAbs: string
-  try {
-    realAbs = await realpath(abs)
-  } catch (err: any) {
-    if (err?.code === 'ENOENT' || err?.code === 'ENOTDIR') {
-      return guardedFailure('not-found', requested, `no such file: ${abs}`)
-    }
-    return guardedFailure('unreadable', requested, `realpath failed (${String(err?.code ?? err)})`)
-  }
-  if (!input.roots.real.some((root) => withinRoot(root, realAbs))) {
-    return guardedFailure('outside-roots', requested, `the path resolves outside every registered project directory (${realAbs})`)
-  }
-  let info
-  try {
-    info = await stat(realAbs)
-  } catch (err: any) {
-    if (err?.code === 'ENOENT') return guardedFailure('not-found', requested, `no such file: ${realAbs}`)
-    return guardedFailure('unreadable', requested, `stat failed (${String(err?.code ?? err)})`)
-  }
-  if (info.isDirectory()) return guardedFailure('is-directory', requested, 'the path is a directory, not a file')
-  if (!info.isFile()) return guardedFailure('unreadable', requested, 'the path is not a regular file')
-  if (info.size > FILE_READ_MAX_BYTES) {
-    return guardedFailure('too-large', requested, `the file is ${info.size} bytes; the read limit is ${FILE_READ_MAX_BYTES}`)
-  }
-  return { ok: true, absolutePath: realAbs }
-}
-
-/** The session workspace (Session.header.cwd; the probe shape is read from the installed tree, not a contract). */
-function sessionCwdOf(ctx: Context, sessionId: string): string | undefined {
-  try {
-    const sessions = (ctx as any)?.get?.('sessions')
-    const session = typeof sessions?.get === 'function' ? sessions.get(sessionId) : undefined
-    const cwd = session?.header?.cwd
-    return typeof cwd === 'string' && cwd !== '' ? cwd : undefined
-  } catch {
-    return undefined
-  }
-}
-
 import { computeTicketDiff, type TicketForDiff } from './src/host/changes.ts'
 import { readTicketTimeFile } from './src/host/ticket-time-file.ts'
-// t261030-35 (epic artifact-face, slice 2): the artifact inventory and its
-// original-bytes channel. The row list comes from the same pure model the console
-// panel uses (`src/client/artifact-face-model.ts`), so the panel cannot list a row
-// this route cannot find, or the reverse.
-import {
-  buildArtifactInventory,
-  readArtifactBytes,
-  withArtifactSlot,
-  type ArtifactByteFailure,
-} from './src/host/artifact-face.ts'
 // t261022-14: the lane-file comment store for the markdown reviewer. MINIMAL
 // REGISTRATION ONLY (CF1, lost by settles a21f4d00/6846bb14 — see
 // integration/t261022-14/node-ts-registration.patch for the one-command
@@ -482,25 +271,6 @@ const OPS = new Set(['accept', 'advance', 'dispatch-next', 'rework', 'update', '
 /** 工单 id 白名单：review 落盘文件名由它拼出，必须防穿路径（同 knowledge DOC_PATH_RE 的角色）。
  *  放行 Han 字（真实工单 id 含中文，54 张全量体检零误伤）；/ \ . % 与控制字符全在表外，穿路径无门。 */
 const TICKET_ID_RE = /^[A-Za-z0-9\p{Script=Han}][A-Za-z0-9_\-\p{Script=Han}]{2,80}$/u
-
-/**
- * Stage order for the artifact inventory (t261030-35): the template topology the
- * ticket already carries (`topology.nodes[].id`), else undefined so the model
- * keeps the receipt order. Ordering only — it never adds or removes a row.
- */
-function artifactStageOrder(detail: Record<string, unknown>): string[] | undefined {
-  const topo = detail.topology
-  if (topo === null || typeof topo !== 'object') return undefined
-  const nodes = (topo as Record<string, unknown>).nodes
-  if (!Array.isArray(nodes)) return undefined
-  const order: string[] = []
-  for (const n of nodes) {
-    if (n === null || typeof n !== 'object') continue
-    const id = (n as Record<string, unknown>).id
-    if (typeof id === 'string' && id !== '' && !order.includes(id)) order.push(id)
-  }
-  return order.length > 0 ? order : undefined
-}
 
 /**
  * 工单快照 → 首条上下文消息（t260831-08 从 handleTicketSessionOpen 的闭包抽出，
@@ -1146,11 +916,26 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     const anchor = anchorGuard(res, anchorOf(url))
     if (anchor === null) return
     try {
-      sendJson(res, 200, {
-        ok: true,
-        result: await listDocs(join(anchor.root, scope), scope),
-        resolved: resolvedMark(anchor),
+      if (scope === 'notes') {
+        // The notes knowledge base is outside the declaration this round (design
+        // nongoal): its listing keeps today's behaviour byte for byte.
+        sendJson(res, 200, {
+          ok: true,
+          result: await listDocs(join(anchor.root, scope), scope),
+          resolved: resolvedMark(anchor),
+        })
+        return
+      }
+      // docs: one merged view over the declared roots + the derived index's state.
+      const project = anchor.key ?? ''
+      const repos = project !== '' ? (findProject(project)?.dirs ?? []) : []
+      const result = await docsRootsTree(project === '' ? 'default' : project, {
+        repos, fallbackRepo: anchor.root,
+        // No project key = the engine-repo default context: no registry entry, so no
+        // declaration to read — the implied default root of the anchor applies.
+        noDeclaration: project === '',
       })
+      sendJson(res, 200, { ok: true, result, resolved: resolvedMark(anchor) })
     } catch (err: any) {
       sendJson(res, 500, { ok: false, error: `docs 目录枚举失败: ${String(err?.message ?? err)}` })
     }
@@ -1175,9 +960,30 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     const anchor = anchorGuard(res, anchorOf(url))
     if (anchor === null) return
     try {
-      const r = await readDoc(join(anchor.root, scope), rel)
-      // 降级走 200 + {empty,reason}（人话可见，同 book/scan-report 风格——路径问题不是服务器错）
-      sendJson(res, 200, { ok: true, result: r, resolved: resolvedMark(anchor) })
+      if (scope === 'notes') {
+        const r = await readDoc(join(anchor.root, scope), rel)
+        // 降级走 200 + {empty,reason}（人话可见，同 book/scan-report 风格——路径问题不是服务器错）
+        sendJson(res, 200, { ok: true, result: r, resolved: resolvedMark(anchor) })
+        return
+      }
+      // docs: the page is read from the RESOLVED root it came from. The tree hands back
+      // a selection token (`@<n>/<rel>`) when more than one root is in effect, so two
+      // roots holding the same relative path never open each other's file.
+      const project = anchor.key ?? ''
+      const repos = project !== '' ? (findProject(project)?.dirs ?? []) : []
+      const picked = await readDocsSelection(project === '' ? 'default' : project, {
+        repos, fallbackRepo: anchor.root,
+        // No project key = the engine-repo default context: no registry entry, so no
+        // declaration to read — the implied default root of the anchor applies.
+        noDeclaration: project === '',
+      }, rel)
+      if (picked.state === 'refused') {
+        // A refusal is an answer, not an empty page: its named reason travels with it.
+        sendJson(res, 200, { ok: true, resolved: resolvedMark(anchor), result: {
+          empty: true, reason: picked.reason, rel, title: '', meta: {}, body: '' } })
+        return
+      }
+      sendJson(res, 200, { ok: true, result: picked.result, resolved: resolvedMark(anchor) })
     } catch (err: any) {
       sendJson(res, 500, { ok: false, error: `docs 篇章读取失败: ${String(err?.message ?? err)}` })
     }
@@ -1339,133 +1145,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       sendJson(res, 200, { ok: true, result: await loadReview(reviewsAnchor, id), resolved: resolvedMark(anchor) })
     } catch (err: any) {
       sendJson(res, 500, { ok: false, error: String(err?.message ?? err) })
-    }
-  }
-
-  /**
-   * Artifact inventory (t261030-35, epic artifact-face slice 2):
-   * GET /wf/tickets/<id>/artifacts[?project=].
-   *
-   * The row list is the canonical one from the ticket snapshot (read through the
-   * ONE pure model, `src/client/artifact-face-model.ts`); this route adds the
-   * metadata the snapshot does not carry (size, mtime, and the named state when
-   * the bytes cannot be used). A row is never removed: a torn-down lane, a missing
-   * file, a multi-repo source with no workspace and an absolute/URL source each
-   * become a named state on the row.
-   *
-   * Read-only: the dispatch refuses any method except GET.
-   */
-  async function handleTicketArtifacts(req: IncomingMessage, res: ServerResponse, id: string): Promise<void> {
-    if (!TICKET_ID_RE.test(id) || /[./]/.test(id)) {
-      sendJson(res, 400, { ok: false, error: `ticket id is not valid: '${id.slice(0, 40)}'` })
-      return
-    }
-    const url = new URL(req.url ?? '/', 'http://x')
-    try {
-      const s = await callTool('ticket', { op: 'show', id })
-      if (s?.ok !== true) {
-        sendTicketShowError(res, s, id)
-        return
-      }
-      const t = (s.result ?? {}) as Record<string, unknown>
-      const queryKey = url.searchParams.get('project')
-      const a = resolveProjectAnchor(
-        queryKey !== null && queryKey !== '' ? queryKey : (typeof t.project === 'string' ? t.project : ''),
-        repo)
-      const anchor = anchorGuard(res, a)
-      if (anchor === null) return
-      const inventory = await buildArtifactInventory(anchor.root, t, artifactStageOrder(t))
-      sendJson(res, 200, { ok: true, result: inventory, resolved: resolvedMark(anchor) })
-    } catch (err) {
-      sendJson(res, 502, { ok: false, error: `artifact inventory read failed: ${String(err instanceof Error ? err.message : err)}` })
-    }
-  }
-
-  /**
-   * Original bytes of ONE declared artifact (t261030-35):
-   * GET /wf/tickets/<id>/artifacts/<stage>/<id>/bytes[?project=].
-   *
-   * The address is the row key, never a path: the source is resolved from the
-   * snapshot. The dispatch has already decoded the path once (`decodeURIComponent`
-   * over the whole remainder), so the segment is used as decoded — decoding again
-   * here would be the classic double-decode bug.
-   *
-   * Status map: 404 not declared / 409 id declared twice in the stage / 413 over
-   * the in-page cap / 503 read pool saturated / 400 the declared source is not
-   * usable (missing file, outside the root, unknown repo, not UTF-8). Every body
-   * names the check that failed. Headers: nosniff + no-store + a content type and
-   * disposition from the kind table (SVG leaves as a download).
-   */
-  async function handleTicketArtifactBytes(
-    req: IncomingMessage, res: ServerResponse, id: string, stage: string, artId: string,
-  ): Promise<void> {
-    if (!TICKET_ID_RE.test(id) || /[./]/.test(id)) {
-      sendJson(res, 400, { ok: false, error: `ticket id is not valid: '${id.slice(0, 40)}'` })
-      return
-    }
-    if (stage === '' || artId === '') {
-      sendJson(res, 400, { ok: false, error: 'stage and artifact id are both required' })
-      return
-    }
-    // Shape guard on the address segments. The client percent-encodes both; the
-    // dispatch decodes the path once, so a path-shaped id (`..`, a separator, a
-    // percent that survived one decode) reaches here as data — refused by name,
-    // never resolved against the filesystem. A declared id that cannot pass this
-    // guard is already marked un-servable on its row (the link is not offered).
-    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$/.test(stage)
-      || !/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,120}$/.test(artId)) {
-      sendJson(res, 400, {
-        ok: false,
-        error: `artifact address is not a plain stage/id pair (stage='${stage.slice(0, 40)}', id='${artId.slice(0, 40)}'); the byte route never takes a path`,
-      })
-      return
-    }
-    const url = new URL(req.url ?? '/', 'http://x')
-    const statusOf = (f: ArtifactByteFailure): number => {
-      switch (f.code) {
-        case 'not_found': return 404
-        case 'ambiguous': return 409
-        case 'too_large': return 413
-        case 'busy': return 503
-        default: return 400
-      }
-    }
-    try {
-      const s = await callTool('ticket', { op: 'show', id })
-      if (s?.ok !== true) {
-        sendTicketShowError(res, s, id)
-        return
-      }
-      const t = (s.result ?? {}) as Record<string, unknown>
-      const queryKey = url.searchParams.get('project')
-      const a = resolveProjectAnchor(
-        queryKey !== null && queryKey !== '' ? queryKey : (typeof t.project === 'string' ? t.project : ''),
-        repo)
-      const anchor = anchorGuard(res, a)
-      if (anchor === null) return
-      const answer = await withArtifactSlot(() => readArtifactBytes(anchor.root, t, stage, artId))
-      if (answer.ok !== true) {
-        const status = statusOf(answer)
-        const headers: Record<string, string> = {
-          'content-type': 'application/json; charset=utf-8',
-          'cache-control': 'no-store',
-          'x-content-type-options': 'nosniff',
-        }
-        const body = JSON.stringify({ ok: false, code: answer.code, error: answer.reason })
-        res.writeHead(status, headers)
-        res.end(body)
-        return
-      }
-      res.writeHead(200, {
-        'content-type': answer.contentType,
-        'content-disposition': `${answer.disposition}; filename="${answer.filename}"`,
-        'content-length': String(answer.sizeBytes),
-        'cache-control': 'no-store',
-        'x-content-type-options': 'nosniff',
-      })
-      res.end(answer.body)
-    } catch (err) {
-      sendJson(res, 502, { ok: false, error: `artifact bytes read failed: ${String(err instanceof Error ? err.message : err)}` })
     }
   }
 
@@ -1682,29 +1361,8 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       await handleTicketEvidence(req, res, parts[0], parts[2])
       return
     }
-    if (parts.length === 5 && parts[1] === 'artifacts' && parts[4] === 'bytes') {
-      // t261030-35: original bytes of one declared artifact. The path was decoded once
-      // above (`decodeURIComponent` over the whole remainder): segments are used as-is.
-      if (req.method !== 'GET') {
-        sendJson(res, 405, { ok: false, error: 'artifact bytes is a read-only channel (GET only)' })
-        return
-      }
-      await handleTicketArtifactBytes(req, res, parts[0], parts[2], parts[3])
-      return
-    }
     if (parts.length === 2) {
       const [id, op] = parts
-      // t261030-35: the artifact inventory (epic artifact-face slice 2). Read-only; the
-      // handler refuses nothing by method because the dispatch already answered 405 for
-      // non-GET below — kept explicit here for the same reason the `file` op is explicit.
-      if (op === 'artifacts') {
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { ok: false, error: 'the artifact inventory is a read-only channel (GET only)' })
-          return
-        }
-        await handleTicketArtifacts(req, res, id)
-        return
-      }
       // t260831-08：evidence 列表只读 GET（详情抽屉「截图证据」区数据源；
       // 带文件段的取图在同前缀 3 段路由，见上方 handleTicketEvidence）。
       if (op === 'evidence' && req.method === 'GET') {
@@ -1935,16 +1593,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
       } catch (err) {
         sendJson(res, 502, { ok: false, error: String(err instanceof Error ? err.message : err) })
       }
-      return
-    }
-    if (parts.length > 5 && parts[1] === 'artifacts') {
-      // t261030-35: a byte address that decoded into more segments than stage/id/bytes
-      // carries a separator (or a `..`) that the caller encoded — refuse by name rather
-      // than let the family 404 imply "such a ticket path does not exist".
-      sendJson(res, 400, {
-        ok: false,
-        error: 'artifact byte address must be /artifacts/<stage>/<id>/bytes; the id cannot contain a path separator',
-      })
       return
     }
     sendJson(res, 404, { ok: false, error: '路径不合法：/sandbar-workbench/api/wf/tickets/<id>[/op | /evidence/<file>]' })
@@ -2948,87 +2596,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
     }
   }
 
-  /**
-   * Middle-column file read (t261102-09): GET /sandbar-workbench/api/wf/file?session=<id>&path=<p>.
-   *
-   * A hijacked chat file link lands in the middle column, and the middle column reads
-   * bytes through this route only. It NEVER reads an arbitrary absolute path: the
-   * target must sit inside a registered project directory (see the resolveGuardedFile
-   * note). No session means the absolute scope (a dsh-resource://file/absolute/...
-   * address carries no session).
-   *
-   * Transport (the handleTicketTimeFile family): a malformed request answers 400
-   * (bad-path / bad-session); a target fault answers 200 + {ok:false, reason, path,
-   * error}. The client names both cases from the body's reason.
-   */
-  async function handleFileRead(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    // Read-only across the method: a write verb never returns file content.
-    if (req.method !== undefined && req.method !== 'GET' && req.method !== 'HEAD') {
-      sendJson(res, 405, { ok: false, reason: 'method-not-allowed', error: `${String(req.method)} is not allowed on the file read (GET only)` })
-      return
-    }
-    const url = new URL(req.url ?? '/', 'http://x')
-    const requested = url.searchParams.get('path')
-    if (requested === null || requested === '') {
-      sendJson(res, 400, {
-        ok: false, reason: 'bad-path',
-        error: 'path is required: a session/project-relative path, or an absolute path inside a project directory',
-      })
-      return
-    }
-    const rawSession = url.searchParams.get('session')
-    if (rawSession !== null && !FILE_SESSION_ID_RE.test(rawSession)) {
-      sendJson(res, 400, {
-        ok: false, reason: 'bad-session',
-        error: `session has an illegal shape (1..200 characters, no slash, no whitespace, no control character): '${rawSession.slice(0, 60)}'`,
-      })
-      return
-    }
-    const roots = await registeredFileRoots((msg) => logger?.warn?.(`[file-read] ${msg}`))
-    if (roots.ok !== true) {
-      sendJson(res, 200, { ok: false, reason: roots.reason, path: requested, error: roots.message })
-      return
-    }
-    const scope: 'session' | 'absolute' = rawSession === null ? 'absolute' : 'session'
-    const sessionCwd = scope === 'session' ? sessionCwdOf(ctx, rawSession as string) : undefined
-    const resolved = await resolveGuardedFile({ roots, scope, sessionCwd, path: requested })
-    if (resolved.ok !== true) {
-      sendJson(res, 200, { ok: false, reason: resolved.reason, path: requested, error: resolved.message })
-      return
-    }
-    let bytes: Buffer
-    try {
-      bytes = await readFile(resolved.absolutePath)
-    } catch (err: any) {
-      sendJson(res, 200, {
-        ok: false, reason: 'unreadable', path: requested,
-        error: `the file could not be read (${String(err?.code ?? err?.message ?? err)})`,
-      })
-      return
-    }
-    let content: string
-    try {
-      // Strict decode: a file that is not UTF-8 text is refused by name, never
-      // rendered as replacement characters.
-      content = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-    } catch {
-      sendJson(res, 200, {
-        ok: false, reason: 'not-utf8', path: requested,
-        error: 'the file is not valid UTF-8 text',
-      })
-      return
-    }
-    sendJson(res, 200, {
-      ok: true,
-      result: {
-        path: resolved.absolutePath,
-        size: Buffer.byteLength(content, 'utf8'),
-        lines: content === '' ? 1 : content.split('\n').length,
-        content,
-      },
-    })
-  }
-
   /** 把路由挂到 webServer（同一 effect，卸载随插件生命周期）。 */
   const attach = (ws: any): void => {
     ctx.effect(() => {
@@ -3057,10 +2624,6 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
         ws.register({ kind: 'exact', path: EPICS_PREFIX, handler: handleEpics }),
         ws.register({ kind: 'prefix', path: EPICS_PREFIX, handler: handleEpicRoute }),
         ws.register({ kind: 'exact', path: '/sandbar-workbench/api/wf/workspaces', handler: handleWorkspaceList }),
-        // t261102-09: the middle-column file read (the only byte entry after a chat file
-        // link is hijacked; registered-directory whitelist + named refusals + the
-        // 200+reason transport). The path constant is shared with the client pane.
-        ws.register({ kind: 'exact', path: FILE_READ_PATH, handler: handleFileRead }),
         // Per-project session ledger (sessions.json, UI-5 t261005-06): GET read
         // (executor projection included) + POST register (id-union merge + atomic
         // write; KI-193 stance in the handleSessionsPost doc).

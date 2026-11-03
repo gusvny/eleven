@@ -19,6 +19,13 @@ import {
   buildDocTree, docTitleOf, isSafeDocRel, parseFrontmatter,
   type DocMeta, type DocTreeGroup,
 } from '../shared/docs-model.ts'
+// t261103-12: the ONE documentation-root resolution (shared with the knowledge feature)
+// plus the derived-index state — this view no longer derives a documentation directory
+// from a name of its own.
+import {
+  indexBanner, locateRoot, newestDocMtime, parseRootToken, readIndexState, resolveDocsRoots,
+  type RootsResolution, type ResolvedRoot,
+} from '../../../knowledge/src/shared/docs-roots.ts'
 
 /** 单篇大小上限（utf8 字符数；定稿库最大篇 ~60KB，2MB 上限=10 倍余量防误配大文件拖爆响应）。 */
 export const DOC_MAX_CHARS = 2_000_000
@@ -142,4 +149,211 @@ export async function readDoc(root: string, rel: string): Promise<DocReadResult>
     body: parsed.body,
     truncated: text.length >= DOC_MAX_CHARS ? true : undefined,
   }
+}
+
+/* ======================================================================
+ * t261103-12 — the docs scope over the project's RESOLVED documentation roots
+ *
+ * Where the view used to read `<project root>/docs` and nothing else, it now asks the
+ * ONE resolution (server/plugins/knowledge/src/shared/docs-roots.ts — the same module
+ * the knowledge feature uses) and merges every root in effect into one view. The
+ * derived index's state travels with the answer (absent / stale with the last build
+ * time / failed with its reason / current), so the page can label it; the files
+ * themselves are always read from the roots, never from a stale index.
+ *
+ * Selection token: with more than one root a file row's `rel` is a SELECTION TOKEN
+ * `@<n>/<root-relative path>` (n = index in the resolution order). Single-root views
+ * keep the plain relative path byte for byte, so today's projects see no change. The
+ * token exists because the page sends back exactly one string (`?path=`), and two roots
+ * may hold the same relative path — without it the second page would open the first
+ * root's file.
+ * ====================================================================== */
+
+/** One root's contribution to the merged view. */
+export interface DocsRootRow {
+  id: string
+  repository: string
+  path: string
+  state: string
+  declared: boolean
+  groups: number
+  docs: number
+}
+
+export interface DocsIndexFace {
+  state: string
+  built_at: string
+  stale_reason: string
+  reason: string
+  code: string
+  banner: string
+  total: number
+}
+
+export interface DocsRootsTreeResult {
+  /** True only when a root is in effect and holds no page at all. */
+  empty: boolean
+  reason?: string
+  state: 'served' | 'refused'
+  declared: boolean
+  declaration: string
+  roots: DocsRootRow[]
+  groups: DocTreeGroup[]
+  skipped: { path: string; reason: string; root?: string }[]
+  index: DocsIndexFace
+  looked_for: string[]
+  /** The refusal code a page can key on (empty when served). */
+  code: string
+}
+
+export interface DocsRootsOpts {
+  repos?: readonly string[]
+  fallbackRepo?: string
+  declarationText?: string
+  projectsRootDir?: string
+  noDeclaration?: boolean
+}
+
+/** Split a selection token into (root index | null, root-relative path). One
+ *  implementation for both the host and the page: the shared module's parser. */
+export function splitSelection(selection: string): { rootIndex: number | null; rel: string } {
+  return parseRootToken(selection)
+}
+
+/** The value the page shows for a selection (the token prefix is transport, not a path). */
+export function selectionDisplay(selection: string): string {
+  return parseRootToken(selection).rel
+}
+
+/** The group label a merged view shows for one root: `<repository>/<rootPath>`, where a
+ *  root in the project's own repository is named by that repository's directory name (a
+ *  bare `.` would not tell a reader which repository the documents came from). */
+function rootLabel(root: ResolvedRoot): string {
+  const repoName = root.repository === '.'
+    ? (root.repoDir.replace(/\/+$/, '').split('/').pop() || '.')
+    : root.repository
+  return `${repoName}/${root.path}`
+}
+
+/** Resolve the docs roots for one request (declaration -> roots in effect). */
+export function resolveDocsFor(projectKey: string, opts: DocsRootsOpts = {}): RootsResolution {
+  return resolveDocsRoots(projectKey, opts)
+}
+
+/** One request renders ONE merged view over the roots in effect. Read-only: it never
+ *  rebuilds the index and never creates a directory. */
+export async function docsRootsTree(projectKey: string,
+  opts: DocsRootsOpts = {}): Promise<DocsRootsTreeResult> {
+  const resolution: RootsResolution = resolveDocsRoots(projectKey, opts)
+  const indexRead = readIndexState(projectKey, resolution, {
+    newestMtime: resolution.state === 'served' ? newestDocMtime(resolution.roots) : null,
+  })
+  const index: DocsIndexFace = {
+    state: indexRead.state,
+    built_at: indexRead.builtAt,
+    stale_reason: indexRead.staleReason,
+    reason: indexRead.reason,
+    code: indexRead.code,
+    banner: indexBanner(indexRead),
+    total: indexRead.total,
+  }
+  if (resolution.state === 'refused') {
+    return {
+      // `empty:true` is the legacy key the console page renders a named reason from;
+      // `state:'refused'` keeps a refusal distinguishable from "present but empty".
+      // The reason says the root was refused and names what was looked for, so this is
+      // never a silent empty view.
+      empty: true,
+      state: 'refused',
+      declared: resolution.declaration !== '',
+      declaration: resolution.declaration,
+      reason: resolution.reason,
+      roots: [], groups: [], skipped: [], index,
+      looked_for: resolution.lookedFor,
+      code: resolution.code,
+    }
+  }
+  const served: ServedResolution = resolution
+  const multi = served.roots.length > 1
+  const groups: DocTreeGroup[] = []
+  const skipped: { path: string; reason: string; root?: string }[] = []
+  const roots: DocsRootRow[] = []
+  let docs = 0
+  const trees: DocsTreeResult[] = []
+  // A selection token is needed only when two roots hold the SAME relative path: every
+  // other row keeps the plain path it always had (no cosmetic change on the page).
+  const relCount = new Map<string, number>()
+  for (const root of served.roots) {
+    const tree = await listDocs(root.directory, 'docs')
+    trees.push(tree)
+    for (const g of tree.groups) {
+      for (const f of g.files) relCount.set(f.rel, (relCount.get(f.rel) ?? 0) + 1)
+    }
+  }
+  for (let i = 0; i < served.roots.length; i++) {
+    const root = served.roots[i]
+    const tree = trees[i]
+    for (const s of tree.skipped) skipped.push({ ...s, root: root.id })
+    let counted = 0
+    for (const g of tree.groups) {
+      counted += g.files.length
+      // Group key: root + directory, so equal relative directories never collide.
+      groups.push({
+        dir: multi ? `${root.id}|${g.dir}` : g.dir,
+        label: multi ? `${rootLabel(root)} / ${g.label}` : g.label,
+        root: root.id,
+        files: g.files.map((f) => ({
+          rel: (relCount.get(f.rel) ?? 0) > 1 ? `@${i}/${f.rel}` : f.rel,
+          title: f.title,
+          root: root.id,
+        })),
+      })
+    }
+    docs += counted
+    roots.push({ id: root.id, repository: root.repository, path: root.path,
+      state: root.state, declared: served.source === 'declared', groups: tree.groups.length,
+      docs: counted })
+  }
+  groups.sort((a, b) => (a.dir < b.dir ? -1 : a.dir > b.dir ? 1 : 0))
+  return {
+    empty: docs === 0,
+    reason: docs === 0
+      ? `no .md page under the documentation root(s) in effect: ${served.roots.map((r) => r.directory).join(', ')} (present but empty — a content finding, not a configuration refusal)`
+      : undefined,
+    state: 'served',
+    declared: served.source === 'declared',
+    declaration: served.declaration,
+    roots,
+    groups,
+    skipped,
+    index,
+    looked_for: served.lookedFor,
+    code: '',
+  }
+}
+
+/** Read one page of the docs scope from the root it came from.
+ *
+ * The three refusal shapes stay distinct: a refused declaration, an unknown selection
+ * token and a page the loader refuses each answer with their own reason. */
+export async function readDocsSelection(projectKey: string, opts: DocsRootsOpts,
+  selection: string): Promise<{ state: 'refused'; reason: string } |
+    { state: 'served'; root: string; result: DocReadResult }> {
+  const resolution = resolveDocsRoots(projectKey, opts)
+  if (resolution.state === 'refused') {
+    return { state: 'refused', reason: resolution.reason }
+  }
+  const { rootIndex, rel } = parseRootToken(selection)
+  const located = rootIndex === null
+    ? locateRoot(resolution, rel, null)
+    : (resolution.roots[rootIndex] !== undefined
+      ? { root: resolution.roots[rootIndex] }
+      : { reason: `unknown root selection '@${rootIndex}' (roots in effect: ${resolution.roots.map((r, i) => `@${i}=${r.id}`).join(', ')})` })
+  if ('reason' in located) {
+    return { state: 'refused', reason: located.reason }
+  }
+  if (!isPlainDocRel(rel)) {
+    return { state: 'refused', reason: `path not admitted (a safe .md path inside the root): ${rel}` }
+  }
+  return { state: 'served', root: located.root.id, result: await readDoc(located.root.directory, rel) }
 }

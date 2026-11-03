@@ -267,16 +267,16 @@ export function DocsSection({ projectKey: shellProjectKey }: { projectKey?: stri
 
   const visibleGroups = filterGroups(tree?.groups, query)
   // 项目语境空目录指引（t260915-10）：emptyGuidance 对缺省语境/非空返回 ''，既有文案不动。
-  const emptyHint = tree?.empty === true ? emptyGuidance(tree.empty, projectKey) : ''
+  const emptyHint = tree?.empty === true && (tree?.roots?.length ?? 0) === 0 ? emptyGuidance(tree.empty, projectKey) : ''
   const docLoaded = doc !== null && !doc.empty
-  const crumbTitle = docLoaded && doc.title ? doc.title : selected
+  const crumbTitle = docLoaded && doc.title ? doc.title : displaySelection(selected)
   const chips: [string, string, string][] = docLoaded
     ? [
       ['status', 'Status', doc.meta?.status || '—'],
       ['verified', 'Verified', verifiedChipValue(doc.meta)],
       ['category', 'Category', doc.meta?.category || '—'],
       ['updated', 'Updated', doc.meta?.updated || '—'],
-      ['path', 'Path', chipPath(scope, selected)],
+      ['path', 'Path', chipPath(scope, displaySelection(selected))],
     ]
     : []
 
@@ -287,6 +287,7 @@ export function DocsSection({ projectKey: shellProjectKey }: { projectKey?: stri
       data-wb-docs-selected={selected} data-wb-doc-project-key={projectKey}
     >
       <style>{DOCS_STYLE}</style>
+      <style>{ROOTS_STYLE}</style>
       <header className="wb-doc-topbar" data-wb-doc-topbar="">
         <div className="wb-doc-crumb" data-wb-doc-breadcrumb="">
           <span className="wb-doc-crumb-root">Docs</span>
@@ -313,6 +314,23 @@ export function DocsSection({ projectKey: shellProjectKey }: { projectKey?: stri
         />
       </header>
       {projErr !== '' && <div className="wb-doc-project-error" data-wb-doc-project-error="">Project list unavailable: {projErr}</div>}
+      {tree?.index && (
+        // The derived index state, always labelled: absent, stale (with the last build
+        // time), failed (with its reason) or current. A stale index is never presented
+        // as current — and the listing below is read from the roots, never from it.
+        <div className="wb-doc-index-state" data-wb-doc-index-state={tree.index.state}
+          data-wb-doc-index-banner="">{tree.index.banner}</div>
+      )}
+      {tree?.state === 'served' && (tree.roots?.length ?? 0) > 0 && (
+        <div className="wb-doc-roots" data-wb-doc-roots="">
+          <b>{tree.roots!.length === 1 ? 'Root' : 'Roots'} in effect</b>
+          {': '}
+          {tree.roots!.map((r) => `${r.repository}/${r.path} (${r.state})`).join(' · ')}
+          {tree.declared === true
+            ? ` — declared in ${tree.declaration}`
+            : ' — implied default (no declaration)'}
+        </div>
+      )}
       <div className={`wb-doc-frame ${selected ? 'has-doc' : ''}`} data-wb-docs-frame="">
         <nav className="wb-doc-toc" data-wb-docs-toc="" aria-label="Docs browser">
           <div className="wb-doc-side">
@@ -326,7 +344,19 @@ export function DocsSection({ projectKey: shellProjectKey }: { projectKey?: stri
             </div>
             {treeErr !== '' && <div className="wb-doc-empty">目录加载失败：{treeErr}</div>}
             {treeErr === '' && tree === null && <div className="wb-doc-empty">Loading…</div>}
-            {tree?.empty === true && <div className="wb-doc-empty">目录为空：{tree.reason}</div>}
+            {tree?.empty === true && tree?.state !== 'refused' && <div className="wb-doc-empty" data-wb-doc-empty="">Empty documentation root: {tree.reason}</div>}
+            {tree?.state === 'refused' && (
+              // A refusal appears IN PLACE of the listing, naming the declaration and
+              // the paths that were looked for. Never an empty view for a missing root.
+              <div className="wb-doc-refused" data-wb-doc-refused="">
+                <b>Documentation root refused</b>
+                <div>{tree.reason}</div>
+                {(tree.looked_for?.length ?? 0) > 0 && (
+                  <div>Searched: {(tree.looked_for ?? []).join(', ')}</div>
+                )}
+                {tree.declaration ? <div>Declaration: {tree.declaration}</div> : null}
+              </div>
+            )}
             {emptyHint !== '' && <div className="wb-doc-empty" data-wb-doc-empty-hint="">{emptyHint}</div>}
             {visibleGroups.map((g) => {
               const isCollapsed = collapsed[g.dir] === true
@@ -404,3 +434,73 @@ export function DocsSection({ projectKey: shellProjectKey }: { projectKey?: stri
     </div>
   )
 }
+
+/* ======================================================================
+ * t261103-12 — the docs view over the project's RESOLVED documentation roots
+ *
+ * The host (src/host/docs.ts) resolves the roots, merges them and reads the derived
+ * index's state; this half only renders what it is told:
+ *   - `tree.roots` — the roots in effect (repository + path + served/empty), and whether
+ *     they were declared or are the implied default;
+ *   - `tree.index` — the derived index state (absent / stale with the last build time /
+ *     failed with its reason / current), always labelled; a stale index never reads as
+ *     current, and the listing itself always comes from the roots;
+ *   - `tree.state === 'refused'` — a named refusal in place of the listing (never an
+ *     empty view for a missing root).
+ *
+ * With more than one root a file row's `rel` is a selection token `@<n>/<rel>` (the
+ * transport form the page sends back); `displaySelection` strips it for the copy the
+ * reader sees. Declared here (not above the component) on purpose: the placeholder
+ * literals of the chip line are line-keyed in the face-dash exemption table, so the
+ * component's own line numbers must stay stable.
+ * ====================================================================== */
+
+interface RootRow {
+  id: string
+  /** The repository the root lives in; a dot is the project root itself. */
+  repository: string
+  path: string
+  state: string
+  declared: boolean
+  groups?: number
+  docs?: number
+}
+
+interface IndexFace {
+  state: 'absent' | 'current' | 'stale' | 'failed' | string
+  built_at: string
+  stale_reason: string
+  reason: string
+  banner: string
+  total: number
+}
+
+// Declaration merging: the original TreeResult (above) keeps its legacy keys.
+interface TreeResult {
+  /** t261103-12: the resolved roots this view merges. */
+  state?: 'served' | 'refused'
+  declared?: boolean
+  declaration?: string
+  roots?: RootRow[]
+  looked_for?: string[]
+  index?: IndexFace
+}
+
+/** Strip the transport token from a selection: the reader sees a plain path. */
+function displaySelection(selection: string): string {
+  const m = /^@\d+\/(.+)$/.exec(selection)
+  return m ? m[1] : selection
+}
+
+const ROOTS_STYLE = `
+/* t261103-12: roots in effect + derived index state (a stale index never reads as current). */
+.wb-doc-roots { font-size:11px; color:var(--dsw-derive-muted,#57606a); padding:2px 8px 8px; line-height:1.6; overflow-wrap:anywhere; }
+.wb-doc-roots b { color:var(--dsw-derive-fg,#1f2328); font-weight:600; }
+.wb-doc-index-state { font-size:11px; padding:4px 12px; border-bottom:1px solid var(--dsw-derive-border,#d0d7de);
+  color:var(--dsw-derive-muted,#57606a); overflow-wrap:anywhere; }
+.wb-doc-index-state[data-wb-doc-index-state="stale"],
+.wb-doc-index-state[data-wb-doc-index-state="failed"],
+.wb-doc-index-state[data-wb-doc-index-state="absent"] { color:var(--dsw-derive-warn,#9a6700); }
+.wb-doc-refused { color:var(--dsw-derive-warn,#9a6700); padding:12px; line-height:1.7; font-size:12px;
+  border:1px solid var(--dsw-derive-border,#d0d7de); border-radius:8px; margin:8px; overflow-wrap:anywhere; }
+`

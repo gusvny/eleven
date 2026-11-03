@@ -1006,7 +1006,8 @@ def run_doc_mech(repo_root: str,
                  commit_exists: Optional[Callable[[str], bool]] = None,
                  base_head: str = "",
                  docs_root: Optional[str] = None,
-                 project_key: str = "") -> Dict[str, Any]:
+                 project_key: str = "",
+                 index_rebuild: Optional[Callable[[], Dict[str, Any]]] = None) -> Dict[str, Any]:
     """Run M1-M7 over the whole library. All inputs injectable; malformed input
     degrades item by item (never crashes). Returns {findings, meta} with
     findings in the exact agent shape.
@@ -1016,7 +1017,19 @@ def run_doc_mech(repo_root: str,
     exactly as before, a project that declares roots has each of its roots in
     this repository scanned, and a missing/unreadable/malformed root is a NAMED
     refusal (DocMechError carrying the code) rather than a green empty scan.
+
+    `index_rebuild` is the documentation inspection's ONE automatic write
+    (t261103-12): the callable rebuilds the derived documentation index outside the
+    repository (`docs_index.rebuild`), and its outcome lands in meta.docs_index. None
+    means no rebuild this pass (unit tests, replay paths). A rebuild failure is
+    recorded, never raised — a documentation refresh must not take the pass down.
     """
+    index_note: Optional[Dict[str, Any]] = None
+    if index_rebuild is not None:
+        try:
+            index_note = index_rebuild()
+        except Exception as e:      # noqa: BLE001 — recorded failure, never fatal
+            index_note = {"ok": False, "state": "failed", "reason": str(e)[:300]}
     repo = Path(repo_root)
     if not repo.is_dir():
         raise DocMechError("repo root does not exist: %s" % repo_root)
@@ -1059,6 +1072,8 @@ def run_doc_mech(repo_root: str,
         "caveats": caveats,
         "docs_roots": roots_face,
     }
+    if index_note is not None:
+        meta["docs_index"] = index_note
     return {"findings": findings, "meta": meta}
 
 

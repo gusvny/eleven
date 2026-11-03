@@ -29,6 +29,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import docs_index  # noqa: E402  (t261103-12: the derived documentation index)
+import docs_roots  # noqa: E402  (t261103-12: the ONE roots resolution)
 from inspection_doc_mech import (  # noqa: E402
     DocMechError, collect_exemptions, extract_paths, frontmatter_defects,
     parse_frontmatter, run_doc_mech)
@@ -589,6 +591,409 @@ class ActivityShellTest(unittest.TestCase):
         # existing ticket → no finding
         self.assertNotIn("doc-m5-ticket",
                          [f["scan"] for f in res["result"]["findings"]])
+
+# ========================================================================
+# t261103-12 — the derived documentation index (docs/design/project-docs-roots-v1.md)
+#
+# The index + presentation half: ONE declaration (`paths.docs_roots` inside the project
+# declaration the engine and the console both read), ONE resolution
+# (`docs_roots.project_roots`, the same module the gate half owns and this half extends),
+# one scan over the resolved roots, and the derived index in the project's data
+# directory with its four reader states. Every fixture uses a temp projects root.
+# ========================================================================
+
+
+def _registry_entry(perkey: Path, key: str, dirs: list, paths_block: str = "") -> Path:
+    """One project declaration in the real shape (`paths:` holds the roots block)."""
+    perkey.mkdir(parents=True, exist_ok=True)
+    body = ("schema: v1\nproject:\n  - key: %s\n    name: %s\n    dirs:\n%s\n"
+            % (key, key, "".join("      - %s\n" % d for d in dirs)))
+    if paths_block:
+        body += "paths:\n" + paths_block
+    target = perkey / "project.yaml"
+    target.write_text(body, encoding="utf-8")
+    return target
+
+
+def _roots_block(entries) -> str:
+    """`paths:` content for the given (repository, path, projections) entries."""
+    out = "  docs_roots:\n"
+    for entry in entries:
+        repo, path = entry[0], entry[1]
+        projections = entry[2] if len(entry) > 2 else ""
+        out += "    - repository: %s\n      path: %s\n" % (repo, path)
+        if projections:
+            out += "      projections: %s\n" % projections
+    return out
+
+
+class DocsRootsDeclarationTests(unittest.TestCase):
+    """The ONE declaration + resolution: `paths.docs_roots`, project scope."""
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="docsroots-ut-"))
+        _TMP_DIRS.append(self.root)
+        self.projects = self.root / "projects"
+        self.repo = self.root / "repo-a"
+        (self.repo / "docs").mkdir(parents=True)
+
+    def _entry(self, dirs: list = None, block: str = "", key: str = "proj") -> Path:
+        dirs = dirs if dirs is not None else [str(self.repo)]
+        return _registry_entry(self.projects / key, key, dirs, block)
+
+    # ---- truth table -------------------------------------------------
+
+    def test_undeclared_project_gets_the_implied_default_root(self):
+        self._entry()
+        _write(self.repo, "docs/design/a.md", FM + "a\n")
+        res = docs_roots.project_roots("proj", projects_root_dir=self.projects)
+        self.assertEqual(res.source, "implied")
+        self.assertEqual(res.paths(), ("docs",))
+        self.assertEqual(res.roots[0].directory, self.repo / "docs")
+        self.assertEqual(res.projections(), ())     # no declaration = no projection
+
+    def test_undeclared_and_no_docs_directory_is_a_named_refusal(self):
+        self._entry()
+        (self.repo / "docs").rmdir()
+        with self.assertRaises(docs_roots.DocsRootsStop) as cm:
+            docs_roots.project_roots("proj", projects_root_dir=self.projects)
+        self.assertEqual(cm.exception.code, docs_roots.STOP_ABSENT)
+        self.assertIn("paths.docs_roots", cm.exception.message)
+        self.assertIn(str(self.repo / "docs"), cm.exception.message)
+
+    def test_one_declared_non_default_root(self):
+        (self.repo / "kb").mkdir()
+        _write(self.repo, "kb/x.md", FM + "x\n")
+        self._entry(block=_roots_block([(".", "kb")]))
+        res = docs_roots.project_roots("proj", projects_root_dir=self.projects)
+        self.assertEqual(res.source, "declared")
+        self.assertEqual(res.paths(), ("kb",))
+        self.assertEqual(res.roots[0].directory, self.repo / "kb")
+
+    def test_many_declared_roots_keep_order_and_identities(self):
+        """`repository` is relative to the project root (the entry's first dirs item)."""
+        repo_b = self.repo / "repo-b"
+        (repo_b / "handbook").mkdir(parents=True)
+        (self.repo / "handbook").mkdir()
+        self._entry(block=_roots_block([(".", "handbook"), ("repo-b", "handbook")]))
+        res = docs_roots.project_roots("proj", projects_root_dir=self.projects)
+        self.assertEqual(len(res.roots), 2)
+        self.assertEqual([r.repository or "." for r in res.roots], [".", "repo-b"])
+        ids = {r.identity for r in res.roots}
+        self.assertEqual(len(ids), 2)         # equal relative paths never share identity
+
+    def test_declared_root_absent_is_refused_not_empty(self):
+        self._entry(block=_roots_block([(".", "moved")]))
+        with self.assertRaises(docs_roots.DocsRootsStop) as cm:
+            docs_roots.project_roots("proj", projects_root_dir=self.projects)
+        self.assertEqual(cm.exception.code, docs_roots.STOP_ROOT_ABSENT)
+        self.assertIn("moved", cm.exception.message)
+        self.assertIn("project.yaml", cm.exception.declaration)
+
+    def test_declared_empty_root_is_served_but_empty(self):
+        (self.repo / "kb").mkdir()
+        _write(self.repo, "kb/notes.txt", "not a page\n")
+        self._entry(block=_roots_block([(".", "kb")]))
+        res = docs_roots.project_roots("proj", projects_root_dir=self.projects)
+        self.assertEqual(res.paths(), ("kb",))
+        self.assertEqual(docs_roots.root_state(res.roots[0]), docs_roots.ROOT_STATE_EMPTY)
+        _write(self.repo, "kb/page.md", FM + "p\n")
+        self.assertEqual(docs_roots.root_state(res.roots[0]), docs_roots.ROOT_STATE_SERVED)
+
+    def test_malformed_declarations_are_refused_with_location(self):
+        cases = {
+            "unknown projection": _roots_block([(".", "kb", "vectors")]),
+            "absolute path": "  docs_roots:\n    - repository: .\n      path: /etc\n",
+            "parent segment": "  docs_roots:\n    - repository: .\n      path: ../out\n",
+            "whole repository": "  docs_roots:\n    - repository: .\n      path: .\n",
+            "unknown entry key": "  docs_roots:\n    - repo: .\n      path: kb\n",
+            "missing path": "  docs_roots:\n    - repository: .\n",
+            "no entries": "  docs_roots:\n",
+            "duplicate root": ("  docs_roots:\n    - repository: .\n      path: kb\n"
+                               "    - repository: .\n      path: kb\n"),
+        }
+        (self.repo / "kb").mkdir(exist_ok=True)
+        for label, block in cases.items():
+            with self.subTest(label):
+                self._entry(block=block)
+                with self.assertRaises(docs_roots.DocsRootsStop) as cm:
+                    docs_roots.project_roots("proj", projects_root_dir=self.projects)
+                self.assertIn(cm.exception.code,
+                              (docs_roots.STOP_DECLARATION_MALFORMED,
+                               docs_roots.STOP_DUPLICATE), label)
+                self.assertIn("docs_roots", cm.exception.message + cm.exception.code, label)
+
+    def test_projections_are_declared_per_root_and_default_off(self):
+        (self.repo / "kb").mkdir(exist_ok=True)
+        self._entry(block=_roots_block([(".", "docs"), (".", "kb", "entries,fulltext")]))
+        res = docs_roots.project_roots("proj", projects_root_dir=self.projects)
+        self.assertEqual(res.projections(), ("entries", "fulltext"))
+
+    def test_the_old_sibling_declaration_file_is_ignored(self):
+        """One declaration only: a stray docs_roots.yaml must change nothing."""
+        (self.projects / "proj").mkdir(parents=True, exist_ok=True)
+        (self.projects / "proj" / "docs_roots.yaml").write_text(
+            "schema: v1\ndocs_roots:\n  - repo: /elsewhere\n    path: kb\n", encoding="utf-8")
+        self._entry()
+        _write(self.repo, "docs/a.md", FM + "a\n")
+        res = docs_roots.project_roots("proj", projects_root_dir=self.projects)
+        self.assertEqual(res.source, "implied")
+        self.assertEqual(res.paths(), ("docs",))
+
+    def test_index_home_is_the_project_data_directory(self):
+        home = docs_roots.index_dir("proj", self.projects)
+        self.assertEqual(home, self.projects / "proj" / "data" / "docs")
+        self.assertFalse(str(home).startswith(str(self.repo)))
+
+
+class DocsIndexBuilderTests(unittest.TestCase):
+    """The builder: one scan over the resolved roots -> the project's data directory."""
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="docsindex-ut-"))
+        _TMP_DIRS.append(self.root)
+        self.projects = self.root / "projects"
+        self.repo = self.root / "repo-a"
+        (self.repo / "docs").mkdir(parents=True)
+        _registry_entry(self.projects / "proj", "proj", [str(self.repo)])
+
+    def _declare(self, entries) -> None:
+        _registry_entry(self.projects / "proj", "proj", [str(self.repo)],
+                        _roots_block(entries))
+
+    def test_categories_come_from_the_documents(self):
+        """No fixed category subdirectories: the walk covers the whole root."""
+        _write(self.repo, "docs/anything/page.md",
+               "---\ntitle: P\ncategory: ops\nstatus: active\nupdated: 2026-11-01\n---\nbody\n")
+        _write(self.repo, "docs/root-page.md",
+               "---\ntitle: R\ncategory: reference\nstatus: active\nupdated: 2026-11-01\n---\nr\n")
+        payload = docs_index.build(
+            docs_roots.project_roots("proj", projects_root_dir=self.projects))
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(sorted(d["category"] for d in payload["docs"]), ["ops", "reference"])
+        self.assertEqual(sorted(payload["categories"]), ["ops", "reference"])
+        self.assertIn("anything/page.md", [d["path"] for d in payload["docs"]])
+
+    def test_index_lands_in_the_project_data_directory_not_the_repository(self):
+        _write(self.repo, "docs/a.md", FM + "a\n")
+        res = docs_index.rebuild("proj", self.projects, trigger="inspection")
+        self.assertTrue(res["ok"], res.get("reason"))
+        index_path = self.projects / "proj" / "data" / "docs" / "index.json"
+        self.assertTrue(index_path.is_file())
+        self.assertFalse((self.repo / "docs" / "index.json").exists())
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["schema"], docs_index.SCHEMA)
+        self.assertEqual(payload["total"], 1)
+        self.assertTrue(payload["built_at"])
+        self.assertEqual(payload["roots"][0]["repository"], ".")
+
+    def test_many_roots_merge_without_shadowing(self):
+        repo_b = self.repo / "repo-b"
+        (repo_b / "kb").mkdir(parents=True)
+        _write(self.repo, "docs/same.md", FM + "left\n")
+        _write(repo_b, "kb/same.md", FM + "right\n")
+        _registry_entry(self.projects / "proj", "proj", [str(self.repo)],
+                        _roots_block([(".", "docs"), ("repo-b", "kb")]))
+        payload = docs_index.build(
+            docs_roots.project_roots("proj", projects_root_dir=self.projects))
+        self.assertEqual(payload["total"], 2)
+        self.assertEqual(len({d["id"] for d in payload["docs"]}), 2)
+
+    def test_moved_root_rebuilds_from_the_new_place(self):
+        _write(self.repo, "docs/old.md", FM + "old\n")
+        self.assertTrue(docs_index.rebuild("proj", self.projects)["ok"])
+        (self.repo / "kb").mkdir()
+        _write(self.repo, "kb/new.md", FM + "new\n")
+        self._declare([(".", "kb")])
+        result = docs_index.rebuild("proj", self.projects)
+        self.assertTrue(result["ok"], result.get("reason"))
+        payload = json.loads((self.projects / "proj" / "data" / "docs" / "index.json")
+                             .read_text(encoding="utf-8"))
+        self.assertEqual([d["path"] for d in payload["docs"]], ["new.md"])
+        self.assertNotEqual(payload["total"], 0)
+
+    def test_projections_are_off_by_default_and_on_when_declared(self):
+        _write(self.repo, "docs/a.md", FM + "a body\n")
+        self.assertTrue(docs_index.rebuild("proj", self.projects)["ok"])
+        data = self.projects / "proj" / "data" / "docs"
+        self.assertFalse((data / "entries.json").exists())
+        self.assertFalse((data / "fulltext.json").exists())
+        self._declare([(".", "docs", "entries,fulltext")])
+        self.assertTrue(docs_index.rebuild("proj", self.projects)["ok"])
+        entries = json.loads((data / "entries.json").read_text(encoding="utf-8"))
+        fulltext = json.loads((data / "fulltext.json").read_text(encoding="utf-8"))
+        self.assertEqual(entries["total"], 1)
+        self.assertEqual(entries["entries"][0]["root"], ".:docs")
+        self.assertIn("a body", fulltext["docs"][0]["text"])
+        self._declare([(".", "docs")])          # withdrawing the declaration
+        self.assertTrue(docs_index.rebuild("proj", self.projects)["ok"])
+        self.assertFalse((data / "entries.json").exists())
+        self.assertFalse((data / "fulltext.json").exists())
+
+    def test_unreadable_page_degrades_alone(self):
+        _write(self.repo, "docs/good.md", FM + "good\n")
+        (self.repo / "docs" / "bad.md").write_bytes(b"---\ntitle: \xff\xfe\n---\n")
+        payload = docs_index.build(
+            docs_roots.project_roots("proj", projects_root_dir=self.projects))
+        self.assertEqual([d["path"] for d in payload["docs"]], ["good.md"])
+        self.assertEqual([r["path"] for r in payload["review"]["unreadable"]], ["bad.md"])
+
+
+class DocsIndexReaderStateTests(unittest.TestCase):
+    """The four reader states, told apart, and the read path that never writes."""
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="docsread-ut-"))
+        _TMP_DIRS.append(self.root)
+        self.projects = self.root / "projects"
+        self.repo = self.root / "repo"
+        (self.repo / "docs").mkdir(parents=True)
+        _registry_entry(self.projects / "proj", "proj", [str(self.repo)])
+        _write(self.repo, "docs/a.md", FM + "a\n")
+
+    def test_absent_before_any_build(self):
+        read = docs_index.read_index("proj", self.projects)
+        self.assertEqual(read.state, docs_index.ST_ABSENT)
+        self.assertEqual(read.entries, [])
+        # the roots are still known: "no index yet" is not "no documents"
+        self.assertEqual(len(read.roots_now), 1)
+
+    def test_current_after_a_build(self):
+        built = docs_index.rebuild("proj", self.projects)
+        read = docs_index.read_index("proj", self.projects)
+        self.assertEqual(read.state, docs_index.ST_CURRENT)
+        self.assertEqual(read.built_at, built["built_at"])
+        self.assertEqual([d["path"] for d in read.entries], ["a.md"])
+
+    def test_stale_names_the_last_build_time(self):
+        built = docs_index.rebuild("proj", self.projects)
+        page = self.repo / "docs" / "a.md"
+        later = float(built["built_at_ts"]) + 60
+        os.utime(page, (later, later))
+        read = docs_index.read_index("proj", self.projects)
+        self.assertEqual(read.state, docs_index.ST_STALE)
+        self.assertEqual(read.built_at, built["built_at"])
+        self.assertIn("newer than the build", read.stale_reason)
+
+    def test_stale_when_the_roots_changed_since_the_build(self):
+        """A moved root leaves the old index stale, never looking current."""
+        self.assertTrue(docs_index.rebuild("proj", self.projects)["ok"])
+        (self.repo / "kb").mkdir()
+        _write(self.repo, "kb/b.md", FM + "b\n")
+        _registry_entry(self.projects / "proj", "proj", [str(self.repo)],
+                        _roots_block([(".", "kb")]))
+        read = docs_index.read_index("proj", self.projects)
+        self.assertEqual(read.state, docs_index.ST_STALE)
+        self.assertIn("roots in effect changed", read.stale_reason)
+
+    def test_failed_is_named_and_serves_no_old_entries(self):
+        """A failed rebuild is named with its reason; the old index is not served."""
+        self.assertTrue(docs_index.rebuild("proj", self.projects)["ok"])
+        data = self.projects / "proj" / "data" / "docs"
+        (data / "rebuild-failed.json").write_text(json.dumps(
+            {"schema": "v1", "project": "proj", "failed_at_ts": 9e12,
+             "code": "docs_index_rebuild_failed",
+             "reason": "permission denied writing index"}), encoding="utf-8")
+        read = docs_index.read_index("proj", self.projects)
+        self.assertEqual(read.state, docs_index.ST_FAILED)
+        self.assertIn("permission denied", read.reason)
+        self.assertEqual(read.entries, [])
+        self.assertNotEqual(read.state, docs_index.ST_ABSENT)
+
+    def test_a_refused_declaration_is_failed_not_an_empty_library(self):
+        _registry_entry(self.projects / "proj", "proj", [str(self.repo)],
+                        _roots_block([(".", "gone")]))
+        read = docs_index.read_index("proj", self.projects)
+        self.assertEqual(read.state, docs_index.ST_FAILED)
+        self.assertEqual(read.code, docs_roots.STOP_ROOT_ABSENT)
+        self.assertIn("gone", read.reason)
+        # a rebuild records the same refusal and never writes an empty library
+        built = docs_index.rebuild("proj", self.projects)
+        self.assertFalse(built["ok"])
+        self.assertEqual(built["state"], docs_index.ST_FAILED)
+        self.assertFalse((self.projects / "proj" / "data" / "docs" / "index.json").exists())
+
+    def test_read_path_never_writes(self):
+        """Every writer raises; the reader still answers (read path is write-free)."""
+        self.assertTrue(docs_index.rebuild("proj", self.projects)["ok"])
+        data = self.projects / "proj" / "data" / "docs"
+        before = sorted(p.name for p in data.iterdir())
+
+        def boom(*_a, **_k):
+            raise AssertionError("the read path must never write")
+
+        old_write, old_rebuild = docs_index._write_json, docs_index.rebuild
+        docs_index._write_json = boom
+        docs_index.rebuild = boom
+        try:
+            read = docs_index.read_index("proj", self.projects)
+        finally:
+            docs_index._write_json, docs_index.rebuild = old_write, old_rebuild
+        self.assertEqual(read.state, docs_index.ST_CURRENT)
+        self.assertEqual(sorted(p.name for p in data.iterdir()), before)
+
+    def test_absent_stays_absent_on_read(self):
+        """Reading must not create the index directory either."""
+        read = docs_index.read_index("proj", self.projects)
+        self.assertEqual(read.state, docs_index.ST_ABSENT)
+        self.assertFalse((self.projects / "proj" / "data" / "docs").exists())
+
+
+class DocsIndexInspectionTriggerTests(unittest.TestCase):
+    """The documentation inspection is the ONLY automatic writer; nothing else writes."""
+
+    def setUp(self) -> None:
+        self.root = Path(tempfile.mkdtemp(prefix="docstrigger-ut-"))
+        _TMP_DIRS.append(self.root)
+        self.projects = self.root / "projects"
+        self.repo = self.root / "repo"
+        (self.repo / "docs").mkdir(parents=True)
+        _write(self.repo, "docs/a.md", FM + "a\n")
+        _registry_entry(self.projects / "proj", "proj", [str(self.repo)])
+
+    def test_pass_without_the_hook_does_not_write(self):
+        run_doc_mech(str(self.repo))
+        self.assertFalse((self.projects / "proj" / "data").exists())
+
+    def test_pass_with_the_hook_records_and_writes(self):
+        res = run_doc_mech(str(self.repo),
+                           index_rebuild=lambda: docs_index.inspection_rebuild(
+                               "proj", self.projects))
+        self.assertTrue((self.projects / "proj" / "data" / "docs" / "index.json").is_file())
+        self.assertEqual(res["meta"]["docs_index"]["state"], docs_index.ST_CURRENT)
+        self.assertEqual(res["meta"]["docs_index"]["trigger"], "inspection")
+
+    def test_a_failing_rebuild_is_recorded_not_raised(self):
+        def boom():
+            raise RuntimeError("disk full")
+
+        res = run_doc_mech(str(self.repo), index_rebuild=boom)
+        self.assertEqual(res["meta"]["docs_index"]["state"], "failed")
+        self.assertIn("disk full", res["meta"]["docs_index"]["reason"])
+
+    def test_activity_shell_rebuilds_only_when_asked(self):
+        """The IO shell wires the writer only for a run that opted in (and a valid key)."""
+        import asyncio
+
+        from activities import run_inspection_doc_mech as shell
+        old = os.environ.get("SANDBAR_PROJECTS_DIR")
+        os.environ["SANDBAR_PROJECTS_DIR"] = str(self.projects)
+        try:
+            off = asyncio.run(shell({"base_dir": str(self.repo), "no_diff": True,
+                                     "project_key": "proj"}))
+            self.assertNotIn("docs_index", off["result"]["meta"])
+            self.assertFalse((self.projects / "proj" / "data").exists())
+            on = asyncio.run(shell({"base_dir": str(self.repo), "no_diff": True,
+                                    "project_key": "proj", "docs_index_rebuild": True}))
+            self.assertEqual(on["result"]["meta"]["docs_index"]["state"],
+                             docs_index.ST_CURRENT)
+            self.assertTrue((self.projects / "proj" / "data" / "docs" / "index.json")
+                            .is_file())
+        finally:
+            if old is None:
+                os.environ.pop("SANDBAR_PROJECTS_DIR", None)
+            else:
+                os.environ["SANDBAR_PROJECTS_DIR"] = old
 
 
 if __name__ == "__main__":

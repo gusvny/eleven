@@ -116,8 +116,14 @@ DEFAULT_HOME_DIRNAME = ".sandbar"
 PROJECT_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 #: A declared path/segment lexicon: printable path characters only.
 SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-/]*$")
-#: The only two keys an entry may carry.
+#: The keys an entry must carry: every root names its repository and its path.
 ENTRY_KEYS = ("repository", "path")
+#: t261103-12: the OPTIONAL per-entry key that declares the LLM-facing projection
+#: emitted beside the derived index for THIS root. Additive and default-off: absent
+#: means "no projection", and the engine never emits one on its own (design goal 12).
+ENTRY_OPTIONAL_KEYS = ("projections",)
+#: The projection vocabulary. Both names are derived artefacts of the same scan.
+PROJECTION_VOCAB = ("entries", "fulltext")
 
 #: The declaration is present but its shape is unusable.
 STOP_DECLARATION_MALFORMED = "docs_roots_declaration_malformed"
@@ -266,9 +272,31 @@ class DocsRootEntry:
 
     repository: str
     path: str
+    #: t261103-12: LLM-facing projections declared for this root (default none).
+    projections: Tuple[str, ...] = ()
 
     def face(self) -> Dict[str, str]:
-        return {"repository": self.repository or ".", "path": self.path}
+        face = {"repository": self.repository or ".", "path": self.path}
+        if self.projections:
+            face["projections"] = ",".join(self.projections)
+        return face
+
+
+def _decl_projections(value: str, label: str, lineno: int) -> Tuple[str, ...]:
+    """Validate the optional `projections:` value: a comma/space list drawn from
+    PROJECTION_VOCAB. An unknown name is refused by name (fail-closed: a typo must
+    never silently switch a projection off)."""
+    out: List[str] = []
+    for tok in str(value or "").replace(",", " ").split():
+        if tok not in PROJECTION_VOCAB:
+            raise DocsRootsStop(
+                STOP_DECLARATION_MALFORMED,
+                "%s:%d %s: unknown projection %r (vocabulary: %s)"
+                % (label, lineno, SECTION_LABEL, tok, ", ".join(PROJECTION_VOCAB)),
+                declaration=label)
+        if tok not in out:
+            out.append(tok)
+    return tuple(out)
 
 
 def parse_declaration(text: str, label: str = "project.yaml") -> Optional[List[DocsRootEntry]]:
@@ -349,7 +377,8 @@ def parse_declaration(text: str, label: str = "project.yaml") -> Optional[List[D
                 % (label, current_line, pair[0] or ".", pair[1]),
                 declaration=label, path=pair[1])
         seen_pairs.add(pair)
-        entries.append(DocsRootEntry(repository=pair[0], path=pair[1]))
+        entries.append(DocsRootEntry(repository=pair[0], path=pair[1],
+                                     projections=tuple(current.get("_projections", ()))))
         current = {}
 
     for lineno, raw in block:
@@ -359,23 +388,36 @@ def parse_declaration(text: str, label: str = "project.yaml") -> Optional[List[D
             flush()
             current_line = lineno
             key, value = item.group(1), item.group(2)
-            if key not in ENTRY_KEYS:
+            if key not in ENTRY_KEYS and key not in ENTRY_OPTIONAL_KEYS:
                 raise DocsRootsStop(
                     STOP_DECLARATION_MALFORMED,
-                    "%s:%d unrecognized %s entry key: %r (only %s)"
-                    % (label, lineno, SECTION_LABEL, key, ", ".join(ENTRY_KEYS)),
+                    "%s:%d unrecognized %s entry key: %r (only %s; optional: %s)"
+                    % (label, lineno, SECTION_LABEL, key, ", ".join(ENTRY_KEYS),
+                       ", ".join(ENTRY_OPTIONAL_KEYS)),
                     declaration=label)
+            if key in ENTRY_OPTIONAL_KEYS:
+                current["_projections"] = _decl_projections(value, label, lineno)
+                continue
             current[key] = _decl_path_value(key, value, label, lineno)
             continue
         cont = re.match(r"^([A-Za-z_]+):\s*(.*)$", stripped)
         if cont and current_line:
             key, value = cont.group(1), cont.group(2)
-            if key not in ENTRY_KEYS:
+            if key not in ENTRY_KEYS and key not in ENTRY_OPTIONAL_KEYS:
                 raise DocsRootsStop(
                     STOP_DECLARATION_MALFORMED,
-                    "%s:%d unrecognized %s entry key: %r (only %s)"
-                    % (label, lineno, SECTION_LABEL, key, ", ".join(ENTRY_KEYS)),
+                    "%s:%d unrecognized %s entry key: %r (only %s; optional: %s)"
+                    % (label, lineno, SECTION_LABEL, key, ", ".join(ENTRY_KEYS),
+                       ", ".join(ENTRY_OPTIONAL_KEYS)),
                     declaration=label)
+            if key in ENTRY_OPTIONAL_KEYS:
+                if "_projections" in current:
+                    raise DocsRootsStop(
+                        STOP_DECLARATION_MALFORMED,
+                        "%s:%d duplicate %r in one entry" % (label, lineno, key),
+                        declaration=label)
+                current["_projections"] = _decl_projections(value, label, lineno)
+                continue
             if key in current:
                 raise DocsRootsStop(
                     STOP_DECLARATION_MALFORMED,
@@ -408,10 +450,21 @@ class DocsRoot:
     path: str
     directory: Path
     repository_dir: Path
+    #: t261103-12: LLM-facing projections declared for this root (default none).
+    projections: Tuple[str, ...] = ()
 
     def face(self) -> Dict[str, str]:
-        return {"repository": self.repository or ".", "path": self.path,
+        face = {"repository": self.repository or ".", "path": self.path,
                 "directory": str(self.directory)}
+        if self.projections:
+            face["projections"] = ",".join(self.projections)
+        return face
+
+    @property
+    def identity(self) -> str:
+        """Stable document identity prefix (design goal 8): repository + root, so two
+        roots holding the same relative path never shadow each other."""
+        return "%s:%s" % (self.repository or ".", self.path)
 
     @property
     def rel(self) -> str:
@@ -437,6 +490,16 @@ class DocsRoots:
         """The declared paths as repository-relative posix paths, in
         declaration order (the judged surface's exclusion key)."""
         return tuple(r.path for r in self.roots)
+
+    def projections(self) -> Tuple[str, ...]:
+        """t261103-12: the LLM-facing projections this resolution declares, in
+        declaration order, de-duplicated. Empty = emit none (the default)."""
+        out: List[str] = []
+        for root in self.roots:
+            for name in root.projections:
+                if name not in out:
+                    out.append(name)
+        return tuple(out)
 
     def single(self) -> DocsRoot:
         """The one root for a consumer that can write exactly one (the produce
@@ -605,7 +668,8 @@ def resolve(project_key: str, *, tree: Optional[Any] = None,
                    entry.path, kind, directory),
                 project=key, declaration=label, path=str(directory))
         resolved.append(DocsRoot(repository=entry.repository, path=entry.path,
-                                 directory=directory, repository_dir=repo_dir))
+                                 directory=directory, repository_dir=repo_dir,
+                                 projections=tuple(entry.projections)))
 
     if tree_path is not None:
         applicable = tuple(r for r in resolved if same_repository(r.repository_dir, tree_path))
@@ -628,3 +692,132 @@ def refusal_text(exc: BaseException) -> str:
     message that names what was looked for."""
     code = getattr(exc, "code", "") or type(exc).__name__
     return "%s:%s" % (code, getattr(exc, "message", str(exc)))
+# ============================================================================
+# t261103-12 (index + presentation half): the two additions this half needs from
+# the ONE resolver -- both reuse the same declaration, the same parser, the same
+# validation and the same named refusals above; neither carries its own rules.
+# ============================================================================
+
+def project_roots(project_key: str, *,
+                  projects_root_dir: Optional[Any] = None) -> DocsRoots:
+    """The roots in effect for the PROJECT, not for one tree.
+
+    Why this scope exists: a gate works inside one repository (`resolve(tree=...)`
+    answers "which declared roots live in THIS repository"), while the console's
+    documents view is per PROJECT and shows the merged set of its roots (design
+    goal 8: "There is one documents view per project, showing the merged set of
+    its roots"). Same declaration, same parser, same entry validation and the
+    same stop codes as `resolve` -- only the tree filter is absent.
+
+    Undeclared projects get the implied default root of the project root (the
+    registry entry's first `dirs` item); when that directory does not exist the
+    answer is `docs_roots_absent`, never an empty root list.
+    """
+    key = str(project_key or "")
+    text, label = _read_declaration(key, projects_root_dir)
+    main_dir = project_root_of(text) if text is not None else ""
+    if text is not None:
+        entries = parse_declaration(text, label or "project.yaml")
+        if entries:
+            if not main_dir:
+                raise DocsRootsStop(
+                    STOP_DECLARATION_MALFORMED,
+                    "%s: %s is declared but the entry carries no usable first dirs "
+                    "item (the project root is unknown, so no declared repository "
+                    "can be resolved)" % (label or "project.yaml", SECTION_LABEL),
+                    project=key, declaration=label)
+            return DocsRoots(project=key, source="declared", declaration=label,
+                             tree=main_dir,
+                             roots=tuple(_materialise_entry(key, label, entry, index,
+                                                            Path(main_dir))
+                                         for index, entry in enumerate(entries, 1)))
+    base = Path(main_dir) if main_dir else None
+    if base is None:
+        raise DocsRootsStop(
+            STOP_ABSENT,
+            "project %r declares no documentation root (%s) and no repository root "
+            "was found to look for the implied default directory %r"
+            % (key or "?", SECTION_LABEL, IMPLIED_ROOT),
+            project=key, declaration=label, path=IMPLIED_ROOT)
+    cand = base / IMPLIED_ROOT
+    if cand.is_dir():
+        return DocsRoots(project=key, source="implied", declaration=label,
+                         tree=str(base),
+                         roots=(DocsRoot(repository="", path=IMPLIED_ROOT,
+                                         directory=cand, repository_dir=base),))
+    raise DocsRootsStop(
+        STOP_ABSENT,
+        "project %r declares no documentation root (%s) and no documentation "
+        "directory exists at the repository root: looked for %s"
+        % (key or "?", SECTION_LABEL, cand),
+        project=key, declaration=label, path=str(cand))
+
+
+def _materialise_entry(project_key: str, label: str, entry: DocsRootEntry,
+                       index: int, project_root: Path) -> DocsRoot:
+    """One declared entry -> one resolved root, with the same three named refusals
+    the tree-scoped resolution uses (unknown repository / absent / unreadable)."""
+    repo_dir = (project_root / entry.repository) if entry.repository else project_root
+    if entry.repository and not repo_dir.is_dir():
+        raise DocsRootsStop(
+            STOP_REPOSITORY_UNKNOWN,
+            "%s: %s entry %d names repository %r, which is not a directory of the "
+            "project: looked for %s"
+            % (label, SECTION_LABEL, index, entry.repository, repo_dir),
+            project=project_key, declaration=label, path=str(repo_dir))
+    directory = repo_dir / entry.path
+    if not directory.exists():
+        raise DocsRootsStop(
+            STOP_ROOT_ABSENT,
+            "%s: %s entry %d declares repository %r path %r but that root does not "
+            "exist: looked for %s"
+            % (label, SECTION_LABEL, index, entry.repository or ".", entry.path,
+               directory),
+            project=project_key, declaration=label, path=str(directory))
+    readable = directory.is_dir() and os.access(str(directory), os.R_OK | os.X_OK)
+    if not readable:
+        kind = "is not a directory" if not directory.is_dir() else "is not readable"
+        raise DocsRootsStop(
+            STOP_ROOT_UNREADABLE,
+            "%s: %s entry %d declares repository %r path %r but that root %s: "
+            "looked for %s"
+            % (label, SECTION_LABEL, index, entry.repository or ".", entry.path,
+               kind, directory),
+            project=project_key, declaration=label, path=str(directory))
+    return DocsRoot(repository=entry.repository, path=entry.path,
+                    directory=directory, repository_dir=repo_dir,
+                    projections=tuple(entry.projections))
+
+
+#: A root that exists and holds at least one document is SERVED; one that exists and
+#: holds none is EMPTY -- a content finding, never a configuration refusal.
+ROOT_STATE_SERVED = "served"
+ROOT_STATE_EMPTY = "empty"
+
+
+def root_state(root: DocsRoot) -> str:
+    """SERVED when the root holds at least one .md page anywhere below it, EMPTY when
+    it exists and holds none. Never raises: an unlistable root reads as EMPTY (the
+    resolution already refused unreadable roots)."""
+    try:
+        for _ in root.directory.rglob("*.md"):
+            return ROOT_STATE_SERVED
+    except OSError:
+        return ROOT_STATE_EMPTY
+    return ROOT_STATE_EMPTY
+
+
+def index_dir(project_key: str, projects_root_dir: Optional[Any] = None) -> Path:
+    """The derived documentation artefacts' home (design goal 5): the project's own
+    data directory, outside every repository of the project.
+
+        <projects_root>/<key>/data/docs/
+    """
+    key = str(project_key or "")
+    if not PROJECT_KEY_RE.match(key):
+        raise DocsRootsStop(
+            STOP_DECLARATION_MALFORMED,
+            "malformed project key %r (whitelist %s): the derived index home cannot "
+            "be resolved" % (key, PROJECT_KEY_RE.pattern),
+            project=key)
+    return projects_root(projects_root_dir) / key / "data" / "docs"

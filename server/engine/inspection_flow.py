@@ -241,6 +241,12 @@ SUITE_TEARDOWN_GRACE_PATCH_ID = "t260927-inspection-suite-teardown-grace"
 # old tickets wedge); repo precedent = the gates above. Ledger read/write live
 # in the activity side (the workflow body stays zero-IO).
 REVIEW_LEDGER_PATCH_ID = "t261006-12-inspection-review-ledger"
+# Version gate (t261103-12, replay-safe): the documentation inspection pass is the only
+# automatic writer of the derived documentation index. The flag is added to the doc-mech
+# activity args on NEW runs only; an in-flight inspection ticket whose history lacks the
+# marker gets patched()=False and keeps the old, write-free args byte for byte (the same
+# replay non-determinism red line as every gate above).
+DOCS_INDEX_PATCH_ID = "t261103-12-docs-index-rebuild"
 # lane/watchdog 面预算（260926）：活动内部自设扫描总预算（有界——在册非终态票可能上百张，
 # 没有 worker 应答的僵尸票每次 query 都要等到超时）；Temporal 侧 start_to_close 必须**晚于**
 # 内部预算，否则 Temporal 先杀、活动自己的「预算用尽」收口永远跑不到（SUITE/INSPECT 双闸
@@ -1613,11 +1619,18 @@ class InspectionPeriodicWorkflow(TicketEventLedgerMixin):
         # lane) → the daily period surface = the last day's commits (HEAD~1).
         doc_mech_meta: Optional[Dict[str, Any]] = None
         if workflow.patched(DOC_MECH_PATCH_ID) and str(plan.get("scan_face") or "") == "doc":
+            mech_args: Dict[str, Any] = {
+                "base_dir": base_dir,
+                "base_head": (lane or {}).get("base_ref", "") or "HEAD~1",
+                "project_key": getattr(inp, "project_key", "")}
+            # t261103-12: this pass is the ONE automatic writer of the derived
+            # documentation index (never the read path). Version-gated so an older
+            # in-flight ticket replays with its original args.
+            if self._patched and workflow.patched(DOCS_INDEX_PATCH_ID):
+                mech_args["docs_index_rebuild"] = True
             mech_raw: Any = await workflow.execute_activity(
                 "run_inspection_doc_mech",
-                args=[{"base_dir": base_dir,
-                       "base_head": (lane or {}).get("base_ref", "") or "HEAD~1",
-                       "project_key": getattr(inp, "project_key", "")}],
+                args=[mech_args],
                 start_to_close_timeout=SHORT_TO, retry_policy=RETRY)
             if not (mech_raw or {}).get("ok"):
                 return await self._blocked(

@@ -39,7 +39,7 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { appendFile, readFile, stat } from 'node:fs/promises'
+import { appendFile, readFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -48,6 +48,26 @@ import type { Context } from '@deepseek-ai/cordis'
 import { resolveRepo } from '../repo-anchor.mjs'  // t261008-33: shared anchor chain + escape guard
 import { findProject, primaryDir, type ProjectEntry } from '../../project-registry.ts'
 import { diffBlocks } from './src/shared/blocks.ts'
+// t261103-12: the ONE documentation-root resolution, shared with the console documents
+// view (server/plugins/workbench). This feature no longer decides "where the documents
+// are" on its own: the roots come from the project's declaration, and the derived index
+// is read from the project's data directory with its state (absent / stale / failed /
+// current) attached to every answer.
+import {
+  indexBanner, indexDir, liveEntries, locateRoot,
+  readIndexState as readIndexStateFor, resolveDocsRoots,
+  type ResolvedRoot, type RootsResolution, type ServedResolution,
+} from './src/shared/docs-roots.ts'
+import { isSafeDocRel } from '../workbench/src/shared/docs-model.ts'
+
+/** Containment check for a root-relative document path: safe shape AND inside the root
+ *  (the lexical gates already refuse `..`/absolute; this is the second, explicit
+ *  fail-closed door — same discipline as the workbench read path). */
+function admitsInRoot(root: ResolvedRoot, rel: string): boolean {
+  if (!isSafeDocRel(rel)) return false
+  const abs = `${root.directory}/${rel}`
+  return abs === root.directory || abs.startsWith(`${root.directory}/`)
+}
 import {
   CONCLUDES, appendReviewRound, loadReview,
   type ReviewBlockEntry, type ReviewConclude, type ReviewRound,
@@ -182,72 +202,146 @@ export function apply(ctx: Context, config?: SuyouKnowledgeConfig): void {
     return proj
   }
 
-  /** index.json 缓存：按项目分键、按 mtime 失效，避免每次请求都读盘解析。 */
-  const indexCache = new Map<string, { mtimeMs: number; data: unknown }>()
-
-  /** 读项目 docs/index.json；缺失返回 null（调用方走人话降级，不再 502）。 */
-  async function readIndex(proj: ProjectEntry): Promise<unknown | null> {
-    const indexJson = join(primaryDir(proj), 'docs', 'index.json')
-    let st
-    try {
-      st = await stat(indexJson)
-    } catch {
-      return null
-    }
-    const hit = indexCache.get(proj.key)
-    if (hit && hit.mtimeMs === st.mtimeMs) return hit.data
-    const data = JSON.parse(await readFile(indexJson, 'utf8'))
-    indexCache.set(proj.key, { mtimeMs: st.mtimeMs, data })
-    return data
+  /** t261103-12: the documentation roots in effect for one request (declaration →
+   *  resolution; nothing here derives a directory name). */
+  function resolutionOf(proj: ProjectEntry): RootsResolution {
+    return resolveDocsRoots(proj.key, { repos: proj.dirs, fallbackRepo: primaryDir(proj) })
   }
 
-  /** 重建 index（spawn 项目自己的 build_index.py，幂等）。 */
-  async function rebuildIndex(proj: ProjectEntry): Promise<{ ok: true; result: unknown; stdout: string } | { ok: boolean; error: string }> {
-    const primary = primaryDir(proj)
-    const script = join(primary, 'docs', 'scripts', 'build_index.py')
+  /** The review lists a live listing can state: no frontmatter block, status
+   *  deprecated, and an `updated:` older than the engine's staleness window. */
+  function reviewOfEntries(entries: any[]) {
+    const missing: string[] = []
+    const deprecated: string[] = []
+    const stale: string[] = []
+    const horizon = Date.now() - 180 * 24 * 3600 * 1000
+    for (const d of entries) {
+      if (d?.has_frontmatter === false) missing.push(String(d?.id ?? d?.path ?? ''))
+      if (String(d?.status ?? '') === 'deprecated') deprecated.push(String(d?.id ?? d?.path ?? ''))
+      const t = typeof d?.updated === 'string' && d.updated !== '' ? Date.parse(d.updated) : NaN
+      if (Number.isFinite(t) && t < horizon) stale.push(String(d?.id ?? d?.path ?? ''))
+    }
+    return { missing_frontmatter: missing, deprecated, stale }
+  }
+
+  /**
+   * The index answer every consumer gets: the three reader states are always named.
+   * - current / stale: entries come from the derived index (stale is LABELLED stale
+   *   and names the last build time; it is never passed off as current);
+   * - absent / failed: entries are read live from the resolved roots, so a project
+   *   that HAS documents is never shown as empty — and the state still says that the
+   *   index is missing or that its rebuild failed, with the reason.
+   */
+  function indexAnswer(proj: ProjectEntry, res: ServedResolution) {
+    const served = res
+    const read = readIndexStateFor(proj.key, res)
+    const live = read.state === 'absent' || read.state === 'failed'
+    const docs = live ? liveEntries(res as ServedResolution) : read.entries
+    const review = live ? reviewOfEntries(docs) : read.review
+    return {
+      // legacy keys the current page reads stay valid (generated_at/total/docs/review)
+      generated_at: read.builtAt,
+      total: docs.length,
+      categories: [...new Set(docs.map((d: any) => String(d.category ?? '')))].filter((c) => c !== ''),
+      docs,
+      review,
+      // t261103-12 state face
+      state: read.state,
+      banner: indexBanner(read),
+      built_at: read.builtAt,
+      stale_reason: read.staleReason,
+      reason: read.reason,
+      entries_source: live ? 'roots' : 'index',
+      index_path: join(indexDir(proj.key), 'index.json'),
+      roots: served.roots.map((r) => ({ id: r.id, repository: r.repository,
+        path: r.path, directory: r.directory, state: r.state, projections: r.projections })),
+      resolution: { state: served.state, source: served.source,
+        declared: served.source === 'declared', declaration: served.declaration,
+        reason: served.reason, projections: served.projections },
+      empty: false,
+    }
+  }
+
+  /** Explicit operator rebuild: the ONLY write entry in this plugin's docs face. It
+   *  calls the engine builder, which writes into the project's data directory; the
+   *  read path never triggers it. */
+  async function rebuildIndex(proj: ProjectEntry): Promise<{ ok: boolean; result?: unknown; error?: string; stdout?: string }> {
+    const script = join(repo, 'server', 'engine', 'docs_index.py')
     if (!existsSync(script)) {
-      return { ok: false, error: `项目 ${proj.key} 没有 docs/scripts/build_index.py（期望路径：${script}）` }
+      return { ok: false, error: `engine docs index builder missing (expected: ${script})` }
     }
     try {
-      const { stdout } = await execFileP(python, [script], { cwd: primary, timeout: timeoutMs })
-      // 重建后 index 内容变了，清缓存让下次 readIndex 重读。
-      indexCache.delete(proj.key)
-      return { ok: true, result: await readIndex(proj), stdout: stdout.trim() }
+      const { stdout } = await execFileP(
+        python, [script, '--project', proj.key, '--trigger', 'operator'],
+        { cwd: repo, timeout: timeoutMs })
+      return { ok: true, result: await readIndexStateFor(proj.key, resolutionOf(proj)), stdout: stdout.trim() }
     } catch (err: any) {
-      return { ok: false, error: String(err?.message ?? err) }
+      const out = String(err?.stdout ?? '').trim()
+      return { ok: false, error: String(err?.message ?? err) + (out === '' ? '' : ` (${out})`) }
     }
   }
 
-  /** 项目 docs 目录 + path 白名单 + 防穿路径，三合一；不合法已回错误并返回 null。 */
-  function checkedDocs(req: IncomingMessage, res: ServerResponse, proj: ProjectEntry): { p: string; abs: string; docsDir: string } | null {
+  /** The resolved root a request targets + the path admitted inside it. Every failure
+   *  is answered here with its own named reason (no silent fallback to a default
+   *  directory, no empty answer for a missing root). */
+  function checkedDocs(req: IncomingMessage, res: ServerResponse,
+    proj: ProjectEntry): { p: string; abs: string; docsDir: string; rootId: string;
+      repo: string; rootPath: string } | null {
     const url = new URL(req.url ?? '/', 'http://x')
     const p = url.searchParams.get('path') ?? ''
-    if (!DOC_PATH_RE.test(p)) {
-      sendJson(res, 404, { ok: false, error: `path 不合法（只允许 ${DOC_PATH_HINT}）` })
+    const res0 = resolutionOf(proj)
+    if (res0.state === 'refused') {
+      sendJson(res, 200, { ok: true, result: { empty: true, reason: res0.reason }, resolution: { state: res0.state, code: res0.code, reason: res0.reason, looked_for: res0.lookedFor } })
       return null
     }
-    const docsDir = join(primaryDir(proj), 'docs')
-    const abs = resolve(docsDir, p)
-    if (!abs.startsWith(docsDir + sep)) {
-      sendJson(res, 404, { ok: false, error: 'path 越界（穿路径拒绝）' })
+    // Which root holds this page: an explicit root id wins, otherwise the path itself
+    // decides (exactly one holder), and an ambiguous path is refused by name — two
+    // roots holding the same relative path never open each other's file.
+    const located = locateRoot(res0, p, url.searchParams.get('root'))
+    if ('reason' in located) {
+      sendJson(res, 404, { ok: false, error: located.reason })
       return null
     }
-    return { p, abs, docsDir }
+    const root = located.root
+    // Admission is either the legacy category rule (unchanged for today's library) or a
+    // safe root-relative path inside the resolved root (a declared root may hold any
+    // directory layout). Containment is checked explicitly, never assumed.
+    const legacy = DOC_PATH_RE.test(p)
+    if (!legacy && !admitsInRoot(root, p)) {
+      sendJson(res, 404, { ok: false, error: `path not admitted (allowed: ${DOC_PATH_HINT}, or a safe .md path inside root ${root.id}): ${p}` })
+      return null
+    }
+    const abs = resolve(root.directory, p)
+    if (!abs.startsWith(root.directory + sep)) {
+      sendJson(res, 404, { ok: false, error: 'path escapes the root (traversal refused)' })
+      return null
+    }
+    return { p, abs, docsDir: root.directory, rootId: root.id, repo: root.repoDir,
+      rootPath: root.path }
   }
 
   async function handleIndex(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const proj = projOf(req, res)
     if (!proj) return
     try {
-      const data = await readIndex(proj)
-      if (data === null) {
-        sendJson(res, 200, {
-          ok: true,
-          result: { empty: true, reason: `项目 ${proj.name}（${proj.key}）还没有 docs 知识库（期望路径：${join(primaryDir(proj), 'docs', 'index.json')}）` },
-        })
+      const resolution = resolutionOf(proj)
+      if (resolution.state === 'refused') {
+        // A refusal is an ANSWER, not an empty view: the state and the named reason
+        // travel with it, and the page must render them instead of "no documents".
+        sendJson(res, 200, { ok: true, result: {
+          // `empty:true` is the branch the page renders a named reason from; `state`
+          // keeps a refusal distinguishable from a genuinely empty root.
+          empty: true, state: 'refused', banner: resolution.reason, built_at: '',
+          stale_reason: '', reason: resolution.reason, code: resolution.code,
+          total: 0, docs: [], categories: [],
+          review: { missing_frontmatter: [], deprecated: [], stale: [] },
+          entries_source: 'none', roots: [], looked_for: resolution.lookedFor,
+          resolution: {
+            state: resolution.state, code: resolution.code,
+            declaration: resolution.declaration, reason: resolution.reason } } })
         return
       }
-      sendJson(res, 200, { ok: true, result: data })
+      sendJson(res, 200, { ok: true, result: indexAnswer(proj, resolution) })
     } catch (err: any) {
       sendJson(res, 502, { ok: false, error: String(err?.message ?? err) })
     }
@@ -293,8 +387,10 @@ export function apply(ctx: Context, config?: SuyouKnowledgeConfig): void {
       let oldText = ''
       let hasBase = false
       try {
-        // 注意：git 里的真路径带 docs/ 前缀（DOC_PATH_RE 的 p 是相对 docs/ 的）。
-        const r = await execFileP('git', ['-C', primaryDir(proj), 'show', `${base}:docs/${checked.p}`], { timeout: timeoutMs })
+        // The path inside git carries the ROOT's repository-relative prefix
+        // (t261103-12: the root is resolved, never assumed to be docs/).
+        const relInRepo = `${checked.rootPath}/${checked.p}`
+        const r = await execFileP('git', ['-C', checked.repo, 'show', `${base}:${relInRepo}`], { timeout: timeoutMs })
         oldText = r.stdout
         hasBase = true
       } catch (gitErr: any) {
@@ -344,13 +440,27 @@ export function apply(ctx: Context, config?: SuyouKnowledgeConfig): void {
     }
     const proj = projOf(req, res, body)
     if (!proj) return
-    const docsDir = join(primaryDir(proj), 'docs')
-    // run-id 先定，审计与响应同号（成功失败都留痕）。
     const runId = randomUUID().replace(/-/g, '').slice(0, 12)
     const p = typeof body?.path === 'string' ? body.path : ''
-    if (!DOC_PATH_RE.test(p)) {
-      await audit(runId, 'review.save', { project: proj.key, path: p }, false, 'path 不合法')
-      sendJson(res, 404, { ok: false, run_id: runId, error: `path 不合法（只允许 ${DOC_PATH_HINT}）` })
+    // t261103-12: the review store lives beside the RESOLVED root the document came
+    // from (the declaration decides where; this route never assumes docs/).
+    const resolution = resolutionOf(proj)
+    if (resolution.state === 'refused') {
+      await audit(runId, 'review.save', { project: proj.key, path: p }, false, resolution.reason)
+      sendJson(res, 409, { ok: false, run_id: runId, error: resolution.reason })
+      return
+    }
+    const located = locateRoot(resolution, p, typeof body?.root === 'string' ? body.root : null)
+    if ('reason' in located) {
+      await audit(runId, 'review.save', { project: proj.key, path: p }, false, located.reason)
+      sendJson(res, 404, { ok: false, run_id: runId, error: located.reason })
+      return
+    }
+    const root = located.root
+    const docsDir = root.directory
+    if (!DOC_PATH_RE.test(p) && !admitsInRoot(root, p)) {
+      await audit(runId, 'review.save', { project: proj.key, path: p }, false, 'path not admitted')
+      sendJson(res, 404, { ok: false, run_id: runId, error: `path not admitted (allowed: ${DOC_PATH_HINT}, or a safe .md path inside root ${root.id}): ${p}` })
       return
     }
     const base = typeof body?.base === 'string' ? body.base : 'HEAD'

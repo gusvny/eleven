@@ -782,10 +782,30 @@ async def run_inspection_doc_mech(args: Dict[str, Any]) -> Dict[str, Any]:
     # inside run_doc_mech for THIS repository. A missing/unreadable/malformed
     # root is a named refusal (DocMechError carrying its code), never a green
     # empty scan: "no documents" and "documents not found" must not read alike.
+    # The derived documentation index is rebuilt HERE and nowhere else (t261103-12):
+    # the documentation inspection pass is its only automatic writer. The caller opts
+    # in per run (`docs_index_rebuild`), so a replay of an older pass and every unit
+    # test keep the old, write-free behaviour. The rebuild lands in the project's own
+    # data directory (outside every repository); a failure is recorded by the pure
+    # module and returned in meta.docs_index -- it never fails the pass.
+    index_rebuild = None
+    if bool(args.get("docs_index_rebuild")):
+        if not _re.match(r"^[a-z0-9][a-z0-9-]*$", project_key):
+            activity.logger.warning("docs index rebuild skipped: no valid project_key (%r)",
+                                    project_key)
+        else:
+            from docs_index import inspection_rebuild
+            projects_dir = args.get("docs_projects_root") or None
+
+            def index_rebuild() -> Dict[str, Any]:
+                # The resolver owns the project root (the registry entry's first dirs
+                # item): the inspection pass only says WHICH project it scanned for.
+                return inspection_rebuild(project_key, projects_dir)
+
     try:
         result = await asyncio.to_thread(
             run_doc_mech, repo_root, added, changed, ticket_exists, commit_exists,
-            base_head, None, project_key)
+            base_head, None, project_key, index_rebuild)
     except DocMechError as e:
         return {"ok": False, "error": str(e)}
     activity.logger.info("doc-face mechanical layer: %d finding(s), pages=%s",

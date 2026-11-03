@@ -92,13 +92,19 @@ export interface DocTreeGroup {
    * library content; sub-directory labels stay data (last dir segment).
    */
   label: string
-  files: { rel: string; title: string }[]
+  files: { rel: string; title: string; root?: string }[]
+  /** t261103-12: the documentation root this group came from, when the view merges
+   *  more than one root (identity includes repository + root, so equal relative
+   *  directories never shadow each other). */
+  root?: string
 }
 
 /** 单篇条目（rel=相对路径，title=展示标题，可空）。 */
 export interface DocEntry {
   rel: string
   title?: string
+  /** t261103-12: the root the entry came from (multi-root merged views). */
+  root?: string
 }
 
 /**
@@ -113,7 +119,11 @@ export function buildDocTree(entries: DocEntry[]): DocTreeGroup[] {
     const dir = e.rel.includes('/') ? e.rel.slice(0, e.rel.lastIndexOf('/')) : ''
     if (!byDir.has(dir)) byDir.set(dir, [])
     const title = typeof e.title === 'string' && e.title !== '' ? e.title : e.rel
-    byDir.get(dir)!.push({ rel: e.rel, title })
+    // t261103-12: a merged multi-root view keeps the root on the file row; a
+    // single-root entry keeps the exact old shape (no extra key).
+    byDir.get(dir)!.push(typeof e.root === 'string' && e.root !== ''
+      ? { rel: e.rel, title, root: e.root }
+      : { rel: e.rel, title })
   }
   const dirs = [...byDir.keys()].sort((a, b) => (a === '' ? -1 : b === '' ? 1 : a < b ? -1 : 1))
   return dirs.map((dir) => ({
