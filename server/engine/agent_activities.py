@@ -10691,6 +10691,13 @@ def _landing_project_key_refusal(ticket_id: str, project_key: str,
 #: steer a later read).
 _LANDING_CLOSEOUT_PROJECT_KEY: Dict[str, str] = {}
 
+#: t261103-25: the one-shot RECEIPT note of the same handoff, written by the fence
+#: when it lets a KEYLESS close-out proceed and read by the merge activity right
+#: after the call. Same discipline as the key: set and read with no await in
+#: between, cleared at the top of every fence call for that ticket id (a note can
+#: never outlive the judgement that produced it), and consumed on read in merge().
+_LANDING_CLOSEOUT_KEYLESS_NOTE: Dict[str, str] = {}
+
 
 def _line_landing_closeout_refusal_for(ticket_id: str,
                                        project_key: Optional[str] = None) -> str:
@@ -10699,26 +10706,38 @@ def _line_landing_closeout_refusal_for(ticket_id: str,
     Returns "" when this ticket has no landing row in ITS OWN project's delivery
     ledger (the legacy squash close-out may proceed), else the named refusal. The
     project key is the caller's resolved meta.project (the ``project_key`` argument,
-    or the one-shot handoff above) and it is REQUIRED: an empty, malformed or
-    unresolvable key refuses by name instead of falling back to another project's
-    directory. The measured fault (t261103-23) was a scan of EVERY project's ledger,
-    where a landing row of a same-named ticket in another project was read as this
-    ticket's own landing.
+    or the one-shot handoff above); an empty, malformed or unresolvable key never
+    falls back to another project's directory. The measured fault (t261103-23) was a
+    scan of EVERY project's ledger, where a landing row of a same-named ticket in
+    another project was read as this ticket's own landing.
 
     A hit names the project whose ledger it came from and the landing id. In the same
     project that IS this ticket's landing, so the refusal keeps the two lawful ways
     out (line-round promotion, or withdraw this project's own landing). A hit in
-    ANOTHER project is not this ticket's landing and never enters the refusal; it is
+    ANOTHER project is not this ticket's landing and never enters that refusal; it is
     named only by the diagnostic below, which runs when the key cannot be resolved,
     and it says exactly that: an id-scheme collision, not a landing to undo.
 
-    An unreadable or malformed ledger refuses by name: the fence never guesses over
-    records it cannot read. Deliberately reads with plain JSON instead of the
-    delivery-certify module (this call site sits outside that module's declared gate
-    region; the surface-confinement guard t261009-18 forbids a new reference there)."""
+    KEYLESS case (t261103-25, relaxing t261103-23 where that guard was over-strict):
+    when the key cannot be resolved, the fence looks for a landing of this id in ANY
+    project's delivery ledger, and the answer decides. A hit anywhere refuses BY NAME
+    (the collision copy above) - that is exactly the shape the guard exists for. NO
+    hit anywhere means there is nothing to misattribute, so the close-out PROCEEDS as
+    it did before t261103-23, and the receipt says so by name: the note handed over
+    through ``_LANDING_CLOSEOUT_KEYLESS_NOTE`` states that the key was unresolved,
+    that no project ledger holds this id, and that no ledger row was written. A
+    ledger that cannot be READ in that scan is not evidence of absence: it refuses by
+    name, because the fence never guesses over records it cannot read.
+
+    An unreadable or malformed ledger refuses by name on every other path too.
+    Deliberately reads with plain JSON instead of the delivery-certify module (this
+    call site sits outside that module's declared gate region; the
+    surface-confinement guard t261009-18 forbids a new reference there)."""
     tid = str(ticket_id or "").strip()
     if not tid:
         return "close-out refused: the landing guard needs a ticket id"
+    # Every call re-judges this id: a note from an earlier call can never ride along.
+    _LANDING_CLOSEOUT_KEYLESS_NOTE.pop(tid, None)
     if project_key is None:
         key = _LANDING_CLOSEOUT_PROJECT_KEY.pop(tid, "")
     else:
@@ -10727,36 +10746,62 @@ def _line_landing_closeout_refusal_for(ticket_id: str,
     key = str(key or "").strip()
     try:
         if not key:
-            # UNRESOLVABLE: never judge, and never fall back to another project's
-            # ledger. The diagnostic names a collision if one exists, so the reader
-            # sees WHY the same id appears elsewhere and what the lawful ways out are.
+            # UNRESOLVABLE (t261103-23, relaxed by t261103-25 to refuse only where the
+            # risk exists). No key means the fence cannot NAME this ticket's project,
+            # so it asks the only question that matters: does ANY project's delivery
+            # ledger hold a landing for this id? A hit anywhere is the collision the
+            # guard exists for and refuses by name; no hit anywhere leaves nothing to
+            # misattribute, so the close-out proceeds on the pre-t261103-23 path and
+            # records why. The scan is read-only: no path here writes a ledger.
             collisions: List[Tuple[str, Path, Dict[str, str]]] = []
+            unreadable: List[str] = []
+            scanned = 0
             for proj, ledger_file in _landing_ledger_candidates():
-                hits, _err = _landing_hits_in(ledger_file, tid)
+                scanned += 1
+                hits, err = _landing_hits_in(ledger_file, tid)
+                if err:
+                    # Cannot prove absence over records this run cannot read.
+                    unreadable.append(err)
+                    continue
                 for h in hits:
                     collisions.append((proj, ledger_file, h))
-            note = ("close-out refused: this ticket's own project key (meta.project) "
-                    "could not be resolved, so the landing guard cannot tell this "
-                    "ticket's landing apart from another project's ticket that merely "
-                    "shares the id scheme (<date>-<serial>). Nothing was judged as this "
-                    "ticket's landing and nothing was written. Retry once the ticket's "
-                    "own project key is readable, and land/promote this ticket under "
-                    "its own project key")
             if collisions:
                 proj, ledger_file, h = collisions[0]
-                note += (": a landing for this id sits in the delivery ledger of project %r (%s: "
-                         "landing %s on line %r) - that row belongs to a ticket of project %r. "
-                         "An id-scheme collision between two projects is NOT this "
-                         "ticket's landing and is never a landing to undo, so do not "
-                         "withdraw it. Lawful remedies: (a) land this ticket under its "
-                         "own project key once it resolves, then let the line round "
-                         "certify it; (b) if the id is already taken by another project, "
-                         "re-issue this work under a non-colliding id."
-                         % (proj, ledger_file, h["id"], h["line"], proj))
-            else:
-                note += (": no project ledger holds a landing for this id, so nothing "
-                         "of this ticket's has landed")
-            return note
+                return ("close-out refused: this ticket's own project key (meta.project) "
+                        "could not be resolved, so the landing guard cannot tell this "
+                        "ticket's landing apart from another project's ticket that merely "
+                        "shares the id scheme (<date>-<serial>), and a landing for this "
+                        "id does exist elsewhere: it sits in the delivery ledger of "
+                        "project %r (%s: landing %s on line %r) - that row belongs to a "
+                        "ticket of project %r. An id-scheme collision between two "
+                        "projects is NOT this ticket's landing and is never a landing to "
+                        "undo, so do not withdraw it. Nothing was judged as this "
+                        "ticket's landing and nothing was written. Lawful remedies: (a) "
+                        "land this ticket under its own project key once it resolves, "
+                        "then let the line round certify it; (b) if the id is already "
+                        "taken by another project, re-issue this work under a "
+                        "non-colliding id."
+                        % (proj, ledger_file, h["id"], h["line"], proj))
+            if unreadable:
+                return ("close-out refused: this ticket's own project key (meta.project) "
+                        "could not be resolved AND %d project delivery ledger(s) could "
+                        "not be read, so the guard cannot rule out a landing for this "
+                        "id somewhere: %s It never reads an unreadable ledger as "
+                        "'nothing landed there', and nothing was written. Retry once "
+                        "the ticket's own project key is readable, or once those "
+                        "ledgers read again."
+                        % (len(unreadable), " ".join(unreadable)))
+            # Nothing of this ticket's has landed anywhere: there is nothing to
+            # misattribute, so proceed. The receipt carries the reason by name.
+            _LANDING_CLOSEOUT_KEYLESS_NOTE[tid] = (
+                "close-out note (t261103-25): this ticket's own project key "
+                "(meta.project) could not be resolved; the guard scanned %d project "
+                "delivery ledger(s) read-only and no ledger anywhere holds a landing "
+                "for this id, so nothing of this ticket's has landed and there is "
+                "nothing to misattribute - the close-out proceeded on the "
+                "pre-t261103-23 path, and no ledger row was written."
+                % scanned)
+            return ""
         if not shared.PROJECT_KEY_RE.match(key):
             return ("close-out refused: the landing guard was handed a malformed "
                     "project key %r (whitelist %s) - refusing to read any ledger "
@@ -10781,6 +10826,15 @@ def _line_landing_closeout_refusal_for(ticket_id: str,
                 "(%s: %s)" % (key, type(e).__name__, str(e)[:160]))
 
 
+def _receipt_note(existing: str, note: str) -> str:
+    """Join a close-out receipt's own note with the fence's keyless note (t261103-25).
+    The receipt's own text stays first, so a failure or cleanup warning keeps its
+    place and the keyless note reads as the trailing context it is. Either side may
+    be empty; both empty gives an empty string."""
+    parts = [str(x) for x in (existing, note) if str(x or "").strip()]
+    return "\n".join(parts)
+
+
 @activity.defn
 async def merge(args: MergeArgs) -> MergeResult:
     """The real merge after human sign-off (KI-006 switched to a squash close-out: one
@@ -10797,9 +10851,10 @@ async def merge(args: MergeArgs) -> MergeResult:
     # Project key of THIS ticket (meta.project, read off the workflow snapshot). It is
     # resolved ONCE, before anything below uses it, and fed to both consumers: the
     # t261019-02 close-out fence (t261103-23) and the snapshot step. A lookup failure
-    # answers "" - the fence then refuses by name instead of reading another project's
-    # ledger, and _squash_merge skips the snapshot internally with a note. No fallback
-    # to a neighbouring project's directory, to an empty path, or to this repo's own
+    # answers "" - the fence then judges this id over EVERY project's ledger (t261103-25:
+    # refuse only when a landing for it exists somewhere, otherwise proceed and record
+    # why), and _squash_merge skips the snapshot internally with a note. No fallback to
+    # a neighbouring project's directory, to an empty path, or to this repo's own
     # project: the collision fault measured on 2026-11-03 was exactly such a fallback
     # (a project-vision ticket read as already landed on sandbar's ledger).
     project_key = await _fetch_ticket_project(args.ticket_id)
@@ -10813,6 +10868,10 @@ async def merge(args: MergeArgs) -> MergeResult:
     # RestrictedWorkflowAccessError and blocked every close-out).
     _LANDING_CLOSEOUT_PROJECT_KEY[args.ticket_id] = project_key
     _closeout_refusal = _line_landing_closeout_refusal_for(args.ticket_id)
+    # t261103-25: a KEYLESS close-out the fence let through carries its reason out on
+    # the receipt (the activity result is the audit record). Consumed here, with no
+    # await in between, so a note cannot steer a later close-out.
+    _keyless_note = _LANDING_CLOSEOUT_KEYLESS_NOTE.pop(args.ticket_id, "")
     if _closeout_refusal:
         return MergeResult(ok=False, action="failed",
                            error=_closeout_refusal,
@@ -10855,6 +10914,10 @@ async def merge(args: MergeArgs) -> MergeResult:
             activity.logger.warning("[%s%s] squash 失败：%s", args.ticket_id,
                                     "/%s" % sc["name"] if sc["name"] else "", res.error)
     if len(results) == 1:
+        # t261103-25: the receipt of a keyless close-out says so by name, and the
+        # per-tree warns stay in front of it (error is the receipt's note field when
+        # ok=True - the same channel the cleanup warns use).
+        results[0].error = _receipt_note(results[0].error, _keyless_note)
         return results[0]
     ok = all(r.ok for r in results)
     first_bad = next((r for r in results if not r.ok), None)
@@ -10867,7 +10930,10 @@ async def merge(args: MergeArgs) -> MergeResult:
                        # workflow's blocked text points its file list at this receipt)
                        reason=(first_bad.reason if first_bad else ""),
                        files=list(first_bad.files) if first_bad else [],
-                       merge_commit=merged, error=errs)
+                       merge_commit=merged,
+                       # t261103-25: ONE copy of the keyless note on the aggregated
+                       # receipt (a per-tree append would repeat it per repository).
+                       error=_receipt_note(errs, _keyless_note))
 
 
 # ---------- dev-lane: exporting a finished ticket's data + lane teardown (M1-3, ticket t260902-02) ----------
