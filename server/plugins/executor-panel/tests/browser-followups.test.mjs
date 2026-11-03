@@ -49,6 +49,19 @@ try {
   // ---- 缺陷 1：展开不动另一栏 / 不动下方内容（窄=叠放，宽=并列） ----
   const page = await newAuthedPage({ width: 700, height: 900 })
   page.setDefaultTimeout(15000)
+  // t261103-29: the right column fills from the page's OWN reads, and it fills
+  // late — the Concurrent limit block grows from 88.94px to 134.63px about
+  // 600ms after the page settles, with no interaction at all (measured
+  // 2026-11-03 on main). Comparing a box measured before that read lands with
+  // one measured after reads as "the boxes moved" while the request moved
+  // nothing. So the geometry is only compared once the page is quiescent: no
+  // request in flight and no box movement for a few samples. The page polls
+  // every 5s, so the quiet window is well inside one poll interval; a column
+  // that never stops moving fails by name below instead of silently passing.
+  let inFlight = 0
+  page.on('request', () => { inFlight += 1 })
+  page.on('requestfinished', () => { inFlight -= 1 })
+  page.on('requestfailed', () => { inFlight -= 1 })
   await page.goto(H.base + '/sandbar-executor-panel?project=' + KEY)
   await page.waitForFunction(() => document.getElementById('reqBadge') && document.getElementById('reqBadge').textContent === '1', { polling: 200 })
   // ---- 缺陷 1（t261009-37 更新）：右列改为区块叠（.colstk），两栏随页面滚动——
@@ -57,33 +70,71 @@ try {
   // 窄视口（叠放）下右列在请求列下方正常渲染；行内 detail 限高不变。
   const rects = () => page.evaluate(() => {
     const cols = document.querySelectorAll('.cols > div')
-    const r2 = cols[1].getBoundingClientRect()
-    return { cols: cols.length, other: { top: r2.top, height: r2.height, width: r2.width }, pageH: document.documentElement.scrollHeight }
+    const box = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, height: r.height, width: r.width } }
+    const blk = [...cols[1].querySelectorAll('.blk')].map(box)
+    return { cols: cols.length, first: box(cols[0]), other: box(cols[1]), blocks: blk, pageH: document.documentElement.scrollHeight }
   })
+  // t261103-29: quiescence, not a fixed sleep. The right column's late fill is
+  // driven by the page's own reads, so "no request in flight and no box moved"
+  // is the condition that makes two measurements comparable. A column that
+  // never quiesces is a defect, not a slow read, and it fails by name here.
+  const rightRect = () => page.evaluate(() => {
+    const r = document.querySelectorAll('.cols > div')[1].getBoundingClientRect()
+    return [Math.round(r.top), Math.round(r.height), Math.round(r.width)].join(',')
+  })
+  const settle = async (ms = 8000) => {
+    const deadline = Date.now() + ms
+    let last = await rightRect()
+    let stable = 0
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(60)
+      const now = await rightRect()
+      stable = (inFlight === 0 && now === last) ? stable + 1 : 0
+      last = now
+      if (stable >= 4) return
+    }
+    throw new Error('the right column never grew quiet within ' + ms + 'ms (inFlight=' + inFlight + ', last rect: ' + last + ')')
+  }
+  await settle()
   const before = await rects()
   assert(before.cols === 2, 'two column blocks exist (narrow container stacks them)')
   await page.locator('.head[data-id]').first().click()
   await page.waitForSelector('[data-row][data-open="true"] .detail')
+  await settle()
   const afterNarrow = await rects()
   assert(afterNarrow.other.width === before.other.width, 'narrow/stacked: the right column keeps its width when a request unfolds')
   assert(afterNarrow.pageH >= before.pageH, 'narrow/stacked: the unfolded detail is on the page (the stack grows downward by design)')
 
   await page.setViewportSize({ width: 1300, height: 900 })
-  await page.waitForTimeout(100)
-  const beforeWide = await rects()
-  assert(beforeWide.other.width !== before.other.width, 'wide viewport switches to the side-by-side grid')
+  await settle()
   // 收起再展开（换一条已收起的行验证双向）：并列布局下右列区块盒不动。
+  // t261103-29: the measurement now BRACKETS the unfold. It used to take its
+  // baseline with the row already open (it was opened at the narrow width) and
+  // compare it with the row re-opened, so both sides of the comparison were the
+  // open state — the case could not see the unfold it names. The baseline is
+  // the collapsed wide layout, the measured side is the same layout unfolded.
   await page.locator('.head[data-id]').first().click()
   await page.waitForSelector('[data-row][data-open="false"] .detail', { state: 'detached' }).catch(() => {})
+  await settle()
+  const beforeWide = await rects()
+  assert(beforeWide.other.width !== before.other.width, 'wide viewport switches to the side-by-side grid')
+  assert(await page.locator('[data-row][data-open="true"]').count() === 0, 'the request row starts collapsed at the wide measurement')
   await page.locator('.head[data-id]').first().click()
   await page.waitForSelector('[data-row][data-open="true"]')
+  await settle()
   const afterWide = await rects()
-  assert(JSON.stringify(afterWide.other) === JSON.stringify(beforeWide.other), 'wide/side-by-side: the right-column block boxes do not move when a request unfolds')
+  // Anti-vacuity: the unfold has to be visible where it is measured, or "the
+  // right column did not move" is true of a page that did nothing.
+  assert(afterWide.first.height > beforeWide.first.height,
+    'the unfold really opened the request column (the left box grew)')
+  assert(JSON.stringify(afterWide.other) === JSON.stringify(beforeWide.other)
+    && JSON.stringify(afterWide.blocks) === JSON.stringify(beforeWide.blocks),
+    'wide/side-by-side: the right-column block boxes do not move when a request unfolds')
   // 行内 detail 仍限高内滚（t261003-06 回归锚）。
   const detailH = await page.evaluate(() => document.querySelector('[data-row][data-open="true"] .detail').getBoundingClientRect().height)
   // t261004-16：限高 170→440px（票面要求 ≥420）。
   assert(detailH <= 441, 'row detail stays height-capped and scrollable')
-  n += 7
+  n += 8
   await page.close()
 
   // ---- 缺陷 2：主题深链 + 显式降级（无硬编码缺省调色板） ----

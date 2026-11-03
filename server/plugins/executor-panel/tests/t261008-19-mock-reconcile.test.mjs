@@ -8,12 +8,18 @@
  *    绝不出现 mock 的示意数字 25/60。
  *  - countDocsTree：畸形输入（null/非对象/groups 缺席/非数组/files 非数组）不 throw、
  *    不造数。
- *  - 负断言（本票不是重画许可）：页签条顺序不变、paneInsp 四锚原样在场、既有
- *    KPI 卡标签（tickets (7d) 等）原样在场、端点集合不新增。
+ *  - negative assertions (this ticket is not a licence to redraw the panel): the
+ *    tab strip order is unchanged, the four Inspection anchors are byte-intact,
+ *    the KPI row is exactly the shipped six tiles, the two tiles retired by the
+ *    t261025-13 ruling stay retired, and every fetch stays on a declared API
+ *    prefix (or the panel's own vendored-chart asset route) — no invented
+ *    endpoint. (t261103-29: this replaces the pre-t261025-13 wording, which named
+ *    tiles and a prefix set that no longer exist.)
  */
 import { assert, done } from './lib.mjs'
 import { PANEL_PAGE_HTML } from '../src/host/panel-page.ts'
 import { countDocsTree, docEntryRow } from '../src/host/page-logic.ts'
+import { kpiTilesOf } from '../src/host/metrics-tab-model.ts'
 
 const html = PANEL_PAGE_HTML
 let n = 0
@@ -29,10 +35,25 @@ const paneMetrics = html.slice(html.indexOf('id="paneMetrics"'), html.indexOf('i
 // ride the embedded model core, so they are asserted on the WHOLE page), the
 // five section headings (markup case; CSS uppercases at render), and the
 // retirement of the placeholder copy.
-for (const title of ['REWORK RATE', 'THROUGHPUT', 'MEDIAN LEAD TIME', 'TOKENS',
-  'TOKENS PER CLOSED TICKET', 'HUMAN WAIT']) {
+// t261025-13 (host ruling 261025): the REWORK RATE tile and the single
+// tokens-per-closed-ticket tile are retired; three honest token tiles replace
+// them (docs/design/metrics-token-face-delta.md rule 3, "The REWORK RATE tile is
+// removed"). The six titles below are the shipped face — the same set the
+// integration anchor list pins (integration/t261021-07/...mock_anchors.mjs:116).
+// A tile that comes back must come back with its ruling, not by re-adding an
+// expectation here; this list is the live face, not a historical one.
+for (const title of ['THROUGHPUT', 'MEDIAN LEAD TIME', 'TOKENS',
+  'FRESH TOKENS PER COVERED TICKET', 'CACHE SHARE', 'HUMAN WAIT']) {
   assert(html.includes(title), `Metrics model carries the KPI tile title (${title})`)
 }
+// The row itself is pinned exactly (order and count), so a seventh tile cannot
+// slip in behind the six presence checks; the model is the same function the
+// page embeds, so this reads the shipped face, not a copy of it.
+const kpiRow = kpiTilesOf({ kpis: {} }).map((t) => t.title)
+assert(JSON.stringify(kpiRow) === JSON.stringify(
+  ['THROUGHPUT', 'MEDIAN LEAD TIME', 'TOKENS', 'FRESH TOKENS PER COVERED TICKET',
+    'CACHE SHARE', 'HUMAN WAIT']),
+'the KPI row is exactly the shipped six tiles, in order (actual: ' + kpiRow.join(' / ') + ')')
 for (const heading of ['Where the time goes', 'Certification', 'Epics',
   'Throughput', 'Where the tokens go']) {
   assert(paneMetrics.includes(heading), `Metrics pane carries the section heading (${heading})`)
@@ -82,13 +103,23 @@ for (const anchor of ['id="inspRunBtn"', 'id="inspDlg"', 'id="inspPeriodBtns"', 
   'Run a full-codebase review', 'Reviews you started']) {
   assert(paneInsp.includes(anchor), `Inspection pane keeps its mock anchor (${anchor})`)
 }
-for (const kpi of ['REWORK RATE', 'TOKENS PER CLOSED TICKET', 'HUMAN WAIT']) {
-  assert(html.includes(kpi), `the rebuilt Metrics KPI tile title stays (${kpi})`)
+// The negative face of the KPI row: the two tiles retired by the t261025-13
+// ruling must not come back without a new ruling. The pre-repair version of this
+// hunk asserted 'REWORK RATE' as PRESENT, which is why the retirement shipped
+// with a red pin behind it (docs/design/metrics-token-face-delta.md rule 3).
+for (const retired of ['REWORK RATE', 'TOKENS PER CLOSED TICKET']) {
+  assert(!html.includes(retired), `the retired KPI tile title stays retired (${retired})`)
 }
 const endpoints = [...html.matchAll(/fetch\('([^']+)'/g)].map(m => m[1].split('?')[0])
 assert(new Set(endpoints).size === new Set(endpoints.map(e => e)).size,
   'no duplicate endpoint paths introduced')
-assert(!endpoints.some(e => !/\/sandbar-workbench\/api\/|\/sandbar-executor-panel\/api\/|\/sandbar-watchdog\/api\//.test(e)),
-  'every fetch stays on the existing API prefixes (no invented endpoint)')
+// t261021-07: the panel's vendored echarts build is served from its own static
+// route (panel-page.ts:2182 probes it with HEAD before the lazy module import,
+// harness.mjs:43 serves it as a prefix route). It is an asset, not an API, so
+// the allowed set is the three API prefixes plus that one asset route — any
+// other target still reds, which is what this guard is for.
+const ALLOWED = /\/sandbar-workbench\/api\/|\/sandbar-executor-panel\/api\/|\/sandbar-watchdog\/api\/|\/sandbar-executor-panel\/vendor\//
+assert(!endpoints.some(e => !ALLOWED.test(e)),
+  'every fetch stays on the existing API prefixes or the panel asset route (no invented endpoint)')
 
 done(n + 1)

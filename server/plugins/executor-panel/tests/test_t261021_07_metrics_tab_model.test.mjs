@@ -19,6 +19,7 @@ import {
   METRICS_TAB_COPIES, mnum, mstr, mdash, fmtInt, fmtPct01, fmtTokensM, fmtMs, fmtAgo,
   shareBarPct, metricsV2Of, kpiTilesOf, workflowRowsOf, stageRowsOf, epicCardsOf,
   certSummaryOf, throughputSpecOf, tokensStackOf, sessionRowsOf, roleRowsOf,
+  CHART_ABSENT_REASON,
 } from '../src/host/metrics-tab-model.ts'
 import { METRICS_SERIES_COLORS, throughputOption, tokensOption } from '../src/host/metrics-tab-charts.ts'
 
@@ -144,10 +145,17 @@ const certFlakyless = certSummaryOf({ ok: true, round_faces: { rounds: [{ run_id
 assert(certFlakyless.flaky === null, 'no flaky face = dash, never 0')
 
 // ---- chart specs ----
+// t261026-11 (commit 17c6effd, the host's funnel ruling): both spec builders
+// answer as a FaceValue — {kind:'value', v} or {kind:'absent', reason} — so the
+// pins below read the value half's payload and the absent half's reason. The
+// payload shapes are unchanged ({days, opened, closed} / {title, categories,
+// series}); only the envelope around them is new.
 const health = { charts: { primary: { categories: ['Oct 01', 'Oct 02'], series: [
   { name: 'created', data: [3, 4] }, { name: 'closed', data: [2, 3] } ] } } }
-const spec = throughputSpecOf(health)
-assert(spec && spec.days.length === 2 && spec.closed[0] === 2 && spec.opened[0] === 3, 'throughput spec from health view')
+const specFace = throughputSpecOf(health)
+assert(specFace.kind === 'value', 'throughput spec answers with a value half for a readable chart')
+const spec = specFace.v
+assert(spec.days.length === 2 && spec.closed[0] === 2 && spec.opened[0] === 3, 'throughput spec from health view')
 const opt = throughputOption(spec)
 assert(opt.series[0].type === 'bar' && opt.series[0].name === 'closed' && opt.series[1].type === 'line', 'closed columns + opened line')
 assert(opt.series[0].itemStyle.color === METRICS_SERIES_COLORS[0] && opt.series[1].itemStyle.color === METRICS_SERIES_COLORS[1], 'declared palette on the two series')
@@ -157,8 +165,10 @@ const tokenView = { charts: { primary: { categories: ['Oct 01'], series: [
   { name: 'developer', data: [1e6] }, { name: 'integration', data: [0.5e6] },
   { name: 'executor', data: [0.25e6] }, { name: 'executor session', data: [0.1e6] },
   { name: 'global session', data: [49000] } ] } } }
-const stack = tokensStackOf(tokenView)
-assert(stack && stack.series.length === 5, 'five series from the token view')
+const stackFace = tokensStackOf(tokenView)
+assert(stackFace.kind === 'value', 'token stack answers with a value half for a readable chart')
+const stack = stackFace.v
+assert(stack.series.length === 5, 'five series from the token view')
 const topt = tokensOption(stack)
 assert(topt.series.length === 5 && topt.series.every((s) => s.stack === 'tokens'), 'stacked columns')
 assert(topt.series[0].data[0] === 1 && topt.series[4].data[0] === 0.05, 'values scaled to millions')
@@ -191,9 +201,18 @@ assert(kpiTilesOf({ kpis: { tokens_in_tickets: 5e6 } })[2].sub.includes('outside
 assert(workflowRowsOf(metricsV2Of({ kpis: {} }), ['ghost']).length === 0, 'unknown chip name = no row')
 assert(epicCardsOf(metricsV2Of({ kpis: {} }), 'tokens', [], NOW).length === 0, 'no epics = no cards')
 assert(sessionRowsOf({ ok: true, sessions: null }).length === 1 && sessionRowsOf({ ok: true, sessions: null })[0].value === '—', 'null sessions = named empty, not zeros')
-assert(throughputSpecOf(null) === null && tokensStackOf({ charts: {} }) === null, 'chart specs null on missing faces (named empty downstream)')
-assert(throughputSpecOf({ charts: { primary: { categories: ['d'], series: [{ name: 'x', data: 'nope' }] } } }) === null, 'series with junk data = no spec (named empty)')
-const junkOpt = tokensOption({ days: ['d'], series: [{ name: 'developer', data: ['x', null, 1e6] }] })
+// t261026-11: an unreadable chart is the ABSENT half, and the absence must name
+// what could not be read — a bare dash does not compile in the model and is
+// refused here too, so the funnel cannot be bypassed quietly.
+const noHealth = throughputSpecOf(null)
+const noTokens = tokensStackOf({ charts: {} })
+assert(noHealth.kind === 'absent' && noHealth.reason === CHART_ABSENT_REASON,
+  'a null health view = the absent half, carrying the named reason')
+assert(noTokens.kind === 'absent' && noTokens.reason === CHART_ABSENT_REASON,
+  'an empty charts face = the absent half, carrying the named reason')
+const junkSeries = throughputSpecOf({ charts: { primary: { categories: ['d'], series: [{ name: 'x', data: 'nope' }] } } })
+assert(junkSeries.kind === 'absent', 'series with junk data = no spec (named empty)')
+const junkOpt = tokensOption({ categories: ['d'], series: [{ name: 'developer', data: ['x', null, 1e6] }] })
 assert(JSON.stringify(junkOpt.series[0].data) === '[null,null,1]', 'junk stack values -> null points, never NaN')
 assert(certSummaryOf(null).ok === false && certSummaryOf('x').green === null, 'cert summary safe on junk')
 
@@ -223,9 +242,15 @@ import { GRID_LINE, LABEL } from '../src/host/metrics-tab-charts.ts'
   // page-load module script; the load triggers on the first Metrics open via
   // the named bridge, so PANEL_HTML consumers without the vendor route never
   // see a module MIME/404 error.
+  // t261028-18 replaced the old mtEnsureChartLib() gate with a per-ATTEMPT
+  // bridge (panel-page.ts:2160-2175: "The guard now belongs to one load ATTEMPT
+  // and starts with the first draw"), so the pin re-points to that mechanism:
+  // the bridge is embedded, the page builds one, and a DRAW is what arms it.
   assert(!html.includes('<script type="module">'), 'no page-load module script (the vendor import is lazy)')
-  assert(html.includes('function mtEnsureChartLib(') && html.includes('mtEnsureChartLib()'),
-    'the chart lib loads lazily via mtEnsureChartLib on first Metrics open')
+  assert(html.includes('function createChartLibBridge(') && html.includes('var mtBridge = createChartLibBridge({'),
+    'the chart bridge is embedded and the page builds exactly one')
+  assert(/function mtDraw\(id, option\) \{[\s\S]*?mtBridge\.start\(\)/.test(html),
+    'the chart lib loads lazily: the first draw arms the bridge, not page load')
   // D1 regression pin (gate round 2): the vendor import URL must carry the route
   // WITHOUT an extra quote pair inside it.
   assert(!html.includes('"/sandbar-executor-panel"/vendor'), 'the vendor import URL has no stray quote pair')

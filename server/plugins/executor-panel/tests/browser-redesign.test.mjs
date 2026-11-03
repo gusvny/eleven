@@ -74,8 +74,20 @@ try {
   const qRow = page.locator('[data-row]', { hasText: 'Do you have more instructions' }).first()
   await qRow.locator('.head').click()
   await page.waitForSelector('[data-row] .answer textarea', { timeout: 5000 })
-  assert(await qRow.locator('.opts').count() === 0, 'free-text request shows an answer box, not buttons')
-  n += 3
+  // t261103-29: this used to assert `.opts` is absent from the free-text row.
+  // Since t261007-01 (commit f39061fb) every waiting row carries the inline
+  // `.opts` block, and on a row with no options it holds exactly one button —
+  // Dismiss (panel-page.ts:1415-1421, "It rides the same inline block as the
+  // options so the collapsed row never clips it"). The promise the case names is
+  // still true and still declared: a free-text request offers an answer box, not
+  // answer-option buttons. Pin that promise, and pin what IS in the block so the
+  // case cannot go green by the row losing its dismissal either.
+  assert(await qRow.locator('button[data-answer]').count() === 0, 'free-text request offers no answer-option buttons')
+  assert(await qRow.locator('.answer textarea').count() === 1, 'free-text request shows an answer box')
+  assert(await qRow.locator('.answer button[data-sendbox]').count() === 1, 'the typed answer can be sent')
+  assert(await qRow.locator('.opts button[data-dismiss]').count() === 1 && await qRow.locator('.opts button').count() === 1,
+    'its inline option block carries the Dismiss action only')
+  n += 6
 
   // ③ 点选项按钮=应答：行进 Answered 折叠区，徽标回落。
   await mergeRow.locator('button[data-answer="Approve"]').click()
