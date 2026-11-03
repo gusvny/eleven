@@ -18,11 +18,17 @@ Layers pinned here (stub git only — the unit tier forbids real git, conftest.p
      per-scope union with repo prefixes, the corrupt-manifest fail-closed red, the named
      diff/status failures with a scope tag, and the carried `-uall` face;
   4. `lane_head_sha`: the third consumer of the same placeholder (review K2 / A10);
-  5. the wall-clock contract: the success path reports ``wall_s`` above zero (review C7).
+  5. the wall-clock contract: the success path reports ``wall_s`` above zero (review C7);
+  6. t261104-01: the anchor resolved PER LANE SCOPE through `_lane_scopes` (a multi-repo
+     lane's container is not a repository), folded into one opaque composite identity with
+     the per-repo detail beside it, refused by name when any scope does not resolve, and
+     the walk-up trap (a scope repo that is only a plain directory of an enclosing repo)
+     refused instead of answering that repo's branch.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import subprocess
 import sys
@@ -54,7 +60,7 @@ class StubGit:
     """
 
     def __init__(self, resolve=None, heads=None, base=None, diff=None, status=None,
-                 delay=0.0):
+                 delay=0.0, tops=None, branch_of=None):
         self.calls = []
         self.resolve = dict(resolve or {})
         self.heads = dict(heads or {})
@@ -62,6 +68,13 @@ class StubGit:
         self.diff = dict(diff or {})
         self.status = dict(status or {})
         self.delay = delay
+        # t261104-01: `rev-parse --show-toplevel` answers where git PLACES a path —
+        # absent = the path is a repository rooted at itself; None = git places it in
+        # no repository (the measured "not a git repository" shape); a path = the
+        # toplevel it walked UP to.
+        self.tops = dict(tops or {})
+        #: cwd -> the checked-out branch name (`rev-parse --abbrev-ref HEAD`)
+        self.branch_of = dict(branch_of or {})
 
     def verbs(self):
         return [c[0][0] for c in self.calls]
@@ -75,6 +88,14 @@ class StubGit:
         if self.delay:
             time.sleep(self.delay)
         if verb == "rev-parse":
+            if "--show-toplevel" in args:
+                where = self.tops.get(str(cwd), str(cwd))
+                if where is None:
+                    return _rc("", 128, "fatal: not a git repository (or any of the "
+                                        "parent directories): .git")
+                return _rc(where + "\n")
+            if "--abbrev-ref" in args:
+                return _rc(self.branch_of.get(str(cwd), "main") + "\n")
             if "--quiet" in args:
                 assert args[-1].endswith("^{commit}"), args
                 name = args[-1][:-len("^{commit}")]
@@ -491,6 +512,280 @@ def test_integ_run_args_both_declaring_call_sites_route_through_the_writer():
     # the caliber union lives in the writer, not at a call site
     body = src.split("def _integ_run_args(", 1)[1].split("\n    async def ", 1)[0]
     assert "for _n in (own_names or ()):" in body
+
+
+# ============ t261104-01: the anchor sees the WHOLE lane (per scope) ============
+#
+# The measured defect (project-vision t261103-08 and its six predecessors): `lane_head_sha`
+# resolved ONE ref in ONE repo. It was handed `meta.worktree` — the multi-repo lane ROOT
+# CONTAINER, which is not a repository — and `meta.branch` (the placeholder `lane/<id>`),
+# so git walked UP to the project root repo and answered about THAT repo: the anchor was
+# never minted (the loud case) or was minted from the wrong repository whenever the project
+# root carried a branch of the same name (the silent case). The anchor is now resolved per
+# lane scope, each in its OWN repo on its OWN real branch, and folded into one opaque
+# identity; the per-repo detail travels beside it.
+#
+# These legs are stub-git only, like the rest of this battery (the unit tier forbids real
+# git — conftest.py). The stub models the one fact that matters: which repository git
+# ANSWERS ABOUT from a path.
+
+SHA_APP = "a" * 40
+SHA_LIB = "b" * 40
+SHA_ROOT = "d" * 40
+WRONG_SHA = "c" * 40
+
+
+def _composite(pairs):
+    """The DECLARED canonical form (spec item 2), written out independently:
+    sorted "<repo_rel>@<full sha>" lines, sha256 of that list."""
+    canonical = "\n".join("%s@%s" % (rel, sha) for rel, sha in sorted(pairs))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _member_lane(tmp_path, entries, name="t1"):
+    """A multi-repo lane: the manifest plus the member trees/repos it names.
+
+    The lane CONTAINER is deliberately left without a .git — that is the measured
+    shape, and the stub git models the container as a directory of the project root.
+    """
+    lane = _lane(tmp_path, entries, name=name)
+    for e in entries:
+        rel = e.get("repo") or ""
+        if rel and rel == rel.strip("/") and ".." not in rel and not rel.startswith("/"):
+            (lane / rel).mkdir(parents=True, exist_ok=True)   # the lane-side tree
+            (tmp_path / rel).mkdir(parents=True, exist_ok=True)  # the member repo
+    return lane
+
+
+def _head(lane, branch="lane/t1"):
+    return asyncio.run(aa.lane_head_sha(aa.LaneHeadShaArgs(
+        ticket_id="t", worktree=str(lane), branch=branch)))
+
+
+def _ref_probe_cwds(g):
+    """cwd of every plain `rev-parse --verify <ref>` call (the tip read: which repo the
+    anchor was actually taken from)."""
+    return [cwd for (args, cwd) in g.calls
+            if args[0] == "rev-parse" and "--verify" in args and "--quiet" not in args]
+
+
+def _candidate_names(g):
+    """Every name the resolver ASKED about (the `--quiet ... ^{commit}` existence probe)."""
+    return [args[-1][:-len("^{commit}")] for (args, _cwd) in g.calls
+            if args[0] == "rev-parse" and "--quiet" in args
+            and args[-1].endswith("^{commit}")]
+
+
+def test_head_sha_multi_scope_anchor_covers_every_member(tmp_path):
+    """(a) two member scopes, both resolvable: ONE composite anchor over both real
+    branch heads, and the detail names both repos."""
+    entries = [{"repo": "app", "name": "app", "branch": "lane/t1-app"},
+               {"repo": "lib", "name": "lib", "branch": "lane/t1-lib"}]
+    lane = _member_lane(tmp_path, entries)
+    g = StubGit(resolve={"lane/t1-app": True, "lane/t1-lib": True},
+                heads={"lane/t1-app": SHA_APP, "lane/t1-lib": SHA_LIB})
+    aa._git = g
+    try:
+        r = _head(lane)
+    finally:
+        aa._git = aa_git
+    assert r.ok is True, r.error
+    assert r.sha == _composite([("app", SHA_APP), ("lib", SHA_LIB)])
+    assert r.sha.startswith("sha256:") and r.sha not in (SHA_APP, SHA_LIB)
+    # the detail is the anchor's own explanation: which repo, which branch, which head
+    assert [d["repo"] for d in r.scopes] == ["app", "lib"]
+    assert {d["branch"] for d in r.scopes} == {"lane/t1-app", "lane/t1-lib"}
+    assert {d["sha"] for d in r.scopes} == {SHA_APP, SHA_LIB}
+    # each head was read in ITS OWN repo — never in the lane container
+    assert sorted(_ref_probe_cwds(g)) == sorted([str(tmp_path / "app"),
+                                                 str(tmp_path / "lib")])
+    assert str(lane) not in {cwd for (_a, cwd) in g.calls}
+    # the anchor really covers every member: ONE member moving changes it (a stale
+    # receipt for the tree about to be merged must not read fresh)
+    g2 = StubGit(resolve={"lane/t1-app": True, "lane/t1-lib": True},
+                 heads={"lane/t1-app": SHA_APP, "lane/t1-lib": WRONG_SHA})
+    aa._git = g2
+    try:
+        r2 = _head(lane)
+    finally:
+        aa._git = aa_git
+    assert r2.ok is True and r2.sha != r.sha
+
+
+def test_head_sha_single_member_scope_is_the_measured_defect_shape(tmp_path):
+    """(a2) THE measured shape (project-vision t261103-08): the container is not a
+    repository, the manifest names ONE member repo, `meta.branch` is the placeholder.
+    The old resolver asked the container about `lane/t1` / `lane/t1-root`; the
+    member's real branch was never one of the candidates."""
+    lane = _member_lane(tmp_path, [{"repo": "app", "name": "app",
+                                    "branch": "lane/t1-app"}])
+    g = StubGit(resolve={"lane/t1-app": True}, heads={"lane/t1-app": SHA_APP})
+    aa._git = g
+    try:
+        r = _head(lane)                      # branch = the placeholder, as the gate hands it
+    finally:
+        aa._git = aa_git
+    assert r.ok is True, r.error
+    # a member-only lane is a composite face (spec item 5's second arm), never a bare
+    # sha that could be confused with the root tree
+    assert r.sha == _composite([("app", SHA_APP)])
+    assert [d["repo"] for d in r.scopes] == ["app"]
+    # the placeholder name was never asked anywhere: the scope's own branch was used
+    assert _candidate_names(g) == ["lane/t1-app"]
+    assert _ref_probe_cwds(g) == [str(tmp_path / "app")]
+
+
+def test_head_sha_one_bad_scope_refuses_the_whole_call_by_name(tmp_path):
+    """(b) one scope unresolvable = one NAMED refusal for the whole call, no anchor."""
+    entries = [{"repo": "app", "name": "app", "branch": "lane/t1-app"},
+               {"repo": "lib", "name": "lib", "branch": "lane/t1-lib"}]
+    lane = _member_lane(tmp_path, entries)
+    g = StubGit(resolve={"lane/t1-app": True}, heads={"lane/t1-app": SHA_APP})
+    aa._git = g
+    try:
+        r = _head(lane)
+    finally:
+        aa._git = aa_git
+    assert r.ok is False and r.sha == "" and r.scopes == []
+    # the refusal names the scope, its repo and the branch it tried
+    assert "lib" in r.error and "lane/t1-lib" in r.error
+    assert str(tmp_path / "lib") in r.error
+
+
+def test_head_sha_walk_up_trap_never_answers_another_repository(tmp_path):
+    """(c) THE silent variant (spec item 6): the manifest's repo is a plain directory
+    inside the project root repo, and that repo DOES carry a branch of the same name.
+    The wrong-repo sha is never returned — the call refuses before asking for it."""
+    lane = _member_lane(tmp_path, [{"repo": "app", "name": "app",
+                                    "branch": "lane/t1-app"}])
+    g = StubGit(tops={str(tmp_path / "app"): str(tmp_path)},
+                branch_of={str(tmp_path / "app"): "main"},
+                resolve={"lane/t1-app": True},
+                heads={"lane/t1-app": WRONG_SHA})
+    aa._git = g
+    try:
+        r = _head(lane)
+    finally:
+        aa._git = aa_git
+    assert r.ok is False and r.sha == "" and r.scopes == []
+    assert "walk-up" in r.error
+    # the copy names the repository git walked up to and the branch it is on
+    assert str(tmp_path) in r.error and "'main'" in r.error
+    # and the other repo's answer was never even queried, let alone returned
+    assert WRONG_SHA not in r.error
+    assert _candidate_names(g) == []
+    assert _ref_probe_cwds(g) == []
+
+
+def test_head_sha_single_repo_control_is_byte_identical(tmp_path):
+    """(d) THE CONTROL: a single-repo lane with a resolvable branch keeps exactly
+    today's sha and today's face shape (no composite, no extra key)."""
+    lane = _lane(tmp_path, None)             # no manifest: the historical shape
+    g = StubGit(resolve={"lane/t1": True}, heads={"lane/t1": SHA_APP})
+    aa._git = g
+    try:
+        r = _head(lane)
+    finally:
+        aa._git = aa_git
+    assert r.ok is True, r.error
+    assert r.sha == SHA_APP                  # the branch tip itself, never a composite
+    assert r.scopes == []                    # no additive key on this face
+    assert _ref_probe_cwds(g) == [str(tmp_path)]
+
+
+def test_head_sha_single_root_scope_stays_plain(tmp_path):
+    """(d2) a one-entry manifest naming the ROOT repo scope (repo "") is still the
+    single-scope face: the branch tip itself, no composite. The composite rule is
+    "more than one scope, or the only scope is a member repo" — pinned here."""
+    lane = _lane(tmp_path, [{"repo": "", "name": "root", "branch": "lane/t1-root"}])
+    g = StubGit(resolve={"lane/t1-root": True}, heads={"lane/t1-root": SHA_ROOT})
+    aa._git = g
+    try:
+        r = _head(lane)
+    finally:
+        aa._git = aa_git
+    assert r.ok is True, r.error
+    assert r.sha == SHA_ROOT and r.scopes == []
+
+
+def test_head_sha_no_branch_keeps_the_documented_head_outcome(tmp_path):
+    """(d3) the pre-existing degenerate input: a manifest-free lane handed an empty
+    `meta.branch` resolved `args.branch or "HEAD"` before this ticket and still does.
+    It is not a fallback after a failed resolution — the control above pins that."""
+    lane = _lane(tmp_path, None)
+    g = StubGit(resolve={"HEAD": True}, heads={"HEAD": SHA_APP})
+    aa._git = g
+    try:
+        r = _head(lane, branch="")
+    finally:
+        aa._git = aa_git
+    assert r.ok is True, r.error
+    assert r.sha == SHA_APP and r.scopes == []
+
+
+def test_head_sha_refuses_escaping_or_malformed_manifest_by_name(tmp_path):
+    """(e) the family stance `changed_files` already pins: a malformed manifest, an
+    absolute repo value or a `..`-escaping one is refused BY NAME, no anchor minted."""
+    absolute = _lane(tmp_path, [{"repo": "/abs/app", "name": "app",
+                                 "branch": "lane/t1-app"}], name="t1")
+    aa._git = StubGit()
+    try:
+        r_abs = _head(absolute)
+        assert r_abs.ok is False and r_abs.sha == "" and r_abs.scopes == []
+        assert "absolute" in r_abs.error and "app" in r_abs.error
+
+        escaping = _lane(tmp_path, [{"repo": "../app", "name": "app",
+                                     "branch": "lane/t2-app"}], name="t2")
+        r_esc = _head(escaping, branch="lane/t2")
+        assert r_esc.ok is False and r_esc.sha == "" and r_esc.scopes == []
+        assert "escapes" in r_esc.error and "'..'" in r_esc.error
+
+        no_branch = _lane(tmp_path, [{"repo": "app", "name": "app"}], name="t3")
+        r_nb = _head(no_branch, branch="lane/t3")
+        assert r_nb.ok is False and r_nb.sha == "" and r_nb.scopes == []
+        assert "branch" in r_nb.error
+
+        corrupt = _lane(tmp_path, None, name="t4")
+        mf = shared.multi_manifest_path(corrupt, create=True)
+        mf.parent.mkdir(parents=True, exist_ok=True)
+        mf.write_text("{not json", encoding="utf-8")
+        r_bad = _head(corrupt, branch="lane/t4")
+        assert r_bad.ok is False and r_bad.sha == "" and r_bad.scopes == []
+        assert "manifest is unreadable" in r_bad.error
+
+        # a scope whose repo git places in NO repository at all
+        missing = _lane(tmp_path, [{"repo": "gone", "name": "gone",
+                                    "branch": "lane/t5-gone"}], name="t5")
+        aa._git = StubGit(tops={str(tmp_path / "gone"): None})
+        r_miss = _head(missing, branch="lane/t5")
+        assert r_miss.ok is False and r_miss.sha == "" and r_miss.scopes == []
+        assert "not a repository" in r_miss.error
+        assert str(tmp_path / "gone") in r_miss.error
+    finally:
+        aa._git = aa_git
+
+
+def test_head_sha_copy_names_the_walk_up_instead_of_a_git_fault(tmp_path):
+    """(item 4) the measured diagnostic: the lane container is not a repository, git
+    answers about the project root on `main`, and the branch was never a ref there.
+    The refusal says exactly THAT — the old "git: rev-parse returned nothing" claimed
+    a git fault that did not exist and sent the reader hunting it."""
+    lane = _member_lane(tmp_path, [
+        {"repo": "", "name": "root", "branch": "lane/t1-root"},
+        {"repo": "app", "name": "app", "branch": "lane/t1-app"}])
+    g = StubGit(tops={str(lane): str(tmp_path)},
+                branch_of={str(lane): "main"},
+                resolve={"lane/t1-app": True},
+                heads={"lane/t1-app": SHA_APP})
+    aa._git = g
+    try:
+        r = _head(lane)
+    finally:
+        aa._git = aa_git
+    assert r.ok is False and r.sha == "" and r.scopes == []
+    assert "is not a repository" in r.error
+    assert str(lane) in r.error and str(tmp_path) in r.error and "'main'" in r.error
+    assert "rev-parse returned nothing" not in r.error
 
 
 if __name__ == "__main__":
