@@ -1336,24 +1336,123 @@ def _repo_worktree(project, repo):
 # The judged surface (t261016-01): the baseline suite runs the repo checked
 # out at main's tip, so its fail set depends on the WHOLE tree — not only the
 # suite source. The criterion is therefore "whole tree unchanged, minus the
-# entries below", each excluded WITH A REASON; an entry without a reason does
-# not belong here (a wrong exclude is a false-green hole). Confirmed against
-# what the integration suite reads: scenarios and their lib_* helpers all
-# live in tracked source dirs; docs/ and notes/ are prose/ledger, .sandbar is
-# engine workspace state — no scenario reads them.
-JUDGED_SURFACE_EXCLUDES = ("docs", "notes", ".sandbar")
+# documentation roots in effect", each excluded WITH A REASON; an entry without
+# a reason does not belong here (a wrong exclude is a false-green hole).
+#
+# t261103-11 (design docs/design/project-docs-roots-v1.md goal 7): the
+# documentation part of that exclusion is no longer a directory NAME. It is
+# computed from the RESOLVED documentation roots (docs_roots.resolve), so a
+# moved root either keeps the judged set's meaning (documentation content
+# not-judged, everything else judged) or the consumer stops at a named state.
+# The two entries below are NOT documentation roots and keep their own reasons:
+# ``notes`` is the knowledge-base ledger and ``.sandbar`` is engine workspace
+# state — no scenario reads either. Confirmed against what the integration
+# suite reads: scenarios and their lib_* helpers all live in tracked source
+# dirs.
+JUDGED_SURFACE_ALWAYS_EXCLUDES = ("notes", ".sandbar")
+
+#: Ordering note (the default-off promise, byte for byte): for a project that
+#: declares nothing and owns docs/, the resolved roots are exactly ("docs",) and
+#: the built pathspec list is ("docs", "notes", ".sandbar") — the same argv as
+#: before this ticket. Any other shape is a different (never a wider) exclusion.
+
+def docs_roots_consumer():
+    """The one resolution every in-scope consumer calls (lazy import: this
+    module is imported by the flow core, and docs_roots is a leaf module)."""
+    import docs_roots
+    return docs_roots
 
 
-def _surface_unchanged(repo_path, old_tip, new_tip):
-    """True iff the judged surface (whole tree minus JUDGED_SURFACE_EXCLUDES)
-    is identical between the two tips: one bounded ``git diff --name-only``
-    whose pathspec excludes are built from the declared constant. Any git
-    failure (non-zero exit, timeout, spawn error) -> False — fail closed to
-    REBUILD, which is always safe; an unreadable answer is never a reuse."""
+def _judged_surface_prose_allowance():
+    """A documentation root may cover documentation and must never cover a
+    surface the gates read (design goal 7: a wrong exclusion is a false-green
+    hole). The engine's gate-read surface list is path_gates.PROTECTED_PATHS;
+    the engine's own statement of "prose by default" is the implied
+    documentation root, read from that ONE source -- a protected entry inside it
+    (the design pages) is documentation and is allowed, while every other
+    covered entry (settings, baselines, roles, engine source) refuses the
+    exclusion BY NAME instead of being excluded."""
+    return (docs_roots_consumer().IMPLIED_ROOT,)
+
+
+def judged_surface_excludes(project, repo, repo_path):
+    """(excludes, note) — the judged-surface pathspecs for one repository,
+    computed from the RESOLVED documentation roots, never from a directory name.
+
+    ``note`` is "" when the surface is exactly the declared/implied one, or a
+    named state when the documentation part could not be resolved:
+
+      - no declaration and no documentation directory (the
+        ``docs_roots_absent`` state): nothing here is documentation, so nothing
+        is excluded — and the note stays empty, because the judged SET is
+        identical to what it was before this ticket (excluding a directory that
+        does not exist was a no-op) and the documentation consumers report that
+        state with their own named refusal. The certification is not a
+        documentation view: a project whose documentation situation did not
+        change must not see its records change;
+      - ``docs_roots_declared_elsewhere:<repo>`` — the declaration names roots
+        in other repositories only;
+      - ``judged_surface_refused:<code>:<path>`` — a malformed / absent /
+        unreadable declared root, or a declaration that would exclude a surface
+        the gates read.
+
+    In every one of those cases the exclusion list is only
+    JUDGED_SURFACE_ALWAYS_EXCLUDES: a refusal never widens the exclusion (that
+    would be a false-green hole), it narrows it, and the note says why. The
+    default-off shape is unchanged: an undeclared project that owns docs/
+    resolves to ("docs",) and yields the same argv as before.
+    """
+    dr = docs_roots_consumer()
+    try:
+        res = dr.resolve(project, tree=repo_path)
+    except dr.DocsRootsStop as e:
+        if e.code == dr.STOP_ABSENT:
+            # No documentation anywhere: the judged set is what it always was
+            # (there is no directory to exclude), so the record stays unchanged.
+            return (JUDGED_SURFACE_ALWAYS_EXCLUDES, "")
+        return (JUDGED_SURFACE_ALWAYS_EXCLUDES,
+                "judged_surface_refused:%s:%s" % (e.code, e.path or ""))
+    if res.reason == "declared_elsewhere":
+        return (JUDGED_SURFACE_ALWAYS_EXCLUDES,
+                "docs_roots_declared_elsewhere:%s" % (repo or "?"))
+    try:
+        from path_gates import PROTECTED_PATHS
+    except Exception:                                   # noqa: BLE001
+        PROTECTED_PATHS = ()
+    for root in res.roots:
+        p = root.path.rstrip("/")
+        if not p:
+            return (JUDGED_SURFACE_ALWAYS_EXCLUDES,
+                    "judged_surface_refused:%s:%s"
+                    % (dr.STOP_DECLARATION_MALFORMED, "<whole repository>"))
+        for q in PROTECTED_PATHS:
+            if not (q == p or q.startswith(p + "/")):
+                continue        # this gate-read surface is not excluded
+            if any(q == a or q.startswith(a + "/")
+                   for a in _judged_surface_prose_allowance()):
+                continue        # prose by the engine's own default-root statement
+            return (JUDGED_SURFACE_ALWAYS_EXCLUDES,
+                    "judged_surface_refused:judged_surface_excludes_code:%s:%s"
+                    % (root.path, q))
+    return (tuple(r.path for r in res.roots) + JUDGED_SURFACE_ALWAYS_EXCLUDES, "")
+
+
+def _surface_unchanged(repo_path, old_tip, new_tip,
+                       excludes=JUDGED_SURFACE_ALWAYS_EXCLUDES):
+    """True iff the judged surface (whole tree minus the resolved documentation
+    roots and the always-excluded entries) is identical between the two tips:
+    one bounded ``git diff --name-only`` whose pathspec excludes are the
+    resolved list. Any git failure (non-zero exit, timeout, spawn error) ->
+    False — fail closed to REBUILD, which is always safe; an unreadable answer
+    is never a reuse.
+
+    ``excludes`` is supplied by the caller (``judged_surface_excludes``), never
+    derived from a directory name here; the default keeps a bare call judging
+    the whole tree minus the two non-documentation entries."""
     import subprocess
     cmd = ["git", "-C", str(repo_path), "diff", "--name-only", old_tip,
            new_tip, "--", "."]
-    cmd += [":(exclude)%s" % e for e in JUDGED_SURFACE_EXCLUDES]
+    cmd += [":(exclude)%s" % e for e in excludes]
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
@@ -1367,14 +1466,19 @@ def _valid_full_sha(s):
             and all(c in "0123456789abcdef" for c in s))
 
 
-def _reusable_ancestor_baseline(project, repo, repo_path, main_tip):
+def _reusable_ancestor_baseline(project, repo, repo_path, main_tip,
+                                excludes=JUDGED_SURFACE_ALWAYS_EXCLUDES):
     """The NEWEST cached baseline whose tip is an ancestor of ``main_tip``
     AND whose judged surface did not change since — the reuse candidate for
     a main advance. Keyed on the FULL ``main_tip`` read from each cache
     file's BODY (validated 40-hex, cross-checked against the filename's
     12-char slice); the filename alone is never trusted. Any unreadable,
     malformed, non-ancestor or surface-dirty candidate is skipped — the
-    caller then rebuilds (fail closed), never a guessed reuse."""
+    caller then rebuilds (fail closed), never a guessed reuse.
+
+    ``excludes`` is the resolved judged-surface list for THIS repository
+    (``judged_surface_excludes``), computed once by the caller so every
+    candidate is judged against the same, declaration-derived surface."""
     base_dir = _baseline_dir(project)
     try:
         names = sorted(base_dir.glob("%s@*.json" % repo))
@@ -1400,7 +1504,7 @@ def _reusable_ancestor_baseline(project, repo, repo_path, main_tip):
             continue
         if anc.returncode != 0 or tip == main_tip:
             continue
-        if not _surface_unchanged(repo_path, tip, main_tip):
+        if not _surface_unchanged(repo_path, tip, main_tip, excludes):
             continue
         built = obj.get("built_at")
         if not isinstance(built, int):
@@ -1417,9 +1521,10 @@ def _ensure_baseline(project, repo, runner, flaky):
       1. exact-tip cache hit  -> note ``cache_hit:<repo>@<t12>``;
       2. ancestor reuse       -> note ``baseline_reused:<repo>@<old12>:
          for:<new12>:surface_unchanged`` — the cached tip is an ancestor of
-         the current main tip and the judged surface (whole tree minus
-         JUDGED_SURFACE_EXCLUDES) is unchanged between them, so the same
-         suite over the same tree would produce the same fail set;
+         the current main tip and the judged surface (whole tree minus the
+         RESOLVED documentation roots and the always-excluded entries) is
+         unchanged between them, so the same suite over the same tree would
+         produce the same fail set;
       3. rebuild              -> note ``cache_built:<repo>@<t12>``.
     The provenance face is stamped onto the returned dict: ``baseline_source``
     (cache|reused|rebuilt), ``baseline_tip`` (the tip the fail set was
@@ -1434,15 +1539,23 @@ def _ensure_baseline(project, repo, runner, flaky):
     main_tip = _git_main_tip(wt)
     if not main_tip:
         return None, "main_tip_unresolvable:%s" % repo
+    # t261103-11: the judged surface is computed ONCE per repository from the
+    # resolved documentation roots (never from a directory name), and every
+    # state it lands in is carried onto the round record by `surface_note`
+    # ("" = the untouched default, so the default-off records stay byte for
+    # byte). A refusal narrows the exclusion, so it can cost a rebuild but can
+    # never make the suite greener than the declaration justifies.
+    excludes, surface_note = judged_surface_excludes(project, repo, wt)
+    suffix = ("" if not surface_note else ":judged_surface:%s" % surface_note)
     cached = read_baseline(project, repo, main_tip)
     if cached is not None:
         cached["baseline_source"] = "cache"
         cached["baseline_tip"] = main_tip
         cached["judged_tip"] = main_tip
-        return cached, "cache_hit:%s@%s" % (repo, main_tip[:12])
+        return cached, "cache_hit:%s@%s%s" % (repo, main_tip[:12], suffix)
     # main moved since the cache was written: try a NAMED ancestor reuse
     # before paying a full baseline suite run.
-    reuse = _reusable_ancestor_baseline(project, repo, wt, main_tip)
+    reuse = _reusable_ancestor_baseline(project, repo, wt, main_tip, excludes)
     if reuse is not None:
         obj, old_tip = reuse
         obj = dict(obj)
@@ -1450,8 +1563,8 @@ def _ensure_baseline(project, repo, runner, flaky):
         obj["baseline_tip"] = old_tip
         obj["judged_tip"] = main_tip
         return (obj,
-                "baseline_reused:%s@%s:for:%s:surface_unchanged"
-                % (repo, old_tip[:12], main_tip[:12]))
+                "baseline_reused:%s@%s:for:%s:surface_unchanged%s"
+                % (repo, old_tip[:12], main_tip[:12], suffix))
     # no cache, no nameable reuse: run the baseline suite at main's tip
     bl_header = runner([{"repo": repo, "revision": main_tip}])
     if not (isinstance(bl_header, dict) and isinstance(bl_header.get("cases"), dict)):
@@ -1469,7 +1582,7 @@ def _ensure_baseline(project, repo, runner, flaky):
            "baseline_tip": main_tip, "judged_tip": main_tip}
     if isinstance(bl_run, str) and bl_run.startswith("run-"):
         out["baseline_run"] = bl_run
-    return (out, "cache_built:%s@%s" % (repo, main_tip[:12]))
+    return (out, "cache_built:%s@%s%s" % (repo, main_tip[:12], suffix))
 
 
 def _known_red_rel():

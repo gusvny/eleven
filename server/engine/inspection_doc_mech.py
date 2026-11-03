@@ -132,6 +132,11 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from inspection_inspect import mint_finding_id  # noqa: E402  (single id mint)
 
 # ---- lexical constants (top of file; any change ships with a truth-table UT) ----
+# DOC_ROOT is the IMPLIED default documentation root only: since t261103-11 the
+# root a scan walks is a parameter (resolved from the project's ONE documentation
+# root declaration by docs_roots.resolve), and every rule below takes that root.
+# The constant keeps the pre-declaration behaviour byte for byte for a project
+# that declares nothing and owns docs/.
 DOC_ROOT = "docs"
 DESIGN_SUB = "docs/design"
 EPICS_SUB = "docs/epics"
@@ -198,6 +203,9 @@ _NORMATIVE_EXACT = ("docs/README.md", "docs/testing-guide.md", "docs/terminology
 _NORMATIVE_PREFIX = ("docs/reference/", "docs/ops/")
 #: M3 declared language exceptions (docs/ pages allowed to carry Chinese by design)
 _M3_DOCS_EXEMPT = ("docs/terminology.md", "docs/writing-standard.md")
+#: the same exceptions written relative to the documentation root in effect.
+_M3_DOCS_EXEMPT_REL = tuple(x[len(DOC_ROOT) + 1:] if x.startswith(DOC_ROOT + "/") else x
+                            for x in _M3_DOCS_EXEMPT)
 
 MAX_EVIDENCE_QUOTES = 5   # evidence cap per finding (long lists stay readable)
 MAX_M7_PTR = 40           # pointer findings cap (same order as the agent budget)
@@ -215,25 +223,45 @@ def _norm_slash(p: str) -> str:
     return str(p).replace("\\", "/")
 
 
-def _is_normative(rel: str) -> bool:
+#: The normative-face shapes, written relative to the documentation root (so a
+#: declared root keeps its own normative face instead of silently having none).
+_NORMATIVE_REL_EXACT = tuple(x[len(DOC_ROOT) + 1:] if x.startswith(DOC_ROOT + "/") else x
+                             for x in _NORMATIVE_EXACT)
+_NORMATIVE_REL_PREFIX = tuple(x[len(DOC_ROOT) + 1:] if x.startswith(DOC_ROOT + "/") else x
+                              for x in _NORMATIVE_PREFIX)
+
+
+def _root_rel(rel: str, root: str):
+    """`rel` relative to the documentation root in effect, or None when the page
+    is not inside that root."""
     rel = _norm_slash(rel)
-    return rel in _NORMATIVE_EXACT or any(rel.startswith(p) for p in _NORMATIVE_PREFIX)
+    return rel[len(root.rstrip("/")) + 1:] if rel.startswith(root.rstrip("/") + "/") else None
 
 
-def _is_docs(rel: str) -> bool:
-    return _norm_slash(rel).startswith(DOC_ROOT + "/")
+def _is_normative(rel: str, root: str = DOC_ROOT) -> bool:
+    """A normative-face page (the pages that must match reality)."""
+    sub = _root_rel(rel, root)
+    if sub is None:
+        return False
+    return sub in _NORMATIVE_REL_EXACT or any(sub.startswith(p)
+                                              for p in _NORMATIVE_REL_PREFIX)
 
 
-def _is_epic_page(rel: str) -> bool:
-    """A page under docs/epics/ is an EPIC record: judged by the epic schema."""
-    return _norm_slash(rel).startswith(EPICS_SUB + "/")
+def _is_docs(rel: str, root: str = DOC_ROOT) -> bool:
+    return _norm_slash(rel).startswith(root.rstrip("/") + "/")
 
 
-def _non_catalogue_page(rel: str, indexed_category: str) -> bool:
-    """True when a page is NOT a docs/README.md catalogue row: it lives in the
+def _is_epic_page(rel: str, root: str = DOC_ROOT) -> bool:
+    """A page under <root>/epics/ is an EPIC record: judged by the epic schema."""
+    return _norm_slash(rel).startswith(root.rstrip("/") + "/epics/")
+
+
+def _non_catalogue_page(rel: str, indexed_category: str,
+                        root: str = DOC_ROOT) -> bool:
+    """True when a page is NOT a <root>/README.md catalogue row: it lives in the
     epic store, or the index registers it under a non-catalogue category. The
     README catalogue covers the four knowledge-base categories only."""
-    return _is_epic_page(rel) or indexed_category in NON_CATALOGUE_CATEGORIES
+    return _is_epic_page(rel, root) or indexed_category in NON_CATALOGUE_CATEGORIES
 
 
 def _is_url_or_anchor(tok: str) -> bool:
@@ -403,13 +431,14 @@ def _cap_quotes(findings: List[Dict[str, Any]]) -> None:
 # rules
 # ========================================================================
 
-def _read_pages(repo: Path) -> Tuple[List[str], List[str]]:
-    """All library pages (docs/ + notes/) as (rel, text). Unreadable files
-    degrade alone (C1 item 2)."""
+def _read_pages(repo: Path, root: str = DOC_ROOT) -> Tuple[List[str], List[str]]:
+    """All library pages (<root>/ + notes/) as (rel, text). Unreadable files
+    degrade alone (C1 item 2). `root` is the documentation root in effect for
+    this scan (the declared one, or the implied default)."""
     rels: List[str] = []
     unreadable: List[str] = []
-    for root in (DOC_ROOT, NOTES_ROOT):
-        base = repo / root
+    for rel_root in (root.rstrip("/") or DOC_ROOT, NOTES_ROOT):
+        base = repo / rel_root
         if not base.is_dir():
             continue
         for p in sorted(base.rglob("*.md")):
@@ -476,8 +505,11 @@ def _missing(repo: Path, doc_rel: str, tok: str, bare_index: Optional[set]) -> b
 
 
 def rule_m1(repo: Path, pages: Dict[str, str], index: Any, index_err: Optional[str],
-            readme_rels: set, all_rels: List[str], exempts: Dict[str, set]) -> List[Dict[str, Any]]:
-    """M1 three-way: index.json ↔ README ↔ actual files + frontmatter (S9 carried)."""
+            readme_rels: set, all_rels: List[str], exempts: Dict[str, set],
+            root: str = DOC_ROOT) -> List[Dict[str, Any]]:
+    """M1 three-way: index.json ↔ README ↔ actual files + frontmatter (S9 carried).
+    `root` is the documentation root in effect (the index and the README live
+    inside it)."""
     out: List[Dict[str, Any]] = []
     if index_err:
         out.append(_finding(
@@ -494,10 +526,10 @@ def rule_m1(repo: Path, pages: Dict[str, str], index: Any, index_err: Optional[s
                 # index.json paths are docs/-relative ("design/x.md"); normalize to
                 # repo-relative so they compare against the actual-file set.
                 p = _norm_slash(str(d["path"])).lstrip("./")
-                rel = p if p.startswith(DOC_ROOT + "/") else DOC_ROOT + "/" + p
+                rel = p if p.startswith(root + "/") else root + "/" + p
                 indexed.add(rel)
                 indexed_category[rel] = str(d.get("category") or "")
-    actual = {r for r in all_rels if _is_docs(r)}
+    actual = {r for r in all_rels if _is_docs(r, root)}
     # file vs index
     for rel in sorted(actual - indexed):
         if _exempted(exempts.get(rel, set()), RULE_M1_INDEX):
@@ -521,7 +553,7 @@ def rule_m1(repo: Path, pages: Dict[str, str], index: Any, index_err: Optional[s
     # file per code — is catalogued by its own registry, so its absence from the
     # README rows is not drift).
     for rel in sorted((actual & indexed) - readme_rels):
-        if _non_catalogue_page(rel, indexed_category.get(rel, "")):
+        if _non_catalogue_page(rel, indexed_category.get(rel, ""), root):
             continue
         if _exempted(exempts.get(rel, set()), RULE_M1_README):
             continue
@@ -546,7 +578,7 @@ def rule_m1(repo: Path, pages: Dict[str, str], index: Any, index_err: Optional[s
         if text is None:
             continue
         fields, well = parse_frontmatter(text)
-        if _is_epic_page(rel):
+        if _is_epic_page(rel, root):
             defects = epic_frontmatter_defects(fields, well, rel)
             rule = RULE_M1_FRONTMATTER_EPIC
             why = ("A docs/epics/ page carries the epic schema — required code / retired "
@@ -559,7 +591,7 @@ def rule_m1(repo: Path, pages: Dict[str, str], index: Any, index_err: Optional[s
                    "tags/status/updated (docs/README.md maintenance conventions).")
         if defects and not _exempted(exempts.get(rel, set()), rule):
             out.append(_finding(
-                rule, ("frontmatter epic-schema check failed: " if _is_epic_page(rel)
+                rule, ("frontmatter epic-schema check failed: " if _is_epic_page(rel, root)
                        else "frontmatter five-field check failed: ") + "; ".join(defects),
                 rel, 1, text.splitlines()[0][:200],
                 why,
@@ -576,11 +608,13 @@ def _build_bare_index(repo: Path) -> set:
 
 
 def rule_m2(repo: Path, pages: Dict[str, str], exempts: Dict[str, set],
-            bare_index: Optional[set] = None) -> List[Dict[str, Any]]:
-    """M2: referenced paths reachable — normative face only, explicit shapes only."""
+            bare_index: Optional[set] = None,
+            root: str = DOC_ROOT) -> List[Dict[str, Any]]:
+    """M2: referenced paths reachable — normative face only, explicit shapes only.
+    The normative face is read relative to the documentation root in effect."""
     out: List[Dict[str, Any]] = []
     for rel in sorted(pages):
-        if not _is_normative(rel):
+        if not _is_normative(rel, root):
             continue                       # narrow by class: historical face exempt
         text = pages[rel]
         base = (repo / rel).parent
@@ -602,7 +636,8 @@ def rule_m2(repo: Path, pages: Dict[str, str], exempts: Dict[str, set],
 
 
 def rule_m3(docs_rels: List[str], notes_rels: List[str], pages: Dict[str, str],
-            added: Dict[str, Dict[int, str]], exempts: Dict[str, set]) -> List[Dict[str, Any]]:
+            added: Dict[str, Dict[int, str]], exempts: Dict[str, set],
+            root: str = DOC_ROOT) -> List[Dict[str, Any]]:
     """M3: language discipline on NEW lines only (existing text never judged)."""
     out: List[Dict[str, Any]] = []
     for rel, lines in sorted(added.items()):
@@ -610,8 +645,8 @@ def rule_m3(docs_rels: List[str], notes_rels: List[str], pages: Dict[str, str],
             continue
         text = pages[rel]
         fence_map = {i: f for i, _, f in _fence_state_iter(text.splitlines())}
-        in_docs = _is_docs(rel)
-        if in_docs and rel in _M3_DOCS_EXEMPT:
+        in_docs = _is_docs(rel, root)
+        if in_docs and _root_rel(rel, root) in _M3_DOCS_EXEMPT_REL:
             continue
         rule = RULE_M3_DOCS if in_docs else RULE_M3_NOTES
         for line_no in sorted(lines):
@@ -640,11 +675,13 @@ def rule_m3(docs_rels: List[str], notes_rels: List[str], pages: Dict[str, str],
     return out
 
 
-def rule_m4(pages: Dict[str, str], exempts: Dict[str, set]) -> List[Dict[str, Any]]:
-    """M4: progress/todo/ticket-list content inside docs/ (notes/ exempt by class)."""
+def rule_m4(pages: Dict[str, str], exempts: Dict[str, set],
+            root: str = DOC_ROOT) -> List[Dict[str, Any]]:
+    """M4: progress/todo/ticket-list content inside the documentation root
+    (notes/ exempt by class)."""
     out: List[Dict[str, Any]] = []
     for rel in sorted(pages):
-        if not _is_docs(rel):
+        if not _is_docs(rel, root):
             continue
         rules_hit = {r for r in (RULE_M4_CHECKBOX, RULE_M4_TICKETS)
                      if not _exempted(exempts.get(rel, set()), r)}
@@ -678,7 +715,8 @@ def rule_m5(repo: Path, pages: Dict[str, str], added: Dict[str, Dict[int, str]],
             exempts: Dict[str, set],
             ticket_exists: Optional[Callable[[str], bool]],
             commit_exists: Optional[Callable[[str], bool]],
-            bare_index: Optional[set] = None) -> List[Dict[str, Any]]:
+            bare_index: Optional[set] = None,
+            root: str = DOC_ROOT) -> List[Dict[str, Any]]:
     """M5: references named on NEW lines must exist. Predicates injected; when a
     predicate is None the sub-check degrades with a meta note (the caller turns
     that into meta.caveats)."""
@@ -688,7 +726,7 @@ def rule_m5(repo: Path, pages: Dict[str, str], added: Dict[str, Dict[int, str]],
         if text is None:
             continue
         fence_map = {i: f for i, _, f in _fence_state_iter(text.splitlines())}
-        historical = _is_docs(rel) and not _is_normative(rel)
+        historical = _is_docs(rel, root) and not _is_normative(rel, root)
         for line_no in sorted(lines):
             if fence_map.get(line_no):
                 continue
@@ -735,11 +773,12 @@ def rule_m5(repo: Path, pages: Dict[str, str], added: Dict[str, Dict[int, str]],
 
 
 def rule_m6(pages: Dict[str, str], fm: Dict[str, Dict[str, Any]],
-            exempts: Dict[str, set]) -> List[Dict[str, Any]]:
-    """M6: a docs/design page marked deprecated must carry a superseded-by pointer."""
+            exempts: Dict[str, set],
+            root: str = DOC_ROOT) -> List[Dict[str, Any]]:
+    """M6: a design page marked deprecated must carry a superseded-by pointer."""
     out: List[Dict[str, Any]] = []
     for rel in sorted(pages):
-        if not _norm_slash(rel).startswith(DESIGN_SUB + "/"):
+        if not _norm_slash(rel).startswith(root.rstrip("/") + "/design/"):
             continue
         status = (fm.get(rel) or {}).get("status")
         if status != "deprecated":
@@ -816,8 +855,9 @@ def rule_m7(repo: Path, pages: Dict[str, str], changed_files: List[str],
 # scan entry point
 # ========================================================================
 
-def _resolve_row(repo: Path, tok: str) -> Optional[str]:
-    """Resolve one docs/README.md catalogue row → repo-relative path, or None.
+def _resolve_row(repo: Path, tok: str, root: str = DOC_ROOT) -> Optional[str]:
+    """Resolve one catalogue row of the documentation root's README → repo-relative
+    path, or None. `root` is the documentation root in effect.
 
     A row is written the way the reader of its section resolves it, so the same
     token can be docs-relative (`design/x.md`), repository-root-relative (the
@@ -832,25 +872,26 @@ def _resolve_row(repo: Path, tok: str) -> Optional[str]:
          An ambiguous name never resolves: it stays a missing-row finding, so the
          drift stays visible instead of being guessed away.
     """
+    root = root.rstrip("/") or DOC_ROOT
     t = _norm_slash(tok).lstrip("./")
     if not t:
         return None
-    sub = t[len(DOC_ROOT) + 1:] if t.startswith(DOC_ROOT + "/") else t
-    if (repo / DOC_ROOT / sub).exists():
-        return DOC_ROOT + "/" + sub
+    sub = t[len(root) + 1:] if t.startswith(root + "/") else t
+    if (repo / root / sub).exists():
+        return root + "/" + sub
     if (repo / sub).exists():
         return sub
     if "/" in sub:
         return None
-    hits = sorted(p for p in (repo / DOC_ROOT).rglob("*.md")
+    hits = sorted(p for p in (repo / root).rglob("*.md")
                   if p.is_file() and p.name == sub)
     if len(hits) == 1:
         return _norm_slash(hits[0].relative_to(repo).as_posix())
     return None
 
 
-def _readme_rels(repo: Path, readme_text: str) -> set:
-    """Catalogue rows in docs/README.md → repo-relative docs paths.
+def _readme_rels(repo: Path, readme_text: str, root: str = DOC_ROOT) -> set:
+    """Catalogue rows in the documentation root's README → repo-relative paths.
 
     Rows are backticked `*.md` paths inside tables and prose (explicit shapes
     only). Each row is RESOLVED (see `_resolve_row`) rather than blindly
@@ -863,36 +904,31 @@ def _readme_rels(repo: Path, readme_text: str) -> set:
     leg). A row that resolves nowhere keeps the docs/-relative form, so the
     missing-row finding still fires.
     """
+    root = root.rstrip("/") or DOC_ROOT
     out = set()
     for tok, _off in extract_paths(readme_text):
         t = _norm_slash(tok).lstrip("./")
         if not t.endswith(".md"):
             continue          # catalogue paths only; json/yaml rows are not M1 legs
-        rel = _resolve_row(repo, t)
+        rel = _resolve_row(repo, t, root)
         if rel is None:
-            out.add(t if t.startswith(DOC_ROOT + "/") else DOC_ROOT + "/" + t)
-        elif _is_docs(rel):
+            out.add(t if t.startswith(root + "/") else root + "/" + t)
+        elif _is_docs(rel, root):
             out.add(rel)
         # else: resolves outside docs/ — a legitimate non-library reference
     return out
 
 
-def run_doc_mech(repo_root: str,
-                 added_lines: Optional[Dict[str, Dict[int, str]]] = None,
-                 changed_files: Optional[List[str]] = None,
-                 ticket_exists: Optional[Callable[[str], bool]] = None,
-                 commit_exists: Optional[Callable[[str], bool]] = None,
-                 base_head: str = "") -> Dict[str, Any]:
-    """Run M1-M7 over the whole library. All inputs injectable; malformed input
-    degrades item by item (never crashes). Returns {findings, meta} with
-    findings in the exact agent shape."""
-    repo = Path(repo_root)
-    if not repo.is_dir():
-        raise DocMechError("repo root does not exist: %s" % repo_root)
-    added = added_lines or {}
-    changed = [c for c in (changed_files or [])]
-
-    rels, _unread = _read_pages(repo)
+def _scan_root(repo: Path, root: str,
+               added: Dict[str, Dict[int, str]], changed: List[str],
+               ticket_exists: Optional[Callable[[str], bool]],
+               commit_exists: Optional[Callable[[str], bool]],
+               base_head: str) -> Dict[str, Any]:
+    """M1-M7 over ONE documentation root of one repository. The root is a
+    parameter (the declared one, the implied default, or an explicitly supplied
+    one) -- never a directory name guessed here."""
+    root = root.rstrip("/") or DOC_ROOT
+    rels, _unread = _read_pages(repo, root)
     pages: Dict[str, str] = {}
     for rel in rels:
         t = _read_text(repo, rel)
@@ -902,12 +938,12 @@ def run_doc_mech(repo_root: str,
     index: Any = None
     index_err: Optional[str] = None
     try:
-        index = json.loads((repo / "docs" / "index.json").read_text("utf-8"))
+        index = json.loads((repo / root / "index.json").read_text("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError) as e:
         index_err = str(e)[:200]
 
-    readme_text = pages.get("docs/README.md", "")
-    readme_rels = _readme_rels(repo, readme_text) if readme_text else set()
+    readme_text = pages.get(root + "/README.md", "")
+    readme_rels = _readme_rels(repo, readme_text, root) if readme_text else set()
 
     exempts = {rel: collect_exemptions(t) for rel, t in pages.items()}
     fm = {rel: parse_frontmatter(t)[0] for rel, t in pages.items()}
@@ -920,32 +956,108 @@ def run_doc_mech(repo_root: str,
     if not base_head and not added:
         caveats.append("no change surface supplied: M3 and the new-line part of M5 are skipped this period")
     if index_err:
-        caveats.append("docs/index.json unreadable: index leg of M1 degraded")
+        caveats.append("%s/index.json unreadable: index leg of M1 degraded" % root)
 
     findings: List[Dict[str, Any]] = []
     bare: Optional[set] = None
-    findings += rule_m1(repo, pages, index, index_err, readme_rels, rels, exempts)
-    findings += rule_m2(repo, pages, exempts, _build_bare_index(repo))
+    findings += rule_m1(repo, pages, index, index_err, readme_rels, rels, exempts, root)
+    findings += rule_m2(repo, pages, exempts, _build_bare_index(repo), root)
     if added:
-        findings += rule_m3(rels, rels, pages, added, exempts)
+        findings += rule_m3(rels, rels, pages, added, exempts, root)
         findings += rule_m5(repo, pages, added, exempts, ticket_exists, commit_exists,
-                            _build_bare_index(repo))
-    findings += rule_m4(pages, exempts)
-    findings += rule_m6(pages, fm, exempts)
+                            _build_bare_index(repo), root)
+    findings += rule_m4(pages, exempts, root)
+    findings += rule_m6(pages, fm, exempts, root)
     if changed:
         findings += rule_m7(repo, pages, changed, exempts, _build_bare_index(repo))
+    return {"findings": findings, "pages_scanned": len(pages),
+            "index_leg_degraded": bool(index_err), "exempted": exempts,
+            "caveats": caveats}
+
+
+def _scan_roots(repo: Path, docs_root: Optional[str],
+                project_key: str) -> Tuple[Dict[str, Any], List[str]]:
+    """(the roots-in-effect face for meta, the root paths to scan).
+
+    t261103-11 (design docs/design/project-docs-roots-v1.md goal 2): the ONE
+    resolution every consumer calls decides which roots this scan walks. An
+    explicit `docs_root` (an ops caller that already resolved) wins; otherwise
+    the declaration resolution answers -- declared roots for this repository,
+    or the implied default root. A refusal is raised by name (DocMechError
+    carrying the code), never degraded into an empty library: "no documents" and
+    "documents not found" must not read alike.
+    """
+    if docs_root:
+        one = str(docs_root).strip().rstrip("/") or DOC_ROOT
+        return ({"source": "argument", "declaration": "", "tree": str(repo),
+                 "reason": "", "roots": [{"path": one}]}, [one])
+    import docs_roots
+    try:
+        res = docs_roots.resolve(project_key, tree=repo)
+    except docs_roots.DocsRootsStop as e:
+        raise DocMechError(docs_roots.refusal_text(e)) from None
+    return (res.face(), [r.path for r in res.roots])
+
+
+def run_doc_mech(repo_root: str,
+                 added_lines: Optional[Dict[str, Dict[int, str]]] = None,
+                 changed_files: Optional[List[str]] = None,
+                 ticket_exists: Optional[Callable[[str], bool]] = None,
+                 commit_exists: Optional[Callable[[str], bool]] = None,
+                 base_head: str = "",
+                 docs_root: Optional[str] = None,
+                 project_key: str = "") -> Dict[str, Any]:
+    """Run M1-M7 over the whole library. All inputs injectable; malformed input
+    degrades item by item (never crashes). Returns {findings, meta} with
+    findings in the exact agent shape.
+
+    The documentation root(s) come from the ONE declaration resolution
+    (`docs_roots.resolve`): an undeclared project that owns docs/ scans docs/
+    exactly as before, a project that declares roots has each of its roots in
+    this repository scanned, and a missing/unreadable/malformed root is a NAMED
+    refusal (DocMechError carrying the code) rather than a green empty scan.
+    """
+    repo = Path(repo_root)
+    if not repo.is_dir():
+        raise DocMechError("repo root does not exist: %s" % repo_root)
+    added = added_lines or {}
+    changed = [c for c in (changed_files or [])]
+    roots_face, roots = _scan_roots(repo, docs_root, project_key)
+
+    findings: List[Dict[str, Any]] = []
+    pages_scanned = 0
+    index_degraded = False
+    exempted: set = set()
+    caveats: List[str] = []
+    if not roots:
+        # Declared, but every root lives in another repository of the project:
+        # a NAMED state (the scan covers nothing here), never a silent green.
+        caveats.append("docs_roots_declared_elsewhere: the declaration names no "
+                       "documentation root in this repository (%s)"
+                       % (roots_face.get("declaration") or "no declaration"))
+    for root in roots:
+        part = _scan_root(repo, root, added, changed, ticket_exists,
+                          commit_exists, base_head)
+        findings += part["findings"]
+        pages_scanned += part["pages_scanned"]
+        index_degraded = index_degraded or part["index_leg_degraded"]
+        exempted |= {r for rs in part["exempted"].values() for r in rs}
+        for c in part["caveats"]:
+            if c not in caveats:
+                caveats.append(c)
     _cap_quotes(findings)
     findings.sort(key=lambda f: (f["severity"], f["scan"], f["subject"]))
 
     meta = {
         "scanner": "inspection_doc_mech",
-        "pages_scanned": len(pages),
-        "index_leg_degraded": bool(index_err),
+        "pages_scanned": pages_scanned,
+        "index_leg_degraded": bool(index_degraded),
         "diff_rules_ran": bool(added),
         "change_surface_files": len(changed),
-        "exempted": sorted({r for rs in exempts.values() for r in rs}),
+        "exempted": sorted(exempted),
         "heartbeat": not findings,
         "caveats": caveats,
+        "docs_roots": roots_face,
     }
     return {"findings": findings, "meta": meta}
 
@@ -993,6 +1105,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="git base for the change surface (diff-fed rules M3/M5/M7)")
     ap.add_argument("--no-diff", action="store_true",
                     help="skip the change surface entirely (M1/M2/M4/M6 only)")
+    ap.add_argument("--docs-root", default="",
+                    help="scan this documentation root instead of resolving the "
+                         "declaration (ops override; the resolved default is the "
+                         "implied root of the repository)")
+    ap.add_argument("--project", default="",
+                    help="project key whose documentation-root declaration decides "
+                         "the scan roots")
     args = ap.parse_args(argv)
     try:
         if args.no_diff:
@@ -1000,7 +1119,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             changed, added = _git_changed(args.repo_root, args.base)
         result = run_doc_mech(args.repo_root, added_lines=added,
-                              changed_files=changed, base_head="" if args.no_diff else args.base)
+                              changed_files=changed,
+                              base_head="" if args.no_diff else args.base,
+                              docs_root=args.docs_root or None,
+                              project_key=args.project)
         print(json.dumps({"ok": True, "result": result}, ensure_ascii=False)
               .encode("utf-8", "backslashreplace").decode("utf-8"))
         return 0

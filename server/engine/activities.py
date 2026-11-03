@@ -777,9 +777,15 @@ async def run_inspection_doc_mech(args: Dict[str, Any]) -> Dict[str, Any]:
                            capture_output=True, timeout=30)
         return r.returncode == 0
 
+    # t261103-11 (design docs/design/project-docs-roots-v1.md goal 2): the scan
+    # roots come from the project's ONE documentation-root declaration, resolved
+    # inside run_doc_mech for THIS repository. A missing/unreadable/malformed
+    # root is a named refusal (DocMechError carrying its code), never a green
+    # empty scan: "no documents" and "documents not found" must not read alike.
     try:
         result = await asyncio.to_thread(
-            run_doc_mech, repo_root, added, changed, ticket_exists, commit_exists, base_head)
+            run_doc_mech, repo_root, added, changed, ticket_exists, commit_exists,
+            base_head, None, project_key)
     except DocMechError as e:
         return {"ok": False, "error": str(e)}
     activity.logger.info("doc-face mechanical layer: %d finding(s), pages=%s",

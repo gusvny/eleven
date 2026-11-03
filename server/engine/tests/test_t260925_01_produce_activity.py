@@ -212,3 +212,68 @@ def test_real_spawn_timeout_no_fake_green(lane, tmp_path, monkeypatch):
     r = asyncio.run(aa.run_inspection_produce(
         _args(lane, tmp_path, timeout_sec=prod.PRODUCE_DEADLINE_MARGIN_SEC + 5)))
     assert r["ok"] is False and "超时" in r["error"]
+
+
+# ======================================================================
+# t261103-11 — docs roots (1/2): the produce chain's root comes from the ONE
+# documentation-root declaration (design docs/design/project-docs-roots-v1.md
+# goals 2/4/10), never from a hard-coded directory name. A project that declares
+# nothing keeps today's behaviour (the instance value, which defaults to the
+# implied root); a declared root replaces it and the write-set gate follows it.
+# ======================================================================
+
+def _declare(monkeypatch, tmp_path, lane, block):
+    projects = tmp_path / "projects"
+    d = projects / "probe"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "project.yaml").write_text(
+        "schema: v1\nproject:\n  - key: probe\n    name: probe\n    dirs:\n"
+        "      - %s\npaths:\n%s" % (lane, block), encoding="utf-8")
+    monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(projects))
+
+
+def test_declared_root_decides_the_produce_write_set(lane, tmp_path, monkeypatch):
+    """The declaration's root is the chain's root: a write there passes the gate,
+    a write under the old directory name is refused by it."""
+    (lane / "guide").mkdir()
+    (lane / "guide" / "a.md").write_text(
+        "---\ntitle: A\ncategory: design\ntags: [x]\nstatus: active\n"
+        "updated: 2026-11-03\n---\n# A\n", encoding="utf-8")
+    env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(tmp_path))
+    subprocess.run(["git", "-C", str(lane), "add", "-A"], check=True,
+                   capture_output=True, env=env)
+    subprocess.run(["git", "-C", str(lane), "commit", "-qm", "declared root"],
+                   check=True, capture_output=True, env=env)
+    _declare(monkeypatch, tmp_path, lane,
+             "  docs_roots:\n    - repository: .\n      path: guide\n")
+    (lane / "guide" / "a.md").write_text(
+        "---\ntitle: A\ncategory: design\ntags: [x]\nstatus: active\n"
+        "updated: 2026-11-03\n---\n# A updated\n", encoding="utf-8")
+    _stub(monkeypatch, GOOD.replace("docs/a.md", "guide/a.md"), tmp_path)
+    r = asyncio.run(aa.run_inspection_produce(
+        _args(lane, tmp_path, project_key="probe", docs_root="docs")))
+    assert r["ok"] is True, r
+    res = r["result"]
+    assert res["meta"]["docs_root"] == "guide"        # the declaration decided
+    assert res["selfcheck"]["out_of_root"] == []      # the write is inside it
+    assert res["selfcheck"]["all_paths"] == ["guide/a.md"]
+
+
+def test_absent_declaration_root_is_a_named_refusal(lane, tmp_path, monkeypatch):
+    _declare(monkeypatch, tmp_path, lane,
+             "  docs_roots:\n    - repository: .\n      path: moved\n")
+    _stub(monkeypatch, GOOD, tmp_path)
+    r = asyncio.run(aa.run_inspection_produce(
+        _args(lane, tmp_path, project_key="probe")))
+    assert r["ok"] is False
+    assert "docs_roots_root_absent" in r["error"]
+    assert "moved" in r["error"]
+
+
+def test_no_declaration_keeps_the_instance_root(lane, tmp_path, monkeypatch):
+    """Default-off control: no declaration -> today's value travels unchanged."""
+    (lane / "docs" / "a.md").write_text("# A updated\n", encoding="utf-8")
+    _stub(monkeypatch, GOOD, tmp_path)
+    r = asyncio.run(aa.run_inspection_produce(_args(lane, tmp_path)))
+    assert r["ok"] is True
+    assert r["result"]["meta"]["docs_root"] == "docs"

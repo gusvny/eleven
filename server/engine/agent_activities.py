@@ -15103,7 +15103,17 @@ async def run_inspection_produce(args: Dict[str, Any]) -> Dict[str, Any]:
     instance_id = str(args.get("instance_id") or "")
     period = str(args.get("period") or "")
     ticket_id = str(args.get("ticket_id") or "")
-    docs_root = str(args.get("docs_root") or "docs").strip().rstrip("/") or "docs"
+    # t261103-11 (design docs/design/project-docs-roots-v1.md goals 2/4/10): the
+    # produce chain's documentation root is resolved through the project's ONE
+    # documentation-root declaration, never guessed as a directory name. An
+    # instance may still name a root explicitly (the declared value wins and is
+    # resolved relative to the lane tree); otherwise the declaration decides:
+    # the implied default root for an undeclared project that owns docs/ (today's
+    # behaviour, byte for byte), or the declared root(s) of this repository, of
+    # which this chain -- which writes exactly one root -- needs exactly one. A
+    # refusal is returned by name (fail-closed), never degraded into a write set
+    # the gate cannot judge.
+    docs_root = str(args.get("docs_root") or "").strip().rstrip("/")
     base_dir = str(args.get("base_dir") or "")
     base_ref = str(args.get("base_ref") or "")
     project = str(args.get("project_key") or "")
@@ -15114,6 +15124,22 @@ async def run_inspection_produce(args: Dict[str, Any]) -> Dict[str, Any]:
     base = Path(base_dir)
     if not base.is_dir():
         return _err("泳道工作副本不存在：%s" % base_dir)
+    # The ONE declaration decides; the instance-level root is only a fallback for
+    # a project that declares nothing (today's shape, unchanged).
+    import docs_roots as _droots
+    try:
+        _roots = _droots.resolve(project, tree=base)
+        if _roots.source == "declared":
+            docs_root = _roots.single().path
+        elif not docs_root:
+            docs_root = _roots.single().path
+    except _droots.DocsRootsStop as e:
+        if e.code == _droots.STOP_ABSENT and docs_root:
+            # No declaration and no docs directory at this tree's root: an
+            # instance-declared root still stands (byte-for-byte old behaviour).
+            pass
+        else:
+            return _err("documentation root unresolved (%s)" % _droots.refusal_text(e))
 
     from shared import INSPECTION_DIR, OUT_DIR as _OUT_DIR
     from inspection_inspect import sanitize_agent_home, build_persona_patch

@@ -121,7 +121,13 @@ WIRED_MODES = ("report", "produce")
 DEFAULT_MODE = "report"
 # docs_root：产出型实例的文档根（A6：引擎缺省 docs/，无 sandbar 专属路径硬编码）。
 # 词法=仓内相对 posix 路径：禁绝对路径、禁 .. 段（防越根逃逸）、禁空/尾斜杠。
-DEFAULT_DOCS_ROOT = "docs"
+# t261103-11 (design docs/design/project-docs-roots-v1.md goal 10): the default root
+# is NOT a second literal here. It is the implied default root of the ONE
+# documentation-root declaration (docs_roots.IMPLIED_ROOT), so "where the documents
+# are by default" has exactly one source and a consumer cannot drift from it. An
+# instance may still declare its own root; that value passes the lexical gate below,
+# while the produce chain resolves the project declaration at run time.
+from docs_roots import IMPLIED_ROOT as DEFAULT_DOCS_ROOT  # noqa: E402  (leaf module, no cycle)
 DOCS_ROOT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-/]*$")
 
 

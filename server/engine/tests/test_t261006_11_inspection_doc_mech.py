@@ -514,10 +514,19 @@ class FailClosedTest(unittest.TestCase):
         self.assertIn("doc-m1-index", _scans(res))   # scan continues past the bad page
 
     def test_notes_library_without_docs_dir(self):
+        # t261103-11 (design docs/design/project-docs-roots-v1.md goal 4): a tree
+        # with no documentation root and no declaration used to be scanned as an
+        # empty library (green heartbeat = "no documents" and "documents not
+        # found" reading alike). That state is now a NAMED refusal that says
+        # what was looked for; the notes/ library is not a substitute root.
+        import docs_roots
         repo = Path(tempfile.mkdtemp(prefix="docmech-notes-"))
         _write(repo, "notes/x.md", FM + "x")
-        res = _run(repo)
-        self.assertEqual(res["meta"]["pages_scanned"], 1)
+        with self.assertRaises(DocMechError) as ctx:
+            _run(repo)
+        msg = str(ctx.exception)
+        self.assertIn(docs_roots.STOP_ABSENT, msg)
+        self.assertIn("docs", msg)          # names the path that was looked for
 
 
 class ExemptHelperTest(unittest.TestCase):
@@ -584,3 +593,112 @@ class ActivityShellTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ======================================================================
+# t261103-11 — docs roots (1/2): the scan root comes from the ONE declaration
+# (design docs/design/project-docs-roots-v1.md goals 2 and 4). Contract:
+#   - a project that declares nothing and owns docs/ scans docs/ exactly as
+#     before (the implied default root, reported as "implied", never declared);
+#   - a declared root is scanned, and the old directory name is NOT (a moved
+#     root must not scan nothing, and must not keep scanning the old place);
+#   - many roots in one repository are all scanned;
+#   - a declared root that is absent is a NAMED refusal, not a green empty scan.
+# ======================================================================
+
+class DocsRootFollowsDeclarationTest(unittest.TestCase):
+    """The scan follows `paths.docs_roots`; nothing here touches a real registry."""
+
+    FM = "---\ntitle: t\ncategory: reference\ntags:\n  - x\nstatus: active\nupdated: 2026-11-03\n---\n"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="docmech-roots-"))
+        _TMP_DIRS.append(self.tmp)
+        self.projects = self.tmp / "projects"
+        self.repo = self.tmp / "tree"
+        self.repo.mkdir(parents=True)
+        self._old_env = os.environ.get("SANDBAR_PROJECTS_DIR")
+        os.environ["SANDBAR_PROJECTS_DIR"] = str(self.projects)
+
+    def tearDown(self):
+        if self._old_env is None:
+            os.environ.pop("SANDBAR_PROJECTS_DIR", None)
+        else:
+            os.environ["SANDBAR_PROJECTS_DIR"] = self._old_env
+
+    def declaration(self, block):
+        d = self.projects / "probe"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "project.yaml").write_text(
+            "schema: v1\nproject:\n  - key: probe\n    name: probe\n    dirs:\n"
+            "      - %s\npaths:\n%s" % (self.repo, block), encoding="utf-8")
+
+    def library(self, root, pages):
+        """A minimal library at `root`: index + README + the given pages."""
+        (self.repo / root).mkdir(parents=True, exist_ok=True)
+        index = {"docs": [{"path": rel}
+                          for rel in sorted(set(pages) | {"README.md"})]}
+        (self.repo / root / "index.json").write_text(json.dumps(index),
+                                                     encoding="utf-8")
+        rows = "\n".join("| `%s` | x |" % rel
+                         for rel in sorted(set(pages) | {"README.md"}))
+        _write(self.repo, root + "/README.md", self.FM + "# index\n" + rows + "\n")
+        for rel, text in pages.items():
+            _write(self.repo, root + "/" + rel, self.FM + text)
+
+    def scans(self, res):
+        return [f["scan"] for f in res["findings"]]
+
+    def subjects(self, res):
+        """The evidence paths a finding points at (the agent finding shape keeps
+        the path inside evidence[]; `subject` is the human sentence)."""
+        return [e.get("path") for f in res["findings"] for e in f["evidence"]]
+
+    def test_default_off_scans_the_implied_root(self):
+        self.library("docs", {"reference/a.md": "a\n"})
+        res = run_doc_mech(str(self.repo))
+        self.assertEqual(res["meta"]["docs_roots"]["source"], "implied")
+        self.assertEqual(res["meta"]["pages_scanned"], 2)   # README + the page
+        self.assertEqual(res["findings"], [])
+
+    def test_declared_root_is_the_one_scanned(self):
+        self.library("guide", {"reference/a.md": "a\n"})
+        (self.repo / "docs").mkdir()
+        (self.repo / "docs" / "stale.md").write_text(self.FM + "s\n", encoding="utf-8")
+        self.declaration("  docs_roots:\n    - repository: .\n      path: guide\n")
+        # an unregistered page in the declared root: M1 must fire on it
+        _write(self.repo, "guide/reference/extra.md", self.FM + "e\n")
+        res = run_doc_mech(str(self.repo), project_key="probe")
+        self.assertEqual(res["meta"]["docs_roots"]["source"], "declared")
+        self.assertIn("doc-m1-index", self.scans(res))
+        self.assertIn("guide/reference/extra.md", self.subjects(res))
+        # the old directory name is prose content now: it is not this library
+        self.assertFalse([s for s in self.subjects(res) if s.startswith("docs/")])
+
+    def test_many_declared_roots_are_all_scanned(self):
+        self.library("guide", {"reference/a.md": "a\n"})
+        self.library("manual", {"reference/b.md": "b\n"})
+        self.declaration("  docs_roots:\n"
+                         "    - repository: .\n      path: guide\n"
+                         "    - repository: .\n      path: manual\n")
+        _write(self.repo, "guide/reference/extra.md", self.FM + "e\n")
+        _write(self.repo, "manual/reference/extra.md", self.FM + "e\n")
+        res = run_doc_mech(str(self.repo), project_key="probe")
+        self.assertEqual(len(res["meta"]["docs_roots"]["roots"]), 2)
+        subjects = self.subjects(res)
+        self.assertIn("guide/reference/extra.md", subjects)
+        self.assertIn("manual/reference/extra.md", subjects)
+
+    def test_declared_but_absent_root_is_a_named_refusal(self):
+        self.library("docs", {"reference/a.md": "a\n"})
+        self.declaration("  docs_roots:\n    - repository: .\n      path: moved\n")
+        with self.assertRaises(DocMechError) as cm:
+            run_doc_mech(str(self.repo), project_key="probe")
+        self.assertIn("docs_roots_root_absent", str(cm.exception))
+        self.assertIn("moved", str(cm.exception))
+
+    def test_explicit_root_argument_wins_for_ops_callers(self):
+        self.library("guide", {"reference/a.md": "a\n"})
+        res = run_doc_mech(str(self.repo), docs_root="guide")
+        self.assertEqual(res["meta"]["docs_roots"]["source"], "argument")
+        self.assertEqual(res["meta"]["pages_scanned"], 2)
