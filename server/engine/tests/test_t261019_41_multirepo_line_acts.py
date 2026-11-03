@@ -394,3 +394,149 @@ def test_promotion_act_failure_rolls_moved_repos_back(two):
     assert not (repo_a / "rA.txt").exists()
     rows, _bad = dc.read_rows(dc.ledger_path(PROJECT))
     assert not [r for r in rows if r.get("kind") == dc.KIND_PROMOTION]
+
+
+# =============================================================================
+# t261103-23 — CROSS-PROJECT ID COLLISION AT THE LANDING FACE
+# (added to this anchored battery so no new test file / anchor entry is needed;
+#  a clearly marked section, its own two-project fixture, nothing shared but the
+#  module's git helpers)
+#
+# Measured incident (project-vision, 2026-11-03): ticket t261103-03 was refused as
+# "already landed ... (landing ldg-01M6EY1M7TK40RCNJ6XRRSZX02)" while that landing
+# belonged to a SANDBAR ticket sharing the <date>-<serial> id. The duplicate check
+# is project-scoped by construction, so the refusal could only come from a project
+# key that was not the ticket's own (or from a reader scanning every project). The
+# landing face now refuses such a key BY NAME instead of landing into - or reading
+# - another project's ledger, and it never weakens one-landing-per-ticket inside
+# the ticket's own project.
+# =============================================================================
+
+OTHER_PROJECT = "sandbar"        # the project that really held the landing
+MINE = "project-vision"              # the reporting project: no delivery ledger at all
+COLLIDING = "t261103-03"         # the id both projects used (measured)
+COLLIDING_LINE = "develop-buffer"
+
+
+def _landing_row(project, ticket, line, lid=None):
+    return {"kind": dc.KIND_LANDING, "id": lid or dc.mint_id("ldg"), "line": line,
+            "ticket": ticket, "actor": "ut", "at": 1000,
+            "repos": [{"repo": "rX", "revision": "0" * 40}]}
+
+
+def _landings_in(project):
+    rows, bad = dc.read_rows(dc.ledger_path(project))
+    assert not bad
+    return [r for r in rows if r.get("kind") == dc.KIND_LANDING]
+
+
+@pytest.fixture()
+def collided(tmp_path, monkeypatch):
+    """TWO projects, ONE shared ticket id: the other project has already landed a
+    ticket with this id; the reporting project has a declared line, a lane checkout
+    at a proven sha, and NO delivery ledger at all (the measured shape)."""
+    monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(tmp_path / "projects"))
+    monkeypatch.setenv("SANDBAR_DELIVERY_LEDGER_DIR", str(tmp_path / "ledger"))
+    for key in (OTHER_PROJECT, MINE):
+        d = shared.develop_dir(key)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "lines.json").write_text(json.dumps([
+            {"line_id": COLLIDING_LINE, "scope": "epic", "owner": "integration",
+             "repositories": [{"name": "rX", "branch": COLLIDING_LINE}],
+             "extra_scenarios": [], "version": 1}]), encoding="utf-8")
+    theirs = _landing_row(OTHER_PROJECT, COLLIDING, COLLIDING_LINE, "ldg-COLLIDE")
+    assert dc.append_rows([theirs], dc.ledger_path(OTHER_PROJECT))["written"] == 1
+    repo = _init_repo(tmp_path / "rX")
+    proven = _lane_commit(repo, "mine.txt", "mine\n")
+    return {"tmp": tmp_path, "repo": repo, "proven": proven, "theirs": theirs}
+
+
+def _land_mine(collided, **over):
+    kwargs = dict(ticket_id=COLLIDING, project_key=MINE, line_id=COLLIDING_LINE,
+                  worktree=str(collided["repo"]),
+                  proven_sha=collided["proven"], own_project_key=MINE)
+    kwargs.update(over)
+    return asyncio.run(aa.land_to_line(aa.LandToLineArgs(**kwargs)))
+
+
+def test_a_ticket_whose_id_collided_elsewhere_lands_normally_in_its_own_project(collided):
+    """Regression (i): the SAME id already landed in another project must not stop
+    this ticket from landing in its own project, and the other project's record must
+    stay exactly as it was."""
+    theirs_before = _landings_in(OTHER_PROJECT)
+    res = _land_mine(collided)
+    assert res.ok, res.error
+    mine = _landings_in(MINE)
+    assert len(mine) == 1 and mine[0]["ticket"] == COLLIDING
+    assert mine[0]["id"] != "ldg-COLLIDE", "a landing mints its OWN id"
+    assert mine[0]["line"] == COLLIDING_LINE
+    # the other project's ledger is untouched: same single row, same landing id
+    assert _landings_in(OTHER_PROJECT) == theirs_before
+    # and the landing really happened on THIS project's line branch
+    assert res.revisions["rX"] == _branch_sha(collided["repo"], COLLIDING_LINE)
+
+
+def test_an_empty_project_key_is_refused_by_name_and_writes_nothing(collided):
+    """Regression (ii), empty key: the landing face must refuse by name - never fall
+    back to an empty ledger path - and leave every ledger and branch untouched."""
+    theirs_before = _landings_in(OTHER_PROJECT)
+    res = _land_mine(collided, project_key="")
+    assert not res.ok, res.error
+    assert "NO project key" in res.error and "got ''" in res.error
+    assert res.already_landed is False
+    assert _landings_in(OTHER_PROJECT) == theirs_before
+    assert _landings_in(MINE) == []
+    assert _branch_sha(collided["repo"], COLLIDING_LINE) == ""
+
+
+def test_a_foreign_project_key_is_refused_by_name_and_never_reads_its_ledger(collided):
+    """Regression (ii), foreign key: handed the OTHER project's key while the ticket
+    belongs to this one. Refused by name, both keys named, the colliding landing
+    NAMED and classified as an id-scheme collision - and no withdraw suggestion,
+    because that row is another project's record."""
+    theirs_before = _landings_in(OTHER_PROJECT)
+    res = _land_mine(collided, project_key=OTHER_PROJECT)
+    assert not res.ok, res.error
+    assert "'sandbar'" in res.error and "'project-vision'" in res.error
+    assert "ldg-COLLIDE" in res.error
+    assert "id-scheme collision" in res.error
+    assert "do not withdraw it" in res.error
+    assert "re-issue this work under a non-colliding id" in res.error
+    # the withdraw remedy belongs to the same-project duplicate case only
+    assert "withdraw this project's own landing first" not in res.error
+    assert res.already_landed is False
+    assert _landings_in(OTHER_PROJECT) == theirs_before
+    assert _landings_in(MINE) == []
+    assert _branch_sha(collided["repo"], COLLIDING_LINE) == ""
+
+
+def test_a_malformed_or_unresolvable_project_key_is_refused_by_name(collided):
+    theirs_before = _landings_in(OTHER_PROJECT)
+    bad = _land_mine(collided, project_key="../escape")
+    assert not bad.ok and "malformed project key" in bad.error and "../escape" in bad.error
+    # with no declared own project the handed key is the caller's meta.project read,
+    # and it still has to resolve to a project this store actually holds
+    ghost = _land_mine(collided, project_key="ghost-project", own_project_key="")
+    assert not ghost.ok and "does not resolve to any project" in ghost.error \
+        and "ghost-project" in ghost.error
+    assert _landings_in(OTHER_PROJECT) == theirs_before
+    assert _landings_in(MINE) == []
+
+
+def test_a_genuine_same_project_duplicate_still_refuses_with_the_structured_flag(collided):
+    """Regression (iii): inside the ticket's OWN project the rule is untouched - one
+    landing per ticket, the structured already_landed flag, no second row, and the
+    copy now names the project ledger and the landing id it found."""
+    first = _land_mine(collided)
+    assert first.ok, first.error
+    landed = _landings_in(MINE)
+    assert len(landed) == 1
+    again = _land_mine(collided)
+    assert again.ok is False
+    assert again.already_landed is True, "the stage keys its resume on the flag"
+    assert "already landed" in again.error
+    assert landed[0]["id"] in again.error
+    assert "'project-vision'" in again.error
+    assert "resumes its certification wait" in again.error
+    assert len(_landings_in(MINE)) == 1, "still exactly one landing row"
+

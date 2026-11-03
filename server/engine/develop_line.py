@@ -515,11 +515,26 @@ def _landing_rows(project_key: str) -> List[Dict[str, Any]]:
     return _of_kind(rows, KIND_LANDING)
 
 
+def find_landing(project_key: str, ticket_id: str,
+                 line_id: str) -> Optional[Dict[str, Any]]:
+    """The landing row this (ticket, line) already has in THIS project's delivery
+    ledger, or None. One implementation for the "already landed" question: the
+    boolean face below and the landing act's named refusal (t261103-23, which names
+    the project and the landing id) read the same row, so they cannot disagree.
+    The read is project-scoped by construction — ``ledger_path(project_key)`` is
+    ``<projects root>/<project>/ledger/delivery.jsonl`` (or the declared flat
+    ledger file of that same project) — so a same-named ticket in another project
+    is invisible here, never a duplicate."""
+    for r in _landing_rows(project_key):
+        if r.get("ticket") == ticket_id and r.get("line") == line_id:
+            return r
+    return None
+
+
 def has_landing(project_key: str, ticket_id: str, line_id: str) -> bool:
     """One landing per ticket (goal 7): is there already a landing row for
     this (ticket, line) in the delivery ledger?"""
-    return any(r.get("ticket") == ticket_id and r.get("line") == line_id
-               for r in _landing_rows(project_key))
+    return find_landing(project_key, ticket_id, line_id) is not None
 
 
 # -------------------------------------------------------------------- landing
@@ -689,6 +704,19 @@ def land_ticket(line: DevelopLine, project_key: str,
     """
     result = LandingResult(ok=False, ticket_id=ticket_id, line_id=line.line_id)
     _check_inputs(ticket_id, performed_by, repo_paths)
+    # t261103-23: the one landing per ticket below is judged over THIS project's
+    # delivery ledger, and every later step (the lock, the retired-ledger probe, the
+    # append) resolves its home from the same key. A key that is not a project key
+    # has no ledger to read: it would silently resolve to some other path, and the
+    # duplicate check would answer for records this ticket never wrote. Refused by
+    # name before anything is read, locked or appended.
+    _key = str(project_key or "").strip()
+    if not shared.PROJECT_KEY_RE.match(_key):
+        raise LandingError(
+            "the landing needs the ticket's own project key; got %r - refusing: the "
+            "delivery ledger is per project, so a key that does not name one has no "
+            "ledger to read or write (nothing was read, locked or appended)"
+            % (project_key,))
     declared = {r.name: r for r in line.repositories}
     missing = sorted(set(repo_paths) - set(declared))
     if missing:

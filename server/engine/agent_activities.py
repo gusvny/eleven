@@ -8210,6 +8210,16 @@ class LandToLineArgs:
     #: real multi-repo ticket gets the named refusal (fail-closed, per the
     #: ruling), never a wrong landing.
     repo_proven: Dict[str, str] = field(default_factory=dict)
+    #: t261103-23: the ticket's OWN project key as recorded on its face
+    #: (meta.project), when the caller can state it. The landing reads and writes the
+    #: delivery ledger of exactly one project, so a key that DISAGREES with the
+    #: ticket's own project is refused by name instead of landing into another
+    #: project's records. Defaulted empty because the single source of
+    #: ``project_key`` is still the caller's own meta.project read; the workflow-side
+    #: population is the dev_lane follow-up outside this ticket's write set. An
+    #: undeclared own project does not switch the guard off: the handed key is still
+    #: held to the whitelist and to "resolves to a project in this store".
+    own_project_key: str = ""
 
 
 @dataclass
@@ -8254,10 +8264,16 @@ async def land_to_line(args: LandToLineArgs) -> LandToLineResult:
 
     if not isinstance(args.ticket_id, str) or not args.ticket_id.strip():
         return _land_to_line_refuse("malformed ticket_id: %r" % (args.ticket_id,))
-    if not isinstance(args.project_key, str) or not args.project_key.strip():
-        return _land_to_line_refuse(
-            "ticket %s has no project key — the landing needs the project store"
-            % args.ticket_id)
+    # t261103-23: ONE project-key guard, before every project-scoped read or write.
+    # The ledger this act reads (one landing per ticket) and appends to is the ledger
+    # of exactly one project, so an empty, malformed, unresolvable or disagreeing key
+    # is refused by name here - never silently resolved to an empty path, to another
+    # project's directory, or to this engine repo's own project.
+    _key_refusal = _landing_project_key_refusal(
+        args.ticket_id, args.project_key,
+        str(getattr(args, "own_project_key", "") or ""))
+    if _key_refusal:
+        return _land_to_line_refuse(_key_refusal)
     if not isinstance(args.line_id, str) or not args.line_id.strip():
         return _land_to_line_refuse(
             "ticket %s opted into %s but names no develop line (meta.develop_line "
@@ -8285,15 +8301,25 @@ async def land_to_line(args: LandToLineArgs) -> LandToLineResult:
     # Measured: after the 261016 release ruling made four merge stages'
     # certification wait satisfiable, their retries were refused by the
     # current-main guard instead, and the wait was never reached.
+    # t261103-23: the hit comes from THIS project's ledger (the read above is
+    # project-scoped), so the copy names the project, the ledger file and the
+    # landing id — a reader must never have to guess whose row it is. A hit in
+    # another project is not visible here at all, which is the point: the same id
+    # landed by a sibling project's ticket is not this ticket's landing.
     try:
-        _already = develop_line.has_landing(args.project_key, args.ticket_id,
-                                            args.line_id)
+        _already = develop_line.find_landing(args.project_key, args.ticket_id,
+                                             args.line_id)
     except Exception:  # noqa: BLE001 — unreadable ledger: fall through to the guards
-        _already = False
+        _already = None
     if _already:
         return _land_to_line_refuse(
-            "ticket %s: already landed on line %s — one landing per ticket; the "
-            "caller resumes its certification wait" % (args.ticket_id, args.line_id),
+            "ticket %s: already landed on line %s (landing %s) — the row sits in "
+            "the OWN delivery ledger of project %r (%s), so it is this ticket's landing "
+            "and one landing per ticket stands; nothing was landed again and nothing "
+            "was written. The caller resumes its certification wait."
+            % (args.ticket_id, args.line_id,
+               str(_already.get("id") or ""), args.project_key.strip(),
+               _landing_ledger_of(args.project_key)),
             already_landed=True)
     # 261015: a judged revision is a lawful landing input only while it still
     # CONTAINS the main it was judged against. The green-run face is recorded
@@ -10472,67 +10498,287 @@ def _squash_merge(repo: Path, wt: Path, branch: str, ticket_id: str,
                        error="；".join(warns))
 
 
-def _line_landing_closeout_refusal_for(ticket_id: str) -> str:
-    """The t261019-02 close-out fence, project-free (261019 move into the activity).
+# ---- t261103-23: one ticket, one project key, one ledger --------------------
+#
+# Measured fault (project-vision, 2026-11-03): ticket t261103-03 was refused at merge
+# close-out as "already landed ... (landing ldg-01M6EY1M7TK40RCNJ6XRRSZX02)" while
+# that landing belonged to a SANDBAR ticket that merely shares the <date>-<serial>
+# id scheme. project-vision has no delivery ledger at all, and the fence below answered
+# by scanning EVERY project's ledger - so a cross-project id collision was read as
+# this ticket's own landing, and the copy then offered "withdraw the landing first",
+# which would have made a human destroy another project's record. Two rules follow:
+# a project-scoped read refuses by name over a key it cannot trust, and a duplicate
+# hit always names the project whose ledger it came from.
 
-    Returns "" when no declared line has a landing row for this ticket (the legacy
-    squash close-out may proceed), else the named refusal. Reads every project's
-    delivery ledger under the per-key projects root and the line declarations beside
-    it: the activity does not receive a project key on old workflow histories, and the
-    landing row itself names its line, so scanning is the honest way to answer without
-    adding a workflow input (a new input would leave old histories unfenced forever -
-    the same trap the in-workflow guard hit). A malformed declaration or an unreadable
-    ledger refuses by name: the fence never guesses over records it cannot read.
+#: The flat-ledger-directory environment variable. Mirrors the delivery-certify
+#: module's own constant; the value is the stable part (an isolation seam), so the
+#: reader and the writer resolve the same home without a cross-module import.
+_LEDGER_DIR_ENV = "SANDBAR_DELIVERY_LEDGER_DIR"
 
-    Deliberately reads the ledger with plain JSON instead of the delivery-certify
-    module: this call site sits outside that module's declared gate region, and the
-    surface-confinement guard (t261009-18) forbids a new reference there. The row shape
-    read here is only kind/ticket/line/id - the append-only record contract."""
+
+def _landing_ledger_dir_override() -> str:
+    """The declared FLAT delivery-ledger directory, or "" for the per-project store.
+    Same precedence the writer uses: the directory the process pinned at its entry
+    (a worker started before the pin existed has no accessor - getattr, not a hard
+    reference), else the environment (CLI, tests, activities outside the worker)."""
+    import shared as _shared
+    pin = getattr(_shared, "delivery_ledger_dir", None)
+    try:
+        flat = (pin() if callable(pin) else "") or ""
+    except Exception:  # noqa: BLE001 - a pin read fault must not invent a path
+        flat = ""
+    return str(flat or "").strip() or (os.environ.get(_LEDGER_DIR_ENV) or "").strip()
+
+
+def _landing_ledger_of(project_key: str) -> Path:
+    """The delivery ledger of ONE project, resolved the way its writer resolves it:
+    the flat directory when one is declared (``<dir>/<project>.jsonl``), else the
+    per-project store (``<projects root>/<project>/ledger/delivery.jsonl``). A reader
+    and a writer that split homes answer "not landed" for a landed ticket - the quiet
+    half of the collision fault, so both sides go through this one rule."""
+    key = str(project_key or "").strip()
+    flat = _landing_ledger_dir_override()
+    if flat:
+        return Path(flat) / ("%s.jsonl" % key)
+    import shared as _shared
+    return _shared.perkey_projects_root() / key / "ledger" / "delivery.jsonl"
+
+
+def _landing_ledger_candidates() -> List[Tuple[str, Path]]:
+    """Every (project key, ledger path) this engine could read, project-key order.
+    Used ONLY by the diagnostic that names a collision when the ticket's own project
+    key cannot be resolved - never as a fallback for judging this ticket's landing."""
+    import shared as _shared
+    out: List[Tuple[str, Path]] = []
+    seen = set()
+    flat = _landing_ledger_dir_override()
+    if flat:
+        try:
+            for f in sorted(Path(flat).glob("*.jsonl")):
+                if f not in seen:
+                    seen.add(f)
+                    out.append((f.name[:-len(".jsonl")], f))
+        except OSError:
+            pass
+    try:
+        root = _shared.perkey_projects_root()
+    except Exception:  # noqa: BLE001 - an unreadable root contributes nothing
+        return out
+    if not root.is_dir():
+        return out
+    for proj_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+        ledger = proj_dir / "ledger" / "delivery.jsonl"
+        if ledger not in seen:
+            seen.add(ledger)
+            out.append((proj_dir.name, ledger))
+    return out
+
+
+def _landing_hits_in(ledger: Path, ticket_id: str) -> Tuple[List[Dict[str, str]], str]:
+    """The landing rows one ledger holds for this ticket id: ``([{line, id}], "")``,
+    or ``([], named_error)`` for a ledger that cannot be read. Deliberately plain
+    JSON instead of the delivery-certify module's reader: this call site sits outside
+    that module's declared gate region, and the surface-confinement guard (t261009-18)
+    forbids a new reference there. The row shape read here is only the append-only
+    contract's kind/ticket/line/id."""
+    tid = str(ticket_id or "").strip()
+    ledger = Path(ledger)
+    if not ledger.is_file():
+        return [], ""  # no ledger = nothing has landed in that project
+    rows: List[Any] = []
+    bad = 0
+    try:
+        with open(ledger, encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except ValueError:
+                    bad += 1
+    except OSError as e:
+        return [], ("close-out refused: delivery ledger unreadable at %s (%s: %s)"
+                    % (ledger, type(e).__name__, str(e)[:160]))
+    if bad:
+        return [], ("close-out refused: delivery ledger has %d malformed line(s) at %s"
+                    % (bad, ledger))
+    hits = [{"line": str(r.get("line") or ""), "id": str(r.get("id") or "")}
+            for r in rows
+            if isinstance(r, dict) and r.get("kind") == "landing"
+            and str(r.get("ticket") or "") == tid
+            and str(r.get("line") or "")]
+    return hits, ""
+
+
+def _landing_project_key_refusal(ticket_id: str, project_key: str,
+                                 own_project: str = "") -> str:
+    """t261103-23: the ONE project-key guard of the landing face.
+
+    Returns "" when this key may be used for this ticket, else the named refusal.
+    Refused by name: an empty/blank key (a per-project ledger for "no project" does
+    not exist), a key that fails the project whitelist (it is spliced into a path),
+    a key that names no project in the store (unresolvable), and a key that
+    DISAGREES with the ticket's own project (meta.project) when the caller declared
+    it. Every refusal names the key it was handed and, when known, the ticket's own
+    project; none of them falls back to an empty path, another project's directory,
+    or the engine repo's project, and none of them reads or writes a record.
+
+    When the handed key's ledger happens to carry a landing for this ticket id, the
+    refusal names that landing and says plainly what it is: an id-scheme collision
+    between two projects, never this ticket's landing and never a landing to undo.
+    """
+    tid = str(ticket_id or "").strip()
+    key = str(project_key or "").strip()
+    own = str(own_project or "").strip()
+    pattern = shared.PROJECT_KEY_RE.pattern
+    if not key:
+        return ("ticket %s: the landing face was handed NO project key (got %r) - "
+                "refusing: the delivery ledger is per project, so an empty key has no "
+                "ledger to read or write. Nothing was read and nothing was written; "
+                "the caller must hand the ticket's own project key (meta.project)."
+                % (tid, project_key))
+    if not shared.PROJECT_KEY_RE.match(key):
+        return ("ticket %s: the landing face was handed a malformed project key %r "
+                "(whitelist %s) - refusing: the key is spliced into the ledger path, "
+                "so it must be a project key. Nothing was read and nothing was written."
+                % (tid, key, pattern))
+    if own and not shared.PROJECT_KEY_RE.match(own):
+        return ("ticket %s: the ticket's own project (meta.project) reads %r, which is "
+                "not a project key (whitelist %s) - refusing to compare the handed key "
+                "%r against it. Nothing was read and nothing was written."
+                % (tid, own, pattern, key))
+    ledger = _landing_ledger_of(key)
+    hits, _err = _landing_hits_in(ledger, tid)
+    if own and own != key:
+        note = ("ticket %s: the landing face was handed project key %r but the ticket's "
+                "own project is %r (meta.project) - refusing: the delivery ledger is per "
+                "project, so the ledger of project %r holds another project's records and must "
+                "never be read or written for this ticket. "
+                % (tid, key, own, key))
+        if hits:
+            note += ("The handed key's ledger does hold a landing for this ticket id "
+                     "(%s: landing %s on line %r) - that row belongs to a ticket of project %r: "
+                     "this is an id-scheme collision between two projects, NOT a landing "
+                     "of this ticket and never a landing to undo, so do not withdraw it. "
+                     "Lawful remedies: (a) land this ticket under its own project key "
+                     "%r; (b) if that id is already taken by the other project, re-issue "
+                     "this work under a non-colliding id. Nothing was written."
+                     % (ledger, hits[0]["id"], hits[0]["line"], key, own))
+        else:
+            note += ("Nothing was read as this ticket's landing and nothing was "
+                     "written; hand the ticket's own project key %r." % own)
+        return note
+    # No declared own project: the handed key IS the caller's meta.project read, and
+    # it must still resolve to a project this store actually holds - never a directory
+    # that is merely spelled like one.
+    store = shared.perkey_projects_root() / key
+    if not store.is_dir():
+        return ("ticket %s: the project key %r does not resolve to any project in the "
+                "store (%s is absent) - refusing: the landing would read and write a "
+                "ledger for a project this engine does not have. Nothing was read and "
+                "nothing was written." % (tid, key, store))
+    return ""
+
+
+#: t261103-23: the ticket's own project key (meta.project), resolved by the CALLER of
+#: the close-out fence right before it consults it. The fence's call-site shape
+#: (``_line_landing_closeout_refusal_for(args.ticket_id)``) is source-anchored by the
+#: registered scenario t261019-02-line-landing-closeout-guard, and a new workflow input
+#: would leave old histories unfenced forever, so the key travels through this one-shot
+#: handoff instead of a second argument: it is set and read with no await in between
+#: (asyncio cannot interleave that), and it is consumed on read (a stale key can never
+#: steer a later read).
+_LANDING_CLOSEOUT_PROJECT_KEY: Dict[str, str] = {}
+
+
+def _line_landing_closeout_refusal_for(ticket_id: str,
+                                       project_key: Optional[str] = None) -> str:
+    """The t261019-02 close-out fence, judged against the ticket's OWN project.
+
+    Returns "" when this ticket has no landing row in ITS OWN project's delivery
+    ledger (the legacy squash close-out may proceed), else the named refusal. The
+    project key is the caller's resolved meta.project (the ``project_key`` argument,
+    or the one-shot handoff above) and it is REQUIRED: an empty, malformed or
+    unresolvable key refuses by name instead of falling back to another project's
+    directory. The measured fault (t261103-23) was a scan of EVERY project's ledger,
+    where a landing row of a same-named ticket in another project was read as this
+    ticket's own landing.
+
+    A hit names the project whose ledger it came from and the landing id. In the same
+    project that IS this ticket's landing, so the refusal keeps the two lawful ways
+    out (line-round promotion, or withdraw this project's own landing). A hit in
+    ANOTHER project is not this ticket's landing and never enters the refusal; it is
+    named only by the diagnostic below, which runs when the key cannot be resolved,
+    and it says exactly that: an id-scheme collision, not a landing to undo.
+
+    An unreadable or malformed ledger refuses by name: the fence never guesses over
+    records it cannot read. Deliberately reads with plain JSON instead of the
+    delivery-certify module (this call site sits outside that module's declared gate
+    region; the surface-confinement guard t261009-18 forbids a new reference there)."""
     tid = str(ticket_id or "").strip()
     if not tid:
         return "close-out refused: the landing guard needs a ticket id"
-    import shared as _shared
+    if project_key is None:
+        key = _LANDING_CLOSEOUT_PROJECT_KEY.pop(tid, "")
+    else:
+        _LANDING_CLOSEOUT_PROJECT_KEY.pop(tid, None)
+        key = project_key
+    key = str(key or "").strip()
     try:
-        root = _shared.perkey_projects_root()
-    except Exception as e:  # noqa: BLE001
-        return "close-out refused: cannot resolve the projects root (%s: %s)" % (
-            type(e).__name__, str(e)[:160])
-    if not root.is_dir():
+        if not key:
+            # UNRESOLVABLE: never judge, and never fall back to another project's
+            # ledger. The diagnostic names a collision if one exists, so the reader
+            # sees WHY the same id appears elsewhere and what the lawful ways out are.
+            collisions: List[Tuple[str, Path, Dict[str, str]]] = []
+            for proj, ledger_file in _landing_ledger_candidates():
+                hits, _err = _landing_hits_in(ledger_file, tid)
+                for h in hits:
+                    collisions.append((proj, ledger_file, h))
+            note = ("close-out refused: this ticket's own project key (meta.project) "
+                    "could not be resolved, so the landing guard cannot tell this "
+                    "ticket's landing apart from another project's ticket that merely "
+                    "shares the id scheme (<date>-<serial>). Nothing was judged as this "
+                    "ticket's landing and nothing was written. Retry once the ticket's "
+                    "own project key is readable, and land/promote this ticket under "
+                    "its own project key")
+            if collisions:
+                proj, ledger_file, h = collisions[0]
+                note += (": a landing for this id sits in the delivery ledger of project %r (%s: "
+                         "landing %s on line %r) - that row belongs to a ticket of project %r. "
+                         "An id-scheme collision between two projects is NOT this "
+                         "ticket's landing and is never a landing to undo, so do not "
+                         "withdraw it. Lawful remedies: (a) land this ticket under its "
+                         "own project key once it resolves, then let the line round "
+                         "certify it; (b) if the id is already taken by another project, "
+                         "re-issue this work under a non-colliding id."
+                         % (proj, ledger_file, h["id"], h["line"], proj))
+            else:
+                note += (": no project ledger holds a landing for this id, so nothing "
+                         "of this ticket's has landed")
+            return note
+        if not shared.PROJECT_KEY_RE.match(key):
+            return ("close-out refused: the landing guard was handed a malformed "
+                    "project key %r (whitelist %s) - refusing to read any ledger "
+                    "through it" % (key, shared.PROJECT_KEY_RE.pattern))
+        ledger = _landing_ledger_of(key)
+        hits, err = _landing_hits_in(ledger, tid)
+        if err:
+            return err
+        if hits:
+            h = hits[0]
+            return ("close-out refused by host ruling 261019: %r already landed on line "
+                    "%r (landing %s) - the row sits in the OWN delivery ledger of project %r "
+                    "(%s), so it is this ticket's landing, never a same-named one from "
+                    "another project. Main moves only through a green line certification "
+                    "and a signed promotion; a landed ticket must not be squash-closed "
+                    "out. Ways out: let the line round certify it (then the promotion "
+                    "carries it), or withdraw this project's own landing first."
+                    % (tid, h["line"], h["id"], key, ledger))
         return ""
-    for proj_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-        if not (proj_dir / "data" / "develop" / "lines.json").is_file():
-            continue  # no declared line in this project: the fence is vacuous there
-        ledger = proj_dir / "ledger" / "delivery.jsonl"
-        if not ledger.is_file():
-            continue
-        try:
-            rows = []
-            bad = 0
-            with open(ledger, encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rows.append(json.loads(line))
-                    except ValueError:
-                        bad += 1
-        except OSError as e:
-            return ("close-out refused: delivery ledger unreadable at %s (%s: %s)"
-                    % (ledger, type(e).__name__, str(e)[:160]))
-        if bad:
-            return ("close-out refused: delivery ledger has %d malformed line(s) at %s"
-                    % (bad, ledger))
-        for row in rows:
-            if (isinstance(row, dict) and row.get("kind") == "landing"
-                    and str(row.get("ticket") or "") == tid
-                    and str(row.get("line") or "")):
-                return ("close-out refused by host ruling 261019: %r already landed on line %r "
-                        "(landing %s). Main moves only through a green line certification and a "
-                        "signed promotion; a landed ticket must not be squash-closed out. Ways "
-                        "out: let the line round certify it (then the promotion carries it), or "
-                        "withdraw the landing first." % (tid, row.get("line"), row.get("id")))
-    return ""
+    except Exception as e:  # noqa: BLE001 - an unanswerable read is a named refusal
+        return ("close-out refused: cannot resolve the delivery ledger of project %r "
+                "(%s: %s)" % (key, type(e).__name__, str(e)[:160]))
 
 
 @activity.defn
@@ -10548,13 +10794,24 @@ async def merge(args: MergeArgs) -> MergeResult:
     defer_teardown=True (the M1-3 three-stage close-out): **no inline cleanup** after
     booking; teardown_lane takes over.
     """
+    # Project key of THIS ticket (meta.project, read off the workflow snapshot). It is
+    # resolved ONCE, before anything below uses it, and fed to both consumers: the
+    # t261019-02 close-out fence (t261103-23) and the snapshot step. A lookup failure
+    # answers "" - the fence then refuses by name instead of reading another project's
+    # ledger, and _squash_merge skips the snapshot internally with a note. No fallback
+    # to a neighbouring project's directory, to an empty path, or to this repo's own
+    # project: the collision fault measured on 2026-11-03 was exactly such a fallback
+    # (a project-vision ticket read as already landed on sandbar's ledger).
+    project_key = await _fetch_ticket_project(args.ticket_id)
     # t261019-02 fence, evaluated HERE (activity code, outside the workflow sandbox): a
     # ticket that already landed on a declared line must not leave through the legacy
-    # direct squash close-out. The check scans the project ledgers for a landing row of
-    # this ticket, so it needs no new workflow input — old and new workflow histories
-    # alike reach this activity and get the same judgement, and the sandbox never sees a
-    # ledger read again (261019: the in-workflow version was refused with
+    # direct squash close-out. The fence is handed the key through the one-shot
+    # handoff, so its call shape stays as the registered scenario anchors it, and no
+    # new workflow input is needed — old and new workflow histories alike reach this
+    # activity and get the same judgement, and the sandbox never sees a ledger read
+    # again (261019: the in-workflow version was refused with
     # RestrictedWorkflowAccessError and blocked every close-out).
+    _LANDING_CLOSEOUT_PROJECT_KEY[args.ticket_id] = project_key
     _closeout_refusal = _line_landing_closeout_refusal_for(args.ticket_id)
     if _closeout_refusal:
         return MergeResult(ok=False, action="failed",
@@ -10564,9 +10821,6 @@ async def merge(args: MergeArgs) -> MergeResult:
     wt = Path(args.worktree) if args.worktree else REPO_ROOT
     if not wt.is_absolute():
         wt = REPO_ROOT / wt
-    # Project key (which directory the snapshot belongs to): a lookup failure
-    # soft-degrades to "" → _squash_merge skips the snapshot internally with a note
-    project_key = await _fetch_ticket_project(args.ticket_id)
     # Ticket B (t260907-06): a single repo = 1 scope (the old single-anchor path,
     # unchanged behavior); multi-repo = squash into each child repo in turn
     # (_squash_merge's a–e fault trade-offs hold per tree; re-entrant — an
