@@ -633,6 +633,50 @@ print(asyncio.run(client.enable_narrowed_anchor('<ticket_id>', '<who>')))"
             "who": str(who or ""), "note": "idempotent enable; re-delivery changes nothing"}
 
 
+# t261103-07 (design step (c)): the poller's wake. The ticket entry face is this
+# module - `cmd_ticket` above is the implementation of every `ticket.py` op - and
+# the workflow's `remote_review_update` handler is the only way into a parked
+# ticket. The signal name and the source word are single-sourced here and in
+# `pr_flow` (`POLLER_SOURCE`), which refuses every other source BY NAME: a
+# signature, an advance or a bare payload can therefore never leave the park.
+#
+# What a wake MEANS is decided by the workflow, not by the sender: an accepted
+# wake makes the ticket ask the platform on the following beat, so a wake can
+# start a poll but can never close a ticket by itself.
+REMOTE_REVIEW_WAKE_SIGNAL = "remote_review_update"
+
+
+async def remote_review_wake(ticket_id: str, note: str = "") -> Dict[str, Any]:
+    """Send the poller's wake to a parked review-request ticket.
+
+    Returns a named receipt; delivery failure is a structured error, never a raise
+    to the caller. Idempotent in effect: a second wake just asks the platform
+    again, and the platform's answer is what the ticket acts on.
+
+    Runnable from an instance root (absolute paths, no CLI surface):
+        python3 -c "import asyncio, sys; sys.path.insert(0, '<engine_dir>'); \
+import client; print(asyncio.run(client.remote_review_wake('<ticket_id>', '<note>')))"
+    """
+    import pr_flow  # noqa: PLC0415 - stdlib-only core; imported where it is used
+
+    tid = str(ticket_id or "").strip()
+    if not tid:
+        return {"ok": False, "ticket_id": "", "error": "a wake needs a ticket id"}
+    payload = {"source": pr_flow.POLLER_SOURCE, "note": str(note or "")[:300]}
+    try:
+        client = await _connect()
+        handle = client.get_workflow_handle(tid)
+        await handle.signal(REMOTE_REVIEW_WAKE_SIGNAL, payload)
+    except Exception as e:  # noqa: BLE001 - named receipt, never a raise
+        return {"ok": False, "ticket_id": tid,
+                "error": "signal delivery failed: %s: %s"
+                         % (type(e).__name__, e)}
+    return {"ok": True, "ticket_id": tid, "signal": REMOTE_REVIEW_WAKE_SIGNAL,
+            "source": pr_flow.POLLER_SOURCE,
+            "note": "the ticket asks the platform on its next beat; the platform's "
+                    "answer decides, never this wake"}
+
+
 async def cmd_schedule_list(args: Dict[str, Any]) -> Dict[str, Any]:
     del args  # no arguments
     client = await _connect()

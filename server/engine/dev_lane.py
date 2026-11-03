@@ -143,6 +143,8 @@ with workflow.unsafe.imports_passed_through():
         # t261103-05: the review-request delivery act (design step (b)); the
         # workflow only relays the ticket's own facts to it.
         pr_flow_deliver,
+        # t261103-07: one beat of the review-request poll (design step (c)).
+        pr_flow_poll,
         prepare_ui_evidence,
         prepare_workspace,
         reprobe_red_scenarios,
@@ -650,6 +652,13 @@ INTEG_RUN_TO = timedelta(seconds=INTEG_GUARD_SEC + 300)
 # 预算沿用全量跑同档（子集恒 ≤ 全量；activity 内另有 wait_for 兜底 kill→wait 回收）。
 REPROBE_TO = INTEG_RUN_TO
 RETRY = RetryPolicy(maximum_attempts=3)  # infra failures only; business verdicts go via StageResult.status
+# t261103-07 (design step (c)): ONE poll attempt per beat. The beat IS the retry
+# unit - a failed poll is a named state and the next beat asks again - so an
+# activity retry policy here would turn one slow beat into a busy loop.
+PR_FLOW_POLL_RETRY = RetryPolicy(maximum_attempts=1)
+#: Who the ticket credits when the platform merge ends the delivery (never a
+#: borrowed session or role name: the acceptance record is the platform's).
+PR_FLOW_MERGE_ACTOR = "engine:platform-merge"
 # Boolean patch gates (same family as workflows.py's WORKER_RECONCILE_PATCH_ID): a
 # parked old workflow replays down the old branch, so a new gate must not bump
 # DevLaneWorkflow.PATCH_ID. Every *_PATCH_ID below follows the same rule and only
@@ -5131,24 +5140,40 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                              "item": "all four checks green", "green": True})
         return rows
 
-    async def _pr_flow_merge_step(self) -> bool:
-        """The merge phase's fork for the optional review-request flow (step (b)).
+    async def _pr_flow_merge_step(self) -> str:
+        """The merge phase's fork for the optional review-request flow (steps (b), (c)).
 
-        Returns True when this step OWNS the merge phase - a request set was
-        published and the ticket parked in the named awaiting-remote-review state
-        (or a named stop was raised) - so the caller must not continue into the
-        ordinary merge gate. Returns False when the project switch is off: the
-        caller then runs today's merge gate unchanged (negative control).
+        Returns the PHASE the caller must continue in (an empty string means "the
+        switch is off", so the caller runs today's merge gate unchanged - the
+        negative control):
 
-        Replay: the CALLER guards this call with
+          ""            off: today's local human gate and local landing
+          "merge"       the flow owns the merge phase: a request set was published
+                        and the ticket is parked (or a named stop blocked it)
+          "done"        the platform merged the delivery; the ticket is closed out
+          <work stage>  a comment round sent the ticket back for rework (step (c))
+
+        Replay: the CALLER guards the call with
         workflow.patched(PR_FLOW_DELIVERY_PATCH_ID), so a history recorded before
-        that marker schedules no new command here at all.
+        that marker schedules no new command here. Step (c) adds its own marker
+        (`PR_FLOW_POLL_PATCH_ID`): a history recorded with step (b) only replays
+        the park WITHOUT a timer and re-parks on a wake, byte for byte.
 
         The park holds NO working slot (the slot goes back with its own
-        `remote-review-wait` cause) and leaves only through the poller
-        (`remote_review_update`); what a wake MEANS is step (c)'s judgement and is
-        deliberately not made here.
+        `remote-review-wait` cause). It leaves only through the poller's wake
+        (`remote_review_update`, refused by name for every other source) or its
+        own slow, bounded beat, and the platform's answer - never a local act -
+        decides what happens next.
         """
+        poll_enabled = workflow.patched(pr_flow.PR_FLOW_POLL_PATCH_ID)
+        settled = self.meta.get("pr_flow") or {}
+        if poll_enabled and settled.get("outcome") == pr_flow.POLL_MERGED:
+            # The platform already merged this delivery; a retry finishes the
+            # close-out. The delivery act must NOT run again: a merged branch
+            # would be republished as a second request.
+            self._log("review-request flow: the platform merge is already recorded - "
+                      "the merge phase only finishes its close-out")
+            return await self._pr_flow_finish_close()
         self._enter("merge")
         payload = {
             "ticket_id": self.ticket_id,
@@ -5174,12 +5199,12 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             # the two cases must not be folded together.
             self._log("review-request flow: the delivery act returned no verdict - "
                       "the delivery takes the ordinary local merge gate")
-            return False
+            return ""
         if verdict.action == pr_flow.ACTION_LOCAL_LANDING:
             self._log("review-request flow: off for this project (switch=%s) - the "
                       "delivery takes the ordinary local merge gate"
                       % (verdict.switch or "off"))
-            return False
+            return ""
         if verdict.action != pr_flow.ACTION_REQUESTS_OPEN:
             why = (pr_flow.stop_text(verdict, self.ticket_id) if verdict.stop else
                    ("review-request delivery answered %r: nothing was published and "
@@ -5187,7 +5212,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     "(switch=%s)" % (verdict.action or "(absent)",
                                      verdict.switch or "?")))
             await self._blocked("merge", why)
-            return True
+            return "merge"
         if not verdict.requests:
             await self._blocked(
                 "merge",
@@ -5195,7 +5220,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                 "request: nothing is published on the ticket face, so the park "
                 "would be a lie - a retry re-runs the act (switch=%s)"
                 % (pr_flow.ACTION_REQUESTS_OPEN, verdict.switch or "?"))
-            return True
+            return "merge"
         self.meta["pr_requests"] = [dict(r) for r in verdict.requests]
         self.meta["pr_flow"] = pr_flow.awaiting_record(
             verdict, ticket_id=self.ticket_id,
@@ -5215,33 +5240,290 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                    "Waiting for the platform review; the merge of the request is the "
                    "acceptance record, and only the poller may wake this park")
         await self._ledger_flush()
+        return await self._pr_flow_park_loop(poll_enabled)
+
+    async def _pr_flow_park_loop(self, poll_enabled: bool) -> str:
+        """Wait for the platform on a slow, bounded beat (design step (c)).
+
+        Two ways in, one judgement:
+          * the poller's wake (`remote_review_update`), which is machine-judged by
+            `pr_flow.remote_review_exit` - every other source is refused BY NAME
+            and the ticket stays parked;
+          * the beat timer, which asks the platform itself.
+        Either way the ticket acts on the PLATFORM'S ANSWER, measured by the poll
+        activity on this beat: the wake payload is a notification, never an
+        acceptance record (a fabricated wake can therefore wake the poll, not
+        close a ticket).
+
+        One activity attempt per beat (`PR_FLOW_POLL_RETRY`): a beat that cannot
+        answer is a named state and the next beat asks again.
+        """
+        beat_no = 0
         while True:
-            await workflow.wait_condition(lambda: self._pr_wake is not None)
-            wake = self._pr_wake
-            self._pr_wake = None
-            decision = pr_flow.remote_review_exit(wake)
-            self.meta.setdefault("remote_review_wakes", []).append(decision.record)
-            if decision.accepted:
-                self._log("remote review wake accepted (poller): %s - the park is "
-                          "left; consuming what the platform reported is step (c), so "
-                          "the ticket re-parks" % (decision.record.get("note") or "-"))
+            wake = None
+            if poll_enabled:
+                try:
+                    await workflow.wait_condition(
+                        lambda: self._pr_wake is not None,
+                        timeout=pr_flow.POLL_BEAT_SECONDS)
+                except asyncio.TimeoutError:
+                    wake = None          # the beat fired: ask the platform
+                else:
+                    wake = self._pr_wake
+                    self._pr_wake = None
+            else:
+                # Step (b) replay: no timer, no poll - record the wake and re-park.
+                await workflow.wait_condition(lambda: self._pr_wake is not None)
+                wake = self._pr_wake
+                self._pr_wake = None
+            if wake is not None:
+                decision = pr_flow.remote_review_exit(wake)
+                self.meta.setdefault("remote_review_wakes", []).append(decision.record)
+                if not decision.accepted:
+                    self.refused.append({
+                        "who": str((wake or {}).get("source") or ""),
+                        "want": "leave " + pr_flow.AWAITING_REMOTE_REVIEW,
+                        "why": decision.reason})
+                    self._log("remote review wake refused: %s" % decision.reason)
+                    self._mark("merge", pr_flow.AWAITING_REMOTE_REVIEW,
+                               "wake refused: %s" % decision.reason[:200])
+                    self._touch()
+                    await self._ledger_flush()
+                    continue
+                self._log("remote review wake accepted (poller): %s - the platform is "
+                          "asked on this beat, so the answer comes from the platform "
+                          "and not from the wake payload"
+                          % (decision.record.get("note") or "-"))
                 self._mark("merge", pr_flow.REMOTE_REVIEW_WAKE,
                            "the poller reported a platform answer: the park is left "
                            "(the poller is the only channel that may leave it)")
-                self._mark("merge", pr_flow.AWAITING_REMOTE_REVIEW,
-                           "re-parked: consuming the platform answer (merged / comment "
-                           "round / still open) is step (c)'s judgement, not this "
-                           "step's - still holding no slot")
-            else:
-                self.refused.append({
-                    "who": str((wake or {}).get("source") or ""),
-                    "want": "leave " + pr_flow.AWAITING_REMOTE_REVIEW,
-                    "why": decision.reason})
-                self._log("remote review wake refused: %s" % decision.reason)
-                self._mark("merge", pr_flow.AWAITING_REMOTE_REVIEW,
-                           "wake refused: %s" % decision.reason[:200])
+                if not poll_enabled:
+                    self._mark("merge", pr_flow.AWAITING_REMOTE_REVIEW,
+                               "re-parked: consuming the platform answer (merged / "
+                               "comment round / still open) is step (c)'s judgement, "
+                               "not this step's - still holding no slot")
+                    self._touch()
+                    await self._ledger_flush()
+                    continue
+            beat_no += 1
+            raw = await workflow.execute_activity(
+                pr_flow_poll, self._pr_flow_poll_payload(beat_no),
+                start_to_close_timeout=SHORT, retry_policy=PR_FLOW_POLL_RETRY)
+            verdict = pr_flow.poll_verdict_from(raw)
+            outcome = await self._pr_flow_judge_poll(verdict, beat_no)
+            if outcome:
+                return outcome
+
+    def _pr_flow_poll_payload(self, beat: int) -> Dict[str, Any]:
+        """What the poll activity needs to ask about this ticket's requests.
+
+        `since` is the moment this park was entered: step (b) publishes (or
+        rewrites) the branch BEFORE it parks, so the park's entry time is the
+        ticket's last push and "comments after our last push" is exactly "after
+        this timestamp".
+        """
+        flow = self.meta.get("pr_flow") or {}
+        return {
+            "ticket_id": self.ticket_id,
+            "project": str(self.meta.get("project") or ""),
+            "worktree": str(self.meta.get("worktree") or ""),
+            "requests": [dict(r) for r in (self.meta.get("pr_requests") or [])],
+            "since": str(flow.get("entered_at") or ""),
+            "handled_comment_ids": pr_flow.handled_comment_ids(
+                self.meta.get("pr_comment_rounds")),
+            "beat": int(beat),
+        }
+
+    async def _pr_flow_judge_poll(self, verdict: Any, beat: int) -> str:
+        """Act on ONE beat's judgement. Returns "" to keep waiting, or the phase.
+
+        Fail-closed at every branch: a NAMED STOP always wins over an action (a
+        receipt that carries both can never close a ticket), only POLL_MERGED
+        closes anything, a closed request blocks by name, a comment round moves the
+        ticket once, a failed beat names itself and waits for the next beat.
+
+        A quiet beat is not a state change: the face is updated on every beat, but
+        the timeline is marked only when the answer CHANGED (a beat every five
+        minutes must not grow the ticket's history without bound).
+        """
+        flow = self.meta.setdefault("pr_flow", {})
+        prev_action = str(flow.get("last_action") or "")
+        prev_stop = str((flow.get("last_stop") or {}).get("code") or "")
+        now_iso = self._now_iso()
+        flow["last_beat"] = int(beat)
+        flow["last_answer_at"] = now_iso
+        flow["last_action"] = verdict.action or pr_flow.POLL_STOP
+        if verdict.stop:
+            flow["last_stop"] = {
+                "code": verdict.stop,
+                "at": now_iso,
+                "detail": str(verdict.detail or "")[:400],
+                "remedy": pr_flow.stop_remedy(verdict.stop),
+                "waits_for_next_beat": pr_flow.poll_stop_keeps_waiting(verdict.stop),
+            }
+        else:
+            flow.pop("last_stop", None)
+        flow["last_answer"] = [
+            {"name": o.get("name") or o.get("repo") or "",
+             "number": o.get("number") or 0,
+             "status": o.get("status") or "",
+             "comments": len(o.get("comments") or [])}
+            for o in (verdict.observations or [])]
+        text = pr_flow.poll_text(verdict, self.ticket_id)
+        self._log(text)
+        changed = (verdict.action, verdict.stop) != (prev_action, prev_stop)
+
+        if verdict.stop:
+            if pr_flow.poll_stop_keeps_waiting(verdict.stop):
+                # A failed beat: the park stays, nothing moves, the next beat asks.
+                if changed:
+                    self._mark("merge", pr_flow.AWAITING_REMOTE_REVIEW, text[:400])
+                self._touch()
+                await self._ledger_flush()
+                return ""
+            # A face a beat cannot remove: a human decides. Named, with the remedy.
+            await self._blocked("merge", text)
+            return "merge"
+        if verdict.action == pr_flow.POLL_MERGED:
+            flow["outcome"] = pr_flow.POLL_MERGED
+            flow["merge"] = pr_flow.acceptance_record(
+                verdict, ticket_id=self.ticket_id, at_iso=now_iso)
+            self._mark("merge", pr_flow.POLL_MERGED, text[:400])
             self._touch()
             await self._ledger_flush()
+            return await self._pr_flow_finish_close()
+        if verdict.action == pr_flow.POLL_COMMENT_ROUND:
+            rounds = self.meta.setdefault("pr_comment_rounds", [])
+            record = pr_flow.round_face_record(
+                verdict.round.get("comments") or [], round_no=len(rounds) + 1,
+                at_iso=now_iso, since_iso=str(flow.get("entered_at") or ""))
+            rounds.append(record)
+            self._mark("merge", pr_flow.POLL_COMMENT_ROUND, text[:400])
+            self._touch()
+            await self._ledger_flush()
+            return self._pr_flow_comment_round_landing(record)
+        if verdict.action == pr_flow.POLL_STILL_OPEN:
+            if changed:
+                self._mark("merge", pr_flow.AWAITING_REMOTE_REVIEW, text[:400])
+            self._touch()
+            await self._ledger_flush()
+            return ""
+        # An answer this step cannot read is a human face, never a quiet wait and
+        # never a close (poll_text says so in words).
+        await self._blocked("merge", text)
+        return "merge"
+
+    def _pr_flow_rework_target(self) -> str:
+        """This lane's work stage (the step a comment round sends the ticket to)."""
+        ids = [str(getattr(s, "id", "") or "") for s in self.STAGES]
+        for cand in ("work", "implement"):
+            if cand in ids:
+                return cand
+        return ""
+
+    def _pr_flow_comment_round_landing(self, record: Dict[str, Any]) -> str:
+        """Send the parked ticket back for rework carrying ONE comment round.
+
+        The landing mirrors the lane's own rework landing (`_auto_rework` /
+        `_consume_quick_rework`) field for field - the same meta fields, the same
+        stage memo - so a send-back from the platform and a send-back by a human
+        leave the same face. Nothing lands, nothing merges: the work is reworked.
+        """
+        target = self._pr_flow_rework_target()
+        if not target:
+            self._log("comment round %s cannot land: this lane names no work stage"
+                      % (record.get("round"),))
+            return "merge"
+        note = str(record.get("text") or "") or pr_flow.round_text(record)
+        self.meta["stage"] = target
+        self.meta["role"] = self._step(target).role
+        self.meta["status"] = "rework"
+        self.meta["stage_state"] = "awaiting"
+        self.meta["last_rework_note"] = note
+        self._touch()
+        self._log("comment round %s: %d comment(s) on the review request send the "
+                  "ticket back to %s"
+                  % (record.get("round"), int(record.get("count") or 0), target))
+        self._mark(target, "rework", note[:400])
+        self._persist_stage_memo(target, "rework")
+        return target
+
+    async def _pr_flow_finish_close(self) -> str:
+        """Close out a delivery the PLATFORM accepted (the merge is the record).
+
+        Archive the ticket data, tear the lane down, and finish the merge stage
+        citing the platform merge per repository. Nothing lands locally and no
+        main content is written (step (d) reconciles the local main branch), so
+        this close-out takes no merge claim.
+
+        Idempotent: a retry after a failed archive or teardown repeats only the
+        steps that did not finish, and `closed_out` stops a second finish.
+        """
+        flow = self.meta.setdefault("pr_flow", {})
+        if flow.get("closed_out"):
+            return "done"
+        record = dict(flow.get("merge") or {})
+        cited = "; ".join(str(x) for x in (record.get("cited") or [])) or \
+            "(the platform merge, per repository)"
+        try:
+            ares = await workflow.execute_activity(
+                archive_ticket,
+                ArchiveArgs(ticket_id=self.ticket_id,
+                            project_key=str(self.meta.get("project") or ""),
+                            worktree=str(self.meta.get("worktree") or ""),
+                            meta=dict(self.meta)),
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+        except Exception as e:  # noqa: BLE001 - fail-closed: keep the lane
+            await self._blocked(
+                "merge",
+                "Ticket data archive failed after the platform merge (fail-closed: "
+                "the lane is kept, not torn down): %s: %s%s | remedy: retry_qc "
+                "finishes the close-out; the platform merge is already recorded"
+                % (type(e).__name__, str(e)[:400],
+                   shared.exception_chain_note(e)))
+            return "merge"
+        if not isinstance(ares, ArchiveResult) or not ares.ok:
+            await self._blocked(
+                "merge",
+                "Ticket data archive receipt is not ok after the platform merge "
+                "(fail-closed: the lane is kept, not torn down): %s | remedy: "
+                "retry_qc finishes the close-out"
+                % ((getattr(ares, "error", "") or repr(ares))[:400],))
+            return "merge"
+        flow["archive_path"] = str(getattr(ares, "archive_path", "") or "")
+        self._log("ticket data archived: %s"
+                  % (flow["archive_path"] or "(path unknown)"))
+        try:
+            tr = await workflow.execute_activity(
+                teardown_lane,
+                MergeArgs(ticket_id=self.ticket_id,
+                          worktree=str(self.meta.get("worktree") or ""),
+                          branch=str(self.meta.get("branch") or ""),
+                          repo_worktrees=list(self.meta.get("repo_worktrees") or [])),
+                start_to_close_timeout=SHORT, retry_policy=RETRY)
+        except Exception as e:  # noqa: BLE001
+            await self._blocked(
+                "merge",
+                "Lane teardown failed (data already archived; lane leftovers need a "
+                "human): %s: %s%s | remedy: retry_qc finishes the close-out"
+                % (type(e).__name__, str(e)[:400],
+                   shared.exception_chain_note(e)))
+            return "merge"
+        if not isinstance(tr, MergeResult) or not tr.ok:
+            await self._blocked(
+                "merge",
+                "Lane teardown receipt is not ok (data already archived; lane "
+                "leftovers need a human): %s | remedy: retry_qc finishes the "
+                "close-out" % ((getattr(tr, "error", "") or repr(tr))[:400],))
+            return "merge"
+        if tr.error:
+            self._log("lane teardown warning (reclaimable leftovers, data already "
+                      "archived): %s" % tr.error)
+        flow["closed_out"] = True
+        self._finish("merge", by=PR_FLOW_MERGE_ACTOR,
+                     evidence="accepted by the platform merge: %s" % cited)
+        self._handoff("merge", "Merged on the platform: %s" % cited)
+        return "done"
 
     @workflow.signal
     def remote_review_update(self, payload: Dict[str, Any]) -> None:
@@ -7940,14 +8222,21 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                     if await self._dev_buffer_land_step():
                         phase = "done"
                     continue
-                # t261103-05 (design step (b)): with the project switch ON the green
-                # machine gate publishes review requests instead of landing locally,
-                # and the ticket parks awaiting the platform review. The patched()
-                # gate keeps a pre-marker history on its recorded command sequence;
-                # with the switch OFF the helper answers False and the ordinary gate
-                # below runs byte-identically.
-                if workflow.patched(pr_flow.PR_FLOW_DELIVERY_PATCH_ID) \
-                        and await self._pr_flow_merge_step():
+                # t261103-05 (design step (b)) + t261103-07 (step (c)): with the
+                # project switch ON the green machine gate publishes review requests
+                # instead of landing locally, and the ticket parks awaiting the
+                # platform review. The patched() gate keeps a pre-marker history on
+                # its recorded command sequence; with the switch OFF the helper
+                # answers "" and the ordinary gate below runs byte-identically.
+                #
+                # The helper answers the PHASE this loop continues in: "" is today's
+                # path, "merge" keeps the park, "done" closes the ticket (the
+                # platform merged), a work stage is a comment round.
+                _pr_phase = ""
+                if workflow.patched(pr_flow.PR_FLOW_DELIVERY_PATCH_ID):
+                    _pr_phase = await self._pr_flow_merge_step()
+                if _pr_phase:
+                    phase = _pr_phase
                     continue
                 # t261019-02 (host ruling 261019): the line-landed close-out fence now
                 # lives in the merge ACTIVITY (agent_activities.merge), where reading the
@@ -10277,9 +10566,13 @@ class QuickmanualLaneWorkflow(DevLaneWorkflow):
             # 5) merge - the human gate; landing through the ordinary act.
             if phase == "merge":
                 # t261103-05 (design step (b)): the review-request fork (same
-                # patched() gate, same helper as the dev-lane site).
-                if workflow.patched(pr_flow.PR_FLOW_DELIVERY_PATCH_ID) \
-                        and await self._pr_flow_merge_step():
+                # patched() gate, same helper as the dev-lane site). t261103-07
+                # (step (c)): the helper answers the phase this loop continues in.
+                _pr_phase = ""
+                if workflow.patched(pr_flow.PR_FLOW_DELIVERY_PATCH_ID):
+                    _pr_phase = await self._pr_flow_merge_step()
+                if _pr_phase:
+                    phase = _pr_phase
                     continue
                 self._enter("merge")
                 prep_ctx = await workflow.execute_activity(

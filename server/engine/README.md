@@ -1111,6 +1111,109 @@ handling with an injected transport/git runner, the receipt's redaction property
 the park's slot release and its poller-only exit, and a source lock over the three
 merge phase sites.
 
+## 19. Optional GitHub review-request delivery flow, step (c) (t261103-07)
+
+Design: `docs/design/github-pr-flow-v1.md` (requirements 4, 5, 6 and the failure
+faces of 8). Step (a) ships the switch and the credential, step (b) the delivery
+act and the park (`pr_flow.py`, sections "STEP (a)/(b)"). This step ships the
+poll, the platform verdict and the comment round. The post-merge reconciliation
+of the local target branch is step (d) (t261103-08, the section below): this step
+ends the TICKET, and step (d) then catches the local branch up.
+
+**The beat.** A parked ticket asks the platform on a slow timer
+(`pr_flow.POLL_BEAT_SECONDS`, 300s) through `agent_activities.pr_flow_poll`. One
+beat is ONE activity attempt (`dev_lane.PR_FLOW_POLL_RETRY =
+RetryPolicy(maximum_attempts=1)`) and one `poll_request` call per parked request
+(the port stops asking as soon as the platform stops answering). A beat never
+retries in place: a failed beat is a named state and the NEXT beat asks again, so
+a missed beat costs minutes, never a ticket. The park holds no working slot
+throughout (its `remote-review-wait` release is unchanged), and the beat is a
+durable timer, so the wait survives a worker restart.
+
+**Two ways in, one judgement.** An accepted poller wake (the workflow signal
+`remote_review_update`, sent through the ticket entry face
+`client.remote_review_wake`) makes the ticket ask the platform on the following
+beat; the wake payload is a NOTIFICATION only. The platform's answer - measured
+by the poll activity - is what the ticket acts on, so a fabricated wake can start
+a poll but can never close a ticket. Every other wake source is refused BY NAME
+(`pr_flow.remote_review_exit`) and the ticket stays parked.
+
+**The verdict mapping** (`pr_flow.judge_poll`, one truth table):
+
+| platform answer | ticket |
+| --- | --- |
+| every parked request merged | the ticket CLOSES, citing the merge per repository (that merge is the acceptance record) |
+| a request closed WITHOUT a merge | named non-acceptance (blocked, remedy line), never a close - even beside a merged sibling |
+| a request gone from the platform | named stop (`request_missing`), blocked |
+| the branch is deleted | named stop (`branch_deleted`), blocked |
+| some merged, some open | named NON-TERMINAL state (`partly_merged`): the park stays; a human reads the face |
+| new comments since our last push | exactly ONE comment round, back for rework |
+| comments but none new | named state (`comment_round_empty`): nothing moves |
+| unreachable / rate limited / unreadable answer | named state, the park stays, the next beat asks again |
+| still open | wait quietly, nothing moves |
+
+**The comment rule** (`pr_flow.select_comment_round`): every comment that arrived
+after our last push counts, human or bot alike (the `is_bot` flag is recorded as a
+fact, not used as a filter), EXCEPT the comments our own credential wrote (matched
+on the login the platform reports for the token, bot form tolerated) and the
+comments a previous round already carried (`meta.pr_comment_rounds[].ids`).
+"After our last push" is the park's entry time: step (b) publishes or rewrites the
+branch before it parks, so the park's `entered_at` IS the last push. Timestamps
+are compared as epochs in one format, so the platform's `...Z` and the engine's
+`...+00:00` cannot disagree. A comment whose timestamp cannot be read is KEPT
+(showing a reviewer's words twice is the smaller fault than dropping them).
+
+**The round on the ticket face.** `meta.pr_comment_rounds` gains one entry per
+round: `round` (1, 2, ...), `at`, `since`, `count`, `ids`, the comments themselves
+(bounded: 40 comments, 1200 chars each) and the rendered `text`. The ticket then
+moves back to the lane's own work stage (`work` on the quickmanual lane,
+`implement` on the dev and light lanes) through a landing that mirrors the lane's
+rework landing field for field (same five meta fields, same stage memo), so the
+comment text rides on `meta.last_rework_note` and the working session sees exactly
+what a reviewer wrote. Nothing lands locally and nothing merges here.
+
+**What a merge ends.** On the merged verdict the merge phase archives the ticket
+data, tears the lane down, finishes the merge stage and cites the platform merge
+(`meta.pr_flow.merge.cited`, one line per repository). The close-out takes NO
+merge claim and writes no main content: step (d) reconciles the local main branch.
+The merge is recorded on the face before the close-out runs, so a retry after a
+failed archive or teardown finishes the close-out and never re-runs the delivery
+act (a merged branch must not be republished as a second request).
+
+**Replay.** Step (c)'s workflow half sits behind
+`pr_flow.PR_FLOW_POLL_PATCH_ID`. A history recorded with step (b) only replays the
+park WITHOUT a timer and re-parks on a wake, byte for byte; the judgement helper
+is not reached, so no `outcome` is written on such a ticket.
+
+**Named stops**, each with a remedy line in `pr_flow.stop_remedy`:
+`platform_unreachable`, `rate_limited`, `answer_ambiguous`,
+`request_closed_unmerged`, `branch_deleted`, `request_missing`,
+`comment_round_empty`, `partly_merged`, `no_parked_request`, `switch_off`. The
+first five are split by class: `POLL_BEAT_STOPS` wait for the next beat
+(unreachable, rate limited, ambiguous, empty round, partly merged);
+`POLL_TERMINAL_STOPS` need a human and block the merge stage by name (closed
+unmerged, branch deleted, request missing, no parked request, switch off). Every
+stop text says in words that it is NOT a merge.
+
+**Tests** (`tests/test_t261022_merge_slot_release.py`, section "t261103-07", an
+already-anchored engine test file: the write set excludes `integration/`, so the
+shared anchor manifest cannot be extended from this lane): the verdict truth
+table over the whole answer vocabulary, merged-is-the-only-acceptance with the
+per-repository citations, the partly merged non-terminal state, the closed-request
+non-acceptance (fail-closed beside a merged sibling), the comment-round selection
+(own credential, own bot form, handled, before-the-push, bot comments that DO
+count, repeated ids), one-round-only plus the empty-round control, the poll's
+bounds (one call per request, no retry, no hammering after an unreachable answer),
+the port's raising and credential faces, the GitHub adapter over an injected
+transport (open/merged/closed/absent/rate limited, the comments call, the branch
+probe, `viewer_login`), and the workflow side: the platform merge closes the
+ticket through archive + teardown + a cited finish and never lands locally, a
+retry after a merge does not republish, a comment round moves the ticket back
+once with the text, a failed beat keeps the park and names itself, a closed
+request blocks by name, a pre-step-(c) history replays without a timer, and the
+wake entry (`client.remote_review_wake`) stamps the poller's source while every
+other source is refused.
+
 ## Review-request flow, step (d): reconciling the local branch after the merge
 
 Design: `docs/design/github-pr-flow-v1.md`, requirement 7 (`pr_flow.py`, section

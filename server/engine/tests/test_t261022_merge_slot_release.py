@@ -52,7 +52,7 @@ import concurrency as cc  # noqa: E402
 import dev_lane  # noqa: E402
 import light_lane  # noqa: E402,F401  (source locks below read its file)
 import shared  # noqa: E402
-from shared import Signature  # noqa: E402
+from shared import ArchiveResult, MergeResult, Signature  # noqa: E402
 
 DEV_LANE_PY = ENGINE / "dev_lane.py"
 LIGHT_LANE_PY = ENGINE / "light_lane.py"
@@ -1066,12 +1066,31 @@ def test_pr_flow_repo_identity_parsing():
 
 # ---------- the workflow side: the park, the slot, no local landing ------
 
-def _pr_stub(recorded, receipt):
+def _pr_stub(recorded, receipt, poll=None, patches=None, beats=1):
+    """The workflow facade of the review-request tests.
+
+    `poll` scripts what the poll activity answers (design step (c)); `patches`
+    limits which replay markers exist (None = all of them, the live case); `beats`
+    bounds how many beat timers the park may run before the run is parked (a
+    timer loop that never ends is exactly the busy loop the beat must not be).
+    """
+
+    def _patched(pid):
+        if patches is None:
+            return True
+        return pid in patches
+
     async def execute_activity(act, *a, **k):
         name = getattr(act, "__name__", str(act))
         recorded.append((name, a[0] if a else None))
         if name == "pr_flow_deliver":
             return receipt
+        if name == "pr_flow_poll":
+            return poll if poll is not None else {"action": "still_open", "beat": 1}
+        if name == "archive_ticket":
+            return ArchiveResult(ok=True, archive_path="/tmp/ticket-archive")
+        if name == "teardown_lane":
+            return MergeResult(ok=True)
         if name == "concurrency_acquire":
             return {"granted": True, "already_holding": False, "reason": "",
                     "position": 0, "limit": 10, "holders": 1, "waiting": 0}
@@ -1090,23 +1109,31 @@ def _pr_stub(recorded, receipt):
             raise _StoppedAtMerge()
         return {}
 
-    async def wait_condition(cond):
+    budget = {"beats": int(beats)}
+
+    async def wait_condition(cond, timeout=None):
         # The real facade suspends until the condition holds; here a condition
-        # that already holds returns at once (a seeded poller wake), anything
-        # else parks the run at its first wait.
+        # that already holds returns at once (a seeded poller wake). With a
+        # timeout the beat fires until the budget is spent, then the run parks
+        # (a beat that never stops would be the busy loop the design forbids).
         try:
             ready = bool(cond())
         except Exception:  # noqa: BLE001
             ready = False
         if ready:
             return None
-        raise _Parked()
+        if timeout is None:
+            raise _Parked()
+        if budget["beats"] <= 0:
+            raise _Parked()
+        budget["beats"] -= 1
+        raise asyncio.TimeoutError()
 
     def sleep(_):
         raise AssertionError("queue sleep reached: no slot should be taken")
 
     return SimpleNamespace(
-        patched=lambda pid: True,
+        patched=_patched,
         execute_activity=execute_activity,
         sleep=sleep,
         wait_condition=wait_condition,
@@ -1119,9 +1146,18 @@ def _pr_stub(recorded, receipt):
     )
 
 
-def _drive_pr(monkeypatch, receipt, seed_wake=None):
+class _EnteredStage(Exception):
+    """Sentinel: the loop entered a named phase (the test stops there)."""
+
+    def __init__(self, stage):
+        self.stage = stage
+        super().__init__(stage)
+
+
+def _drive_pr(monkeypatch, receipt, seed_wake=None, poll=None, patches=None,
+              beats=1, stop_at_stage=None):
     recorded = []
-    stub = _pr_stub(recorded, receipt)
+    stub = _pr_stub(recorded, receipt, poll=poll, patches=patches, beats=beats)
     monkeypatch.setattr(dev_lane, "workflow", stub)
     monkeypatch.setattr(base, "workflow", stub)
     orig_init = dev_lane.DevLaneWorkflow._init
@@ -1140,13 +1176,21 @@ def _drive_pr(monkeypatch, receipt, seed_wake=None):
     async def no_prepare(_self):
         return None
 
+    orig_enter = dev_lane.DevLaneWorkflow._enter
+
+    def aimed_enter(self, step_id):
+        if stop_at_stage and str(step_id) == str(stop_at_stage):
+            raise _EnteredStage(step_id)
+        orig_enter(self, step_id)
+
     monkeypatch.setattr(dev_lane.DevLaneWorkflow, "_init", aimed_init)
     monkeypatch.setattr(dev_lane.DevLaneWorkflow, "__init__", aimed_ctor)
     monkeypatch.setattr(dev_lane.DevLaneWorkflow, "_prepare_workspace_step", no_prepare)
+    monkeypatch.setattr(dev_lane.DevLaneWorkflow, "_enter", aimed_enter)
     wf = dev_lane.DevLaneWorkflow()
     try:
         asyncio.run(wf.run(_inp()))
-    except (_Parked, _StoppedAtMerge):
+    except (_Parked, _StoppedAtMerge, _EnteredStage):
         pass
     return wf, recorded
 
@@ -1232,16 +1276,34 @@ def test_pr_flow_switch_off_receipt_takes_the_ordinary_gate(monkeypatch):
 
 def test_pr_flow_merge_sites_are_gated_and_poller_only():
     """Every merge phase site forks through the SAME patched gate + helper (no
-    second implementation), and the park's slot release uses its own cause word."""
+    second implementation), the helper's answer decides the loop's phase, and the
+    park's slot release uses its own cause word.
+
+    Step (c) adds two source locks of its own: the beat is a TIMER (never a bare
+    `while True` poll), and a beat is exactly ONE activity attempt (the beat, not
+    an activity retry, is the retry unit)."""
     for lane_py, expected in ((DEV_LANE_PY, 2), (LIGHT_LANE_PY, 1)):
         src = lane_py.read_text(encoding="utf-8")
-        gate = ("if workflow.patched(pr_flow.PR_FLOW_DELIVERY_PATCH_ID) \\\n"
-                "                        and await self._pr_flow_merge_step():")
+        gate = ("if workflow.patched(pr_flow.PR_FLOW_DELIVERY_PATCH_ID):\n"
+                "                    _pr_phase = await self._pr_flow_merge_step()\n"
+                "                if _pr_phase:\n"
+                "                    phase = _pr_phase\n"
+                "                    continue")
         assert src.count(gate) == expected, (
             "%s: the review-request fork must sit at every merge phase site and "
             "only there (found %d, expected %d)"
             % (lane_py.name, src.count(gate), expected))
     dev_src = DEV_LANE_PY.read_text(encoding="utf-8")
+    assert "pr_flow.PR_FLOW_POLL_PATCH_ID" in dev_src, (
+        "the poll's replay gate is missing: a pre-step-(c) history would replay "
+        "different commands")
+    assert "timeout=pr_flow.POLL_BEAT_SECONDS" in dev_src, (
+        "the park does not wait on a beat TIMER: a bare wait would never poll")
+    assert "retry_policy=PR_FLOW_POLL_RETRY" in dev_src, (
+        "the poll activity is scheduled without its bounded retry policy: an "
+        "unreachable platform would be retried in place instead of on the next beat")
+    assert "PR_FLOW_POLL_RETRY = RetryPolicy(maximum_attempts=1)" in dev_src, (
+        "the beat must be one attempt: the beat is the retry unit")
     assert dev_src.count("_concurrency_release(CAUSE_REMOTE_REVIEW_WAIT") == 1, (
         "the remote-review park must release the slot at exactly one site")
     assert "def remote_review_update(" in dev_src, (
@@ -1273,6 +1335,657 @@ def test_pr_flow_remote_review_release_parks_on_the_ledger_face(proj):
 
 
 # ===========================================================================
+# t261103-07 (design step (c)) - the poll, the platform verdict, the comment round
+#
+# This section extends the same already-anchored engine test file for the same
+# reason the step (b) section does: the write set is server/engine/ only, so
+# integration/test_anchors.json (integration role) cannot be extended here and a
+# new test file would be an undeclared orphan (lint L16).
+#
+# intent: with a ticket parked in `awaiting-remote-review`, the engine asks the
+# platform on a slow bounded beat, and the PLATFORM'S ANSWER drives the ticket:
+# every declared repository merged closes the ticket citing the merge per
+# repository; a request closed WITHOUT a merge is a named non-acceptance and
+# never a close; new comments after our last push (our own words and already
+# handled ones excluded) produce exactly ONE rework round carrying the text; a
+# failed beat names itself and waits for the next beat; an empty round moves
+# nothing. Only the poller may wake the park, through a real ticket entry.
+#
+# hermetic: the platform is a fake port or a fake HTTP transport, the credential
+# is never resolved from ~/.sandbar, no socket, no git, no real activity.
+# ===========================================================================
+
+PROD_MERGE = {"repo": "repo_a", "name": "repo_a", "identity": "owner/repo_a",
+              "branch": "lane/x-repo_a", "number": 11,
+              "url": "https://example.invalid/pull/11",
+              "merged_at": "2026-11-03T09:10:00Z", "merge_commit": "abc1234"}
+
+
+def _open_poll(number=11, comments=None, branch="present", name="repo_a",
+               identity="owner/repo_a"):
+    return {"status": "open", "number": number, "branch": branch,
+            "comments": list(comments or []), "url": "",
+            "detail": "", "repo": name, "name": name, "identity": identity}
+
+
+def _merged_poll(number=11, name="repo_a", identity="owner/repo_a"):
+    return {"status": "merged", "number": number, "branch": "",
+            "comments": [], "merged_at": "2026-11-03T09:10:00Z",
+            "merge_commit": "abc1234", "url": "https://example.invalid/pull/11",
+            "detail": "", "repo": name, "name": name, "identity": identity}
+
+
+def _parked(requests=None):
+    return [dict(r) for r in (requests or [PROD_MERGE])]
+
+
+class _FakePollPlatform:
+    """Step (c)'s port: scripted answers per request number, every call recorded
+    so a test can prove what was NOT asked (no retry inside a beat)."""
+
+    def __init__(self, answers=None, login="sandbar-bot", raise_first=None):
+        self.calls = []
+        self._answers = answers or {}
+        self._login = login
+        self._raise = raise_first
+
+    def poll_request(self, scope, number):
+        self.calls.append((scope.get("identity"), number))
+        if self._raise is not None:
+            exc = self._raise
+            self._raise = None
+            raise exc
+        answer = self._answers.get(number, {"status": "open"})
+        return dict(answer) if isinstance(answer, dict) else answer
+
+    def viewer_login(self):
+        return self._login
+
+
+# ---------- the verdict truth table ---------------------------------------
+
+@pytest.mark.parametrize("answers,action,stop", [
+    ({11: _merged_poll()}, pr_flow.POLL_MERGED, ""),
+    ({11: {"status": "closed"}}, "", pr_flow.POLL_STOP_REQUEST_CLOSED_UNMERGED),
+    ({11: {"status": "absent"}}, "", pr_flow.POLL_STOP_REQUEST_MISSING),
+    ({11: _open_poll()}, pr_flow.POLL_STILL_OPEN, ""),
+    ({11: {"status": "unreachable"}}, "", pr_flow.POLL_STOP_PLATFORM_UNREACHABLE),
+    ({11: {"status": "rate_limited"}}, "", pr_flow.POLL_STOP_RATE_LIMITED),
+    ({11: {"status": "nonsense"}}, "", pr_flow.POLL_STOP_ANSWER_AMBIGUOUS),
+    ({11: {"status": "open", "branch": "deleted"}}, "",
+     pr_flow.POLL_STOP_BRANCH_DELETED),
+    ({11: _open_poll(comments=[{"id": "c1", "author": "human-reviewer",
+                                "body": "please rename this",
+                                "created_at": "2026-11-03T10:00:00Z"}])},
+     pr_flow.POLL_COMMENT_ROUND, ""),
+    ({11: _open_poll(comments=[{"id": "c1", "author": "sandbar-bot",
+                                "body": "opened by the engine",
+                                "created_at": "2026-11-03T10:00:00Z"}])},
+     "", pr_flow.POLL_STOP_COMMENT_ROUND_EMPTY),
+])
+def test_pr_flow_step_c_verdict_truth_table(answers, action, stop):
+    """One beat, one answer, one verdict - and no stop may read as a merge."""
+    platform = _FakePollPlatform(answers=answers)
+    verdict = pr_flow.poll_parked(platform, _parked(), own_logins=["sandbar-bot"],
+                                  since_iso="2026-11-03T09:00:00+00:00", beat=3)
+    assert verdict.action == action, (verdict.action, verdict.stop, verdict.detail)
+    assert verdict.stop == stop, (verdict.stop, verdict.detail)
+    assert verdict.beat == 3
+    if stop:
+        # A named stop carries a remedy and says in words that it is not a merge.
+        assert pr_flow.stop_remedy(stop) and pr_flow.stop_remedy(stop) != \
+            "retry after the named condition is removed", stop
+        text = pr_flow.poll_text(verdict, "t261103ut")
+        assert stop in text and "NOT a merge" in text, text
+    if action != pr_flow.POLL_MERGED:
+        assert not verdict.merged, "a non-merge answer carried a merge citation"
+
+
+def test_pr_flow_step_c_all_merged_is_the_only_acceptance_and_is_cited():
+    platform = _FakePollPlatform(answers={11: _merged_poll(), 12: _merged_poll(
+        number=12, name="repo_b", identity="owner/repo_b")})
+    requests = [PROD_MERGE, dict(PROD_MERGE, repo="repo_b", name="repo_b",
+                                 identity="owner/repo_b", number=12)]
+    verdict = pr_flow.poll_parked(platform, requests)
+    assert verdict.action == pr_flow.POLL_MERGED
+    record = pr_flow.acceptance_record(verdict, ticket_id="t261103ut",
+                                  at_iso="2026-11-03T09:20:00+00:00")
+    assert record["state"] == pr_flow.POLL_MERGED
+    assert [r["number"] for r in record["requests"]] == [11, 12]
+    assert record["cited"] == [
+        "owner/repo_a#11 merged at 2026-11-03T09:10:00Z (commit abc1234)",
+        "owner/repo_b#12 merged at 2026-11-03T09:10:00Z (commit abc1234)"], record["cited"]
+
+
+def test_pr_flow_step_c_a_partly_merged_delivery_is_named_and_does_not_move():
+    platform = _FakePollPlatform(answers={11: _merged_poll(),
+                                          12: _open_poll(number=12, name="repo_b",
+                                                         identity="owner/repo_b")})
+    requests = [PROD_MERGE, dict(PROD_MERGE, repo="repo_b", name="repo_b",
+                                 identity="owner/repo_b", number=12)]
+    verdict = pr_flow.poll_parked(platform, requests)
+    assert verdict.action == pr_flow.POLL_PARTLY_MERGED
+    assert verdict.stop == pr_flow.POLL_STOP_PARTLY_MERGED
+    assert pr_flow.poll_stop_keeps_waiting(verdict.stop), (
+        "a partly merged delivery must keep the park, not block it")
+    assert "owner/repo_a#11" in verdict.detail and "owner/repo_b#12" in verdict.detail
+    text = pr_flow.poll_text(verdict, "t261103ut")
+    assert "NOT a merge" in text and "remedy" in text, text
+    assert [m["number"] for m in verdict.merged] == [11], verdict.merged
+
+
+def test_pr_flow_step_c_a_closed_request_never_reads_as_a_merge():
+    """Fail-closed over the sibling: one repository merged and one closed WITHOUT a
+    merge is a NON-ACCEPTANCE, never a close."""
+    platform = _FakePollPlatform(answers={11: _merged_poll(), 12: {"status": "closed"}})
+    requests = [PROD_MERGE, dict(PROD_MERGE, repo="repo_b", name="repo_b",
+                                 identity="owner/repo_b", number=12)]
+    verdict = pr_flow.poll_parked(platform, requests)
+    assert verdict.action == "" and verdict.stop == \
+        pr_flow.POLL_STOP_REQUEST_CLOSED_UNMERGED
+    assert verdict.merged == []
+    text = pr_flow.poll_text(verdict, "t261103ut")
+    assert "not accepted" in text and "NOT a merge" in text, text
+
+
+def test_pr_flow_step_c_every_named_stop_has_a_remedy_and_a_class():
+    assert pr_flow.POLL_BEAT_STOPS & pr_flow.POLL_TERMINAL_STOPS == set(), (
+        "a stop cannot both wait for the next beat and need a human")
+    assert (pr_flow.POLL_BEAT_STOPS | pr_flow.POLL_TERMINAL_STOPS) == \
+        frozenset(pr_flow.POLL_STOP_TABLE), "a named stop has no class"
+    for code in pr_flow.POLL_STOP_TABLE:
+        remedy = pr_flow.stop_remedy(code)
+        assert remedy and remedy != "retry after the named condition is removed", code
+        assert pr_flow.is_poll_stop(code)
+    # The five faces the design names, each its own name.
+    for code in (pr_flow.POLL_STOP_PLATFORM_UNREACHABLE,
+                 pr_flow.POLL_STOP_RATE_LIMITED,
+                 pr_flow.POLL_STOP_ANSWER_AMBIGUOUS,
+                 pr_flow.POLL_STOP_REQUEST_CLOSED_UNMERGED,
+                 pr_flow.POLL_STOP_BRANCH_DELETED,
+                 pr_flow.POLL_STOP_COMMENT_ROUND_EMPTY):
+        assert code in pr_flow.POLL_STOP_TABLE
+
+
+# ---------- the comment round: selection and exclusion --------------------
+
+def test_pr_flow_step_c_comment_round_selection_excludes_own_and_handled():
+    """Every comment after our last push counts - human or bot - except our own
+    credential's words and the ones an earlier round already carried."""
+    comments = [
+        {"id": "c1", "author": "sandbar-bot", "body": "the engine's own note",
+         "created_at": "2026-11-03T10:00:00Z"},                    # ours
+        {"id": "c2", "author": "sandbar-bot[bot]", "body": "our bot again",
+         "created_at": "2026-11-03T10:01:00Z"},                    # ours (bot form)
+        {"id": "c3", "author": "human-reviewer", "body": "please rename",
+         "created_at": "2026-11-03T10:02:00Z"},                    # counts
+        {"id": "c4", "author": "ci-bot[bot]", "body": "a linter bot objects",
+         "created_at": "2026-11-03T10:03:00Z"},                    # bot, counts
+        {"id": "c5", "author": "human-reviewer", "body": "already handled",
+         "created_at": "2026-11-03T10:04:00Z"},                    # handled
+        {"id": "c6", "author": "human-reviewer", "body": "said before our push",
+         "created_at": "2026-11-03T08:00:00Z"},                    # before the push
+        {"id": "c3", "author": "human-reviewer", "body": "please rename",
+         "created_at": "2026-11-03T10:02:00Z"},                    # repeated id
+    ]
+    selected = pr_flow.select_comment_round(
+        comments, own_logins=["sandbar-bot"], handled_ids=["c5"],
+        since_iso="2026-11-03T09:00:00+00:00")
+    assert [c["id"] for c in selected] == ["c3", "c4"], selected
+    assert selected[1]["is_bot"] is True, (
+        "a bot comment counts (design requirement 5); it is recorded as a fact, "
+        "not filtered")
+
+
+def test_pr_flow_step_c_one_round_is_delivered_once():
+    """The same comments never produce a second round: the first round records
+    them, and the next beat sees an empty round and moves nothing."""
+    comments = [{"id": "c3", "author": "human-reviewer", "body": "please rename",
+                 "created_at": "2026-11-03T10:02:00Z"}]
+    platform = _FakePollPlatform(answers={11: _open_poll(comments=comments)})
+    first = pr_flow.poll_parked(platform, _parked(), own_logins=["sandbar-bot"],
+                                since_iso="2026-11-03T09:00:00+00:00", beat=1)
+    assert first.action == pr_flow.POLL_COMMENT_ROUND
+    record = pr_flow.round_face_record(first.round.get("comments"), round_no=1,
+                                       at_iso="2026-11-03T10:10:00+00:00",
+                                       since_iso="2026-11-03T09:00:00+00:00")
+    assert record["count"] == 1 and record["ids"] == ["c3"]
+    assert "please rename" in record["text"]
+    handled = pr_flow.handled_comment_ids([record])
+    assert handled == ["c3"]
+    second = pr_flow.poll_parked(platform, _parked(), own_logins=["sandbar-bot"],
+                                 handled_ids=handled,
+                                 since_iso="2026-11-03T09:00:00+00:00", beat=2)
+    assert second.action == "" and second.stop == \
+        pr_flow.POLL_STOP_COMMENT_ROUND_EMPTY
+    assert pr_flow.poll_stop_keeps_waiting(second.stop), (
+        "an empty round must not move the ticket")
+
+
+# ---------- the poll is bounded -------------------------------------------
+
+def test_pr_flow_step_c_the_poll_asks_once_per_request_and_never_retries():
+    platform = _FakePollPlatform(answers={11: _merged_poll()})
+    requests = [PROD_MERGE]
+    pr_flow.poll_parked(platform, requests, beat=1)
+    assert platform.calls == [("owner/repo_a", 11)], platform.calls
+    # An unreachable answer stops the beat: the remaining requests are not asked
+    # inside the same beat (the NEXT beat asks again).
+    platform2 = _FakePollPlatform(answers={11: {"status": "unreachable"}})
+    requests2 = [PROD_MERGE, dict(PROD_MERGE, number=12, name="repo_b",
+                                 identity="owner/repo_b")]
+    verdict = pr_flow.poll_parked(platform2, requests2, beat=1)
+    assert verdict.stop == pr_flow.POLL_STOP_PLATFORM_UNREACHABLE
+    assert platform2.calls == [("owner/repo_a", 11)], platform2.calls
+
+
+def test_pr_flow_step_c_a_raising_port_is_a_named_stop_not_an_exception():
+    platform = _FakePollPlatform(raise_first=RuntimeError("connection reset"))
+    verdict = pr_flow.poll_parked(platform, _parked(), beat=1)
+    assert verdict.stop == pr_flow.POLL_STOP_ANSWER_AMBIGUOUS, verdict.stop
+    assert "RuntimeError" in verdict.detail
+    # A step (a) credential stop is NOT a beat: it is raised to the caller.
+    platform2 = _FakePollPlatform(
+        raise_first=pr_flow.PrFlowStop(pr_flow.STOP_CREDENTIAL_REJECTED, "401"))
+    with pytest.raises(pr_flow.PrFlowStop) as e:
+        pr_flow.poll_parked(platform2, _parked(), beat=1)
+    assert e.value.code == pr_flow.STOP_CREDENTIAL_REJECTED
+
+
+def test_pr_flow_step_c_no_parked_request_is_named():
+    verdict = pr_flow.poll_parked(_FakePollPlatform(), [])
+    assert verdict.stop == pr_flow.POLL_STOP_NO_PARKED_REQUEST
+    assert pr_flow.poll_stop_keeps_waiting(verdict.stop) is False
+
+
+# ---------- the GitHub adapter (injected transport; no socket) ------------
+
+def _transport(script):
+    calls = []
+
+    def _t(method, url, headers, body, timeout):
+        calls.append((method, url))
+        if not script:
+            raise AssertionError("unexpected platform call: %s %s" % (method, url))
+        status, payload = script.pop(0)
+        return status, {}, json.dumps(payload).encode("utf-8")
+
+    _t.calls = calls
+    return _t
+
+
+def test_pr_flow_step_c_github_adapter_reads_state_comments_and_branch():
+    from shared import Signature as _S  # noqa: F401  (import parity with the file)
+
+    transport = _transport([
+        (200, {"number": 11, "state": "open", "merged": False,
+               "html_url": "https://example.invalid/pull/11",
+               "head": {"ref": "lane/x-repo_a", "sha": "deadbeef"}}),
+        (200, [{"id": 5, "body": "please rename", "created_at":
+                "2026-11-03T10:00:00Z",
+                "user": {"login": "human-reviewer", "type": "User"}},
+               {"id": 6, "body": "engine note", "created_at":
+                "2026-11-03T10:01:00Z",
+                "user": {"login": "sandbar-bot", "type": "Bot"}}]),
+        (200, {"name": "lane/x-repo_a"}),
+    ])
+    platform = pr_flow.GitHubPlatform(token="ghp_" + "a" * 30, transport=transport)
+    scope = {"repo": "repo_a", "name": "repo_a", "identity": "owner/repo_a",
+             "branch": "lane/x-repo_a", "remote": ""}
+    answer = platform.poll_request(scope, 11)
+    assert answer["status"] == pr_flow.REQUEST_OPEN, answer
+    assert answer["branch"] == pr_flow.BRANCH_PRESENT
+    assert [c["id"] for c in answer["comments"]] == ["5", "6"]
+    assert answer["comments"][1]["is_bot"] is True
+    # The round then excludes our bot's own note and keeps the human's.
+    selected = pr_flow.select_comment_round(answer["comments"],
+                                            own_logins=["sandbar-bot"])
+    assert [c["id"] for c in selected] == ["5"], selected
+    assert [c[0] for c in transport.calls] == ["GET", "GET", "GET"]
+    assert transport.calls[0][1].endswith("/repos/owner/repo_a/pulls/11")
+    assert "/issues/11/comments" in transport.calls[1][1]
+    assert "/branches/lane%2Fx-repo_a" in transport.calls[2][1]
+
+
+def test_pr_flow_step_c_github_adapter_maps_merged_closed_and_absent():
+    scope = {"identity": "owner/repo_a", "branch": "lane/x", "remote": ""}
+    merged = pr_flow.GitHubPlatform(
+        token="ghp_" + "b" * 30,
+        transport=_transport([(200, {"number": 11, "state": "closed",
+                                     "merged": True,
+                                     "merged_at": "2026-11-03T09:10:00Z",
+                                     "merge_commit_sha": "abc1234",
+                                     "html_url": "u"})]))
+    out = merged.poll_request(scope, 11)
+    assert out["status"] == pr_flow.REQUEST_MERGED
+    assert out["merge_commit"] == "abc1234" and out["merged_at"]
+    closed = pr_flow.GitHubPlatform(
+        token="ghp_" + "c" * 30,
+        transport=_transport([(200, {"number": 11, "state": "closed",
+                                     "merged": False, "html_url": "u"})]))
+    assert closed.poll_request(scope, 11)["status"] == pr_flow.REQUEST_CLOSED
+    absent = pr_flow.GitHubPlatform(
+        token="ghp_" + "d" * 30, transport=_transport([(404, {"message": "Not Found"})]))
+    assert absent.poll_request(scope, 11)["status"] == pr_flow.REQUEST_ABSENT
+
+
+def test_pr_flow_step_c_github_adapter_names_rate_limits_and_the_viewer():
+    scope = {"identity": "owner/repo_a", "branch": "lane/x", "remote": ""}
+    limited = pr_flow.GitHubPlatform(
+        token="ghp_" + "e" * 30,
+        transport=_transport([(429, {"message": "API rate limit exceeded"})]))
+    with pytest.raises(pr_flow.PrFlowStop) as e:
+        limited.poll_request(scope, 11)
+    assert e.value.code == pr_flow.POLL_STOP_RATE_LIMITED
+    viewer = pr_flow.GitHubPlatform(
+        token="ghp_" + "f" * 30,
+        transport=_transport([(200, {"login": "sandbar-bot"})]))
+    assert viewer.viewer_login() == "sandbar-bot"
+
+
+# ---------- the workflow side: the answer drives the ticket ---------------
+
+def _merged_poll_receipt(number=11, name="repo_a", identity="owner/repo_a"):
+    observation = _merged_poll(number=number, name=name, identity=identity)
+    return {"action": pr_flow.POLL_MERGED, "beat": 1, "stop": "", "detail": "",
+            "requests": [observation],
+            "merged": [{"repo": name, "name": name, "identity": identity,
+                        "branch": "lane/x-%s" % name, "number": number,
+                        "url": "https://example.invalid/pull/%d" % number,
+                        "merged_at": "2026-11-03T09:10:00Z",
+                        "merge_commit": "abc1234", "platform_merge": True}],
+            "round": {}}
+
+
+def test_pr_flow_step_c_a_platform_merge_closes_the_ticket(monkeypatch):
+    """The merge of every declared request ends the ticket: the close-out archives,
+    tears the lane down and finishes the merge stage citing the platform merge -
+    and nothing lands locally."""
+    wf, recorded = _drive_pr(monkeypatch, _requests_open_receipt(),
+                             poll=_merged_poll_receipt())
+    names = [n for n, _ in recorded]
+    assert "merge" not in names, "a platform merge landed locally: %r" % (names,)
+    assert "prepare_human_gate" not in names, names
+    assert "archive_ticket" in names and "teardown_lane" in names, names
+    assert wf.meta["status"] == "closed", wf.meta["status"]
+    assert wf.meta["stage_state"] == "awaiting"
+    flow = wf.meta["pr_flow"]
+    assert flow["outcome"] == pr_flow.POLL_MERGED
+    assert flow["closed_out"] is True
+    assert flow["merge"]["cited"] == [
+        "owner/repo_a#11 merged at 2026-11-03T09:10:00Z (commit abc1234)"], flow["merge"]
+    checks = wf.meta["checks"]["merge"]
+    assert checks and all(c["done"] for c in checks), checks
+    assert all(c["by"] == dev_lane.PR_FLOW_MERGE_ACTOR for c in checks), checks
+    assert any(h.get("stage") == "merge" and "abc1234" in h.get("summary", "")
+               or "Merged on the platform" in h.get("summary", "")
+               for h in wf.meta.get("handoffs") or []), wf.meta.get("handoffs")
+
+
+def test_pr_flow_step_c_a_retry_after_a_merge_never_republishes(monkeypatch):
+    """A second entry into the merge phase (a retry after a failed close-out) only
+    finishes the close-out: the delivery act does not run again, so a merged branch
+    cannot be republished as a second request."""
+    wf, recorded = _drive_pr(monkeypatch, _requests_open_receipt(),
+                             poll=_merged_poll_receipt())
+    names = [n for n, _ in recorded]
+    assert names.count("pr_flow_deliver") == 1, names
+    assert names.count("pr_flow_poll") == 1, names
+
+
+def test_pr_flow_step_c_a_comment_round_moves_the_ticket_back_once(monkeypatch):
+    round_receipt = {"action": pr_flow.POLL_COMMENT_ROUND, "beat": 1,
+                     "stop": "", "detail": "",
+                     "requests": [_open_poll(comments=[{"id": "c3",
+                                                        "author": "human-reviewer",
+                                                        "body": "please rename it",
+                                                        "created_at":
+                                                        "2026-11-03T10:02:00Z"}])],
+                     "merged": [],
+                     "round": {"count": 1, "ids": ["c3"],
+                               "comments": [{"id": "c3", "author": "human-reviewer",
+                                             "body": "please rename it",
+                                             "created_at": "2026-11-03T10:02:00Z",
+                                             "is_bot": False}]}}
+    wf, recorded = _drive_pr(monkeypatch, _requests_open_receipt(),
+                             poll=round_receipt, stop_at_stage="implement")
+    rounds = wf.meta.get("pr_comment_rounds") or []
+    assert len(rounds) == 1, rounds
+    assert rounds[0]["round"] == 1 and rounds[0]["ids"] == ["c3"]
+    assert "please rename it" in wf.meta["last_rework_note"], wf.meta["last_rework_note"]
+    assert wf.meta["status"] == "rework"
+    assert wf.meta["stage"] == "implement", wf.meta["stage"]
+    assert wf.meta["role"] == "developer"
+    assert any(t.get("state") == "rework" and t.get("stage") == "implement"
+               for t in wf.timeline), wf.timeline
+    names = [n for n, _ in recorded]
+    assert "run_integration_tests" not in names and "merge" not in names, names
+
+
+def test_pr_flow_step_c_a_failed_beat_names_itself_and_keeps_the_park(monkeypatch):
+    """An unanswerable poll is a NAMED state, the ticket stays parked (holding no
+    slot) and the next beat asks again - it never blocks and never closes."""
+    poll = {"action": "", "stop": pr_flow.POLL_STOP_PLATFORM_UNREACHABLE,
+            "detail": "no route to host", "beat": 1, "requests": [], "merged": [],
+            "round": {}}
+    wf, recorded = _drive_pr(monkeypatch, _requests_open_receipt(), poll=poll,
+                             beats=1)
+    flow = wf.meta["pr_flow"]
+    assert flow["last_stop"]["code"] == pr_flow.POLL_STOP_PLATFORM_UNREACHABLE
+    assert flow["last_stop"]["waits_for_next_beat"] is True
+    assert flow["last_stop"]["remedy"], flow["last_stop"]
+    assert wf.meta["stage_state"] == pr_flow.AWAITING_REMOTE_REVIEW, (
+        wf.meta["stage_state"], wf.meta.get("blocked_reason"))
+    assert not wf.meta.get("blocked_reason"), wf.meta.get("blocked_reason")
+    assert wf.meta["status"] != "closed"
+
+
+def test_pr_flow_step_c_a_closed_request_blocks_by_name_never_closes(monkeypatch):
+    poll = {"action": "", "stop": pr_flow.POLL_STOP_REQUEST_CLOSED_UNMERGED,
+            "detail": "the platform closed owner/repo_a#11 WITHOUT a merge",
+            "beat": 1, "requests": [], "merged": [], "round": {}}
+    wf, recorded = _drive_pr(monkeypatch, _requests_open_receipt(), poll=poll,
+                             beats=1)
+    reason = str(wf.meta.get("blocked_reason") or "")
+    assert pr_flow.POLL_STOP_REQUEST_CLOSED_UNMERGED in reason, reason
+    assert "NOT a merge" in reason and "remedy" in reason, reason
+    assert wf.meta["status"] != "closed", "a closed request closed the ticket"
+    assert wf.meta.get("pr_flow", {}).get("outcome") != pr_flow.POLL_MERGED
+
+
+def test_pr_flow_step_c_a_pre_step_c_history_replays_without_a_timer(monkeypatch):
+    """Replay discipline: with the step (c) marker absent the park records the wake
+    and re-parks - it schedules no timer and no poll, exactly as step (b) did."""
+    wf, recorded = _drive_pr(
+        monkeypatch, _requests_open_receipt(),
+        seed_wake={"source": "poller", "note": "beat 3", "reported": {"state": "open"}},
+        patches={dev_lane.pr_flow.PR_FLOW_DELIVERY_PATCH_ID})
+    names = [n for n, _ in recorded]
+    assert "pr_flow_poll" not in names, (
+        "a history recorded before the step (c) marker scheduled a poll: %r" % (names,))
+    states = [t.get("state") for t in wf.timeline]
+    assert pr_flow.REMOTE_REVIEW_WAKE in states, states
+    assert wf.meta["stage_state"] == pr_flow.AWAITING_REMOTE_REVIEW
+    assert "outcome" not in wf.meta["pr_flow"], (
+        "a pre-step-(c) replay judged the platform answer: %r"
+        % (wf.meta["pr_flow"],))
+
+
+# ---------- the tool-face entry: only the poller may wake the park --------
+
+def test_pr_flow_step_c_the_wake_entry_is_the_ticket_face_and_the_poller(monkeypatch):
+    """`client.remote_review_wake` is the wake's entry (this module implements every
+    ticket op), it sends the workflow's own wake signal, and the source it stamps is
+    the one `pr_flow.remote_review_exit` accepts - every other source is refused."""
+    import client
+
+    recorded = []
+
+    class _Handle:
+        async def signal(self, name, payload=None):
+            recorded.append((name, payload))
+
+    class _Client:
+        def get_workflow_handle(self, tid):
+            recorded.append(("handle", tid))
+            return _Handle()
+
+    async def _connect():
+        return _Client()
+
+    monkeypatch.setattr(client, "_connect", _connect)
+    out = asyncio.run(client.remote_review_wake("t261103ut", "beat 7"))
+    assert out["ok"] is True, out
+    assert ("handle", "t261103ut") in recorded
+    sent = [r for r in recorded if r[0] == client.REMOTE_REVIEW_WAKE_SIGNAL]
+    assert sent and sent[0][1]["source"] == pr_flow.POLLER_SOURCE, recorded
+    assert client.REMOTE_REVIEW_WAKE_SIGNAL == "remote_review_update"
+    # The workflow carries a handler with that exact name (the entry cannot drift).
+    assert "def %s(" % client.REMOTE_REVIEW_WAKE_SIGNAL in DEV_LANE_PY.read_text(
+        encoding="utf-8")
+    # And the judgement refuses every other source BY NAME.
+    for bad in ({"source": "sign", "note": "host signed"},
+                {"source": "advance"}, {"source": ""}, "not-a-payload"):
+        decision = pr_flow.remote_review_exit(bad)
+        assert decision.accepted is False, bad
+        assert "poller" in decision.reason, decision.reason
+
+    # Failures are named receipts, never raises.
+    empty = asyncio.run(client.remote_review_wake("", "note"))
+    assert empty["ok"] is False and "ticket id" in empty["error"]
+
+    class _Broken:
+        def get_workflow_handle(self, tid):
+            raise RuntimeError("no such workflow")
+
+    async def _broken():
+        return _Broken()
+
+    monkeypatch.setattr(client, "_connect", _broken)
+    failed = asyncio.run(client.remote_review_wake("t-ghost", "beat 8"))
+    assert failed["ok"] is False and "no such workflow" in failed["error"]
+
+
+# ---------- the activity shell (the seam a workflow may not touch) --------
+
+def _activity_payload(**over):
+    base = {"ticket_id": "t261103ut", "project": "proj-alpha",
+            "worktree": "", "requests": _parked(),
+            "since": "2026-11-03T09:00:00+00:00", "handled_comment_ids": [],
+            "beat": 2}
+    base.update(over)
+    return base
+
+
+def test_pr_flow_step_c_the_poll_activity_answers_a_named_stop_when_the_switch_is_off(
+        monkeypatch):
+    """The operator turned the flow off while the ticket was parked: the beat comes
+    back as a named stop for a human, never as an endless quiet wait."""
+    import agent_activities as aa
+
+    monkeypatch.setattr(pr_flow, "read_switch",
+                        lambda *a, **k: pr_flow.SwitchDecision(
+                            enabled=False, reason="off", repositories=(),
+                            declaration="/sandbox/projects/proj-alpha/project.yaml"))
+    out = asyncio.run(aa.pr_flow_poll(_activity_payload()))
+    assert out["stop"] == pr_flow.POLL_STOP_SWITCH_OFF, out
+    assert out["action"] == ""
+    assert pr_flow.poll_stop_keeps_waiting(out["stop"]) is False
+
+
+def test_pr_flow_step_c_the_poll_activity_asks_the_platform_once_per_beat(monkeypatch):
+    """The activity resolves the credential and the platform inside itself, asks
+    the platform once, and returns a scrubbed receipt (never the token)."""
+    import agent_activities as aa
+
+    fake = _FakePollPlatform(answers={
+        11: _open_poll(comments=[{"id": "c1", "author": "human-reviewer",
+                                  "body": "please rename",
+                                  "created_at": "2026-11-03T10:00:00Z"}])},
+        login="sandbar-bot")
+    monkeypatch.setattr(pr_flow, "read_switch",
+                        lambda *a, **k: pr_flow.SwitchDecision(
+                            enabled=True, reason="on",
+                            repositories=("owner/repo_a",),
+                            declaration="/sandbox/projects/proj-alpha/project.yaml"))
+    monkeypatch.setattr(pr_flow, "resolve_credential",
+                        lambda **k: pr_flow.Credential(secret="ghp_" + "a" * 30))
+    monkeypatch.setattr(pr_flow, "platform_from_credential",
+                        lambda credential, **k: fake)
+    out = asyncio.run(aa.pr_flow_poll(_activity_payload()))
+    assert out["action"] == pr_flow.POLL_COMMENT_ROUND, out
+    assert [c["id"] for c in out["round"]["comments"]] == ["c1"], out["round"]
+    assert fake.calls == [("owner/repo_a", 11)], fake.calls
+    assert "ghp_" not in json.dumps(out), "the token rode out on the receipt"
+    assert aa.pr_flow_poll in aa.ALL_AGENT_ACTIVITIES
+
+
+def test_pr_flow_step_c_the_poll_activity_maps_an_unbuildable_client_to_a_beat(monkeypatch):
+    import agent_activities as aa
+
+    monkeypatch.setattr(pr_flow, "read_switch",
+                        lambda *a, **k: pr_flow.SwitchDecision(
+                            enabled=True, reason="on",
+                            repositories=("owner/repo_a",),
+                            declaration="/sandbox/projects/proj-alpha/project.yaml"))
+
+    def _boom(**k):
+        raise RuntimeError("no sandbox home")
+
+    monkeypatch.setattr(pr_flow, "resolve_credential", _boom)
+    out = asyncio.run(aa.pr_flow_poll(_activity_payload()))
+    assert out["stop"] == pr_flow.POLL_STOP_PLATFORM_UNREACHABLE, out
+    assert pr_flow.poll_stop_keeps_waiting(out["stop"]) is True
+
+
+def test_pr_flow_step_c_a_quiet_beat_does_not_grow_the_history(monkeypatch):
+    """Three quiet beats update the face but mark the timeline once: a beat every
+    five minutes must not grow the ticket history without bound."""
+    poll = {"action": pr_flow.POLL_STILL_OPEN, "beat": 1, "stop": "", "detail": "",
+            "requests": [_open_poll()], "merged": [], "round": {}}
+    wf, _recorded = _drive_pr(monkeypatch, _requests_open_receipt(), poll=poll,
+                              beats=3)
+    marks = [t for t in wf.timeline
+             if t.get("state") == pr_flow.AWAITING_REMOTE_REVIEW]
+    assert len(marks) == 2, (
+        "expected the park entry plus ONE still-open mark for three quiet beats, "
+        "got %d: %r" % (len(marks), [t.get("reason") for t in marks]))
+    assert wf.meta["pr_flow"]["last_beat"] == 3, wf.meta["pr_flow"]["last_beat"]
+    assert wf.meta["stage_state"] == pr_flow.AWAITING_REMOTE_REVIEW
+
+
+def test_pr_flow_step_c_a_stop_wins_over_an_action_in_one_receipt():
+    """A receipt that claims an action AND a stop is read as the stop: no receipt
+    can close a ticket by carrying the word "merged" on the side."""
+    raw = {"action": pr_flow.POLL_MERGED,
+           "stop": pr_flow.POLL_STOP_ANSWER_AMBIGUOUS, "beat": 2}
+    verdict = pr_flow.poll_verdict_from(raw)
+    assert verdict.stop == pr_flow.POLL_STOP_ANSWER_AMBIGUOUS
+    assert verdict.action == pr_flow.POLL_MERGED     # the decoder is faithful
+    assert pr_flow.poll_text(verdict, "t").startswith(
+        "review-request poll stopped"), pr_flow.poll_text(verdict, "t")
+
+
+def test_pr_flow_step_c_an_unreadable_receipt_is_a_failed_beat():
+    for raw in ({}, {"beat": 4}, "not-a-receipt", None):
+        verdict = pr_flow.poll_verdict_from(raw)
+        assert verdict.stop == pr_flow.POLL_STOP_ANSWER_AMBIGUOUS, raw
+        assert pr_flow.poll_stop_keeps_waiting(verdict.stop), raw
+
+
+def test_pr_flow_step_c_a_round_needs_to_know_which_comments_are_ours():
+    """Without the credential's login the poll cannot tell our own words apart, so
+    it refuses to form a round (a bounce of our own comments would restart the work
+    forever). The next beat asks again."""
+    platform = _FakePollPlatform(answers={11: _open_poll(comments=[
+        {"id": "c1", "author": "human-reviewer", "body": "please rename",
+         "created_at": "2026-11-03T10:00:00Z"}])})
+    verdict = pr_flow.poll_parked(platform, _parked(), beat=1)
+    assert verdict.action == ""
+    assert verdict.stop == pr_flow.POLL_STOP_ANSWER_AMBIGUOUS, verdict.stop
+    assert "login" in verdict.detail, verdict.detail
+
+
 # t261103-08 (design step (d)) - reconcile the local target branch after the
 # platform merged: a fast-forward plus a content check, nothing else.
 #

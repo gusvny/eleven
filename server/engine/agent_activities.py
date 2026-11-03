@@ -15476,11 +15476,115 @@ async def pr_flow_deliver(payload: Dict[str, Any]) -> Dict[str, Any]:
     return verdict.to_dict()
 
 
+# ---------- review-request delivery flow, step (c) (t261103-07) -------------
+#
+# One beat of the poll. The workflow owns the timer and the judgement; this
+# activity owns the parts a workflow may not do (read the environment, resolve
+# the credential, open a socket) and answers with ONE scrubbed receipt.
+#
+# Bounds: one `poll_request` call per parked request, no retry inside the
+# activity, and the caller schedules ONE attempt per beat
+# (`RetryPolicy(maximum_attempts=1)`), so a failed beat waits for the next beat
+# instead of retrying in place.
+
+@activity.defn
+async def pr_flow_poll(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Ask the platform what happened to a parked ticket's requests (step (c)).
+
+    The receipt carries the platform's answer (state per request, the comments
+    that may form a round) and the judgement of that answer. It never carries the
+    credential: the token is resolved here with step (a)'s checks, revealed only
+    to build the client, and every string goes through `pr_flow.redact`/`scrub`.
+
+    Failure faces are named, never raised: a step (a) credential stop, an
+    unreachable platform, a rate-limited beat, an ambiguous answer and a switch
+    that was turned off while the ticket was parked each come back as a named
+    stop with its remedy.
+    """
+    args = payload if isinstance(payload, dict) else {}
+    ticket_id = str(args.get("ticket_id") or "")
+    project = str(args.get("project") or "")
+    worktree = str(args.get("worktree") or "")
+    beat = 0
+    try:
+        beat = int(args.get("beat") or 0)
+    except (TypeError, ValueError):
+        beat = 0
+    requests = [dict(r) for r in (args.get("requests") or [])
+                if isinstance(r, dict)]
+
+    # 1) the switch. An operator who turned it off left the ticket parked for a
+    #    flow that no longer runs: a named stop for a human, never a silent wait.
+    if project:
+        try:
+            switch = pr_flow.read_switch(project,
+                                        str(shared.perkey_projects_root()))
+        except pr_flow.PrFlowStop as e:
+            activity.logger.warning("[%s] review-request poll: switch refused (%s)",
+                                    ticket_id, e.code)
+            return pr_flow.poll_stop_verdict(e.code, e.message(), beat=beat).to_dict()
+        if not switch.enabled:
+            return pr_flow.poll_stop_verdict(
+                pr_flow.POLL_STOP_SWITCH_OFF,
+                "the project declaration no longer enables the review-request flow "
+                "(reason %r): the parked ticket cannot be polled" % (switch.reason,),
+                beat=beat).to_dict()
+
+    # 2) the credential and the platform (no validity probe: the poll's own
+    #    answer is the probe, and this beat must not spend an extra request).
+    try:
+        credential = pr_flow.resolve_credential(
+            project_dirs=[worktree] if worktree else ())
+        platform = pr_flow.platform_from_credential(credential)
+    except pr_flow.PrFlowStop as e:
+        activity.logger.warning("[%s] review-request poll refused (%s)",
+                                ticket_id, e.code)
+        return pr_flow.poll_stop_verdict(e.code, e.message(), beat=beat).to_dict()
+    except Exception as e:  # noqa: BLE001 - an unbuildable client is a failed beat
+        return pr_flow.poll_stop_verdict(
+            pr_flow.POLL_STOP_PLATFORM_UNREACHABLE,
+            "the platform client could not be built: %s: %s"
+            % (type(e).__name__, e), beat=beat).to_dict()
+
+    # 3) whose words are ours (the exclusion rule needs the credential's login).
+    own: List[str] = []
+    try:
+        login = str(getattr(platform, "viewer_login", lambda: "")() or "").strip()
+    except pr_flow.PrFlowStop as e:
+        if str(e.code or "").startswith("github_pr_credential_"):
+            return pr_flow.poll_stop_verdict(e.code, e.message(), beat=beat).to_dict()
+        login = ""
+    except Exception as e:  # noqa: BLE001 - an unanswerable lookup is a failed beat
+        activity.logger.warning("[%s] review-request poll: viewer lookup failed (%s)",
+                                ticket_id, type(e).__name__)
+        login = ""
+    if login:
+        own = [login]
+
+    # 4) the beat itself (bounded inside: one call per parked request).
+    try:
+        verdict = pr_flow.poll_parked(
+            platform, requests, own_logins=own,
+            handled_ids=list(args.get("handled_comment_ids") or []),
+            since_iso=str(args.get("since") or ""), beat=beat)
+    except pr_flow.PrFlowStop as e:
+        activity.logger.warning("[%s] review-request poll refused (%s)",
+                                ticket_id, e.code)
+        return pr_flow.poll_stop_verdict(e.code, e.message(), beat=beat).to_dict()
+    activity.logger.info(
+        "[%s] review-request poll beat %d: %s%s", ticket_id, beat,
+        verdict.action or "stop",
+        (" (" + verdict.stop + ")") if verdict.stop else "")
+    return verdict.to_dict()
+
+
 ALL_AGENT_ACTIVITIES = AGENT_STAGE_ACTIVITIES + [
     prepare_human_gate, prepare_workspace, merge_check, merge,
     # t261103-05: the review-request delivery act (design step (b)); a missing
     # registration only surfaces at runtime (same discipline as the entries below).
     pr_flow_deliver,
+    # t261103-07: one beat of the review-request poll (design step (c)).
+    pr_flow_poll,
     # t260925-01 产出型巡检 produce 段（受限可写 agent + 机械自检四闸）
     run_inspection_produce,
     prepare_conflict_resolution, settle_conflict_resolution,

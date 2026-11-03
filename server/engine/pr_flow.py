@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """pr_flow -- the optional GitHub review-request delivery flow.
 
-Design: docs/design/github-pr-flow-v1.md. This module ships three of the four
-steps: (a) the switch and the credential (requirement 1 and 2), (b) the delivery
-act that opens one request per changed repository and parks the ticket (3, 4 and
-6), and (d) the post-merge reconciliation of the local target branch (7). Step
-(c) -- the poll that reads the platform and turns comment rounds into rework --
-is a separate ticket. A project that does not set the switch keeps today's
+Design: docs/design/github-pr-flow-v1.md. This module ships all four steps:
+(a) the switch and the credential (requirement 1 and 2), (b) the delivery act
+that opens one request per changed repository and parks the ticket (3, 4 and 6),
+(c) the poll that reads the platform, ends the ticket on a merge and turns a
+comment round into rework (4 and 5), and (d) the post-merge reconciliation of the
+local target branch (7). A project that does not set the switch keeps today's
 behaviour byte for byte: every entry point below answers "not applicable" or
 "land locally" before it reads a credential, a branch or a network.
 
@@ -819,9 +819,16 @@ def is_delivery_stop(code: Any) -> bool:
 
 
 def stop_remedy(code: Any) -> str:
-    """The remedy line for any stop code this module can report (the delivery
-    act's, step (a)'s preconditions, and step (d)'s reconciliation)."""
+    """The remedy line for any stop code this module can report.
+
+    Four families, one entry point: step (c)'s poll stops (defined further down in
+    this module), step (b)'s delivery stops, step (d)'s reconciliation stops and
+    step (a)'s precondition stops. Every named face of the flow therefore carries a
+    remedy a reader can act on.
+    """
     name = str(code or "")
+    if name in POLL_STOP_REMEDY:
+        return POLL_STOP_REMEDY[name]
     if name in DELIVERY_STOP_REMEDY:
         return DELIVERY_STOP_REMEDY[name]
     if name in RECONCILE_STOP_REMEDY:
@@ -1374,6 +1381,787 @@ def _plain(value: Any) -> Any:
         return redact(value)[:400]
 
 
+# ===========================================================================
+# STEP (c) - the poll, the verdict, and the comment round
+# ===========================================================================
+#
+# Step (b) above parks the ticket and accepts only the poller's wake. This half
+# says what an answer MEANS. The engine asks the platform ONCE per slow beat and
+# the platform's answer drives the ticket:
+#
+#   every parked request merged   -> the ticket closes, citing the platform merge
+#                                    per repository (that merge is the acceptance
+#                                    record, not a local signature)
+#   a request closed WITHOUT merge -> a named NON-ACCEPTANCE. The ticket is never
+#                                    closed here, even when a sibling merged.
+#   new comments since our push   -> exactly ONE rework round carrying the text
+#   still open                    -> wait quietly (nothing moves, no slot is held)
+#
+# Two rules carry the whole judgement:
+#
+#   * Only "all declared repositories merged" accepts a delivery. A partly merged
+#     delivery is a named, non-terminal state; a closed request is a
+#     non-acceptance even beside a merged one.
+#   * A comment round is a ROUND, not an event. Everything that arrived after our
+#     last push counts - human OR bot - except the words of our own credential and
+#     everything a previous round already carried. Nothing selected = no move.
+#
+# Bounds (deliberate, and the reason a poll can never spin):
+#   * one port call per parked request per beat, never a second attempt inside a
+#     beat;
+#   * the workflow side runs one activity attempt per beat (maximum_attempts=1),
+#     so a failed beat waits for the next beat instead of retrying in place;
+#   * the number of parked requests is the number of repositories the project
+#     declared, so the beat's cost is bounded by the declaration, not by time.
+#
+# Port contract for step (c) (a fake in a test is a few lines):
+#   poll_request(scope, number) -> {"status": "open"|"merged"|"closed"|"absent"
+#                                            |"ambiguous"|"unreachable"
+#                                            |"rate_limited",
+#                                   "merged_at": iso, "merge_commit": sha,
+#                                   "url": str,
+#                                   "branch": "present"|"deleted"|"",
+#                                   "comments": [{"id", "author", "body",
+#                                                 "created_at", "is_bot"}],
+#                                   "detail": str}
+#   viewer_login()             -> the login our own credential posts as ("" when
+#                                 the port cannot say). An empty login is NOT
+#                                 papered over: the round would then be unable to
+#                                 tell our own words apart, so the answer is read
+#                                 as ambiguous, never as a round.
+# An implementation may raise `PrFlowStop` instead of returning a status; the
+# stop code is carried through unchanged and stays named.
+
+#: Replay gate for the workflow side of step (c). A history recorded before this
+#: marker replays step (b)'s park verbatim: record the wake, re-park, no timer.
+PR_FLOW_POLL_PATCH_ID = "dev-lane-pr-flow-poll-v1"
+
+#: The beat: one platform question per beat, on a slow timer. One beat does not
+#: loop and does not retry; a beat that cannot answer is a named state and the
+#: NEXT beat asks again (a missed beat costs minutes, never the ticket).
+POLL_BEAT_SECONDS = 300
+
+#: The poll's judgement outcomes. One word each, and only POLL_MERGED may end the
+#: ticket.
+POLL_MERGED = "merged"
+POLL_COMMENT_ROUND = "comment_round"
+POLL_STILL_OPEN = "still_open"
+POLL_PARTLY_MERGED = "partly_merged"
+#: The beat produced no action at all: it stopped, and `stop` names why.
+POLL_STOP = "stop"
+
+#: What the platform answered about ONE parked request. This is the whole
+#: vocabulary; anything else is `ambiguous`, never a guess.
+REQUEST_OPEN = "open"
+REQUEST_MERGED = "merged"
+REQUEST_CLOSED = "closed"
+REQUEST_ABSENT = "absent"
+REQUEST_AMBIGUOUS = "ambiguous"
+REQUEST_UNREACHABLE = "unreachable"
+REQUEST_RATE_LIMITED = "rate_limited"
+REQUEST_STATUSES = (REQUEST_OPEN, REQUEST_MERGED, REQUEST_CLOSED, REQUEST_ABSENT,
+                    REQUEST_AMBIGUOUS, REQUEST_UNREACHABLE, REQUEST_RATE_LIMITED)
+#: The answers that actually settled the question (the rest are a failed beat).
+REQUEST_ANSWERED = (REQUEST_OPEN, REQUEST_MERGED, REQUEST_CLOSED, REQUEST_ABSENT)
+
+#: The branch face of one parked request.
+BRANCH_PRESENT = "present"
+BRANCH_DELETED = "deleted"
+
+# ---- the poll's named stops (one table, the whole vocabulary) --------------
+
+POLL_STOP_PLATFORM_UNREACHABLE = "github_pr_poll_platform_unreachable"
+POLL_STOP_RATE_LIMITED = "github_pr_poll_rate_limited"
+POLL_STOP_ANSWER_AMBIGUOUS = "github_pr_poll_answer_ambiguous"
+POLL_STOP_REQUEST_CLOSED_UNMERGED = "github_pr_poll_request_closed_unmerged"
+POLL_STOP_BRANCH_DELETED = "github_pr_poll_branch_deleted"
+POLL_STOP_REQUEST_MISSING = "github_pr_poll_request_missing"
+POLL_STOP_COMMENT_ROUND_EMPTY = "github_pr_poll_comment_round_empty"
+POLL_STOP_PARTLY_MERGED = "github_pr_poll_partly_merged"
+POLL_STOP_NO_PARKED_REQUEST = "github_pr_poll_no_parked_request"
+POLL_STOP_SWITCH_OFF = "github_pr_poll_switch_off"
+
+#: code -> what the stop means, in one line. No entry may be read as a merge:
+#: the only acceptance face of this flow is POLL_MERGED.
+POLL_STOP_TABLE = {
+    POLL_STOP_PLATFORM_UNREACHABLE:
+        "the platform could not be reached on this beat",
+    POLL_STOP_RATE_LIMITED:
+        "the platform rate limited this beat",
+    POLL_STOP_ANSWER_AMBIGUOUS:
+        "the platform answer was ambiguous (the poll cannot read it)",
+    POLL_STOP_REQUEST_CLOSED_UNMERGED:
+        "the platform CLOSED the request without merging it (non-acceptance)",
+    POLL_STOP_BRANCH_DELETED:
+        "the branch under the request no longer exists on the platform",
+    POLL_STOP_REQUEST_MISSING:
+        "a request recorded on the ticket face is gone from the platform",
+    POLL_STOP_COMMENT_ROUND_EMPTY:
+        "there is nothing to deliver as a round (no new comment)",
+    POLL_STOP_PARTLY_MERGED:
+        "part of the delivery is merged and part is not (non-terminal)",
+    POLL_STOP_NO_PARKED_REQUEST:
+        "the parked ticket names no request, so there is nothing to poll",
+    POLL_STOP_SWITCH_OFF:
+        "the project switch was turned off while the ticket was parked",
+}
+
+#: code -> the remedy a reader can act on (one line, no jargon).
+POLL_STOP_REMEDY = {
+    POLL_STOP_PLATFORM_UNREACHABLE:
+        "nothing is lost: the next beat asks again; check the platform status "
+        "page if the beats keep failing",
+    POLL_STOP_RATE_LIMITED:
+        "nothing is lost: the next beat asks again; lower the beat rate or the "
+        "credential's request volume if this repeats",
+    POLL_STOP_ANSWER_AMBIGUOUS:
+        "the next beat asks again; if it repeats, read the request on the "
+        "platform and decide by hand (the ticket face names what was asked)",
+    POLL_STOP_REQUEST_CLOSED_UNMERGED:
+        "the delivery was not accepted: reopen the request on the platform, or "
+        "send rework(to_stage=work) to deliver again - the ticket stays open",
+    POLL_STOP_BRANCH_DELETED:
+        "push the branch again (the delivery act republishes it) and retry, or "
+        "cancel the ticket if the work is dropped",
+    POLL_STOP_REQUEST_MISSING:
+        "open the request again (the delivery act rewrites it in place when the "
+        "branch is still there), or cancel the ticket if the work is dropped",
+    POLL_STOP_COMMENT_ROUND_EMPTY:
+        "nothing moves: every comment seen was ours or already handled; the next "
+        "beat asks again",
+    POLL_STOP_PARTLY_MERGED:
+        "read the merged repositories on the ticket face and merge the rest, or "
+        "send rework(to_stage=work) for the open ones",
+    POLL_STOP_NO_PARKED_REQUEST:
+        "a human inspects the ticket face: the park recorded no request, so the "
+        "poll has nothing to ask about",
+    POLL_STOP_SWITCH_OFF:
+        "decide by hand: turn the switch back on and retry, or cancel the "
+        "ticket (the request stays on the platform)",
+}
+
+#: The stops that mean "this beat failed, the next beat asks again". The park
+#: STAYS, nothing moves, no slot is held.
+POLL_BEAT_STOPS = frozenset((
+    POLL_STOP_PLATFORM_UNREACHABLE,
+    POLL_STOP_RATE_LIMITED,
+    POLL_STOP_ANSWER_AMBIGUOUS,
+    POLL_STOP_COMMENT_ROUND_EMPTY,
+    POLL_STOP_PARTLY_MERGED,
+))
+
+#: The stops a beat cannot remove: a human decides. The ticket is blocked BY
+#: NAME with its remedy (never closed, never silently re-parked).
+POLL_TERMINAL_STOPS = frozenset((
+    POLL_STOP_REQUEST_CLOSED_UNMERGED,
+    POLL_STOP_BRANCH_DELETED,
+    POLL_STOP_REQUEST_MISSING,
+    POLL_STOP_NO_PARKED_REQUEST,
+    POLL_STOP_SWITCH_OFF,
+))
+
+
+def is_poll_stop(code: Any) -> bool:
+    """True for every stop this step can report."""
+    return str(code or "") in POLL_STOP_TABLE
+
+
+def poll_stop_keeps_waiting(code: Any) -> bool:
+    """True when the named stop is a failed beat: the park stays and the next
+    beat asks again. False means a human must act (blocked by name)."""
+    return str(code or "") in POLL_BEAT_STOPS
+
+
+# ---- the comment round ----------------------------------------------------
+
+#: How many comments one round may carry on the ticket face (the round itself is
+#: delivered whole; the FACE is what stays bounded).
+COMMENT_ROUND_FACE_LIMIT = 40
+#: How much of one comment body the face keeps.
+COMMENT_BODY_FACE_LIMIT = 1200
+
+
+def parse_iso(value: Any) -> float:
+    """Epoch seconds for an ISO-8601 timestamp, or -1.0 when it cannot be read.
+
+    One format for both sides (the platform answers "...Z", the engine records
+    "...+00:00"), so "after our last push" is a number comparison, never a string
+    comparison of two different spellings.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return -1.0
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        import datetime as _dt  # noqa: PLC0415 - local on purpose
+        return _dt.datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return -1.0
+
+
+def normalize_comment(raw: Any) -> Dict[str, Any]:
+    """One platform comment in this module's shape ({} when it is not a comment).
+
+    `is_bot` is recorded as a FACT, not a filter: the round's rule is "human or
+    bot alike, except our own words" (design requirement 5).
+    """
+    if not isinstance(raw, Mapping):
+        return {}
+    ident = str(raw.get("id") or "").strip()
+    author = str(raw.get("author") or raw.get("login") or "").strip()
+    body = str(raw.get("body") or "").strip()
+    if isinstance(raw.get("user"), Mapping):
+        author = str(raw["user"].get("login") or author).strip()
+        is_bot = str(raw["user"].get("type") or "").lower() == "bot"
+    else:
+        is_bot = bool(raw.get("is_bot"))
+    if author.lower().endswith("[bot]"):
+        is_bot = True
+    if not ident and not body:
+        return {}
+    return {
+        "id": ident,
+        "author": author,
+        "body": body,
+        "created_at": str(raw.get("created_at") or "").strip(),
+        "is_bot": is_bot,
+    }
+
+
+def _is_own_comment(author: str, own_logins: Iterable[Any]) -> bool:
+    """True when a comment was written by OUR credential.
+
+    The comparison is on the login, lower-cased; a bot suffix is tolerated so an
+    "our-bot[bot]" credential is still recognized as ours (the engine's own words
+    must never send a ticket back).
+    """
+    name = str(author or "").strip().lower()
+    if not name:
+        return False
+    bare = name[:-5] if name.endswith("[bot]") else name
+    for raw in own_logins or ():
+        mine = str(raw or "").strip().lower()
+        if not mine:
+            continue
+        mine_bare = mine[:-5] if mine.endswith("[bot]") else mine
+        if name == mine or bare == mine_bare:
+            return True
+    return False
+
+
+def select_comment_round(comments: Iterable[Any], *, own_logins: Iterable[Any] = (),
+                         handled_ids: Iterable[Any] = (),
+                         since_iso: Any = "") -> List[Dict[str, Any]]:
+    """The comments that form ONE round: arrived after our last push, not ours,
+    not already carried by an earlier round.
+
+    Rules, in the design's words (requirement 5): every comment that arrived after
+    our last push counts, human or bot alike, except the ones our own credential
+    wrote and the ones a previous round already handled.
+
+    A comment whose timestamp cannot be read is KEPT (showing a reviewer's words
+    twice is a smaller fault than silently dropping them); one whose id repeats
+    inside one answer is kept once.
+    """
+    mine = tuple(x for x in (own_logins or ()) if str(x or "").strip())
+    handled = {str(x) for x in (handled_ids or ()) if str(x or "").strip()}
+    since = parse_iso(since_iso)
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for raw in comments or ():
+        c = normalize_comment(raw)
+        if not c:
+            continue
+        ident = c["id"]
+        if ident and (ident in seen or ident in handled):
+            continue
+        if _is_own_comment(c["author"], mine):
+            continue
+        created = parse_iso(c["created_at"])
+        if since >= 0 and created >= 0 and created <= since:
+            continue
+        if ident:
+            seen.add(ident)
+        out.append(c)
+    return out
+
+
+def handled_comment_ids(rounds: Iterable[Any]) -> List[str]:
+    """Every comment id a previous round already carried (the ticket face is the
+    source: `meta["pr_comment_rounds"]`)."""
+    out: List[str] = []
+    for raw in rounds or ():
+        if not isinstance(raw, Mapping):
+            continue
+        ids = raw.get("ids")
+        if isinstance(ids, (list, tuple)):
+            out.extend(str(x) for x in ids if str(x or "").strip())
+        for c in (raw.get("comments") or []):
+            if isinstance(c, Mapping) and str(c.get("id") or "").strip():
+                out.append(str(c["id"]))
+    seen = set()
+    uniq = []
+    for i in out:
+        if i not in seen:
+            seen.add(i)
+            uniq.append(i)
+    return uniq
+
+
+def round_text(record: Mapping[str, Any]) -> str:
+    """The round as text, carried to the work stage (the comments are the work)."""
+    rows = [c for c in (record.get("comments") or []) if isinstance(c, Mapping)]
+    head = ("Review comments, round %s: %d comment(s) arrived on the review "
+            "request after our last push." % (record.get("round") or "?", len(rows)))
+    lines = [head, ""]
+    for c in rows:
+        who = str(c.get("author") or "(unknown author)")
+        if c.get("is_bot"):
+            who += " [bot]"
+        where = str(c.get("url") or "")
+        lines.append("- %s at %s%s:" % (who, c.get("created_at") or "(time unknown)",
+                                        (" (%s)" % where) if where else ""))
+        body = str(c.get("body") or "").strip() or "(empty comment)"
+        for line in body.split("\n"):
+            lines.append("  > %s" % line)
+        lines.append("")
+    lines.append("Address these in the lane, then deliver again: the request is "
+                 "rewritten in place, so the same thread carries the next round.")
+    return "\n".join(lines).strip()
+
+
+def round_face_record(comments: Iterable[Any], *, round_no: int, at_iso: str,
+                      since_iso: str = "") -> Dict[str, Any]:
+    """The ticket-face record of one comment round (bounded, scrubbed).
+
+    The round number makes "once per round" auditable: a second round needs new
+    comments, never the same ones.
+    """
+    rows: List[Dict[str, Any]] = []
+    for c in list(comments or [])[:COMMENT_ROUND_FACE_LIMIT]:
+        cc_ = normalize_comment(c)
+        if not cc_:
+            continue
+        body = cc_["body"]
+        if len(body) > COMMENT_BODY_FACE_LIMIT:
+            body = body[:COMMENT_BODY_FACE_LIMIT - 3].rstrip() + "..."
+        rows.append({"id": cc_["id"], "author": cc_["author"], "body": body,
+                     "created_at": cc_["created_at"], "is_bot": cc_["is_bot"]})
+    record = {
+        "round": int(round_no),
+        "at": str(at_iso or ""),
+        "since": str(since_iso or ""),
+        "count": len(rows),
+        "ids": [r["id"] for r in rows if r["id"]],
+        "comments": rows,
+    }
+    return scrub(dict(record, text=round_text(record)))
+
+
+# ---- the verdict ----------------------------------------------------------
+
+@dataclass
+class PollVerdict:
+    """One beat's judgement: what the platform said, and what it means.
+
+    `action` is one of POLL_MERGED / POLL_COMMENT_ROUND / POLL_STILL_OPEN /
+    POLL_PARTLY_MERGED, or "" when the beat stopped (`stop` names it). Only
+    POLL_MERGED closes a ticket; every stop names its remedy in `stop_remedy`.
+    """
+    action: str = ""
+    stop: str = ""
+    detail: str = ""
+    beat: int = 0
+    observations: List[Dict[str, Any]] = field(default_factory=list)
+    merged: List[Dict[str, Any]] = field(default_factory=list)
+    round: Dict[str, Any] = field(default_factory=dict)
+
+    def face(self) -> Dict[str, Any]:
+        return scrub({
+            "action": self.action,
+            "stop": self.stop,
+            "detail": self.detail,
+            "beat": int(self.beat),
+            "remedy": stop_remedy(self.stop) if self.stop else "",
+            "requests": [dict(o) for o in self.observations],
+            "merged": [dict(m) for m in self.merged],
+            "round": dict(self.round),
+        })
+
+    def to_dict(self) -> Dict[str, Any]:
+        """The activity receipt. Scrubbed: no secret can ride out on it."""
+        return self.face()
+
+
+def poll_verdict_from(raw: Any) -> PollVerdict:
+    """Decode a poll receipt (the workflow side's entry point)."""
+    if isinstance(raw, PollVerdict):
+        return raw
+    if not isinstance(raw, Mapping):
+        return PollVerdict(action="", stop=POLL_STOP_ANSWER_AMBIGUOUS,
+                           detail="the poll returned %r, not a receipt"
+                                  % type(raw).__name__)
+    try:
+        beat = int(raw.get("beat") or 0)
+    except (TypeError, ValueError):
+        beat = 0
+    if not raw.get("action") and not raw.get("stop"):
+        return poll_stop_verdict(
+            POLL_STOP_ANSWER_AMBIGUOUS,
+            "the poll receipt names neither an action nor a stop (beat %d): nothing "
+            "was judged and nothing moved" % beat, beat=beat)
+    return PollVerdict(
+        action=str(raw.get("action") or ""),
+        stop=str(raw.get("stop") or ""),
+        detail=str(raw.get("detail") or ""),
+        beat=beat,
+        observations=[dict(o) for o in (raw.get("requests") or [])
+                      if isinstance(o, Mapping)],
+        merged=[dict(m) for m in (raw.get("merged") or [])
+                if isinstance(m, Mapping)],
+        round=dict(raw.get("round") or {}) if isinstance(raw.get("round"), Mapping) else {})
+
+
+def poll_stop_verdict(code: Any, detail: Any = "", *, beat: int = 0,
+                      observations: Iterable[Any] = ()) -> PollVerdict:
+    """A named stop of the poll (never a merge, never a close)."""
+    return PollVerdict(action="", stop=redact(code), detail=redact(detail),
+                       beat=int(beat),
+                       observations=[dict(o) for o in (observations or ())
+                                     if isinstance(o, Mapping)])
+
+
+def merged_citations(observations: Iterable[Any]) -> List[Dict[str, Any]]:
+    """The platform merge, cited per repository (the acceptance record)."""
+    out: List[Dict[str, Any]] = []
+    for o in observations or ():
+        if not isinstance(o, Mapping):
+            continue
+        if str(o.get("status") or "") != REQUEST_MERGED:
+            continue
+        out.append(scrub({
+            "repo": str(o.get("repo") or ""),
+            "name": str(o.get("name") or ""),
+            "identity": str(o.get("identity") or ""),
+            "branch": str(o.get("branch") or ""),
+            "number": int(o.get("number") or 0),
+            "url": str(o.get("url") or ""),
+            "merged_at": str(o.get("merged_at") or ""),
+            "merge_commit": str(o.get("merge_commit") or ""),
+            "platform_merge": True,
+        }))
+    return out
+
+
+def acceptance_record(verdict: PollVerdict, *, ticket_id: str,
+                      at_iso: str) -> Dict[str, Any]:
+    """The ticket-face record of an accepted delivery: which platform merge
+    accepted which repository. This IS the acceptance record of the ticket.
+
+    Not to be confused with the platform port's `merge_record` (step (d) reads
+    the platform's own merge report for one repository): this is the ticket's
+    record of the acceptance, that one is a platform read.
+    """
+    rows = [dict(m) for m in verdict.merged] or merged_citations(verdict.observations)
+    cited = ["%s#%s merged at %s%s"
+             % (m.get("identity") or m.get("repo") or "?", m.get("number") or "?",
+                m.get("merged_at") or "(time not reported)",
+                (" (commit %s)" % m.get("merge_commit")) if m.get("merge_commit") else "")
+             for m in rows]
+    return scrub({
+        "state": POLL_MERGED,
+        "ticket": str(ticket_id or ""),
+        "at": str(at_iso or ""),
+        "beats": int(verdict.beat or 0),
+        "requests": rows,
+        "cited": cited,
+    })
+
+
+def poll_text(verdict: PollVerdict, ticket_id: str = "") -> str:
+    """The one-line status of a beat, or the blocked text of a named stop.
+
+    A stop always carries its remedy and the promise that nothing was lost, and it
+    says in words that it is not a merge (a non-acceptance must never read as an
+    acceptance).
+    """
+    if verdict.action == POLL_PARTLY_MERGED or verdict.stop == POLL_STOP_PARTLY_MERGED:
+        return ("review-request poll: part of the delivery is merged, part is not - "
+                "%s | remedy: %s | the ticket does not move and this is NOT a merge "
+                "of the delivery" % (verdict.detail or "the open requests are named on "
+                                     "the ticket face",
+                                     stop_remedy(POLL_STOP_PARTLY_MERGED)))
+    if verdict.stop:
+        return ("review-request poll stopped (%s%s): %s%s | remedy: %s | this is NOT a "
+                "merge and the ticket is not closed"
+                % (verdict.stop, (", ticket " + str(ticket_id)) if ticket_id else "",
+                   verdict.detail or "no detail recorded",
+                   poll_stop_keeps_waiting(verdict.stop)
+                   and " | the park stays, the next beat asks again" or "",
+                   stop_remedy(verdict.stop)))
+    if verdict.action == POLL_MERGED:
+        return ("review-request poll: every request is merged on the platform (%s) - "
+                "the platform merge is the acceptance record"
+                % ", ".join("%s#%s" % (m.get("identity") or m.get("repo") or "?",
+                                       m.get("number") or "?")
+                            for m in (verdict.merged or merged_citations(
+                                verdict.observations)) or []) or "(no request named)")
+    if verdict.action == POLL_COMMENT_ROUND:
+        return ("review-request poll: one comment round (%d comment(s)) - the ticket "
+                "goes back for rework with the comment text"
+                % int(verdict.round.get("count") or len(verdict.round.get("comments") or [])))
+    if verdict.action == POLL_STILL_OPEN:
+        return "review-request poll: still open on the platform - nothing moves"
+    return ("review-request poll answered %r: no judgement was made and nothing "
+            "moved (a named read, never a close)" % (verdict.action or "(absent)",))
+
+
+# ---- normalizing one port answer -----------------------------------------
+
+def _observation(request: Mapping[str, Any], answer: Mapping[str, Any]) -> Dict[str, Any]:
+    """One parked request + one port answer -> one observation row.
+
+    An answer outside the vocabulary is read as `ambiguous` (the engine does not
+    know the state), never as open and never as merged.
+    """
+    req = request if isinstance(request, Mapping) else {}
+    raw = answer if isinstance(answer, Mapping) else {}
+    status = str(raw.get("status") or "").strip().lower()
+    if status not in REQUEST_STATUSES:
+        status = REQUEST_AMBIGUOUS
+    branch = str(raw.get("branch") or "").strip().lower()
+    if branch not in (BRANCH_PRESENT, BRANCH_DELETED):
+        branch = ""
+    comments = []
+    for c in (raw.get("comments") or []):
+        cc_ = normalize_comment(c)
+        if cc_:
+            comments.append(cc_)
+    try:
+        number = int(req.get("number") or raw.get("number") or 0)
+    except (TypeError, ValueError):
+        number = 0
+    return scrub({
+        "repo": str(req.get("repo") or ""),
+        "name": str(req.get("name") or req.get("repo") or ""),
+        "identity": str(req.get("identity") or ""),
+        "branch": str(req.get("branch") or ""),
+        "number": number,
+        "url": str(raw.get("url") or req.get("url") or ""),
+        "status": status,
+        "merged_at": str(raw.get("merged_at") or "") if status == REQUEST_MERGED else "",
+        "merge_commit": str(raw.get("merge_commit") or "") if status == REQUEST_MERGED else "",
+        "branch_state": branch,
+        "comments": comments,
+        "detail": str(raw.get("detail") or "")[:300],
+    })
+
+
+def _asked_scope(request: Mapping[str, Any]) -> Dict[str, Any]:
+    """The scope a port implementation needs to ask about one parked request."""
+    req = request if isinstance(request, Mapping) else {}
+    return {"repo": str(req.get("repo") or ""),
+            "name": str(req.get("name") or ""),
+            "identity": str(req.get("identity") or ""),
+            "branch": str(req.get("branch") or ""),
+            "tree": "", "remote": "", "changed": True}
+
+
+# ---- the poll ------------------------------------------------------------
+
+def poll_parked(platform: Any, requests: Iterable[Any], *, own_logins: Iterable[Any] = (),
+                handled_ids: Iterable[Any] = (), since_iso: Any = "",
+                beat: int = 0) -> PollVerdict:
+    """One beat: ask the platform about every parked request, then judge ONE answer.
+
+    Bounded by construction: one `poll_request` call per parked request, no retry
+    inside the beat, and the beat stops asking as soon as the platform cannot
+    answer (a rate-limited or unreachable platform is not asked again inside the
+    same beat). Every failure is a named stop, never a guess.
+
+    A step (a) credential stop is NOT a beat: it is raised to the caller, which
+    names it on the ticket face (a rejected token cannot heal on the next beat).
+    """
+    parked = [r for r in (requests or ()) if isinstance(r, Mapping)]
+    if not parked:
+        return poll_stop_verdict(
+            POLL_STOP_NO_PARKED_REQUEST,
+            "the parked ticket face names no request: there is nothing to ask the "
+            "platform about", beat=beat)
+    observations: List[Dict[str, Any]] = []
+    for req in parked:
+        observations.append(_ask_one(platform, req))
+        if observations[-1].get("status") in (REQUEST_UNREACHABLE, REQUEST_RATE_LIMITED):
+            break          # do not hammer a platform that just refused to talk
+    return judge_poll(observations, own_logins=own_logins, handled_ids=handled_ids,
+                      since_iso=since_iso, beat=beat)
+
+
+def _status_for_stop(code: Any) -> str:
+    """A raised stop -> the observation status it means.
+
+    Rate limiting and an unreachable platform keep their own faces; everything
+    else is `ambiguous` (the read did not answer), which the next beat asks again.
+    """
+    name = str(code or "")
+    if name == POLL_STOP_RATE_LIMITED:
+        return REQUEST_RATE_LIMITED
+    if name == DELIVERY_STOP_PLATFORM_UNREACHABLE:
+        return REQUEST_UNREACHABLE
+    return REQUEST_AMBIGUOUS
+
+
+def _ask_one(platform: Any, request: Mapping[str, Any]) -> Dict[str, Any]:
+    """ONE question about ONE parked request, translated to one observation.
+
+    Never retried here: the caller's beat is the retry unit.
+    """
+    req = request if isinstance(request, Mapping) else {}
+    try:
+        number = int(req.get("number") or 0)
+    except (TypeError, ValueError):
+        number = 0
+    if number <= 0:
+        return _observation(req, {"status": REQUEST_AMBIGUOUS,
+                                  "detail": "the parked record carries no request "
+                                            "number, so the request cannot be asked "
+                                            "about"})
+    try:
+        answer = platform.poll_request(_asked_scope(req), number)
+    except PrFlowStop as e:
+        if str(e.code or "").startswith("github_pr_credential_"):
+            raise          # a precondition, not a beat: the caller names it
+        return _observation(req, {"status": _status_for_stop(e.code),
+                                  "detail": e.message()})
+    except Exception as e:  # noqa: BLE001 - an unclassified fault is a failed beat
+        return _observation(req, {
+            "status": REQUEST_AMBIGUOUS,
+            "detail": "poll_request raised %s: %s" % (type(e).__name__, e)})
+    return _observation(req, answer if isinstance(answer, Mapping) else {})
+
+
+def judge_poll(observations: Iterable[Any], *, own_logins: Iterable[Any] = (),
+               handled_ids: Iterable[Any] = (), since_iso: Any = "",
+               beat: int = 0) -> PollVerdict:
+    """Judge one beat's observations. This function is the truth table.
+
+    Order matters, and it is fail-closed at every step:
+      1. a beat that could not answer      -> its named stop, nothing moves;
+      2. a request closed WITHOUT a merge  -> non-acceptance (never a close);
+      3. a request gone from the platform  -> named stop;
+      4. a deleted branch                  -> named stop;
+      5. EVERY parked request merged       -> the only acceptance;
+      6. some merged, some open            -> named non-terminal state (a human
+                                              decides; a rework here could not
+                                              republish an already merged branch);
+      7. new comments (own/handled removed) -> ONE round;
+      8. comments seen but all excluded    -> named "nothing to deliver" (no move);
+      9. otherwise                          -> still open, wait quietly.
+    """
+    obs = [dict(o) for o in (observations or ()) if isinstance(o, Mapping)]
+    statuses = [str(o.get("status") or "") for o in obs]
+    if not obs:
+        return poll_stop_verdict(POLL_STOP_ANSWER_AMBIGUOUS,
+                                 "the beat produced no observation at all", beat=beat)
+    if REQUEST_UNREACHABLE in statuses:
+        return poll_stop_verdict(
+            POLL_STOP_PLATFORM_UNREACHABLE,
+            "the platform could not be reached for: %s"
+            % ", ".join(o.get("name") or o.get("repo") or "?"
+                        for o in obs if o.get("status") == REQUEST_UNREACHABLE),
+            beat=beat, observations=obs)
+    if REQUEST_RATE_LIMITED in statuses:
+        return poll_stop_verdict(
+            POLL_STOP_RATE_LIMITED,
+            "the platform rate limited the beat for: %s"
+            % ", ".join(o.get("name") or o.get("repo") or "?"
+                        for o in obs if o.get("status") == REQUEST_RATE_LIMITED),
+            beat=beat, observations=obs)
+    unknown = [o for o in obs if str(o.get("status") or "") not in REQUEST_ANSWERED]
+    if unknown:
+        return poll_stop_verdict(
+            POLL_STOP_ANSWER_AMBIGUOUS,
+            "; ".join("%s: %s" % (o.get("name") or o.get("repo") or "?",
+                                  o.get("detail") or ("status %r"
+                                                      % (o.get("status"),)))
+                      for o in unknown)[:400],
+            beat=beat, observations=obs)
+    closed = [o for o in obs if o.get("status") == REQUEST_CLOSED]
+    if closed:
+        return poll_stop_verdict(
+            POLL_STOP_REQUEST_CLOSED_UNMERGED,
+            "the platform closed %s WITHOUT a merge: the delivery was not accepted "
+            "(a rejection is not an acceptance and the ticket is not closed)"
+            % ", ".join("%s#%s" % (o.get("identity") or o.get("repo") or "?",
+                                   o.get("number") or "?") for o in closed),
+            beat=beat, observations=obs)
+    missing = [o for o in obs if o.get("status") == REQUEST_ABSENT]
+    if missing:
+        return poll_stop_verdict(
+            POLL_STOP_REQUEST_MISSING,
+            "the platform no longer has %s"
+            % ", ".join("%s#%s" % (o.get("identity") or o.get("repo") or "?",
+                                   o.get("number") or "?") for o in missing),
+            beat=beat, observations=obs)
+    deleted = [o for o in obs if o.get("branch_state") == BRANCH_DELETED]
+    if deleted:
+        return poll_stop_verdict(
+            POLL_STOP_BRANCH_DELETED,
+            "the branch is gone on the platform for: %s"
+            % ", ".join(o.get("name") or o.get("repo") or "?" for o in deleted),
+            beat=beat, observations=obs)
+    merged = [o for o in obs if o.get("status") == REQUEST_MERGED]
+    if merged and len(merged) == len(obs):
+        return PollVerdict(action=POLL_MERGED, beat=beat, observations=obs,
+                           merged=merged_citations(obs))
+    if merged:
+        # A named, NON-TERMINAL state: neither a merge (it would close the ticket)
+        # nor a stop a human must clear. The park stays and the next beat asks.
+        partly = poll_stop_verdict(
+            POLL_STOP_PARTLY_MERGED,
+            "merged: %s | still open: %s (the delivery ends only when every "
+            "declared repository is merged)"
+            % (", ".join("%s#%s" % (o.get("identity") or o.get("repo") or "?",
+                                    o.get("number") or "?") for o in merged),
+               ", ".join("%s#%s" % (o.get("identity") or o.get("repo") or "?",
+                                    o.get("number") or "?")
+                         for o in obs if o.get("status") == REQUEST_OPEN) or "(none)"),
+            beat=beat, observations=obs)
+        partly.action = POLL_PARTLY_MERGED
+        partly.merged = merged_citations(obs)
+        return partly
+    seen_comments = [c for o in obs for c in (o.get("comments") or [])]
+    own = [str(x) for x in (own_logins or ()) if str(x or "").strip()]
+    if seen_comments and not own:
+        # The exclusion rule needs to know which comments are OURS. Without that
+        # identity the round could bounce the engine's own words back at the
+        # lane, so the beat is read as ambiguous and the next beat asks again.
+        return poll_stop_verdict(
+            POLL_STOP_ANSWER_AMBIGUOUS,
+            "%d comment(s) on the request but the platform did not report the "
+            "credential's login, so our own comments cannot be told apart"
+            % len(seen_comments), beat=beat, observations=obs)
+    selected = select_comment_round(seen_comments, own_logins=own,
+                                    handled_ids=handled_ids, since_iso=since_iso)
+    if selected:
+        return PollVerdict(action=POLL_COMMENT_ROUND, beat=beat, observations=obs,
+                           round={"count": len(selected),
+                                  "ids": [c["id"] for c in selected if c["id"]],
+                                  "comments": selected})
+    if seen_comments:
+        return poll_stop_verdict(
+            POLL_STOP_COMMENT_ROUND_EMPTY,
+            "%d comment(s) on the request, none of them new for this ticket: our "
+            "own words (%s) and the ones an earlier round already carried (%s) do "
+            "not move a ticket"
+            % (len(seen_comments),
+               ", ".join(sorted({str(x) for x in (own_logins or ())})) or "(none recorded)",
+               len(list(handled_ids or ()))),
+            beat=beat, observations=obs)
+    return PollVerdict(action=POLL_STILL_OPEN, beat=beat, observations=obs)
+
+
 # ---- GitHub: the platform port implementation -----------------------------
 
 GITHUB_API_BASE = "https://api.github.com"
@@ -1649,6 +2437,143 @@ class GitHubPlatform:
         raise PrFlowStop(DELIVERY_STOP_PLATFORM_AMBIGUOUS,
                          "the branch publish answer is ambiguous: %s"
                          % text.strip()[:300])
+
+    # ---- step (c): the read-only poll face ----
+    def _poll_status(self, status: int, payload: Any, what: str) -> None:
+        """Map one status of a READ-ONLY poll call onto one named stop.
+
+        A read has no side effect, so the mapping is different from the delivery
+        act's: rate limiting is its own named face (the next beat asks again),
+        5xx/transport is unreachable, 401 is the credential (terminal), and
+        anything else is ambiguous (the poll cannot read the answer).
+        """
+        if status in (200, 201, 204):
+            return
+        if status == 401:
+            raise PrFlowStop(STOP_CREDENTIAL_REJECTED,
+                             "the platform refused the credential (401) on %s: %s"
+                             % (what, self._message(payload)))
+        if status == 429:
+            raise PrFlowStop(POLL_STOP_RATE_LIMITED,
+                             "the platform rate limited %s (429): %s"
+                             % (what, self._message(payload)))
+        if status == 403:
+            text = self._message(payload).lower()
+            if "rate limit" in text or "secondary rate" in text:
+                raise PrFlowStop(POLL_STOP_RATE_LIMITED,
+                                 "the platform rate limited %s (403): %s"
+                                 % (what, self._message(payload)))
+            raise PrFlowStop(POLL_STOP_ANSWER_AMBIGUOUS,
+                             "the platform refused %s (403) outside the rate limit: %s"
+                             % (what, self._message(payload)))
+        if status >= 500:
+            raise PrFlowStop(DELIVERY_STOP_PLATFORM_UNREACHABLE,
+                             "the platform could not serve %s (%d): %s"
+                             % (what, status, self._message(payload)))
+        raise PrFlowStop(POLL_STOP_ANSWER_AMBIGUOUS,
+                         "unexpected platform status %d on %s: %s"
+                         % (status, what, self._message(payload)))
+
+    def viewer_login(self) -> str:
+        """The login our own credential posts as (step (c)'s exclusion rule).
+
+        One read per beat. An empty login is returned as "" and NOT invented: the
+        judgement then reads the round as ambiguous instead of mistaking our own
+        words for a reviewer's.
+        """
+        status, payload = self._call("GET", "/user")
+        self._poll_status(status, payload, "the credential lookup")
+        if not isinstance(payload, Mapping):
+            raise PrFlowStop(POLL_STOP_ANSWER_AMBIGUOUS,
+                             "the credential lookup answered %r, not an object"
+                             % type(payload).__name__)
+        return str(payload.get("login") or "")
+
+    def _branch_state(self, ident: str, ref: str) -> str:
+        """present / deleted / "" (unknown) for one branch on the platform.
+
+        Only asked when the request is still open, because a closed or merged
+        request cannot be reviewed again and the branch no longer matters."""
+        if not ref:
+            return ""
+        status, payload = self._call(
+            "GET", "/repos/%s/branches/%s" % (ident, quote(ref, safe="")))
+        if status == 404:
+            return BRANCH_DELETED
+        if status == 200:
+            return BRANCH_PRESENT
+        return ""
+
+    def poll_request(self, scope: Dict[str, Any], number: int) -> Dict[str, Any]:
+        """Ask the platform about ONE parked request (step (c), read-only).
+
+        Calls, in order and only as far as the answer needs them:
+          1. the request itself (state, merge facts);
+          2. the discussion comments, when the request is still open;
+          3. the branch, when the request is still open (a deleted branch is a
+             named face of the poll, not a guess from a closed request).
+        No write, no retry, no rate-limit dance: a failed call is a named stop and
+        the next beat asks again.
+        """
+        ident = self._identity(scope)
+        n = _request_number(number)
+        if not n:
+            raise PrFlowStop(POLL_STOP_ANSWER_AMBIGUOUS,
+                             "the parked record carries no request number")
+        status, payload = self._call("GET", "/repos/%s/pulls/%d" % (ident, n))
+        if status == 404:
+            return {"status": REQUEST_ABSENT, "number": n, "url": "",
+                    "detail": "the platform has no request #%d in %s" % (n, ident)}
+        self._poll_status(status, payload, "the request state")
+        if not isinstance(payload, Mapping):
+            raise PrFlowStop(POLL_STOP_ANSWER_AMBIGUOUS,
+                             "the request state answered %r, not an object"
+                             % type(payload).__name__)
+        url = str(payload.get("html_url") or "")
+        merged_at = str(payload.get("merged_at") or "")
+        state = str(payload.get("state") or "").lower()
+        if merged_at or payload.get("merged"):
+            return {"status": REQUEST_MERGED, "number": n, "url": url,
+                    "merged_at": merged_at,
+                    "merge_commit": str(payload.get("merge_commit_sha") or ""),
+                    "branch": "", "comments": [], "detail": ""}
+        if state == "closed":
+            return {"status": REQUEST_CLOSED, "number": n, "url": url,
+                    "branch": "", "comments": [], "detail": ""}
+        if state != "open":
+            raise PrFlowStop(POLL_STOP_ANSWER_AMBIGUOUS,
+                             "the request state %r is not one this poll can read"
+                             % (state or "(absent)",))
+        head = payload.get("head")
+        ref = str((head or {}).get("ref") or "") if isinstance(head, Mapping) else ""
+        comments = self._comments(ident, n)
+        return {"status": REQUEST_OPEN, "number": n, "url": url,
+                "branch": self._branch_state(ident, ref),
+                "comments": comments, "detail": ""}
+
+    def _comments(self, ident: str, number: int) -> List[Dict[str, Any]]:
+        """The request's discussion comments, normalized to this module's shape."""
+        status, payload = self._call(
+            "GET", "/repos/%s/issues/%d/comments?per_page=100" % (ident, number))
+        self._poll_status(status, payload, "the request comments")
+        if not isinstance(payload, list):
+            raise PrFlowStop(POLL_STOP_ANSWER_AMBIGUOUS,
+                             "the comments answer is %r, not a list"
+                             % type(payload).__name__)
+        out: List[Dict[str, Any]] = []
+        for raw in payload:
+            if not isinstance(raw, Mapping):
+                continue
+            out.append({
+                "id": str(raw.get("id") or ""),
+                "author": str((raw.get("user") or {}).get("login") or "")
+                if isinstance(raw.get("user"), Mapping) else "",
+                "body": str(raw.get("body") or ""),
+                "created_at": str(raw.get("created_at") or ""),
+                "is_bot": (isinstance(raw.get("user"), Mapping)
+                           and str(raw["user"].get("type") or "").lower() == "bot"),
+            })
+        return out
 
 
 def platform_from_credential(credential: Any, *,

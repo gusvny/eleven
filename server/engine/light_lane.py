@@ -1647,9 +1647,14 @@ class LightLaneWorkflow(DevLaneWorkflow):
             if phase == "merge":
                 # t261103-05 (design step (b)): the review-request fork. The helper is
                 # the dev-lane one (no second implementation here); the gate marker is
-                # single-sourced in pr_flow.
-                if workflow.patched(pr_flow.PR_FLOW_DELIVERY_PATCH_ID) \
-                        and await self._pr_flow_merge_step():
+                # single-sourced in pr_flow. t261103-07 (step (c)): the helper answers
+                # the phase this loop continues in ("" = today's path, "merge" = the
+                # park, "done" = the platform merged, a work stage = a comment round).
+                _pr_phase = ""
+                if workflow.patched(pr_flow.PR_FLOW_DELIVERY_PATCH_ID):
+                    _pr_phase = await self._pr_flow_merge_step()
+                if _pr_phase:
+                    phase = _pr_phase
                     continue
                 self._enter("merge")
                 prep_ctx = await workflow.execute_activity(
