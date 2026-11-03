@@ -1110,3 +1110,53 @@ request), every delivery stop by name, the adapter's status mapping and credenti
 handling with an injected transport/git runner, the receipt's redaction property,
 the park's slot release and its poller-only exit, and a source lock over the three
 merge phase sites.
+
+## Review-request flow, step (d): reconciling the local branch after the merge
+
+Design: `docs/design/github-pr-flow-v1.md`, requirement 7 (`pr_flow.py`, section
+"step (d)"). The platform's merge settles the delivery; it does not catch this
+machine's target branch up. `pr_flow.reconcile_after_merge` is the only thing
+that touches the local target branch, and it reconciles every declared
+repository INDEPENDENTLY, naming each one in the receipt.
+
+**The rule, per repository, in this order (verify, act, verify the act).** The
+local target branch must exist; the platform is asked what it merged on that
+branch; the declared remote is fetched (a read that writes no local branch); the
+local branch must be an ANCESTOR of the fetched head; the fetched head's tree
+must equal the tree the platform reported as merged; only then does the branch
+advance, by a fast-forward-only merge to that one commit; and the branch and its
+tree are read back afterwards. A git tree id is a digest of a whole tree, so
+"same tree" is "same content" - which is what makes the content check exact.
+
+**What stops it, by name** (remedy line each, in `pr_flow.stop_remedy`):
+`remote_unreachable` (a state the act reads could not be read - the detail names
+the command), `local_drift` (the branch carries work the merged state does not,
+so no fast-forward exists), `content_mismatch` (the content is not what the
+platform reported as merged), `branch_missing` (absent locally or on the
+remote), and `partial_reconciliation` - the named NON-TERMINAL state: some
+repositories reconciled, others stopped, and the ticket stays open until every
+one of them is caught up. Only a fully reconciled delivery is a success.
+
+**Never, on any path** (the design's nongoal): no history rewriting, no forced
+update, no ref overwrite, no worktree discard. The module builds every git
+command line in exactly one place (`pr_flow._git_argv`), which refuses such a
+shape before it can run, and the test file proves both halves - the chokepoint's
+refusal, and that no other string in `pr_flow.py` can spell such a command. A
+refusal never repairs the branch to make a check pass: a person decides.
+
+**What a refusal may not touch.** `refs/heads/<target>` and the worktree. The
+targeted fetch writes `FETCH_HEAD` and the remote's tracking cache
+(`refs/remotes/<remote>/<branch>`) - a read cache of the remote, which is allowed
+to move - and nothing else, so every refusal after the fetch leaves the branch
+byte-identical. A retry is therefore always safe: once a repository is caught up,
+the same act answers `reconciled` again and advances nothing.
+
+**Tests** (section "t261103-08" of the same anchored file): the fast-forward
+happy path, a multi-repository delivery named in full, idempotency, the
+default-off control, every read failure and refusal by name with the branch
+provably untouched, the partial multi-repository state, the stop vocabulary and
+its remedy lines, the source-level guard, and three cases against a REAL local
+repository cloned from a REAL bare remote in a temp dir (file transport only) -
+where the refusal paths are measured byte-identical on the branch sha, the tree
+sha, the worktree status and every file's bytes.
+

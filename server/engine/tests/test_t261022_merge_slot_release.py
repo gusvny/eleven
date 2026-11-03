@@ -1270,3 +1270,740 @@ def test_pr_flow_remote_review_release_parks_on_the_ledger_face(proj):
     re_acq = cc.acquire(key, "pr1")
     assert re_acq["granted"] is True, re_acq
     assert re_acq.get("reacquired_from", {}).get("cause") == "remote-review-wait", re_acq
+
+
+# ===========================================================================
+# t261103-08 (design step (d)) - reconcile the local target branch after the
+# platform merged: a fast-forward plus a content check, nothing else.
+#
+# The section lives in this file for the same reason step (b)'s does: the write
+# set is server/engine/ only, so the shared anchor manifest
+# (integration/test_anchors.json, owned by the integration role) cannot be
+# extended from this lane, and a NEW server/engine/tests/test_*.py would be the
+# L16 "anchor missing" error. This file is already anchored and already carries
+# the review-request flow, of which step (d) is the closing act.
+#
+# intent: after the platform reports a merge, the local target branch catches up
+# ONLY by a fast-forward whose content equals the content the platform reported
+# as merged. A branch that carries other work (not an ancestor), a branch whose
+# content differs, an unreadable remote, an absent branch and a partly
+# reconciled multi-repository delivery are each a NAMED outcome; every refusal
+# leaves the branch byte-identical, and no path can spell a history-rewriting,
+# forced or discarding git command.
+#
+# hermetic: two harnesses. A scripted git (every command line recorded, the
+# repository state modelled in memory) covers the whole decision surface
+# exactly; three cases run against a REAL repository cloned from a REAL local
+# bare remote in tmp_path (file transport only - no network, no ~/.sandbar, no
+# docker, no port 3099, no Temporal). The platform is always injected.
+# ===========================================================================
+
+import ast      # noqa: E402  (the source-level guard reads pr_flow.py's AST)
+import subprocess  # noqa: E402  (the real-git harness runs git on tmp dirs only)
+
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+SHA_C = "c" * 40
+TREE_A = "1" * 40
+TREE_B = "2" * 40
+TREE_X = "3" * 40
+
+
+class _FakeGit:
+    """One scripted local repository, plus a record of every command line.
+
+    The model is deliberately small: a local branch, a fetched remote head, a
+    tree per commit, and one scripted answer per verb. That is enough to judge
+    the decision surface, and it makes "the branch was left alone" a plain fact
+    (the modelled branch sha did not move).
+    """
+
+    def __init__(self, local=SHA_A, head=SHA_B, trees=None, ancestry=0,
+                 fetch=(0, ""), merge_code=0, merge_text="Fast-forward",
+                 after_local=None, after_tree=None, missing=()):
+        self.local = local
+        self.head = head
+        self.trees = dict(trees if trees is not None else
+                          {SHA_A: TREE_A, SHA_B: TREE_B})
+        self.ancestry = ancestry
+        self.fetch = fetch
+        self.merge_code = merge_code
+        self.merge_text = merge_text
+        self.after_local = after_local
+        self.after_tree = after_tree
+        self.missing = set(missing)
+        self.calls = []          # [(verb, args_tuple)]
+        self.merges = 0
+
+    # -- the runner interface --
+    def __call__(self, argv, env, timeout):
+        verb = argv[3]
+        args = tuple(argv[4:])
+        self.calls.append((verb, args))
+        if verb == "fetch":
+            return self.fetch
+        if verb == "merge-base":
+            return self.ancestry, ""
+        if verb == "merge":
+            self.merges += 1
+            if self.merge_code != 0:
+                return self.merge_code, self.merge_text
+            self.local = self.after_local or args[-1]
+            return 0, self.merge_text
+        if verb == "rev-parse":
+            rev = args[-1]
+            if rev in self.missing:
+                return 128, "fatal: Needed a single revision\n"
+            if rev == "FETCH_HEAD":
+                return 0, self.head + "\n"
+            if rev.startswith("refs/heads/"):
+                return 0, self.local + "\n"
+            if rev.endswith("^{tree}"):
+                sha = rev[:-len("^{tree}")]
+                if self.after_tree and self.merges and sha == self.local:
+                    return 0, self.after_tree + "\n"
+                tree = self.trees.get(sha)
+                if not tree:
+                    return 128, "fatal: Not a valid object name\n"
+                return 0, tree + "\n"
+            return 128, "fatal: unknown revision\n"
+        return 127, "scripted git: unexpected verb %r\n" % (verb,)
+
+    def verbs(self):
+        return [verb for verb, _args in self.calls]
+
+
+class _FakeMergePlatform:
+    """The platform port for step (d): what it reports as merged, per identity."""
+
+    def __init__(self, sha=SHA_B, tree=TREE_B, status="merged", raises=None):
+        self.sha = sha
+        self.tree = tree
+        self.status = status
+        self.raises = raises
+        self.calls = []
+
+    def merge_record(self, scope):
+        self.calls.append(dict(scope))
+        if self.raises is not None:
+            raise self.raises
+        if self.status == "absent":
+            return {"status": "absent", "sha": "", "tree": "",
+                    "detail": "no commit on that branch"}
+        return {"status": "merged", "sha": self.sha, "tree": self.tree,
+                "detail": ""}
+
+
+def _rec_switch(enabled=True, reason="on"):
+    return pr_flow.SwitchDecision(
+        enabled=enabled, reason=reason,
+        repositories=("owner/repo_a", "owner/repo_b"),
+        declaration="/sandbox/projects/proj-alpha/project.yaml")
+
+
+def _rec_entry(path, identity="owner/repo_a", name=None, target="main"):
+    return {"repo": str(path), "name": name or "root", "identity": identity,
+            "target_branch": target, "remote_name": "origin"}
+
+
+def _rec_payload(entries, **over):
+    base = {"repositories": entries, "target_branch": "main",
+            "remote_name": "origin"}
+    base.update(over)
+    return base
+
+
+def _assert_no_destructive_command(calls):
+    """Every command line the act issued is allowlisted (verb and tokens)."""
+    forbidden = set(pr_flow.FORBIDDEN_GIT_VERBS) | set(pr_flow.FORBIDDEN_GIT_ARGS)
+    for verb, args in calls:
+        assert verb in pr_flow.ALLOWED_GIT_VERBS, (verb, args)
+        for token in args:
+            assert token not in forbidden, (verb, token)
+            assert not token.startswith("--force"), (verb, token)
+
+
+# ---------- 1. the happy path: a fast-forward plus a content check ---------
+
+def test_reconcile_fast_forwards_and_verifies_the_merged_content(tmp_path):
+    git = _FakeGit(local=SHA_A, head=SHA_B)
+    platform = _FakeMergePlatform(sha=SHA_B, tree=TREE_B)
+    verdict = pr_flow.reconcile_after_merge(
+        _rec_payload([_rec_entry(tmp_path / "repo_a")]), _rec_switch(),
+        platform=platform, git_runner=git)
+    assert verdict.state == pr_flow.RECONCILE_RECONCILED, verdict.to_dict()
+    assert (verdict.terminal, verdict.keeps_ticket_open) == (True, False)
+    row = verdict.repositories[0]
+    assert row["state"] == pr_flow.REPO_STATE_RECONCILED
+    assert (row["before"], row["after"], row["head"]) == (SHA_A, SHA_B, SHA_B)
+    assert row["advanced"] is True
+    assert row["local_tree"] == row["reported_tree"] == TREE_B
+    assert git.local == SHA_B, "the scripted branch did not end on the merged head"
+    # exactly one mutating command, and it is the fast-forward to that commit
+    assert git.verbs().count("merge") == 1
+    merge_args = [args for verb, args in git.calls if verb == "merge"][0]
+    assert merge_args == ("--ff-only", SHA_B), merge_args
+    assert git.verbs().index("fetch") < git.verbs().index("merge"), git.calls
+    _assert_no_destructive_command(git.calls)
+    # the receipt is a plain, JSON-safe face (nothing secret, nothing live)
+    face = verdict.to_dict()
+    assert set(face) == {"state", "stop", "detail", "terminal",
+                         "keeps_ticket_open", "retryable", "repositories"}
+    text = pr_flow.reconcile_text(verdict, "t261103ut")
+    assert pr_flow.RECONCILE_RECONCILED in text and "root" in text
+
+
+def test_reconcile_names_every_repository_of_a_multi_repo_delivery(tmp_path):
+    a, b = tmp_path / "repo_a", tmp_path / "repo_b"
+    gits = {str(a): _FakeGit(local=SHA_A, head=SHA_B),
+            str(b): _FakeGit(local=SHA_C, head=SHA_A,
+                             trees={SHA_C: TREE_A, SHA_A: TREE_B})}
+    platform = _FakeMergePlatform(sha=SHA_B, tree=TREE_B)
+
+    def runner(argv, env, timeout):
+        return gits[argv[2]](argv, env, timeout)
+
+    verdict = pr_flow.reconcile_after_merge(
+        _rec_payload([_rec_entry(a, identity="owner/repo_a", name="a"),
+                      _rec_entry(b, identity="owner/repo_b", name="b")]),
+        _rec_switch(), platform=platform, git_runner=runner)
+    assert verdict.state == pr_flow.RECONCILE_RECONCILED, verdict.to_dict()
+    assert [r["name"] for r in verdict.repositories] == ["a", "b"]
+    assert [c["identity"] for c in platform.calls] == ["owner/repo_a",
+                                                       "owner/repo_b"]
+    assert gits[str(a)].local == SHA_B and gits[str(b)].local == SHA_A
+    for git in gits.values():
+        _assert_no_destructive_command(git.calls)
+
+
+def test_reconcile_is_idempotent_when_the_branch_is_already_there(tmp_path):
+    git = _FakeGit(local=SHA_B, head=SHA_B)
+    verdict = pr_flow.reconcile_after_merge(
+        _rec_payload([_rec_entry(tmp_path / "repo_a")]), _rec_switch(),
+        platform=_FakeMergePlatform(sha=SHA_B, tree=TREE_B), git_runner=git)
+    assert verdict.state == pr_flow.RECONCILE_RECONCILED, verdict.to_dict()
+    assert verdict.repositories[0]["advanced"] is False
+    _assert_no_destructive_command(git.calls)
+
+
+# ---------- 2. the default-off control -------------------------------------
+
+def test_reconcile_with_the_switch_off_touches_nothing(tmp_path):
+    """OFF (and "no switch read at all") is not a no-op success: it is the named
+    not-applicable answer, and no git command and no platform read happens."""
+    git = _FakeGit()
+    platform = _FakeMergePlatform()
+    payload = _rec_payload([_rec_entry(tmp_path / "repo_a")])
+    for switch in (_rec_switch(enabled=False, reason="off"), None):
+        verdict = pr_flow.reconcile_after_merge(payload, switch,
+                                               platform=platform, git_runner=git)
+        assert verdict.state == pr_flow.RECONCILE_OFF, verdict.to_dict()
+        assert (verdict.terminal, verdict.keeps_ticket_open) == (False, False)
+    assert git.calls == [] and platform.calls == []
+
+
+def test_reconcile_refuses_an_unusable_repository_set(tmp_path):
+    """An absent, empty or malformed set is a named stop, never a silent "done"
+    (a reconciliation that looked at nothing must not read as reconciled)."""
+    for payload in ({}, {"repositories": []}, {"repositories": [42]},
+                    {"repositories": [{"name": "root"}]},
+                    {"repositories": [{"repo": "   "}]}):
+        git = _FakeGit()
+        verdict = pr_flow.reconcile_after_merge(payload, _rec_switch(),
+                                                platform=_FakeMergePlatform(),
+                                                git_runner=git)
+        assert verdict.stop == pr_flow.RECONCILE_STOP_SET_UNUSABLE, verdict.to_dict()
+        assert verdict.state == pr_flow.ACTION_STOP
+        assert verdict.keeps_ticket_open is True
+        assert git.calls == [], "a git command ran with no usable repository set"
+
+
+# ---------- 3. the refusals leave the branch byte-identical ---------------
+
+def test_local_drift_stops_named_and_leaves_the_branch_untouched(tmp_path):
+    """The measured shape: the local branch carries work the merged remote state
+    does not. No fast-forward exists, so nothing may move."""
+    git = _FakeGit(local=SHA_A, head=SHA_B, ancestry=1)
+    verdict = pr_flow.reconcile_after_merge(
+        _rec_payload([_rec_entry(tmp_path / "repo_a")]), _rec_switch(),
+        platform=_FakeMergePlatform(sha=SHA_B, tree=TREE_B), git_runner=git)
+    assert verdict.state == pr_flow.ACTION_STOP
+    assert verdict.stop == pr_flow.RECONCILE_STOP_LOCAL_DRIFT, verdict.to_dict()
+    assert verdict.keeps_ticket_open is True and verdict.terminal is False
+    row = verdict.repositories[0]
+    assert row["before"] == SHA_A and row["after"] == ""
+    assert "untouched" in row["detail"]
+    assert git.local == SHA_A, "the branch moved on a drift refusal"
+    assert "merge" not in git.verbs(), git.calls
+    _assert_no_destructive_command(git.calls)
+
+
+def test_content_mismatch_stops_before_the_branch_moves(tmp_path):
+    """The fetched head is not the content the platform reported as merged: the
+    act refuses BEFORE the fast-forward, so the branch cannot have moved."""
+    git = _FakeGit(local=SHA_A, head=SHA_B, trees={SHA_A: TREE_A, SHA_B: TREE_X})
+    verdict = pr_flow.reconcile_after_merge(
+        _rec_payload([_rec_entry(tmp_path / "repo_a")]), _rec_switch(),
+        platform=_FakeMergePlatform(sha=SHA_B, tree=TREE_B), git_runner=git)
+    assert verdict.stop == pr_flow.RECONCILE_STOP_CONTENT_MISMATCH, verdict.to_dict()
+    assert "NOT advanced" in verdict.repositories[0]["detail"]
+    assert git.local == SHA_A, "the branch moved on a content mismatch"
+    assert "merge" not in git.verbs(), git.calls
+    _assert_no_destructive_command(git.calls)
+
+
+def test_a_post_act_mismatch_is_named_and_nothing_is_rewritten(tmp_path):
+    """A branch that does not end where the act put it (a race, or a git that
+    lies) is read back and named; the act does not chase it with a second
+    command."""
+    drifted = _FakeGit(local=SHA_A, head=SHA_B, after_local=SHA_C,
+                       trees={SHA_A: TREE_A, SHA_B: TREE_B, SHA_C: TREE_B})
+    verdict = pr_flow.reconcile_after_merge(
+        _rec_payload([_rec_entry(tmp_path / "repo_a")]), _rec_switch(),
+        platform=_FakeMergePlatform(sha=SHA_B, tree=TREE_B), git_runner=drifted)
+    assert verdict.stop == pr_flow.RECONCILE_STOP_LOCAL_DRIFT, verdict.to_dict()
+    assert "nothing further is attempted" in verdict.repositories[0]["detail"]
+    assert drifted.merges == 1, "a second mutating command was issued"
+    _assert_no_destructive_command(drifted.calls)
+
+    late = _FakeGit(local=SHA_A, head=SHA_B, after_tree=TREE_X)
+    verdict = pr_flow.reconcile_after_merge(
+        _rec_payload([_rec_entry(tmp_path / "repo_a")]), _rec_switch(),
+        platform=_FakeMergePlatform(sha=SHA_B, tree=TREE_B), git_runner=late)
+    assert verdict.stop == pr_flow.RECONCILE_STOP_CONTENT_MISMATCH, verdict.to_dict()
+    assert "nothing is rewritten to hide it" in verdict.repositories[0]["detail"]
+    assert late.merges == 1, "a second mutating command was issued"
+
+
+@pytest.mark.parametrize("label,git_kwargs,platform,expected", [
+    ("local-branch-absent", {"missing": ("refs/heads/main",)},
+     _FakeMergePlatform(), pr_flow.RECONCILE_STOP_BRANCH_MISSING),
+    ("remote-ref-absent", {"fetch": (128, "fatal: couldn't find remote ref "
+                                           "refs/heads/main\n")},
+     _FakeMergePlatform(), pr_flow.RECONCILE_STOP_BRANCH_MISSING),
+    ("platform-has-no-branch", {}, _FakeMergePlatform(status="absent"),
+     pr_flow.RECONCILE_STOP_BRANCH_MISSING),
+    ("remote-unreachable", {"fetch": (128, "fatal: unable to access https://"
+                                            "github.com/o/r.git/: Could not "
+                                            "resolve host: github.com\n")},
+     _FakeMergePlatform(), pr_flow.RECONCILE_STOP_REMOTE_UNREACHABLE),
+    ("platform-unreadable", {},
+     _FakeMergePlatform(raises=RuntimeError("socket closed")),
+     pr_flow.RECONCILE_STOP_REMOTE_UNREACHABLE),
+    ("ancestry-unanswerable", {"ancestry": 128}, _FakeMergePlatform(),
+     pr_flow.RECONCILE_STOP_REMOTE_UNREACHABLE),
+])
+def test_every_read_failure_is_named_and_moves_nothing(tmp_path, label,
+                                                       git_kwargs, platform,
+                                                       expected):
+    git = _FakeGit(local=SHA_A, head=SHA_B, **git_kwargs)
+    verdict = pr_flow.reconcile_after_merge(
+        _rec_payload([_rec_entry(tmp_path / "repo_a")]), _rec_switch(),
+        platform=platform, git_runner=git)
+    assert verdict.stop == expected, (label, verdict.to_dict())
+    assert verdict.keeps_ticket_open is True and verdict.terminal is False
+    assert git.local == SHA_A, "%s: the branch moved" % label
+    assert "merge" not in git.verbs(), (label, git.calls)
+    assert verdict.repositories[0]["remedy"], "a named stop lost its remedy"
+    _assert_no_destructive_command(git.calls)
+
+
+def test_a_repository_without_an_identity_is_named_before_any_git_call(tmp_path):
+    git = _FakeGit()
+    entry = {"repo": str(tmp_path / "repo_a"), "name": "root", "remote_name": "origin"}
+    verdict = pr_flow.reconcile_after_merge(_rec_payload([entry]), _rec_switch(),
+                                            platform=_FakeMergePlatform(),
+                                            git_runner=git)
+    assert verdict.stop == pr_flow.DELIVERY_STOP_REPOSITORY_UNIDENTIFIED, \
+        verdict.to_dict()
+    assert git.calls == []
+    assert verdict.repositories[0]["remedy"]
+
+
+# ---------- 4. the partial multi-repository state (non-terminal) ----------
+
+def test_a_partial_multi_repo_reconciliation_keeps_the_ticket_open(tmp_path):
+    a, b = tmp_path / "repo_a", tmp_path / "repo_b"
+    gits = {str(a): _FakeGit(local=SHA_A, head=SHA_B),
+            str(b): _FakeGit(local=SHA_C, head=SHA_A, ancestry=1,
+                             trees={SHA_C: TREE_A, SHA_A: TREE_B})}
+    platform = _FakeMergePlatform(sha=SHA_B, tree=TREE_B)
+
+    def runner(argv, env, timeout):
+        return gits[argv[2]](argv, env, timeout)
+
+    verdict = pr_flow.reconcile_after_merge(
+        _rec_payload([_rec_entry(a, identity="owner/repo_a", name="a"),
+                      _rec_entry(b, identity="owner/repo_b", name="b")]),
+        _rec_switch(), platform=platform, git_runner=runner)
+    assert verdict.state == pr_flow.RECONCILE_PARTIAL, verdict.to_dict()
+    assert verdict.stop == pr_flow.RECONCILE_STOP_PARTIAL_RECONCILIATION
+    assert (verdict.terminal, verdict.keeps_ticket_open) == (False, True)
+    assert verdict.retryable is True
+    rows = {r["name"]: r for r in verdict.repositories}
+    assert rows["a"]["state"] == pr_flow.REPO_STATE_RECONCILED
+    assert rows["b"]["stop"] == pr_flow.RECONCILE_STOP_LOCAL_DRIFT
+    assert gits[str(a)].local == SHA_B, "the reconcilable repository was not caught up"
+    assert gits[str(b)].local == SHA_C, "the stopped repository moved"
+    text = pr_flow.reconcile_text(verdict, "t261103ut")
+    assert "a" in text and "b" in text and "ticket stays open" in text
+    assert pr_flow.stop_remedy(pr_flow.RECONCILE_STOP_PARTIAL_RECONCILIATION)
+
+
+# ---------- 5. the vocabulary: every stop, one remedy line -----------------
+
+def test_every_reconcile_stop_is_named_and_carries_a_remedy():
+    constants = {value for key, value in vars(pr_flow).items()
+                 if key.startswith("RECONCILE_STOP_") and isinstance(value, str)}
+    assert constants == set(pr_flow.RECONCILE_STOP_TABLE)
+    assert {pr_flow.RECONCILE_STOP_REMOTE_UNREACHABLE,
+            pr_flow.RECONCILE_STOP_LOCAL_DRIFT,
+            pr_flow.RECONCILE_STOP_CONTENT_MISMATCH,
+            pr_flow.RECONCILE_STOP_PARTIAL_RECONCILIATION,
+            pr_flow.RECONCILE_STOP_BRANCH_MISSING} <= constants
+    for code in constants:
+        assert pr_flow.is_reconcile_stop(code) is True
+        remedy = pr_flow.stop_remedy(code)
+        assert remedy and "retry after the named condition is removed" != remedy, (
+            "%s lost its remedy line" % code)
+        assert pr_flow.RECONCILE_STOP_TABLE[code], code
+    assert pr_flow.is_reconcile_stop("") is False
+    assert pr_flow.is_reconcile_stop(pr_flow.STOP_CREDENTIAL_MISSING) is False
+
+
+# ---------- 6. the mechanical promise: no destructive git verb exists ------
+
+def _pr_flow_source():
+    return (ENGINE / "pr_flow.py").read_text(encoding="utf-8")
+
+
+def _literals_outside_docstrings_and_guard_tables(source):
+    """Every string constant except docstrings and the guard tables' own words."""
+    tree = ast.parse(source)
+    excluded = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)):
+            body = getattr(node, "body", [])
+            first = body[0] if body else None
+            if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                    and isinstance(first.value.value, str)):
+                excluded.add(id(first.value))
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and (
+                        target.id.startswith("FORBIDDEN_")
+                        or target.id == "FORCED_UPDATE_PREFIX"):
+                    for inner in ast.walk(node.value):
+                        if isinstance(inner, ast.Constant):
+                            excluded.add(id(inner))
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) \
+                and id(node) not in excluded:
+            out.append(node.value)
+    return out
+
+
+def test_the_module_cannot_spell_a_destructive_git_command():
+    """Two halves of one promise. Statics: no string in the module (outside its
+    own guard tables and its prose) spells a history-rewriting, forced or
+    discarding command. Dynamics: the one chokepoint refuses such a shape, so a
+    future edit cannot reach a git argument list that does harm."""
+    forbidden = ((set(pr_flow.FORBIDDEN_GIT_VERBS)
+                  - set(pr_flow.FORBIDDEN_GIT_VERBS_COMMON_WORDS))
+                 | set(pr_flow.FORBIDDEN_GIT_ARGS))
+    assert pr_flow.FORBIDDEN_GIT_VERBS_COMMON_WORDS, (
+        "the scan exemption list must stay an explicit, reviewed list")
+    source = _pr_flow_source()
+    for text in _literals_outside_docstrings_and_guard_tables(source):
+        for token in text.split():
+            assert token not in forbidden, (
+                "pr_flow.py carries the git token %r in a string: %r"
+                % (token, text[:80]))
+            assert not token.startswith(pr_flow.FORCED_UPDATE_PREFIX), (
+                "pr_flow.py carries a forced-update flag: %r" % (text[:80],))
+    # there is exactly ONE place that spells a git command line
+    assert source.count('"git", "-C"') == 1, (
+        "a second git command-line builder appeared in pr_flow.py")
+    # and it refuses every shape that would rewrite, force or discard
+    for verb in pr_flow.FORBIDDEN_GIT_VERBS:
+        with pytest.raises(ValueError):
+            pr_flow._git_argv("/tmp/x", verb, "--help")
+        assert verb not in pr_flow.ALLOWED_GIT_VERBS
+    for arg in pr_flow.FORBIDDEN_GIT_ARGS:
+        with pytest.raises(ValueError):
+            pr_flow._git_argv("/tmp/x", "fetch", arg)
+    for arg in (pr_flow.FORCED_UPDATE_PREFIX, "--force-with-lease", "-f"):
+        with pytest.raises(ValueError):
+            pr_flow._git_argv("/tmp/x", "push", arg)
+    with pytest.raises(ValueError):
+        pr_flow._git_argv("/tmp/x", "kill-everything")
+    with pytest.raises(ValueError):
+        pr_flow._git_argv("/tmp/x")
+    for verb in pr_flow.ALLOWED_GIT_VERBS:
+        assert pr_flow._git_argv("/tmp/x", verb, "ref") == [
+            "git", "-C", "/tmp/x", verb, "ref"]
+
+
+def test_the_module_has_exactly_one_place_that_can_run_a_process():
+    """The gated runner is the only code that can spawn anything; no shell path
+    exists beside it."""
+    source = _pr_flow_source()
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            segment = ast.get_source_segment(source, node) or ""
+            if "subprocess" in segment:
+                assert node.name == "_default_git_runner", (
+                    "a process can be spawned from %r as well" % node.name)
+    for banned in ("os.system", "os.popen", "os.execv", "os.execvp",
+                   "os.spawnv", "shell=True"):
+        assert banned not in source, banned
+
+
+# ---------- 7. the real-git proof: byte identity on every refusal ---------
+
+def _git(args, cwd):
+    proc = subprocess.run(["git"] + list(args), cwd=str(cwd),
+                          capture_output=True, text=True)
+    assert proc.returncode == 0, "git %s failed in %s: %s" % (
+        " ".join(args), cwd, proc.stderr)
+    return proc.stdout.strip()
+
+
+def _git_setup(path):
+    _git(["init", "-b", "main"], cwd=path)
+    _git(["config", "user.email", "ut@example.com"], cwd=path)
+    _git(["config", "user.name", "ut"], cwd=path)
+
+
+def _worktree_bytes(root):
+    """Every tracked-or-untracked file's bytes outside .git (the whole tree)."""
+    out = {}
+    for path in sorted(root.rglob("*")):
+        if ".git" in path.parts or not path.is_file():
+            continue
+        out[str(path.relative_to(root))] = path.read_bytes()
+    return out
+
+
+def _fingerprint(repo):
+    """(branch sha, branch tree, dirty status, worktree bytes): byte identity."""
+    return (_git(["rev-parse", "refs/heads/main"], cwd=repo),
+            _git(["rev-parse", "refs/heads/main^{tree}"], cwd=repo),
+            _git(["status", "--porcelain"], cwd=repo),
+            _worktree_bytes(repo))
+
+
+@pytest.fixture
+def real_clone(tmp_path):
+    """A real clone of a real LOCAL bare remote - file transport, no network."""
+    origin = tmp_path / "origin.git"
+    _git(["init", "--bare", "-b", "main", str(origin)], cwd=tmp_path)
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    _git_setup(seed)
+    (seed / "README.md").write_text("base\n", encoding="utf-8")
+    _git(["add", "-A"], cwd=seed)
+    _git(["commit", "-m", "base"], cwd=seed)
+    _git(["remote", "add", "origin", str(origin)], cwd=seed)
+    _git(["push", "-u", "origin", "main"], cwd=seed)
+    clone = tmp_path / "clone"
+    _git(["clone", str(origin), str(clone)], cwd=tmp_path)
+    _git(["config", "user.email", "ut@example.com"], cwd=clone)
+    _git(["config", "user.name", "ut"], cwd=clone)
+    return origin, seed, clone
+
+
+def _advance_origin(seed, name="second.txt", text="second\n"):
+    (seed / name).write_text(text, encoding="utf-8")
+    _git(["add", "-A"], cwd=seed)
+    _git(["commit", "-m", "advance " + name], cwd=seed)
+    _git(["push", "origin", "main"], cwd=seed)
+
+
+def _real_verdict(clone, platform, target="main"):
+    return pr_flow.reconcile_after_merge(
+        _rec_payload([_rec_entry(clone, identity="owner/repo_a",
+                                 target=target)]),
+        _rec_switch(), platform=platform)
+
+
+def test_real_fast_forward_brings_the_clone_to_the_merged_content(real_clone):
+    origin, seed, clone = real_clone
+    _advance_origin(seed)
+    head = _git(["rev-parse", "refs/heads/main"], cwd=origin)
+    tree = _git(["rev-parse", "refs/heads/main^{tree}"], cwd=origin)
+    before = _git(["rev-parse", "refs/heads/main"], cwd=clone)
+    assert before != head
+
+    verdict = _real_verdict(clone, _FakeMergePlatform(sha=head, tree=tree))
+    assert verdict.state == pr_flow.RECONCILE_RECONCILED, verdict.to_dict()
+    assert _git(["rev-parse", "refs/heads/main"], cwd=clone) == head
+    assert _git(["rev-parse", "refs/heads/main^{tree}"], cwd=clone) == tree
+    assert (clone / "second.txt").read_text(encoding="utf-8") == "second\n"
+    assert _git(["status", "--porcelain"], cwd=clone) == ""
+    assert verdict.repositories[0]["advanced"] is True
+
+    # a retry (the production path after a later repository stopped) is a no-op:
+    # the branch is already there, so the same act answers reconciled again with
+    # nothing advanced - and it still moves no ref beyond the fetch's own cache
+    after_first = _fingerprint(clone)
+    again = _real_verdict(clone, _FakeMergePlatform(sha=head, tree=tree))
+    assert again.state == pr_flow.RECONCILE_RECONCILED, again.to_dict()
+    assert again.repositories[0]["advanced"] is False
+    assert _fingerprint(clone) == after_first
+
+
+def test_real_local_drift_refusal_leaves_the_branch_byte_identical(real_clone):
+    """The local clone carries its own commit; the remote advanced from the same
+    base. Byte identity is measured on the real repository: branch sha, branch
+    tree, worktree status and every file's bytes. The fetch's own tracking cache
+    (refs/remotes/origin/main) is outside this promise on purpose - it is a
+    read cache of the remote, never the work; refs/heads/main is the branch."""
+    origin, seed, clone = real_clone
+    (clone / "local.txt").write_text("local work\n", encoding="utf-8")
+    _git(["add", "-A"], cwd=clone)
+    _git(["commit", "-m", "local work"], cwd=clone)
+    _advance_origin(seed)
+    head = _git(["rev-parse", "refs/heads/main"], cwd=origin)
+    tree = _git(["rev-parse", "refs/heads/main^{tree}"], cwd=origin)
+    before = _fingerprint(clone)
+    log_before = _git(["log", "--format=%H %s"], cwd=clone)
+
+    verdict = _real_verdict(clone, _FakeMergePlatform(sha=head, tree=tree))
+    assert verdict.stop == pr_flow.RECONCILE_STOP_LOCAL_DRIFT, verdict.to_dict()
+    assert verdict.keeps_ticket_open is True
+    assert _fingerprint(clone) == before, (
+        "the drift refusal changed the branch or the worktree")
+    assert _git(["log", "--format=%H %s"], cwd=clone) == log_before
+
+
+def test_real_content_mismatch_refusal_rewrites_nothing(real_clone):
+    """The platform reports a tree the fetched head does not carry: the act
+    refuses before the fast-forward and the real branch stays where it was."""
+    origin, seed, clone = real_clone
+    _advance_origin(seed)
+    head = _git(["rev-parse", "refs/heads/main"], cwd=origin)
+    wrong_tree = _git(["rev-parse", "refs/heads/main^{tree}"], cwd=clone)
+    assert wrong_tree != _git(["rev-parse", "refs/heads/main^{tree}"], cwd=origin)
+    before = _fingerprint(clone)
+
+    verdict = _real_verdict(clone, _FakeMergePlatform(sha=head, tree=wrong_tree))
+    assert verdict.stop == pr_flow.RECONCILE_STOP_CONTENT_MISMATCH, verdict.to_dict()
+    assert _fingerprint(clone) == before, (
+        "the content-mismatch refusal changed the branch or the worktree")
+
+
+# ---------- 8. the act consumes step (b), and a broken runner is named ------
+
+def test_reconcile_consumes_the_step_b_park_record(tmp_path):
+    """Step (d) reads what step (b) already published (`requests`: repository
+    path, identity, branch), so no caller has to reshape it."""
+    git = _FakeGit(local=SHA_A, head=SHA_B)
+    park = {"requests": [{"repo": str(tmp_path / "repo_a"), "name": "root",
+                          "identity": "owner/repo_a", "branch": "lane/x",
+                          "number": 101, "url": "", "action": "created"}],
+            "target_branch": "main"}
+    verdict = pr_flow.reconcile_after_merge(
+        park, _rec_switch(), platform=_FakeMergePlatform(sha=SHA_B, tree=TREE_B),
+        git_runner=git)
+    assert verdict.state == pr_flow.RECONCILE_RECONCILED, verdict.to_dict()
+    assert verdict.repositories[0]["identity"] == "owner/repo_a"
+    assert git.local == SHA_B
+    _assert_no_destructive_command(git.calls)
+
+
+def test_a_fully_stopped_multi_repo_delivery_adopts_nothing(tmp_path):
+    a, b = tmp_path / "repo_a", tmp_path / "repo_b"
+    gits = {str(a): _FakeGit(local=SHA_A, head=SHA_B, ancestry=1),
+            str(b): _FakeGit(local=SHA_C, head=SHA_A,
+                             fetch=(128, "fatal: Could not resolve host: "
+                                         "github.com\n"))}
+
+    def runner(argv, env, timeout):
+        return gits[argv[2]](argv, env, timeout)
+
+    verdict = pr_flow.reconcile_after_merge(
+        _rec_payload([_rec_entry(a, identity="owner/repo_a", name="a"),
+                      _rec_entry(b, identity="owner/repo_b", name="b")]),
+        _rec_switch(), platform=_FakeMergePlatform(sha=SHA_B, tree=TREE_B),
+        git_runner=runner)
+    assert verdict.state == pr_flow.ACTION_STOP, verdict.to_dict()
+    assert verdict.stop == pr_flow.RECONCILE_STOP_LOCAL_DRIFT
+    assert verdict.keeps_ticket_open is True and verdict.terminal is False
+    assert [r["stop"] for r in verdict.repositories] == [
+        pr_flow.RECONCILE_STOP_LOCAL_DRIFT,
+        pr_flow.RECONCILE_STOP_REMOTE_UNREACHABLE]
+    assert "none of the 2 repositories reconciled" in verdict.detail
+    assert gits[str(a)].local == SHA_A and gits[str(b)].local == SHA_C
+
+
+def test_a_broken_git_runner_is_a_named_stop_and_moves_nothing(tmp_path):
+    """An injected runner that raises, or answers something unusable, means the
+    act cannot know what git did: a named stop, never an assumed advance."""
+    def raising(argv, env, timeout):
+        raise OSError("git is not installed")
+
+    def malformed(argv, env, timeout):
+        return "ok"
+
+    def unparsable_code(argv, env, timeout):
+        return "zero", ""
+
+    for runner in (raising, malformed, unparsable_code):
+        verdict = pr_flow.reconcile_after_merge(
+            _rec_payload([_rec_entry(tmp_path / "repo_a")]), _rec_switch(),
+            platform=_FakeMergePlatform(sha=SHA_B, tree=TREE_B),
+            git_runner=runner)
+        assert verdict.stop == pr_flow.RECONCILE_STOP_REMOTE_UNREACHABLE, \
+            verdict.to_dict()
+        assert verdict.keeps_ticket_open is True
+        assert verdict.repositories[0]["detail"]
+
+
+def test_the_github_adapter_reports_the_merged_tree_on_the_target_branch():
+    """The real port's half of the content check: a GET on the target branch's
+    commit, answering the commit sha and its tree sha; an absent branch and every
+    platform refusal stay named. No request body is sent, nothing is written."""
+    seen = {}
+
+    def transport(status, payload):
+        def _t(method, url, headers, body, timeout):
+            seen.update({"method": method, "url": url, "body": body,
+                         "auth": headers.get("Authorization", "")})
+            return status, {}, json.dumps(payload).encode("utf-8")
+        return _t
+
+    scope = {"repo": "", "name": "root", "identity": "owner/name",
+             "target_branch": "main", "remote": "git@github.com:owner/name.git"}
+
+    platform = pr_flow.GitHubPlatform(token="ghp_" + "C" * 36, transport=transport(
+        200, {"sha": SHA_B, "commit": {"tree": {"sha": TREE_B}}}))
+    out = platform.merge_record(scope)
+    assert out["status"] == "merged" and out["sha"] == SHA_B
+    assert out["tree"] == TREE_B and out["target"] == "main"
+    assert seen["method"] == "GET", seen
+    assert seen["url"].endswith("/repos/owner/name/commits/main"), seen["url"]
+    assert seen["body"] is None, "the merge read must not send a body"
+
+    absent = pr_flow.GitHubPlatform(token="ghp_" + "C" * 36,
+                                    transport=transport(404, {"message": "Not Found"}))
+    assert absent.merge_record(scope)["status"] == "absent"
+
+    for status, code in ((401, pr_flow.STOP_CREDENTIAL_REJECTED),
+                         (429, pr_flow.DELIVERY_STOP_PLATFORM_UNREACHABLE),
+                         (500, pr_flow.DELIVERY_STOP_PLATFORM_UNREACHABLE),
+                         (418, pr_flow.DELIVERY_STOP_PLATFORM_AMBIGUOUS)):
+        platform = pr_flow.GitHubPlatform(
+            token="ghp_" + "C" * 36, transport=transport(status, {"message": "m"}))
+        with pytest.raises(pr_flow.PrFlowStop) as e:
+            platform.merge_record(scope)
+        assert e.value.code == code, (status, e.value.code, code)
+
+    shapeless = pr_flow.GitHubPlatform(token="ghp_" + "C" * 36,
+                                       transport=transport(200, {"sha": SHA_A}))
+    with pytest.raises(pr_flow.PrFlowStop) as e:
+        shapeless.merge_record(scope)
+    assert e.value.code == pr_flow.DELIVERY_STOP_PLATFORM_AMBIGUOUS

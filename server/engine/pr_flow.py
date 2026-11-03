@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-"""pr_flow -- the optional GitHub review-request delivery flow, STEP (a) only.
+"""pr_flow -- the optional GitHub review-request delivery flow.
 
-Design: docs/design/github-pr-flow-v1.md (requirement 1, 2 and the upfront
-credential constraint). Steps (b) open the request, (c) poll and send comments
-back, (d) reconcile after the platform merges. THIS module ships only the two
-preconditions those steps consume, and nothing else in the engine consults it
-yet -- which is exactly why a project that does not set the switch keeps today's
-behaviour byte for byte.
+Design: docs/design/github-pr-flow-v1.md. This module ships three of the four
+steps: (a) the switch and the credential (requirement 1 and 2), (b) the delivery
+act that opens one request per changed repository and parks the ticket (3, 4 and
+6), and (d) the post-merge reconciliation of the local target branch (7). Step
+(c) -- the poll that reads the platform and turns comment rounds into rework --
+is a separate ticket. A project that does not set the switch keeps today's
+behaviour byte for byte: every entry point below answers "not applicable" or
+"land locally" before it reads a credential, a branch or a network.
 
 WHAT IS HERE
 
@@ -66,13 +68,26 @@ WHAT IS HERE
    every entry point is "no probe" = shape-validated only, which is the honest
    step-(a) answer: validity against the platform is step (b)'s first live call.
 
+6. Reconciliation (step (d)). The platform's merge settles the delivery; it does
+   not catch this machine's target branch up. `reconcile_after_merge` is the only
+   thing here that touches the local target branch, and the only advance it
+   allows is a fast-forward, verified against the content the platform reported
+   as merged. A branch that carries other work, a branch whose content differs
+   from the reported merge, an unreadable remote and an absent branch are each a
+   NAMED stop that leaves the branch alone and hands the decision to a person.
+   One module-wide chokepoint (`_git_argv`) builds every git command line, so the
+   promise "no path rewrites history, forces an update or discards work" is
+   mechanical rather than a comment.
+
 Light-import discipline: stdlib only, no temporalio, no `shared` import (this face
 must stay importable from a bare interpreter, and the registry root is mirrored
 from `shared.registry_root` by reading the same env, the way audit.py and
 event_ledger.py read their own additive sections).
 
 Tests: server/engine/tests/test_t261004_44_deliver_refusal.py (the delivery
-named-refusal carrier), section "PR flow step (a)".
+named-refusal carrier), section "PR flow step (a)"; step (b) and step (d) are
+covered in server/engine/tests/test_t261022_merge_slot_release.py (sections
+"t261103-05 (design step (b))" and "t261103-08 (design step (d))").
 """
 from __future__ import annotations
 
@@ -804,10 +819,13 @@ def is_delivery_stop(code: Any) -> bool:
 
 
 def stop_remedy(code: Any) -> str:
-    """The remedy line for any stop code this module can report."""
+    """The remedy line for any stop code this module can report (the delivery
+    act's, step (a)'s preconditions, and step (d)'s reconciliation)."""
     name = str(code or "")
     if name in DELIVERY_STOP_REMEDY:
         return DELIVERY_STOP_REMEDY[name]
+    if name in RECONCILE_STOP_REMEDY:
+        return RECONCILE_STOP_REMEDY[name]
     for prefix, text in _PRECONDITION_REMEDY:
         if name.startswith(prefix):
             return text
@@ -1550,6 +1568,38 @@ class GitHubPlatform:
         return {"status": "updated", "number": int(number),
                 "url": str((payload or {}).get("html_url") or ""), "detail": ""}
 
+    def merge_record(self, scope: Dict[str, Any]) -> Dict[str, Any]:
+        """What the platform reports as merged on the target branch (step (d)'s
+        content check, a pure read).
+
+        Answers `merged` with the commit sha and its tree sha, or `absent` when
+        the platform carries no such commit. The tree sha is what makes the
+        content check exact: a git tree id is a digest of the whole tree, so
+        "same tree" is "same content". Nothing is written, and an answer that
+        cannot be read is a stop (never an assumed merge).
+        """
+        ident = self._identity(scope)
+        target = str(scope.get("target_branch") or DEFAULT_TARGET_BRANCH)
+        status, payload = self._call(
+            "GET", "/repos/%s/commits/%s" % (ident, quote(target, safe="")))
+        if status == 404:
+            return {"status": "absent", "sha": "", "tree": "", "target": target,
+                    "detail": redact(self._message(payload))
+                    or "the platform answered 404"}
+        self._raise_for_status(status, payload, "the merged-content read")
+        body = payload if isinstance(payload, dict) else {}
+        commit = body.get("commit") if isinstance(body.get("commit"), dict) else {}
+        tree = commit.get("tree") if isinstance(commit.get("tree"), dict) else {}
+        sha = str(body.get("sha") or "")
+        tree_sha = str(tree.get("sha") or "")
+        if not sha or not tree_sha:
+            raise PrFlowStop(DELIVERY_STOP_PLATFORM_AMBIGUOUS,
+                             "the merged-content read of %r branch %r answered "
+                             "without a commit sha and a tree sha"
+                             % (ident, target))
+        return {"status": "merged", "sha": sha, "tree": tree_sha,
+                "target": target, "detail": ""}
+
     def ensure_branch(self, scope: Dict[str, Any]) -> Dict[str, Any]:
         """Publish the lane branch to the platform: the transport leg of the
         delivery (a request can only exist for a branch the platform has)."""
@@ -1569,8 +1619,8 @@ class GitHubPlatform:
             "GIT_CONFIG_VALUE_0": "AUTHORIZATION: basic " + basic,
             "GIT_TERMINAL_PROMPT": "0",
         })
-        argv = ["git", "-C", tree, "push", "--porcelain", self._remote,
-                "refs/heads/%s:refs/heads/%s" % (branch, branch)]
+        argv = _git_argv(tree, "push", "--porcelain", self._remote,
+                         "refs/heads/%s:refs/heads/%s" % (branch, branch))
         code, out = self._git(argv, env, self._git_timeout)
         text = redact(out)
         low = text.lower()
@@ -1609,3 +1659,651 @@ def platform_from_credential(credential: Any, *,
     activity only: `Credential.reveal()` is the one explicit way to the value."""
     return GitHubPlatform(token=credential.reveal(), transport=transport,
                           git_runner=git_runner)
+
+
+# ---- step (d): reconcile the local target branch after a platform merge -----
+#
+# Design requirement 7. The platform's merge settles the delivery, but this
+# machine's target branch still has to catch up before the next ticket is judged
+# against it. Catching up is NOT a merge: the only lawful advance is a
+# fast-forward, and it is verified by comparing the content the platform reported
+# as merged with the content the local branch now carries.
+#
+# The act, per repository, always in this order - verify, act, verify the act:
+#
+#   1. the local target branch exists                    -> branch_missing
+#   2. the platform is asked what it merged on that branch -> branch_missing,
+#                                                            remote_unreachable
+#   3. the declared remote is fetched. The fetch writes FETCH_HEAD and the
+#      remote's tracking cache and NOTHING else: no local branch moves, so a
+#      refusal after this point still leaves the branch exactly where it was
+#                                                        -> branch_missing,
+#                                                           remote_unreachable
+#   4. the local branch is proven an ancestor of the fetched head
+#                                                        -> local_drift
+#   5. the fetched head's tree is proven equal to the tree the platform reported
+#      as merged                                         -> content_mismatch
+#   6. the branch advances with a fast-forward-only merge, to that one commit
+#   7. the branch and its tree are read back: they must be that commit and that
+#      reported tree                                     -> local_drift,
+#                                                           content_mismatch
+#
+# Nothing else is ever issued. There is no history rewriting, no forced update,
+# no ref overwrite and no worktree discard on any path: the module builds every
+# git command line in exactly one place (`_git_argv`), which refuses such a shape
+# before it can run. A refusal names the check that failed, says whether the
+# branch was left alone, and carries a remedy line. A refusal never "repairs" the
+# branch to make the check pass - a person decides.
+#
+# Every declared repository is reconciled INDEPENDENTLY: one repository's stop
+# neither hides another repository's success nor blocks it. A delivery whose
+# repositories reconciled only in part is the named NON-TERMINAL state
+# `partial_reconciliation` - never a success, and the ticket stays open.
+
+#: The git remote NAME the act fetches. It is a name configured in the local
+#: repository ("origin"), never a URL and never a credential: the act reads the
+#: remote the clone already trusts and adds no secret of its own to git.
+DEFAULT_REMOTE = "origin"
+#: One git call's budget: a fetch of one branch is small, and a hung remote must
+#: not hold a worker slot.
+DEFAULT_GIT_TIMEOUT = 180.0
+
+#: The reconciliation act's named stops. Each is a refusal a person acts on; none
+#: is retried in a loop, and none changes the branch to become satisfiable.
+RECONCILE_STOP_REMOTE_UNREACHABLE = "github_pr_reconcile_remote_unreachable"
+RECONCILE_STOP_LOCAL_DRIFT = "github_pr_reconcile_local_drift"
+RECONCILE_STOP_CONTENT_MISMATCH = "github_pr_reconcile_content_mismatch"
+RECONCILE_STOP_PARTIAL_RECONCILIATION = "github_pr_reconcile_partial_reconciliation"
+RECONCILE_STOP_BRANCH_MISSING = "github_pr_reconcile_branch_missing"
+RECONCILE_STOP_SET_UNUSABLE = "github_pr_reconcile_repository_set_unusable"
+
+#: code -> what the stop means, in one line. `remote_unreachable` covers every
+#: state the act reads but cannot get an answer for (the remote, the platform, or
+#: git's own reading of the fetched state): the detail always names which command
+#: failed, so "unreachable" never becomes a vague bucket.
+RECONCILE_STOP_TABLE = {
+    RECONCILE_STOP_REMOTE_UNREACHABLE:
+        "a state the act reads could not be read (the remote or the platform)",
+    RECONCILE_STOP_LOCAL_DRIFT:
+        "the local branch is not an ancestor of the fetched remote head",
+    RECONCILE_STOP_CONTENT_MISMATCH:
+        "the local content is not the content the platform reported as merged",
+    RECONCILE_STOP_PARTIAL_RECONCILIATION:
+        "some declared repositories reconciled and others stopped",
+    RECONCILE_STOP_BRANCH_MISSING:
+        "the target branch is absent locally or on the remote",
+    RECONCILE_STOP_SET_UNUSABLE:
+        "the repository set handed to the act is absent, empty or malformed",
+}
+
+#: code -> the remedy a reader can act on (one line, no jargon).
+RECONCILE_STOP_REMEDY = {
+    RECONCILE_STOP_REMOTE_UNREACHABLE:
+        "check the repository's remote configuration and the platform credential, "
+        "then retry - a retry reads the remote again and adopts nothing it cannot "
+        "verify",
+    RECONCILE_STOP_LOCAL_DRIFT:
+        "a person compares the local branch with the merged work; the branch is "
+        "untouched, because the engine never rewrites, discards or merges across "
+        "a divergence",
+    RECONCILE_STOP_CONTENT_MISMATCH:
+        "a person compares the local branch with the platform's merge commit "
+        "(nothing was rewritten); only content equal to the reported merge is "
+        "ever adopted",
+    RECONCILE_STOP_PARTIAL_RECONCILIATION:
+        "a person resolves the named repositories that stopped, then retries - the "
+        "reconciled repositories are already caught up, so a retry advances only "
+        "the ones still behind",
+    RECONCILE_STOP_BRANCH_MISSING:
+        "check the declared target branch name, and that the clone carries the "
+        "platform's branch, then retry - the act creates no branch",
+    RECONCILE_STOP_SET_UNUSABLE:
+        "hand the act the delivery's repository set (what step (b) published) - "
+        "nothing was reconciled",
+}
+
+#: The act's outcomes. Only `reconciled` closes the reconciliation; a partial
+#: reconciliation and a stop both keep the ticket open.
+RECONCILE_RECONCILED = "reconciled"
+RECONCILE_PARTIAL = "partial_reconciliation"
+RECONCILE_OFF = "not_applicable"
+
+#: One repository's row state inside the receipt.
+REPO_STATE_RECONCILED = "reconciled"
+REPO_STATE_STOPPED = "stopped"
+
+
+def is_reconcile_stop(code: Any) -> bool:
+    """True for every stop the reconciliation act can report."""
+    return str(code or "") in RECONCILE_STOP_TABLE
+
+
+# ---- the one git chokepoint ------------------------------------------------
+
+#: The git verbs this module may issue. Every one is additive: it reads state, it
+#: advances a fast-forward, or it publishes a branch without a forced update.
+ALLOWED_GIT_VERBS = ("fetch", "rev-parse", "merge-base", "merge", "push")
+
+#: Command words no path in this module may ever build: history rewriting, forced
+#: updates, ref overwrites and worktree discards.
+FORBIDDEN_GIT_VERBS = ("am", "checkout", "cherry-pick", "clean", "filter-branch",
+                       "gc", "prune", "rebase", "reset", "restore", "revert",
+                       "stash", "switch", "update-ref", "worktree")
+#: Arguments with the same effect, spelled as flags.
+FORBIDDEN_GIT_ARGS = ("-f", "-B", "-D", "--force", "--force-with-lease",
+                      "--force-if-includes", "--hard", "--keep", "--mirror",
+                      "--prune")
+#: Any argument with this prefix is a forced update, whatever follows it.
+FORCED_UPDATE_PREFIX = "--force"
+#: The guard words that are ALSO ordinary English and therefore cannot be judged
+#: from a source scan ("the github_pr switch block", "a clean sync"): the
+#: command-line chokepoint still refuses every one of them as a git verb, and the
+#: source scan judges the rest of the list - the spellings that can only mean the
+#: destructive action.
+FORBIDDEN_GIT_VERBS_COMMON_WORDS = ("am", "clean", "gc", "prune", "restore",
+                                    "revert", "stash", "switch", "worktree")
+
+
+def _git_argv(repo: Any, *args: str) -> List[str]:
+    """Build the ONE git command line this module may run, or refuse the shape.
+
+    Every git call in this module goes through here (the reconciliation act and
+    the branch publish alike), so "no path rewrites history, forces an update or
+    discards work" is mechanical rather than a comment. A refused shape is a
+    programming error, not a delivery state: it raises ValueError, and the test
+    suite proves both halves (the refusal, and that no other string in the module
+    can spell such a command).
+    """
+    if not args:
+        raise ValueError("a git command needs a verb (allowed: %s)"
+                         % ", ".join(ALLOWED_GIT_VERBS))
+    verb = str(args[0])
+    if verb not in ALLOWED_GIT_VERBS:
+        raise ValueError(
+            "this module never issues the git verb %r: it may only read, "
+            "fast-forward and publish a branch (allowed: %s)"
+            % (verb, ", ".join(ALLOWED_GIT_VERBS)))
+    bad = [str(a) for a in args
+           if str(a) in FORBIDDEN_GIT_VERBS or str(a) in FORBIDDEN_GIT_ARGS
+           or str(a).startswith(FORCED_UPDATE_PREFIX)]
+    if bad:
+        raise ValueError(
+            "this module never builds the git argument %r: it would rewrite "
+            "history, force an update or discard work (allowed verbs: %s)"
+            % (bad[0], ", ".join(ALLOWED_GIT_VERBS)))
+    return ["git", "-C", str(repo or ".")] + [str(a) for a in args]
+
+
+def _git_env(extra: Optional[Mapping[str, Any]] = None) -> Dict[str, str]:
+    """The environment one git call runs in.
+
+    An inherited environment plus one rule: git must fail rather than block on a
+    terminal prompt (an unattended worker has nobody to answer it). No secret is
+    added here - the fetch reads the remote the clone already trusts.
+    """
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    for key, value in (extra or {}).items():
+        env[str(key)] = str(value)
+    return env
+
+
+def _run_git(git_runner: Callable[..., Any], argv: List[str], env: Dict[str, str],
+             timeout: float) -> Tuple[int, str]:
+    """Run one git command line through the injected runner.
+
+    The runner answers (exit code, combined output). Anything else - a raised
+    exception, a non-pair, a non-numeric exit code - means the act cannot know
+    what git did, so it is the named `remote_unreachable` stop with the runner's
+    own words in the detail. The output is redacted before it can reach a receipt.
+    """
+    shown = " ".join(argv[3:]) or "(no verb)"
+    try:
+        answer = git_runner(argv, dict(env), timeout)
+    except PrFlowStop:
+        raise
+    except Exception as e:  # noqa: BLE001 - an unclassified runner fault is a stop
+        raise PrFlowStop(RECONCILE_STOP_REMOTE_UNREACHABLE,
+                         "the git runner raised %s on %r: %s"
+                         % (type(e).__name__, shown, e))
+    if not (isinstance(answer, (tuple, list)) and len(answer) == 2):
+        raise PrFlowStop(RECONCILE_STOP_REMOTE_UNREACHABLE,
+                         "the git runner answered %r for %r instead of "
+                         "(exit code, output)"
+                         % (type(answer).__name__, shown))
+    code, text = answer
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        raise PrFlowStop(RECONCILE_STOP_REMOTE_UNREACHABLE,
+                         "the git runner answered the exit code %r for %r"
+                         % (code, shown))
+    return code, redact(str(text if text is not None else ""))
+
+
+def _git_read(git_runner: Callable[..., Any], env: Dict[str, str],
+              timeout: float, repo: str, *args: str) -> Tuple[int, str]:
+    """One git call through the chokepoint, as (exit code, redacted output)."""
+    return _run_git(git_runner, _git_argv(repo, *args), env, timeout)
+
+
+def _require_sha(git_runner: Callable[..., Any], env: Dict[str, str],
+                 timeout: float, repo: str, rev: str, *,
+                 stop: str, what: str) -> str:
+    """Resolve one revision to a sha, or report the named stop with the reason.
+
+    A read that answers nothing is NEVER read as "nothing to do": it is the stop
+    the caller names, with the command, the exit code and git's own words.
+    """
+    code, text = _git_read(git_runner, env, timeout, repo,
+                           "rev-parse", "--verify", rev)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    sha = lines[0] if (code == 0 and lines) else ""
+    if not sha:
+        raise PrFlowStop(stop, "%s: git could not resolve %r in %r (exit %s): %s"
+                         % (what, rev, repo or "?", code, text.strip()[:200]))
+    return sha
+
+
+#: The git error texts that mean "the remote does not carry that ref" rather than
+#: "the remote could not be reached".
+_MISSING_REF_MARKERS = ("couldn't find remote ref", "no such ref",
+                        "not our ref", "unable to find ref",
+                        "could not find remote ref")
+
+
+def _fetch_stop(code: int, text: str) -> str:
+    """Classify a failed fetch: a missing ref, or an unreachable remote."""
+    low = text.lower()
+    if any(marker in low for marker in _MISSING_REF_MARKERS):
+        return RECONCILE_STOP_BRANCH_MISSING
+    return RECONCILE_STOP_REMOTE_UNREACHABLE
+
+
+def _merge_report(platform: Any, scope: Dict[str, Any]) -> Dict[str, str]:
+    """Ask the platform what it merged on the target branch (a pure read).
+
+    Returns {"sha", "tree", "detail"}. `absent` is the named `branch_missing`
+    stop (the platform reports no commit on that branch); any other unusable
+    answer is `remote_unreachable` - the act must never invent a merge it could
+    not read, because the content check is the whole point of this step.
+    """
+    identity = str(scope.get("identity") or "")
+    target = str(scope.get("target_branch") or DEFAULT_TARGET_BRANCH)
+    try:
+        answer = platform.merge_record(scope)
+    except PrFlowStop:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise PrFlowStop(RECONCILE_STOP_REMOTE_UNREACHABLE,
+                         "the platform merge record raised %s for %r branch %r: %s"
+                         % (type(e).__name__, identity or "?", target, e))
+    if not isinstance(answer, Mapping):
+        raise PrFlowStop(RECONCILE_STOP_REMOTE_UNREACHABLE,
+                         "the platform merge record for %r branch %r is %r, not a "
+                         "receipt" % (identity or "?", target,
+                                      type(answer).__name__))
+    status = str(answer.get("status") or "")
+    detail = redact(str(answer.get("detail") or ""))
+    if status == "merged":
+        return {"sha": str(answer.get("sha") or ""),
+                "tree": str(answer.get("tree") or ""),
+                "detail": detail}
+    if status == "absent":
+        raise PrFlowStop(RECONCILE_STOP_BRANCH_MISSING,
+                         "the platform reports no commit on %r branch %r (%s)"
+                         % (identity or "?", target,
+                            detail or "no detail recorded"))
+    raise PrFlowStop(RECONCILE_STOP_REMOTE_UNREACHABLE,
+                     "the platform merge record for %r branch %r answered status "
+                     "%r, which cannot verify the content (%s)"
+                     % (identity or "?", target, status or "(absent)",
+                        detail or "no detail recorded"))
+
+
+def _advance_one(row: Dict[str, Any], *, repo: str, identity: str,
+                 platform: Any, git_runner: Callable[..., Any],
+                 git_timeout: float, env: Dict[str, str], target: str,
+                 remote: str) -> None:
+    """Reconcile one repository: verify, act, verify the act.
+
+    Raises PrFlowStop on every refusal. The only mutating command in the whole
+    function is the fast-forward-only merge at step 6; every earlier refusal
+    therefore leaves the branch byte-identical, and the steps after it read the
+    result rather than changing it again.
+    """
+    if not identity:
+        raise PrFlowStop(DELIVERY_STOP_REPOSITORY_UNIDENTIFIED,
+                         "repository %r has no platform identity (an entry needs "
+                         "its declared owner/name or its GitHub remote), so the "
+                         "platform merge cannot be read" % (row.get("name"),))
+    branch = "refs/heads/%s" % target
+
+    # 1. the local branch, before anything else is read
+    local = _require_sha(git_runner, env, git_timeout, repo, branch,
+                         stop=RECONCILE_STOP_BRANCH_MISSING,
+                         what="the local target branch is absent")
+    row["before"] = local
+
+    # 2. what the platform says it merged on that branch
+    report = _merge_report(platform, {"repo": repo, "name": row.get("name"),
+                                      "identity": identity,
+                                      "target_branch": target, "remote": remote})
+    row["reported_sha"] = report["sha"]
+    row["reported_tree"] = report["tree"]
+    if not row["reported_tree"]:
+        raise PrFlowStop(RECONCILE_STOP_REMOTE_UNREACHABLE,
+                         "the platform merge record for %r carries no tree, so the "
+                         "content check cannot be made - nothing was advanced"
+                         % (identity,))
+
+    # 3. fetch the declared remote. Measured: a targeted fetch writes FETCH_HEAD
+    # and the remote's tracking cache (refs/remotes/<remote>/<branch>) - a read
+    # cache, not the local branch - so refs/heads/<target> cannot move here.
+    code, text = _git_read(git_runner, env, git_timeout, repo,
+                           "fetch", "--no-tags", remote, branch)
+    if code != 0:
+        raise PrFlowStop(_fetch_stop(code, text),
+                         "the fetch of %r from the remote %r failed (git exit %s) "
+                         "- no local branch was changed: %s"
+                         % (branch, remote, code, text.strip()[:200]))
+    head = _require_sha(git_runner, env, git_timeout, repo, "FETCH_HEAD",
+                        stop=RECONCILE_STOP_BRANCH_MISSING,
+                        what="the fetched remote head is absent")
+    row["head"] = head
+    row["head_matches_reported"] = bool(row["reported_sha"]) and \
+        head == row["reported_sha"]
+
+    # 4. the only lawful advance is a fast-forward
+    code, text = _git_read(git_runner, env, git_timeout, repo,
+                           "merge-base", "--is-ancestor", local, head)
+    if code == 1:
+        raise PrFlowStop(RECONCILE_STOP_LOCAL_DRIFT,
+                         "the local branch %r (%s) is not an ancestor of the "
+                         "fetched head %s: the branch carries work the merged "
+                         "remote state does not, or the histories diverged, so no "
+                         "fast-forward exists - the branch was left untouched"
+                         % (branch, local[:12], head[:12]))
+    if code != 0:
+        raise PrFlowStop(RECONCILE_STOP_REMOTE_UNREACHABLE,
+                         "the ancestry check of %r could not be answered (git "
+                         "exit %s) - the branch was left untouched: %s"
+                         % (branch, code, text.strip()[:200]))
+
+    # 5. the content check BEFORE the act: the fetched head IS the reported merge
+    head_tree = _require_sha(git_runner, env, git_timeout, repo,
+                             "%s^{tree}" % head,
+                             stop=RECONCILE_STOP_REMOTE_UNREACHABLE,
+                             what="the fetched head's tree could not be read")
+    row["local_tree"] = head_tree
+    if head_tree != row["reported_tree"]:
+        raise PrFlowStop(RECONCILE_STOP_CONTENT_MISMATCH,
+                         "the fetched head %s carries tree %s while the platform "
+                         "reported tree %s as merged: the local branch was NOT "
+                         "advanced, and nothing was rewritten to make it match"
+                         % (head[:12], head_tree[:12],
+                            row["reported_tree"][:12]))
+
+    # 6. the act: a fast-forward to exactly that commit, never a merge commit
+    code, text = _git_read(git_runner, env, git_timeout, repo,
+                           "merge", "--ff-only", head)
+    if code != 0:
+        raise PrFlowStop(RECONCILE_STOP_LOCAL_DRIFT,
+                         "the fast-forward to %s was refused (git exit %s), so "
+                         "git left the branch where it was: %s"
+                         % (head[:12], code, text.strip()[:200]))
+
+    # 7. verify the act: the branch and its tree are read back, never assumed
+    after = _require_sha(git_runner, env, git_timeout, repo, branch,
+                         stop=RECONCILE_STOP_LOCAL_DRIFT,
+                         what="the branch cannot be read after the fast-forward")
+    row["after"] = after
+    if after != head:
+        raise PrFlowStop(RECONCILE_STOP_LOCAL_DRIFT,
+                         "the fast-forward did not land %r on the fetched head "
+                         "(branch %s, head %s): nothing further is attempted"
+                         % (branch, after[:12], head[:12]))
+    after_tree = _require_sha(git_runner, env, git_timeout, repo,
+                              "%s^{tree}" % after,
+                              stop=RECONCILE_STOP_CONTENT_MISMATCH,
+                              what="the branch tree cannot be read after the "
+                                   "fast-forward")
+    row["local_tree"] = after_tree
+    if after_tree != row["reported_tree"]:
+        raise PrFlowStop(RECONCILE_STOP_CONTENT_MISMATCH,
+                         "after the fast-forward the local tree is %s while the "
+                         "platform reported %s: nothing is rewritten to hide it"
+                         % (after_tree[:12], row["reported_tree"][:12]))
+
+    row["state"] = REPO_STATE_RECONCILED
+    row["advanced"] = local != after
+    note = ""
+    if not row["head_matches_reported"]:
+        note = (" (the fetched head differs from the reported merge commit %s, "
+                "which can happen when the remote advanced further; the CONTENT "
+                "is equal)" % ((row["reported_sha"] or "?")[:12],))
+    row["detail"] = ("fast-forwarded %r from %s to %s; tree %s equals the "
+                     "platform-reported tree%s"
+                     % (branch, local[:12], after[:12], after_tree[:12], note))
+
+
+def _reconcile_one(entry: Mapping, *, platform: Any,
+                   git_runner: Callable[..., Any], git_timeout: float,
+                   env: Dict[str, str], target: str, remote: str) -> Dict[str, Any]:
+    """One repository's receipt row. A stop never escapes: it is recorded on the
+    row, so the act can reconcile every other repository independently."""
+    repo = str(entry.get("repo") or "")
+    identity = str(entry.get("identity") or "") or \
+        parse_repo_identity(entry.get("remote"))
+    row = scrub({
+        "repo": repo,
+        "name": str(entry.get("name") or repo or "root"),
+        "identity": identity,
+        "target": target,
+        "remote": remote,
+        "state": REPO_STATE_STOPPED,
+        "stop": "",
+        "detail": "",
+        "remedy": "",
+        "before": "",
+        "head": "",
+        "after": "",
+        "reported_sha": "",
+        "reported_tree": "",
+        "local_tree": "",
+        "advanced": False,
+        "head_matches_reported": False,
+    })
+    try:
+        _advance_one(row, repo=repo, identity=identity, platform=platform,
+                     git_runner=git_runner, git_timeout=git_timeout, env=env,
+                     target=target, remote=remote)
+    except PrFlowStop as e:
+        row["state"] = REPO_STATE_STOPPED
+        row["stop"] = e.code
+        row["detail"] = e.message()
+        row["remedy"] = stop_remedy(e.code)
+    return row
+
+
+def _reconcile_entries(args: Mapping) -> Tuple[List[Mapping], str]:
+    """The repository set handed to the act, or the reason it is unusable.
+
+    Accepts either the field name (`repositories`) or step (b)'s park record
+    (`requests`, whose entries already carry the repository path and identity),
+    so the caller does not have to reshape what step (b) produced. An absent,
+    empty or malformed set is a named stop, never a silent "nothing to do".
+    """
+    raw = args.get("repositories")
+    if not isinstance(raw, (list, tuple)) or not raw:
+        raw = args.get("requests")
+    if not isinstance(raw, (list, tuple)) or not raw:
+        return [], ("the payload carries neither the delivery's repositories nor "
+                    "the requests step (b) published, so there is nothing to "
+                    "reconcile")
+    out: List[Mapping] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, Mapping):
+            return [], ("entry %d of the repository set is %r, not an object "
+                        "carrying the repository path"
+                        % (index, type(item).__name__))
+        repo = item.get("repo")
+        if not isinstance(repo, str) or not repo.strip():
+            return [], ("entry %d of the repository set carries no local "
+                        "repository path ('repo'), so its branch cannot be "
+                        "found" % index)
+        out.append(item)
+    return out, ""
+
+
+@dataclass
+class ReconcileVerdict:
+    """The reconciliation act's answer.
+
+    `state` is one of `RECONCILE_RECONCILED` (the only success),
+    `RECONCILE_PARTIAL` (the named NON-TERMINAL state), `ACTION_STOP` (named, no
+    repository adopted) or `RECONCILE_OFF` (the switch is off: nothing to do).
+    `keeps_ticket_open` is the fact the caller must act on: only a fully
+    reconciled delivery may close the ticket. `repositories` names every
+    repository the act looked at, reconciled or stopped.
+    """
+    state: str = RECONCILE_OFF
+    stop: str = ""
+    detail: str = ""
+    terminal: bool = False
+    keeps_ticket_open: bool = False
+    retryable: bool = False
+    repositories: List[Dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """The activity receipt. Scrubbed: no secret can ride out on it."""
+        return scrub({
+            "state": self.state,
+            "stop": self.stop,
+            "detail": self.detail,
+            "terminal": bool(self.terminal),
+            "keeps_ticket_open": bool(self.keeps_ticket_open),
+            "retryable": bool(self.retryable),
+            "repositories": [dict(row) for row in self.repositories],
+        })
+
+
+def _summarize(rows: List[Dict[str, Any]]) -> ReconcileVerdict:
+    """Fold the per-repository rows into the act's answer."""
+    done = [r for r in rows if r.get("state") == REPO_STATE_RECONCILED]
+    stopped = [r for r in rows if r.get("state") != REPO_STATE_RECONCILED]
+    names = ", ".join(str(r.get("name") or r.get("repo")) for r in done) or "(none)"
+    if not stopped:
+        return ReconcileVerdict(
+            state=RECONCILE_RECONCILED, terminal=True, keeps_ticket_open=False,
+            retryable=False, repositories=rows,
+            detail="%d of %d repositories fast-forwarded and content-verified: %s"
+                   % (len(done), len(rows), names))
+    stops = ", ".join("%s: %s" % (r.get("name") or r.get("repo"),
+                                  r.get("stop") or "unnamed") for r in stopped)
+    if done:
+        return ReconcileVerdict(
+            state=RECONCILE_PARTIAL, stop=RECONCILE_STOP_PARTIAL_RECONCILIATION,
+            terminal=False, keeps_ticket_open=True, retryable=True,
+            repositories=rows,
+            detail="%d of %d repositories reconciled (%s) and %d stopped (%s) - "
+                   "the ticket stays open until every declared repository is "
+                   "reconciled" % (len(done), len(rows), names, len(stopped), stops))
+    return ReconcileVerdict(
+        state=ACTION_STOP,
+        stop=str(stopped[0].get("stop") or RECONCILE_STOP_SET_UNUSABLE),
+        terminal=False, keeps_ticket_open=True, retryable=True, repositories=rows,
+        detail="none of the %d repositories reconciled (%s) - nothing was adopted"
+               % (len(rows), stops))
+
+
+def reconcile_after_merge(payload: Any, switch: Any = None, *,
+                          platform: Any = None,
+                          platform_factory: Optional[Callable[[], Any]] = None,
+                          git_runner: Optional[Callable[..., Any]] = None,
+                          git_timeout: float = DEFAULT_GIT_TIMEOUT,
+                          git_env: Optional[Mapping[str, Any]] = None,
+                          ) -> ReconcileVerdict:
+    """Reconcile the local target branch after the platform merged (design step d).
+
+    `switch` is step (a)'s decision. OFF (including "no switch read at all", the
+    same default `run_delivery` uses) answers NOT APPLICABLE and touches nothing -
+    the design's default-off promise, which is why this act never fetches for a
+    project that did not enable the flow.
+
+    payload keys (all read defensively): `repositories` (the delivery's declared
+    repositories: entries carry `repo` = the local repository path, plus optional
+    `name`, `identity`, `remote` = the GitHub remote URL, `remote_name`,
+    `target_branch`) or step (b)'s `requests`; plus optional `target_branch` and
+    `remote_name` defaults.
+
+    Per repository the act fetches the declared remote, allows only a
+    fast-forward, and verifies the content against the platform's reported merge.
+    A partial reconciliation is the named non-terminal state that keeps the
+    ticket open. Nothing here changes how a ticket closes (that is step (c)).
+    """
+    if not bool(getattr(switch, "enabled", False)):
+        return ReconcileVerdict(
+            state=RECONCILE_OFF,
+            detail="the project switch is off (%s), so the delivery did not go "
+                   "through the platform and there is nothing to reconcile"
+                   % (str(getattr(switch, "reason", "") or "absent")))
+    args = payload if isinstance(payload, Mapping) else {}
+    entries, problem = _reconcile_entries(args)
+    if problem:
+        return ReconcileVerdict(state=ACTION_STOP, stop=RECONCILE_STOP_SET_UNUSABLE,
+                                detail=problem, terminal=False,
+                                keeps_ticket_open=True, retryable=False)
+    if platform is None and platform_factory is not None:
+        try:
+            platform = platform_factory()
+        except PrFlowStop as e:
+            return ReconcileVerdict(state=ACTION_STOP, stop=e.code,
+                                    detail=e.message(), terminal=False,
+                                    keeps_ticket_open=True, retryable=True)
+        except Exception as e:  # noqa: BLE001
+            return ReconcileVerdict(
+                state=ACTION_STOP, stop=RECONCILE_STOP_REMOTE_UNREACHABLE,
+                detail="the platform client could not be built: %s: %s"
+                       % (type(e).__name__, e),
+                terminal=False, keeps_ticket_open=True, retryable=True)
+    if platform is None:
+        return ReconcileVerdict(
+            state=ACTION_STOP, stop=RECONCILE_STOP_REMOTE_UNREACHABLE,
+            detail="no platform client is configured, so what was merged cannot "
+                   "be read", terminal=False, keeps_ticket_open=True,
+            retryable=False)
+    runner = git_runner or _default_git_runner
+    env = _git_env(git_env)
+    default_target = str(args.get("target_branch") or DEFAULT_TARGET_BRANCH)
+    default_remote = str(args.get("remote_name") or DEFAULT_REMOTE)
+    rows: List[Dict[str, Any]] = []
+    for entry in entries:
+        rows.append(_reconcile_one(
+            entry, platform=platform, git_runner=runner,
+            git_timeout=float(git_timeout), env=env,
+            target=str(entry.get("target_branch") or default_target),
+            remote=str(entry.get("remote_name") or default_remote)))
+    return _summarize(rows)
+
+
+def reconcile_text(verdict: ReconcileVerdict, ticket_id: str = "") -> str:
+    """The receipt/blocked text for a reconciliation: the state, every repository
+    by name, the stop that failed and its remedy. Always redacted - a person must
+    be able to read what happened without reading this console."""
+    parts = ["post-merge reconciliation %s%s: %s"
+             % (verdict.state or "(no state)",
+                (", ticket " + str(ticket_id)) if ticket_id else "",
+                verdict.detail or "no detail recorded")]
+    if verdict.stop:
+        parts.append("stop %s" % verdict.stop)
+        parts.append("remedy: %s" % stop_remedy(verdict.stop))
+    if verdict.keeps_ticket_open:
+        parts.append("the ticket stays open")
+    for row in verdict.repositories:
+        parts.append("%s (%s) %s: %s"
+                     % (row.get("name") or row.get("repo") or "?",
+                        row.get("identity") or "no identity",
+                        row.get("state") or "?",
+                        row.get("detail") or "no detail recorded"))
+    return redact(" | ".join(parts))
