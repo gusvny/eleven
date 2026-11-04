@@ -131,6 +131,16 @@ SCENARIOS = [
     ("t261102-12-named-read-state",
      "A finished ticket stays readable without a live poller, and an unreadable one is NAMED instead of spun as a timeout (ticket t261102-12, host report 261101 'the left column shows many inspection tickets as timed out'; measured = seven inspection period tickets RUNNING with a FAILED workflow task, so every snapshot query was refused deterministically while the console called it a transient fault, re-polled it every beat and titled the row 'query timed out, refresh to retry' forever; the same path also probed a queue DERIVED from the ticket id while the execution polled the shared queue, so an inspection ticket always 'proved' zero pollers; grey-box L3, the REAL engine read faces - client.cmd_ticket_query, the named-cause classifier, retained_ticket_face, the poller probe - over stubbed Temporal, and the REAL console panel model (read-state.ts + ticket-error.ts) driven by a node leg over the engine's OWN receipts, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A a CLOSED ticket answers with ZERO snapshot queries (no poller needed at all) and the console reads it as a plain success; B a closed ticket whose return value cannot be read is answered from the RETAINED record on disk (post-close witness + archive manifest, no Temporal call) and renders as retained, never re-polled; C a workflow whose TASK is in a failed state yields kind=workflow_task_failed at the FIRST query attempt, with the history cause on the face, and the console renders it by name and schedules NO further detail read (the measured forever-timeout); D an unreadable ticket whose queue has no live poller yields kind=no_poller naming the queue the EXECUTION reports (never the id-derived name) and is re-read on the slow beat only; E a ticket on the shared queue with a live poller is NEVER named no_poller (the pre-fix false claim) and keeps the normal beat; F a ticket with neither a live read nor a retained record renders retained_unavailable and is not left as an endless transient retry. Intent split (no intent-level duplication): the engine truth tables (queue source, deterministic detection, retained store readers, row shapes) belong to developer L1 (server/engine/tests/test_t261102_12_named_read_state.py) and the panel model truth table to the plugin's own UT; THIS entry uniquely owns the engine->console read-state contract end to end - which is exactly the seam the measured bug lived in. engine import failure = ENV_FAIL exit 2 (the leg runs through integration/py_interp.sh); node missing = ENV_FAIL exit 2; tier: the cross-layer read-state promise only an end-to-end pass can prove; cost: seconds. fast-catch: a finished ticket rendered as a timeout, a false no_poller on a queue nobody polls, or an unreadable ticket re-polled every beat is caught here in seconds instead of at the next human look at the left column",
      "sh integration/py_interp.sh integration/t261102-12/sc_t26110212_named_read_state.py", "ro", "fast"),
+    # ---- t261029-38: the tmp-fixture sweep's daily cadence (ticket deliverables 1/2/3) ----
+    ("t261029-38-tmp-sweep-daily-tick",
+     "The tmp-fixture sweep ticks once a day on the daily inspection face and leaves a receipt that names the leaker with an owner (ticket t261029-38; grey-box L3, the REAL cadence CLI as a subprocess over a private temp root and a private state dir, the REAL sweep tool as its child, a REAL live process for the holder guard, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A face selection - only the daily inspection shape ticks; a lane round (source=lane:<ticket>, owner=gate, known-red=1 - the exact per-ticket composition), a manual run, a nested round (depth 2), a narrowed round and a disabled config are each a named exit-0 inert with NO state write and NO delete, so a per-ticket gate can never be red by construction; B the real-face tick in report mode writes the receipt pair, deletes nothing, and its header names mode, the absolute root, the backlog and the delta plus the top leaker prefix WITH its repo, while its sections name the sister repo (project-content, never attributed to this repo), the cross-repo project-vision family by name and prefix, the excluded families with their owner and the uncovered families with an explicit unknown owner; the live open-fd holder is named and its process stays alive; a forced second tick carries the count delta (the KI-01M506 bounded-growth face) and a plain second tick is the named due-window skip; status/report are readable reader faces; C apply mode routes BOTH guards end to end - an aged unheld whitelisted dir is reclaimed, a fresh dir survives, a dir held open by a live process (cwd elsewhere) survives and is named, the holder is never killed (the runner never passes --kill-carriers), the foreign/excluded families survive (counted, never swept, deliverable 3), and a tick that overlaps a held state-dir lock is a named exit-0 lock-held skip with no second receipt and no delete (the scheduler's two-ticks-at-once surface), proven by ticking again after the holder stops; D the config inputs fail closed and named - corrupt config, unknown mode and an age below the tool floor exit 8, an unusable state dir exits 5, none deletes; E THE PRODUCTION FACE (acceptance item 1) - on the DAILY INSPECTION ROUND ONLY the scheduled shape ticks the REAL host temp root with the REAL state dir (~/.sandbar/tmp-sweep) and NO mode flag, so the host's `enable --mode apply` governs (report keeps, apply reclaims behind the same two guards): the periodic receipt exists outside any throwaway box: its header names the real root, the backlog and the delta word, its sections name the top leaker family with its repo and the cross-repo project-vision family by prefix and scenario files, the receipt's mode is the host-config mode (report asserts swept 0; apply asserts the age gate >= 1 h and that --kill-carriers was never passed), exactly ONE receipt is written per scheduled round (never a forced second tick: a forced tick would replace the reader's period delta with a tick-to-tick number and halve the history, and a source lock refuses it), the reader's delta is the period delta against the previous scheduled receipt or a named baseline on day one, the production history log gains this round's row, a skipped tick is a named N/A and never a stale receipt read as proof; any other round prints one named N/A line and writes nothing, so a per-ticket gate never touches the production state dir; an unwritable state dir is ENV_FAIL, never a silent pass; C proves the config governs in both directions on private boxes (report keeps, apply deletes) and a source lock refuses any tick call that passes --mode. Intent split (no duplication): the sweep tool's own CLI safety contract and the open-fd holder case belong to t261002-13-tmp-backlog-sweep-safety; the watermark alarm owner receipt to t261002-13-tmp-alarm-owner-receipt; producer zero residue to t261002-13-tmp-producer-zero-residue; the pure runner faces (round_shape/due/staleness/delta math/malformed state/the full M-table) to the developer L1 battery integration/tests/test_t261029_38_tmp_sweep_receipt.py; THIS entry owns the cadence CLI as a real process. Pre-implement missing runner = FAIL named (TDD signal); green required at the integration gate/merge. lsof or pgrep missing = ENV_FAIL exit 2. tier: the cadence journey no single-component contract can express (face selection, receipt attribution, guard routing, exit table); cost: seconds (three sweep subprocesses); budget: 300s",
+     "python3 integration/t261029-38/sc_tmp_sweep_daily_tick.py", "ro", "serial"),
+    # ---- t261029-18: a multi-repo lane root tree is on lane/<id>-root ----
+    ("t261029-18-lane-branch-root",
+     "A multi-repo lane's ROOT tree is on lane/<id>-root while the gate hands the placeholder lane/<id>: the file-level blast radius must stop degrading to a full run and the degrade must be readable (ticket t261029-18; incident = project-vision multi-repo tickets timed out in merge_check/verify_lane because git merge-base main lane/<ticket> could not resolve the placeholder, changed_files returned an error, and every round ran the whole suite; grey-box L2, the REAL agent_activities.changed_files and lane_head_sha activities plus the REAL shared.changed_files_blast_radius and shared.targeted_rerun_plan decision faces over REAL git multi-repo lane fixtures - a root worktree on lane/<id>-root, a member worktree on lane/<id>-<member>, and the on-disk repo_worktrees.json the engine writes - offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A the incident shape returns the committed and dirty files of every tree (member paths repo-prefixed) with no error, and the decision narrows instead of the full-run sentinel; B non-vacuity - the placeholder really does not resolve on that lane while the root-tree twin does, and the pre-fix failure input still rides the sentinel; C a multi-repo lane whose manifest is gone must FAIL CLOSED - the resolved root-tree twin is itself the evidence that the lane's root branch is lane/<id>-root, so the root list alone is not the lane's change set (a manifest-free single-repo lane keeps returning its own list, as the control) - and the ordinary path emits one scope line per tree naming the scope and the resolved branch (the ticket's gate-log requirement); D an unresolvable name, a corrupt manifest and a missing member tree each give files=[] plus a named error and the sentinel, and never raise (accepted plan A4); E a member path whose tail is a shared face (a member-repo verify.yaml) reads shared, so a prefixed member path cannot silently narrow the round; F lane_head_sha resolves the root-tree tip on the same real lane (the merge gate's green-run face can be recorded again) and keeps its fail-closed shape for an unresolvable name. tier: the real-git multi-repo lane shape and the composed collect-then-decide seam, which no single component's stub contract can express (the unit tier bans real git). cost: seconds. Why L1 cannot carry it: the unit tier bans real git (server/engine/tests/conftest.py) and this property IS git ref resolution over the assembled lane shape. Why not L3: the workflow arm needs a real worker and Temporal (minutes) and would re-run the same activity; the one link only the assembly holds (the gate handing meta.branch down) is pinned by an engine unit leg. The fixture builder is the shared integration/t260921-09/lib_lane_fixture.py, extended in place for the root-tree entry (no third builder). Intent split: the candidate truth tables, the failure-message matrix, the wall-clock leg and the naming lock belong to developer L1 (server/engine/tests/test_t261029_18_lane_branch_root.py); THIS entry uniquely owns the real-git lane shapes and the composed decision. Anchor: behaviour in integration/test_anchors.json. Accepted plan rev2 contract: ChangedFilesResult.resolved carries '<scope>:<branch>'. Any future red on this face fails the round; git or the engine venv missing = ENV_FAIL exit 2",
+     "sh integration/py_interp.sh integration/t261029-18/sc_t261029_18_lane_branch_root.py", "ro"),
+
+    # ---- t261102-12: a finished ticket stays readable; an unreadable one is NAMED ----
     # ---- t261029-76: a retired premise is excluded and NAMED, never judged silently ----
     ("sc_retired_premise_round_face",
      "A round EXCLUDES an entry whose premise was retired and NAMES it; a live premise that fails still books ENV_FAIL and still reds the round (ticket t261029-76, incident = host order 261027 retired docker while two line-round cases still demanded a daemon, so every round booked two env_fail entries and the red froze the develop-buffer line on a premise that can never hold again; measured 2026-10-29 on round run-01M63CEX71YDHNH56E612BX86C ran=688 pass=685 fail=1 env_fail=2, freeze frz-01M63HN38C3CFFY5M8WE8H8FAR; grey-box L3, the REAL run_scenarios.py round driven over stub registries plus the REAL line_round_runner.py over a stub suite and a real git fixture, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233/8233; every nested round writes only inside its own temp ledger/lease/projects roots): S the shipped declaration and roster agree - integration/retired-premises.json parses, every excluded entry is STILL listed in the registry (no case disappears), each exclusion names a declared premise with its retirement order and a reason, and both measured entries carry a disposition (t260921-06-batch-ns-isolation EXCLUDED, t261027-11-stage-process-backend-zero-docker RE-POINTED); X exclusion BY CONSTRUCTION with a STUB premise - a stub entry under a retired stub premise neither runs nor books anything (no PASS, no ENV_FAIL, out of the expected roster count), it is NAMED on the receipt with premise + retirement order + reason, and the round is GREEN under BOTH the engine's run_verdict and the face's stricter rule; N the NEGATIVE BRANCH BITES - the same construction with a LIVE premise and a failing environment leg books ENV_FAIL exactly as today (not_checked=1, the name in env_red_names) and the round is RED under both rules (no blanket 'env_fail does not count'); V the two decisions keep two NAMES - the retired-premise line carries none of the pool-skip vocabulary and a pool-excluded round prints no retired-premise line; R the RECEIPT names the exclusion end to end - the real runner relays it onto the run header and the terminal face.json, names it on stderr, and a round whose cases carry a live env_fail still reds its face; D the re-pointed observation face has teeth - the fixture's recording `docker` stand-in records real invocations, flags the container-creating family and never calls an inspection a container. Intent split: the loader/decision purity (schema truth table, malformed data, select/line shaping) belongs to developer L1; the round's own roster arithmetic for known-red/pool/own calibers stays with their entries (t260930-01, t260920-01/t261025-02, t260913-03) and is not re-asserted here; THIS entry uniquely owns 'a retired premise is excluded and named, a live premise still bites, and the two decisions are distinguishable on the receipt'. Declaration data missing or unreadable = FAIL named (the guard exists to catch exactly that); git absent for the receipt leg = ENV_FAIL exit 2",
@@ -1099,6 +1109,10 @@ SCENARIOS = [
     ("t261006-19-counter-reset-replay-guard",
      "The main-sync conflict counter-reset family is replay-safe across the e9daa05 code boundary (t261006-19, KI-212, grey-box L2/L3, real lane workflow class behind a stubbed workflow facade with a live info() seam, offline seconds, zero docker/Temporal/3099; incident 261006 22:37 = t261005-10 and t261006-13 frozen with TMPRL1100 'scheduled concurrency_renew does not match activity command implement' after workers loaded e9daa05 — its four UNGATED counter-reset sites (rework/retry_qc signal handlers + two settle-success resets) zeroed the over-cap counter on replay, flipping the conflict route from blocked (what history records, next activity concurrency_renew) to resolve (scheduling implement), a deterministic divergence that kills every snapshot query): S1 (the reported regression, red today) a pre-fix history shape (patched=False, start_time before the e9daa05 landing instant) fires the rework AND the retry_qc handlers raising nothing, the over-cap counter SURVIVES (no reset), the route verdict stays blocked, and zero activities are scheduled where history holds concurrency_renew — the replayed command stream continues the history, never freezes; S2 window (b) positive: patched=False with start_time AFTER the instant keeps the fix semantics (counter reset fires, route resolves) — the guard must not silently disarm t261006-07 for post-anchor or markerless-window runs; S3 marker arm stays primary: patched=True fires the reset regardless of start_time; S4 degraded-probe contract (external-input three-state hook): info() missing entirely / no start_time attribute / start_time=None / non-datetime / naive datetime / a raising info() ALL raise nothing and fall back to the patched() verdict (a degraded probe must never crash the workflow task, it only loses the time arm); S5 source-shape lock (family face): COUNTER_RESET_PATCH_ID and E9DAA05_LANDED_AT constants present, at least four _counter_reset_active call sites, and the counter reset inside BOTH signal handlers sits within the guard verdict (unwinding either is red). Intent split: the CL-1 concurrency-gate family (acquire/release/renew first-command shape, both-lane guard) belongs to t261005-14-gate-replay-compat and its time-arm face to t261005-15-gate-window-b-time-anchor — a different patch family and fault face (counter zeroing flips the ROUTE; it does not add or drop gate commands); the developer L1 battery (test_t261006_19_counter_reset_replay.py, white-box) pins the single-class shape and static-lock details; a real-Temporal full-history Replayer pass and the two frozen tickets' post-fix live query proof belong to the engine pool / verification stage, not this offline entry. Engine modules (dev_lane/shared) unimportable = ENV_FAIL exit 2. S1/S5 red expected before the fix lands (TDD signal); arbitrate/merge must be green",
      "sh integration/py_interp.sh integration/t261006-19/sc_counter_reset_replay_guard.py", "ro", "serial"),
+    # ---- t261031-20: gate receipt freshness (a receipt is valid only for its tree) ----
+    ("t261031-20-gate-receipt-freshness",
+     "A gate receipt is valid only for the tree it measured, so the merge signature rests on a receipt for the merged tree (ticket t261031-20, cross-project report: three tickets in one day went gate-red, arbitrate said it changed the criterion, and the flow walked straight into the merge gate with a FAILED receipt that described a tree later stages had moved; grey-box L2/L3, the REAL dev_lane workflow class behind a stubbed workflow facade, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233/8233): A the reported shape - the receipt measured A and the lane head is B, so the guard refuses the receipt, sends the flow back to the gate, reports no verified receipt, and its reader text names both trees and the last stage entered while claiming no committer; B the 261009 control - a MAIN-SYNC delta (A -> B) never voids, the guard proceeds, the text names both trees, and the merge face names the tree the merge will land (other people's merges must not stall a lane); C an unresolvable head probe (ok=false, and a raising probe) is never fresh: the lane stops with the unprovable copy that names the head-resolution failure and both exits, and nothing escapes the guard; D a missing or malformed anchor is never fresh (no anchor, empty sha, None sha, a non-dict face), the guard never raises on the malformed shapes, and a second no-receipt miss stops (the no-receipt bound is one round); E the void bound is reachable and a new anchor does not reset it - three stale evaluations separated by new anchors end in a named stop that gives both exits, and a human retry_qc opens one more round (so the reset cannot sit behind the old conflict-counter gate, which is closed on an armed pre-anchor lane); F the arming rule - armed, the recorder issues exactly one head probe and mints the anchor with the measured sha and the surface, a failed probe leaves a named note and no anchor, a later success clears it; the source lock requires the patch id, the arming signal, the arming predicate, and an arming check above every declared command site (the half-armed read-without-writes defect this family measured). Intent split (no intent-level duplication): the pure function's state table per input shape and the main-loop journey belong to developer L1; THIS entry asserts the GUARD's reaction at the seam (never fresh, never raises, the bound, the stop copy); t261011-17-green-run-face-note owns the green-only last_green_run face and its miss note; t261005-14 / t261005-15 / t261006-19 own the concurrency and conflict-counter replay families; THIS entry uniquely owns the receipt-to-tree identity at the merge door plus the arming rule over its command sites. A real-Temporal full lane journey stays in the engine pool / verification stage. Binding note: the assertions use the interface the ticket fixes (the anchor key, the merge face, the recorder/guard outcomes, the arming predicate and the signal) and read no private counter or return-value internals - a refactor that keeps those names and this behaviour stays green; a rename is red by design, the declared-anchor rule the siblings use. Pre-implement tree red = the named TDD signal; green required at the integration gate/merge. dev_lane unimportable = ENV_FAIL exit 2",
+     "sh integration/py_interp.sh integration/t261031-20/sc_gate_receipt_freshness.py", "ro", "serial"),
     # ---- t261004-26: determinism family (inherited caller identity / flaky panel tests / blind guards) ----
     # ---- t261004-18: KI-193 panel write endpoints carry no identity (write gate / writer identity / audit source) ----
     ("t261004-18-ki193-unauth-write-refusal",
@@ -1917,6 +1931,9 @@ SCENARIOS = [
     ("t260903-03-paths-spawn-seam",
      "路径契约化端到端（跨组件：注册条目×路径解析×spawn 组装×patch 产物，观测=cmd --patch 链与 patch 文件内容）：声明命中用声明值（roles patch 指声明目录、模型来自声明表，声明优先于现行约定）；未声明多态（无 paths 节/条目不存在/key 空/key 非法含穿越形状）角色 patch 走现行约定（roles 语义不变）而模型面无表=不打 model patch+引擎面点名 state=decl_missing（t260914-05 兜底分支退役，禁静默回落仓内表）；锚点在内容缺走软语义不红（t260903-03 ①d 用户旅程）",
      "sh integration/py_interp.sh integration/t260903-03/sc_paths_spawn_seam.py"),
+    ("t261028-54-role-preset-fallback",
+     "角色定义逐文件回落+缺项留痕（t261028-54，灰盒 L2，直调引擎 spawn 唯一准备入口，观测=cmd --patch 链、泳道内物化副本、[role_preset] 日志行与 role_preset_<tag>.json 留痕；离线秒级、零 docker、零 Temporal、不碰 3099）：A 声明 roles_dir 两处皆缺→不打角色 patch+state=declared_missing+一条告警点名角色与两条绝对候选；B 声明缺+引擎库命中→恰一份物化副本在 agent cwd 内、与库文件逐字节相等、宿主库路径绝不进 cmd（容器不可见）、无 .part 残留、state=engine；C 未声明项目（project-vision/project-content 形状）→不打 patch、无 [role_preset] 告警、undeclared_missing/declared=false（机制休眠、行为冻结）；D 项目文件优先于引擎库同名文件（state=project、不物化）；E SANDBAR_ROLE_PRESET_FALLBACK=0→库路径关、fallback_enabled=false、仍响亮；F 畸形角色名（穿越/斜杠/前导点/换行+伪造标记/65 字符）→不读文件不阻断、state=invalid_role、单行转义不可伪造；G 64 字符边界=合法形状→declared_missing 而非 invalid_role；H 内置人设角色 inspection→state=builtin、安静、不打 patch。实现落地前红=预期（TDD 信号），arbitrate/merge 期必须绿；引擎模块不可导入=ENV_FAIL exit 2",
+     "sh integration/py_interp.sh integration/t261028-54/sc_t261028_54_role_preset_fallback.py", "ro"),
     ("t260903-03-paths-failclosed-red",
      "路径契约化故障面对抗（spawn 缝隙红传导，用户视角=红工单点名文件而非静默猜着跑）：条目 project.yaml 损坏（现行约定在位也必须红，不静默回落）、无表三态（t260914-05：指向缺失文件/未声明/目录当表=spawn 不红+无模型 patch+引擎面点名 state+指纹，三态互异不静默回落仓内表）、roles_dir 锚点缺失与类型错位仍红（roles 契约未放宽）、声明值畸形代表例（未知键/绝对路径/../穿越）一律红且文案点名键或解析后路径（t260903-03 ①d 三态）",
      "sh integration/py_interp.sh integration/t260903-03/sc_paths_failclosed_red.py", "ro"),
@@ -2305,6 +2322,11 @@ SCENARIOS = [
     ("t261025-02-own-never-peeled",
      "On an UNPOINTED per-ticket gate round the ticket's OWN scenarios stay in the run list AND in the expected caliber, whatever pool they live in (ticket t261025-02, KI-355: the peel happens on the EXCLUSION side - the per-ticket gate excludes engine/exclusive wholesale AFTER the own set is computed; witness t261022-12's own scenario lives in the ENGINE pool and every round reported meta.last_green_run ran=0 while t261024-40/-60 landed, promoted and live; user words: 'the per-ticket gate excludes engine/exclusive wholesale AFTER the own set is computed, and an own scenario that lives in those pools disappears from the run list'; grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a minimal fixture lane shaped like the live gate - verify.yaml excluding engine,exclusive, own fixtures under integration/t261025-02/ so the own-set derivation matches, seconds-scale stub scripts with on-disk execution markers read reader-side, one UNPOINTED round per case on a fresh lane so the reuse economy never enters these faces, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A THE WEDGE, POSITIVE - own in the engine pool + own in main + a non-own in exclusive with the own list declared: both OWN cases run (markers on disk, ran>=2), the non-own excluded entry stays out, and the completeness invariant holds exactly (expected==ran, the kept engine-pool own entry counted once - pre-fix this reds because the pool split runs the own entry while the expected caliber subtracts it); B EXCLUSION CONTROL - the same shape with no own list keeps the economy byte-stable (only the main entry runs, expected==ran==1, the skip face names the excluded pools, no own-exemption keys leak into an own-less receipt); C FAIL-CLOSED - a declared own name genuinely absent from the registry refuses BY NAME on an unpointed round (non-zero rc, REFUSED shape naming it, zero scripts executed) instead of running a subset while claiming own coverage; D MALFORMED - a whitespace-only own list behaves as absent, no phantom refusal. Intent split: the pointed-path keep/refusal/roster faces belong to t261024-40-own-scenario-gate-round; the ledger-reuse wedge belongs to t261024-60-own-never-ledger-reused; the pool-exclusion knob matrix belongs to t260913-03; the narrowed-empty fallback belongs to t260922-12; the engine-side faces (closing fast-union-own caliber, own-coverage named red, stale-lane capability probe) belong to developer L1 batteries plus the engine-gate stage driving the two live lanes; THIS entry uniquely owns 'the unpointed gate round is green and complete with an own scenario in a wholesale-excluded pool, and refuses by name when a declared own name is genuinely absent'. Pre-implement tree red on A/C = the named TDD signal; green required at the integration gate/merge. run_scenarios.py missing = ENV_FAIL exit 2",
      "python3 integration/t261025-02/sc_t261025_02_own_never_peeled.py", "browser-free"),
+
+    # ---- t261102-40: the prelude degrades by name and the round still runs ----
+    ("t261102-40-prelude-named-degrade",
+     "The suite names an unavailable test bench and still runs its cases, and a lane that carries the bench module finishes the same round with a bounded prelude (ticket t261102-40; incident = on line head 2d2d42a8 t261024-40 and t261025-02 failed at their 120 s cap and capture-redline-gate timed out, because the nested suite they spawn exited rc=1 after 140.2 s: _provision_test_target -> _bench_module raised ModuleNotFoundError for a lane that copies only a subset of integration/, after the prelude had burned a 120 s docker prune timeout plus a 20 s daemon probe; user words: 'the suite's test-target provisioning now hard-requires integration/process_bench.py, while fixture lanes copy only a subset of integration/ - the lane crashes instead of degrading'. grey-box L3, the REAL integration/run_scenarios.py as a subprocess over a minimal lane whose bench-module asset is a knob - the real prelude, the real provision and real child spawns, on-disk execution markers read reader-side, offline seconds, zero docker stage, zero Temporal server, never touches 3099/7233): A THE INCIDENT SHAPE - the lane carries the runner and the judge-face modules but NOT process_bench.py: the round exits 0 with no traceback, both stub children ran (markers on disk), the provision prints the SAME named NO TEST TARGET line it prints for a refused binary and names process_bench.py missing at <lane>/integration/process_bench.py, and the round receipt's test_target block reads source=absent with that absent_reason - a missing module degrades, it never crashes; B THE LANE THAT CARRIES THE ASSETS - the same round with process_bench.py, bench_deadman.py and the batch manifest present: exit 0, children ran, no traceback, the prelude-legs line carries a numeric test_target leg below 30 s, and the receipt's test_target source is one of bench/reused/absent and never ambient, because the lane clears the inherited statement so the nested run resolves its own target; C MALFORMED MODULE - a process_bench.py that raises at import: exit 0, children ran, and the named line says present at ... but failed to import with the error type - a broken bench is a code fault named as one, never read as an environment absence. Intent split: the provisioning truth tables over a fake bench (and the two-wordings note) belong to developer L1 (integration/tests/test_t261101_20_suite_test_target.py); the probe matrix, the lane-contract copies and the nested-env clearing belong to developer L1 (integration/tests/test_t261102_40_suite_prelude_budget.py); the own-set and exclusion faces of the two incident fixtures stay theirs; THIS entry uniquely owns the nested-round journey - a real suite round that degrades by name and still runs its children. Pre-implement red on A = the named TDD signal; green required at the integration gate/merge. run_scenarios.py missing = ENV_FAIL exit 2; tier: the nested-prelude seam no single-component contract can express (a real round, a real provision, real children); cost: seconds (three nested rounds, no bench started on this host); budget: 240s (three rounds under a 60 s per-round hang guard)",
+     "python3 integration/t261102-40/sc_t261102_40_prelude_named_degrade.py", "ro"),
 
     # ---- t260907-06: multi-repo project lane carrying sub-repos (ticket B: one ticket, several worktrees cohabiting one lane) ----
 
@@ -3164,6 +3186,11 @@ SCENARIOS = [
      "developer 段「读不算跑」执法旅程回归（t261009-36，事故 t261008-47=261009 实案：ticket 因 `bash -lc \"sed -n 70p integration/baselines/lane-stages-chain.mjs\"` 被 integration_discipline 误判跑集成打回——bash `-lc` 组合短旗使嵌套命令串从 flag 分支跌落为裸 token 进入口匹配，接收该路径的只读程序从未被查询；灰盒 L3 离线秒级，真 zstd 会话档×真活动入口缓存挂点零 spawn，锚公开回执面不锚内部函数）。R 读放行：R1 事故原文逐字进 developer 段→段绿、summary 零红线点名、结果文件逐字节不动（绿不回写）；R2 只读巡检器族×baselines token（sed/grep/cat/head/tail/wc/diff）+包装器包只读程序（timeout 5 sed）+git grep+只读管道（sed|grep）→全绿；X 红线不松：X1 裸跑 run_scenarios.py→红+点名+violations 恰 1（既有执法零回归锚），X2 bash -lc 组合旗内 python3 -m integration.run_scenarios→红（同跌落路径反向面：修复前=漏判绿），X3 xargs 二段式（|xargs python3 …/baselines/x.py）→红（修复前=在册已知漏判，工单规格④点名收口），X4 bash-heredoc 正文跑 baselines 脚本→红（组级分流不因窄化松动）；M 畸形输入：bash -lc 空串/引号不平衡→不抛、段不被误红（坏命令不停好工单）。intent 分工：developer L1（test_t260921_04_integration_discipline）守 matcher 纯函数真值表，t260921-04-discipline-receipt-journey 守执法链固有面（并行档防误伤/角色门/既有 -c 面——其成票时 -lc 组合旗跌落形态尚未在册），t260922-14 守引号分段/heredoc 数据面事故，本条只守「读不算跑」事故回归与同路径反向漏判面，不互替。修复前 R1–R3 红、X3/X4 绿属预期（TDD 信号：误红未消失/漏判未收口），run_integration_tests 期必须全绿；zstd/引擎模块缺席=ENV_FAIL exit 2 点名",
      "sh integration/py_interp.sh integration/t261009-36/sc_discipline_read_not_run.py", "ro"),
 
+    # ---- t261031-28: read-only static analyzer must not read as a suite run (upstream report, incident t261031-24) ----
+    ("t261031-28-discipline-static-analyzer-read-only",
+     "A read-only static analyzer never reds a stage, and the `-m <module>` exemption never admits an executor (t261031-28; upstream integration report, measured on t261031-24 = a developer stage that ran `python3 -m pyflakes integration/sc_*.py` settled RED because the scanner matched the FILE argument of a module outside its read-only table, and the ticket burned a whole round; grey-box L3, the REAL stage activity entry over a REAL zstd session file with the receipt on disk, offline seconds, zero docker/Temporal-server/network, never touches 3099/7233): A the read-only analyzer family is legal - the reported command verbatim (glob included), `python -m`, every user-typed analyzer over each entry shape (runner, scenario script under a ticket dir, baselines script), the joined form, and an analyzer with its own options before the file settle the developer stage green with no violation row and a byte-identical receipt; B the red line stays - the executor modules (pytest/unittest/doctest/runpy/timeit/cProfile/profile/pdb/coverage/trace) keep one hit each over an entry path while an analyzer in the same segment is not swept in, entry-module and plain execution forms keep their entry keys, and the exemption is segment-local and never retroactive (`analyzer && run` and `run -m analyzer` each leave exactly one violation naming the run); C malformed analyzer argv (unbalanced quote, dangling -m, -m with no file, empty command, non-JSON tool arguments) settles green with zero rows and no crash; D the evidence face (walkthrough/arbitrate, role=integration) does not read the analyzer as a suite invocation (green, no row, receipt untouched), still lands one drift row naming a bare full run, and keeps a targeted `--only` run green; E the agent-facing clause never advertises an analyzer the gate rejects (at least one advertised, each accepted over every entry shape). Declared and NOT asserted: the joined form `-m<analyzer> <entry>` is matcher-green but the evidence-face classifier still reports it (agent_activities is outside this ticket's write set; the module docstring declares that residual) - pinning today's split would pin a known bug in a test that must not rot. Intent split: matcher truth tables, the set composition and the docstring/clause name lists belong to developer L1; the receipt enforcement chain for read-only inspection (`sed`/`grep`/`ls`, `bash -lc`) belongs to t260921-04-discipline-receipt-journey and t261009-36-discipline-read-not-run; the clause anchors for the pre-existing forms belong to t260921-04-discipline-clause-contract; THIS entry uniquely owns the newly admitted `-m <static analyzer>` family and the execution modules that must stay outside it, at both stage faces. Pre-fix tree red on A/D1/E = the named TDD signal; green required at the integration gate and at merge. zstd absent or engine modules unimportable = ENV_FAIL exit 2",
+     "sh integration/py_interp.sh integration/t261031-28/sc_t26103128_static_analyzer_read_only.py", "ro"),
+
     # ---- t260922-18: 泳道验证前主同步 main（宿主拍板「机械验证前由 worker 并一次」；KI-082/KI-090 同族清偿） ----
     ("t260922-18-main-sync-gate-evidence",
      "验证前主同步 main 的真编排契约（t260922-18，宿主拍板「只在机械验证前由 worker 并一次 main——被验证的树=将要被合并的树」，灰盒 L3 混合台架：temporalio 本地测试服务器+dev_lane 真 workflow+真 git 泳道+真 git 活动（prepare_workspace/verify_review_gate/settle_lane/prepare_conflict_resolution/settle_conflict_resolution）+可控桩脑，零 docker 零模型）：一张真票走完整旅程——①时点与被验证树：票开工后 main 前进（无害增量→相撞增量两步），跑闸探针桩在每轮 run_integration_tests 被调时刻捕获泳道 HEAD，逐轮断言 main tip 为其祖先（每轮验证树=main+票改动，KI-082 清偿回归：老票不再以 merge_check 冲突形态才第一次知道 main 前进）；首轮验证 HEAD=双亲 merge commit（同步真落 merge）；②幂等与必重跑：抵达跑闸的验证轮恰 2 轮且逐轮真跑——code-fault 打回轮之后的同步留冲突现场被截停在跑闸之前（恰证同步时点在跑闸前）、消解收敛后的已追平轮零新增 merge commit（全旅程恰 2 个：首轮同步 1+消解代提交 1）但跑闸照跑（无旧报告复用分支）；③证据上台面：票面 results[run_integration_tests] 含「主同步」与「main@」（机械证据进票面），冲突消解轨迹进 timeline/handoffs；④冲突回路回实现段：消解步提示词含冲突现场与「不要 git commit」令、worker 真代提交（settle_conflict_resolution 真跑）、票自动回 implement 适配后再验证绿、终到 merge 人审门（awaiting-human）全程零 blocked；⑤不可达响亮转人工：第二张票 main ref 已删→验证相位 blocked（stage=run_integration_tests、blocked 面含「主同步」与「不存在」错误原文特征）、跑闸探针零调用（同步失败拦在跑闸前绝不静默跳过）。intent 分工：developer UT（test_t260922_18_main_sync）锁纯函数矩阵/活动回执新键/legacy dict 兼容/源码结构断言（patched 门与前置检查→同步→跑闸源序）——本条不重复结构锁，只锁运行时行为与票面文本（浅绑定锚「主同步」「main@」「不存在」子串与公开 snapshot 面，不锚实现内部名与整句文案）；selfcheck_conflict_resolution（developer 侧）守既有 merge_check 冲突回路闭环——本条只消费该回路作主同步的冲突出口，不重放其矩阵；t260922-12 场景族守结果台账采信边界——本条不触台账；t260916-26/t260915-05 系真 docker 台全链守缺件预检/红卡观测面——本条用 ki061 selfcheck 同款本地测试服务器守主同步编排本体。实现已随本票落地，实测全绿（真编排 14 断言）；实现回退则 G2/G3/G5/G6/D1-D3 红，arbitrate/merge 期必须绿；git/temporalio 缺失或本地测试服务器起不来=ENV_FAIL exit 2 点名",
@@ -3298,6 +3325,42 @@ SCENARIOS = [
     ("t260925-04-full-run-invariants",
      "全量不变式注入面（t260925-04，灰盒 L3 决策点对抗输入，ro 秒级零 docker）：改动清单畸形（None/标量/裸字符串/dict/非串元素/空白元素/空清单）恒全量且不抛；diff_error 非空恒全量且优先于 localized 清单（计算面报错绝不放窄）；首轮恒全量不因新口径松动；定点面输出恒为红名清洗去重保序子集（__合成/空/非串剔除，红名畸形→全量）且合法清单时真解禁非恒全量换皮。intent 分工：t260925-04-file-blast-radius 守真仓三态组件链，本条只守同一决策点的畸形/边界注入不变式（对抗维度不同不互替）；developer L1 真值矩阵之外的用户级对抗复核。无 ENV 子用例；实现落地前红属预期（TDD 信号），arbitrate/merge 期必须绿",
      "sh integration/py_interp.sh integration/t260925-04/sc_t260925_04_full_run_invariants.py", "ro"),
+
+    # ---- t261103-03: the two-sided change set inside the per-scope collector ----
+    # The buffer-lane caliber (main, t261102-45) and the per-scope collector (line,
+    # t261031-17) disagreed only where the two sides meet (KI-459). This entry guards the
+    # reconciled answer: which files a buffer ticket pays for, and what happens when the
+    # second baseline cannot be read.
+    ("t261103-03-two-sided-per-scope-collector",
+     "A buffer lane's change set counts only what the ticket itself wrote, in every scope, "
+     "and fails closed by name when the line side is unreadable (ticket t261103-03, "
+     "grey-box L3, the REAL agent_activities.changed_files x the REAL "
+     "shared.targeted_rerun_plan over self-built real-git buffer lanes - a project root "
+     "repo plus one member repo, a lane manifest, the line's carried file and a synced "
+     "main on both sides; ro pool, seconds, zero docker/Temporal-server/browser/console, "
+     "never touches 3099/7233): A the two-sided caliber excludes the line's carried files "
+     "in every scope, keeps the ticket's own files with their project-root prefix, and "
+     "names the basis; B the per-scope resolution face survives (one entry per scope); "
+     "C control - with no other side named the historical caliber is intact and the line's "
+     "files ARE in the list, so the new caliber is opt-in; D control - naming main as the "
+     "other side is byte-identical to naming nothing; E an unresolvable other side answers "
+     "files=[] with a named error that carries the side and the merge-base marker, and the "
+     "decision face does NOT narrow; F one unreadable member scope fails the WHOLE call by "
+     "tag, never a partial list; G the status face is not intersected (an untracked own "
+     "file still counts in both scopes); H the sibling mount is not resurrected by the "
+     "intersection; I a single-repo lane keeps the same caliber with no repo prefix. "
+     "Intent split (no intent-level duplication): t261031-17-multirepo-changed-files owns "
+     "the per-scope baseline, the branch naming and the mount drop; "
+     "t260925-04-file-blast-radius owns the real-git blast-radius chain; "
+     "t260925-04-full-run-invariants owns the malformed-input truth tables; "
+     "t261029-18-lane-branch-root owns the root-twin naming; t260930-02-surface-plan-query "
+     "owns the selector state machine; the collector truth tables and the source-structure "
+     "locks belong to developer L1 (a contract-preserving refactor must not red this "
+     "case). THIS entry owns which files a buffer ticket pays for. The fixture technique "
+     "is shared with the sibling entries; shared steps are not shared intent. "
+     "Pre-implementation red = the named TDD signal; green required at the integration "
+     "gate/merge. git or the engine modules unimportable = ENV_FAIL exit 2; cost: seconds",
+     "sh integration/py_interp.sh integration/t261103-03/sc_t261103_03_two_sided_collector.py", "ro"),
 
     # ---- t260925-12: 闸段分相计时——回执可见性与老回执兼容（验收④＋residual 归账）----
     ("t260925-12-executor-timings-receipt",
@@ -4249,6 +4312,37 @@ SCENARIOS = [
     ("t261030-33-artifact-declaration-faults",
      "A malformed artifact declaration never blocks a stage, never gets repaired, and is always named; an old receipt, an old worker's result dict and an old handoff keep working and keep their existing values (ticket t261030-33; the declaration is agent-written external input, so this entry is its adversarial face and the replay face; grey-box L3, the REAL intake, the REAL workflow copy, the REAL _handoff and the REAL snapshot() query body, offline seconds, stdlib + engine modules, zero docker/Temporal-server/browser, never touches 3099/7233): F1 a non-list declaration is refused as a whole and named, and the bare string is never iterated character by character; F2 junk elements between good ones are refused BY INDEX while the good entry survives; F3 entries without a usable source are refused and no descriptor is invented; F4 a string deliverables value yields no path entries and is named (no artifact per character); F5 an old receipt reads as shape absent; F6 an old worker's dict (no new keys) reads as absent while the legacy paths still show as guessed descriptors; F7 a corrupted handoff history is named per entry and never raises the query; F8 the generic template face serves the two keys with an unknown round and the same non-mirroring rule; F9 a refusal leaves the stage status and the gate surface untouched; F10 the existing snapshot keys keep their values. Intent split: the normalizer truth table and the malformed-input matrix belong to developer L1 (server/engine/tests/test_261030_33_artifact_declaration.py); the positive journey is the sibling entry t261030-33-artifact-declaration-face; THIS entry uniquely owns the agent-input fault surface and the old-history replay promise. Green required at the integration gate / merge. engine modules unimportable = ENV_FAIL exit 2",
      "sh integration/py_interp.sh integration/t261030-33/sc_t261030_33_artifact_declaration_faults.py", "ro"),
+    # ---- t261102-09: chat file links open in the middle column (option a: claim and forward) ----
+    ("t261102-09-takeover-seam",
+     "The chat's file tab is CLAIMED at the platform seam and FORWARDED to the middle column (ticket t261102-09, host order 261016 option a: 'a. 抢接，文件一律改在中间开'; the premise is that dsh-client-ui-chat hardcodes ctx.sidebarRight.openResource, so the only takeover is a tab type at the extension band plus a body that reads its own tab). Grey-box L2, the SERVED bundle (server/plugins/workbench/lib/client.js) loaded through the platform module-loader contract and driven through its public entry apply(ctx) against a model of the documented registry contract (extension > builtin > fallback, canOpen veto, claim throws when nothing opens) and the keyed seat 'sidebar.right.pane.tab' (hook factories arrive as props named use<Name>), offline seconds, no browser, no stage, never touches 3099: T1 the served bundle registers a file type at the EXTENSION band that outranks the builtin for a text address (so the takeover is in force in the page the console serves, not only in source); T2 the veto claims markdown/plain/data/source/log/csv and refuses images, PDF and HTML so the builtin keeps those addresses exactly as today; T3 the body rendered by the seat forwards ONE middle-column request {sessionId, path, line} through the plugin's documented cross-evaluation anchor, closes its own tab, and never calls openResource (the right column is not re-opened - the whole point of the option); T4 the column collapses only when it is expanded AND no tab is left (an open chat tab keeps it open; a collapsed column is never expanded); T5 an unparseable address never throws in the seat - it renders a named banner carrying the address and the tab is not closed; T6 a second click keeps ONE middle request (line updated) and a different file replaces it (never two layers); T7 a throwing close()/toggleExpanded() cannot undo the forward or crash the seat; T8 disposing the plugin returns the address to the builtin (no leaked claim). H0 is a harness control: a minimal correct takeover must reach PASS through the same plumbing, so a red is attributable to the artifact. Intent split: the pure claim/parse/clamp truth tables, the store binding and the route unit battery belong to developer L1 (server/plugins/workbench/tests/t261102-09-*.mjs); THIS entry uniquely owns 'what the shipped registration hands the platform, and what the seat body does with it'. The browser-only residue (real layout / line scroll of the middle sheet, a real click inside the chat) is named as an uncovered surface on the ticket result, not faked here. Tier: the platform seam contract (registry + seat commands) that no single component can express; cost: seconds. Absent served bundle = ENV_FAIL exit 2; a bundle that exists but does not evaluate = product red (the console plugin cannot boot).",
+     "node integration/t261102-09/sc_t26110209_takeover_seam.mjs", "ro"),
+    ("t261102-09-read-face-http",
+     "The guarded file-read face the middle column consumes serves bytes and refuses by name, read back from real HTTP (ticket t261102-09, spec item 6: 'reading the content goes through a guarded face ... a path outside every registered project dir is refused BY NAME'; the plan chose the workbench route under /sandbar-workbench/api/wf/). Grey-box L2, the REAL host half (server/plugins/workbench/node.ts imported in a fresh process, apply(ctx) over a real localhost socket, a real registry directory on disk with a per-key project.yaml, real fs fixtures) with a fake sessions service shaped like the installed dsh Session (header.cwd), offline seconds, no browser, no stage, never touches 3099: R1 the host registers the path the SERVED bundle calls (the dead-button class: a client URL with no handler must be red by name); R2 a session-relative text file and an absolute path under a root are served whole (UTF-8 byte-identical); R3 every target fault is refused BY NAME with the requested path in the answer - outside-roots (relative escape, sibling directory sharing the root prefix, an existing absolute path outside, and a symlink inside the root pointing outside), not-found, is-directory, too-large, not-utf8, no-registered-roots (empty registry), session-workspace-unknown (unknown session, a session whose cwd sits on the wrong field, and a throwing session service); R4 no existence oracle: a MISSING path outside the roots answers outside-roots like an existing one; R5 a malformed request is a 4xx naming the parameter; R6 a write method never returns file content; R7 disposing the plugin unregisters the route. Intent split: the read helper's truth tables, the claim model and the pane's pure functions belong to developer L1; THIS entry uniquely owns 'the wire contract the pane consumes, driven over a real socket'. Tier: one component's contract at its public boundary; cost: seconds. A host module that cannot load = ENV_FAIL exit 2; a missing route = the named TDD red.",
+     "node integration/t261102-09/sc_t26110209_read_face_http.mjs", "ro"),
+
+    # ---- t261102-25: the merge gate catches a fast member that catches nothing ----
+    ("t261102-25-fast-set-declaration-gate",
+     "A registry entry that joined the fast set without an honest fast-catch declaration is stopped by the merge gate's own battery, by name, in a lane-shaped tree, and the shipped declaration passes the same rule (ticket t261102-25, measured on main 9897c555 during gatekeeping after t261102-18: t261102-12-named-read-state carried the fast marker with no FAST_SET_CATCH clause, so validate_fast_set() refused and EVERY face that drives the declaration stopped - t261011-10-fast-proof-membership ENV_FAIL, t261011-10-proof-degradation-named ENV_FAIL, t261011-11-fast-set-review-patrol FAIL 3/3, t261018-01-closing-fast-once FAIL, t260919-02-terminal-face-board FAIL; the pytest rod that judges the declaration existed and was red, but no merge-gate check collected integration/tests, so the red sat on main until the next gatekeeping round; grey-box L2/L3, a real git clone --shared of this tree with the WORKING TREE's integration/ mirrored over it, the REAL gate command `python3 integration/lint_tests.py` (exactly what verify.yaml's lint check runs) judged by its exit code and named output, offline about half a minute, zero docker/Temporal-server/browser, never touches 3099/7233, and the tree under test is byte-identical before and after): A1 the fixture is real - the clone carries the lane's integration/ bytes and neither probe member name exists in the shipped registry before injection; A2 THE INCIDENT REPLAYED - a fast-marked member with NO catch clause turns the FULL gate battery red, NAMING that member, and the naming row carries the declaration/catch concept (the merge-gate reach the incident proved missing, so the lane stops before main instead of the fast-set family afterwards); A3 THE SHIPPED DECLARATION PASSES - the same rule exits 0 once the clone is byte-restored, so the guard has no false red on the declaration it protects; A4 THE PLACEHOLDER SHAPE IS CAUGHT TOO - a whitespace-only clause (a member that declares nothing, the same escape in a new dress) is refused by name as well and the missing-clause probe is not named in that run (judged on its own shape); A5 HYGIENE - the clone is reclaimed on every path and the tree under test is byte-identical (sha256 read before and after). Attack surfaces: a guard that lives only in the pytest rod (the incident's exact escape), a guard wired into the battery but silent about the member, a placeholder clause accepted because the key exists, a false red on the shipped declaration, a fixture run that mutates the tree under test or leaks its clone. Intent split (no intent-level duplication): the declaration FACE and its gate-face refusals belong to t261009-16-fast-set-declaration/-gate, the patrol face and record to t261011-11-fast-set-review-patrol, the lint-battery wiring into the code lane to t261004-34-lint-battery-wired-into-code-lane, the interpreter lint's own vacuity control to t261026-35-interp-lint-gate, and the validator truth tables plus the in-process reader rod to developer L1 (integration/tests/test_t26100916_fast_set.py); THIS entry uniquely owns 'a member that joined without an honest declaration is stopped by the merge gate's own battery, by name, while the shipped declaration passes'. Pre-implement tree red on A2/A4 = the named TDD signal; green required at the integration gate/merge. git unavailable, or the registry/gate entry missing = ENV_FAIL exit 2; tier: the assembled merge-gate face no single-component contract can express; cost: about half a minute (one full battery run in the clone plus two seconds-scale scoped runs); this case lives under the carrying ticket's own directory because the own-scenario derivation is path-keyed (KI-445)",
+     "python3 -B integration/t261102-25/sc_fast_set_declaration_gate.py", "ro"),
+
+    # ---- t261030-36 (epic artifact-face slice 3): the six built-in views inside the slice-2
+    # frame. Three halves, built by three changes, must agree about ONE declared artifact, and
+    # no view may add, hide or redraw a row ----
+    ("t261030-36-artifact-view-seam",
+     "One declared artifact row survives the three halves built by three changes, and no view can add, hide or redraw it (ticket t261030-36, epic artifact-face slice 3: the six built-in views inside the slice-2 frame, dispatched spec 'six rendering views inside the console-owned frame; none of them may add or hide an artifact row'; grey-box L2 contract over the REAL client frame model + the REAL host artifact-face + the REAL view model, offline node seconds, zero docker/Temporal-server/browser/console-port, writes only inside its own mkdtemp tree, never touches 3099/7233): A six kinds - every built-in kind resolves to its own view, an unknown kind resolves to the external one, every declared row keeps its identity, and each of the six kinds plans a body; B the frame and the host agree - a row the frame offers bytes for is served by the host, a row it withholds is refused with a named reason, every served row carries a disposition, and an SVG image never leaves as an inline image type; C the body plan agrees with servability - the seven unusable classes (non-addressable id, absent file, over the in-page cap, not UTF-8, outside the root, URL source, unknown kind) plan no body and reach the reader ZERO times, image and external bodies plan a body with no text read, and every text-style row reaches the reader EXACTLY once; D the read classification names the route's own answer for served text, 413 too_large, 400 not_utf8, 404 not_found, 409 ambiguous, 503 busy, a wrong content type and a network error, and an abort is a named state that never throws and never reaches the reader; E fault containment - one damaged artifact (bad JSON, ragged CSV, truncated diff, scalar ledger, binary bytes where markdown should be) never throws, never drops a row, never changes a healthy sibling's plan, and never leaves the damaged row's plan equal to its healthy plan; F no row authority - the frame-owned display keys (hidden/order/view/render) cannot hide a row or change a planned body; G the byte-slot gate saturates as a named busy, and every slot returns after success and after a throw. No lower tier carries A/B: the frame, the host and this slice's view each have their own battery against stubs or against itself, so a stub on either side can agree with itself and disagree with the other half - the fault class this repo paid for four times (t261028-48: four readers, four green rules, one receipt; KI-407 lists five more). Intent split: the parsers' malformed truth tables, the caps arithmetic and the copy belong to developer L1 (workbench/tests/t261030-36-artifact-views.mjs); the markdown/innerHTML inertness promise belongs to developer L2 (workbench/tests/t261030-36-artifact-view-ui.mjs, plan A5; no case carries it yet, so the walkthrough probes it); the browser look and the real click belong to the acceptance walkthrough; THIS entry uniquely owns the three-half agreement, the per-kind dispatch through a REAL frame row (C4-kind/C6-kind), the one-read-per-row rule, per-row fault containment, the no-row-authority rule and the byte-slot lifecycle. Three-state: the slice-2 frame module absent on this lane (the ticket's P0 base staleness) = ENV_FAIL exit 2 named - there is no frame-and-view seam to judge and the plan forbids copying the frame here; this slice's view module absent, unimportable or missing a declared export = FAIL named; node below 22 = ENV_FAIL exit 2. Pre-implement tree: the view module is absent, so this entry is red by name until implement lands; green required at the integration gate / merge. cost: seconds",
+     "node integration/t261030-36/sc_t26103036_artifact_view_seam.mjs", "ro", "fast"),
+    # ---- t261031-17: per-scope changed-file baseline (multi-repo lanes) ----
+    # The collector decides whether a round runs everything. A multi-repo lane names one
+    # branch per repo, so the suffix-less name failed every scope and every gate round ran
+    # the full suite (the reporting project: 40 to 60 minutes per round).
+    ('t261031-17-multirepo-changed-files',
+     "Per-scope changed-file baseline on a multi-repo lane (ticket t261031-17, the cross-project report from project-vision: every gate round ran the full suite, 40 to 60 minutes, because the collector took merge-base with the suffix-less lane branch `lane/<id>` while a multi-repo lane names one branch per repo (`lane/<id>-<repo>`, plus `lane/<id>-root`); grey-box L2 contract, the REAL agent_activities.changed_files x the REAL shared.targeted_rerun_plan over self-built real-git lanes (project root repo plus one-level member repos, a manifest in the engine's own shape, real `git worktree add` mounts), fixture-built branch context, offline seconds, stdlib + engine modules + git, zero docker/browser/console, never touches 3099/7233): A the reported shape (root repo, member mounts ignored as in the reporting project) - a member-only committed change is listed project-root-relative and the coarse-prefix rule's full run narrows to the previous red names; B safety track - a root-repo verify.yaml change still plans a full run; C the sibling mounts are reported by neither face (status `member/`, diff gitlink `member`), an ordinary untracked directory is still reported, and the lane's own manifest artifact does not force a full run; D fail-closed - one member without `main` answers an empty list, an error naming that scope with the merge-base marker, and a full run (a partial list must never narrow); E single-repo lane regression witness - the same list a manual diff gives, committed plus the dirty half read from the LANE TREE; F an uncommitted member change is counted with its prefix; G agent-written external input - a corrupt manifest and an absolute `repo` entry each answer an empty list, a named error and a full run, and never raise. ENV_FAIL exit 2 when git is missing, the engine modules cannot be imported, a fixture step fails, or the fixture's own premise does not hold (per-repo branch/merge-base unresolvable, or the suffix-less name unexpectedly resolving); an ENGINE answer that reports the baseline unavailable is content here, not environment - the fixture builds the per-repo context, which is why the single-repo sibling's KI-413 guard is not borrowed (it would hide this ticket's defect as an environment red). Intent split: t260925-04-file-blast-radius owns the file-level radius versus the write-set coarse prefix on a single-repo lane, and t260925-04-full-run-invariants owns the malformed-input invariants at that decision point; the registered multi-repo cases own other faces (lane materialization t260907-06, the host diff face t260911-01, mixed root t260912, dir stance t260914-01, nested-repo guards t260916-20, implement-stage settle t261016-21, line acts t261019-41, gate root resolution t261019-45), and no registered case drove changed_files on a manifest-bearing lane before this one. Developer L1 owns the stubbed truth table (server/engine/tests/test_t261031_17_multirepo_changed_files.py); THIS entry uniquely owns the real-git per-scope resolution and its decision chain. A pre-implementation red is the named TDD signal; green is required at the integration gate and merge. cost: seconds (measured about 5 s)",
+     "sh integration/py_interp.sh integration/t261031-17/sc_t261031_17_multirepo_changed_files.py", "ro"),
+
+    # ---- t261030-35 (epic artifact-face, slice 2): the console inventory and the original-bytes channel ----
+    ("t261030-35-artifact-face",
+     "The console artifact inventory and the frame's original-bytes channel are served from the REAL workbench route table, and a project can neither hide a declared row nor make the console read another project's tree (ticket t261030-35, epic artifact-face slice 2, host words 'list the declared artifacts, render the frame, keep the frame out of project hands'; plan D5/D5a/D6/D6a/D6b/D6c, acceptance A1-A12; grey-box L3, the REAL server/plugins/workbench/node.ts mounted through apply() over a mkdtemp project pair with a fake server/admin.py answering `call ticket {op:show}` - the technique of t261021-12 - plus a temp per-key project registry, offline seconds, zero docker/Temporal-server/browser, never touches 3099/7233): A both artifact routes are GET-only (any other method is a named 405 and no byte leaves); B one GET lists EVERY declared row in stage order then declaration order, each row carrying its <stage>/<id> key and a named state - a row is never dropped because its bytes are unusable (missing, over the cap, not UTF-8, a URL source, an absolute source, a traversal, a symlink escape, a member repo the ticket does not own) - and a ticket that declares nothing answers an explicit empty list with no false refusal line; the snapshot's flat list wins when the snapshot carries one (the forward-compatible branch); C the key the console model mints (deriveArtifactRows -> row.key) is the address the byte route accepts and the served bytes equal the file on disk (text and image, sha256) - the seam that a wrong-file answer would break; D the status family - undeclared id/stage 404, id declared twice in one stage 409, over-cap 413, path-shaped id 400 (including the double-decode shape a%252Fb), and a DECLARED but unusable source is a named 4xx that is NOT 404 (the host can tell 'not declared' from 'declared, cannot be served'); E every answer carries nosniff + no-store, text kinds are text/plain (never text/html), a PNG stays image/png, an SVG declared as an image and an unknown kind leave as octet-stream downloads; F the same ticket id under a second registered project serves THAT project's bytes, an unregistered key is a named 400 (never a silent fallback to the engine repo), and a file that exists only in project A is never served under project B (KI-057 family: the static engine anchor is how the workbench lost whole faces for external projects); G the detail route and the family's answer to an unknown op are unchanged, so the new routes did not shadow the ticket prefix; H a malformed snapshot (non-object results, non-object receipt, non-object descriptor, blank source) answers 200 with the good row still listed and the rest named - never a 5xx and never a silent drop; I concurrent byte reads are each either served or refused BY NAME and the read pool is free afterwards; J the delivered L1 battery runs and is green (mechanism liveliness - a battery that is absent or red is this ticket's own product gap). Intent split (no intent-level repetition): the derivation truth tables (order, refusals, legacy labels, state vocabulary), the cap arithmetic, the content-type table and the slot helper belong to developer L1 (server/plugins/workbench/tests/t261030-35-artifact-face.mjs, t261030-33's engine contract stays engine-side); THIS entry uniquely owns the assembled seam - route table, per-request project anchor, client key reaching the host route, served HTTP contract, and the existing dispatch staying intact. Why a cheaper tier cannot carry it: L1 sees one module, never the route registration or a second project's tree; the wrong-project read and the client-model-to-route address are properties of the assembled host only. Pre-implement tree: A-J red by name = the named TDD signal; green required at the integration gate / merge. node or workbench node.ts unresolvable = ENV_FAIL exit 2. cost: seconds",
+     "node integration/t261030-35/sc_t261030_35_artifact_face.mjs", "ro"),
 ]
 
 # ---- t261009-16: the lane's fast global set (the declaration) ----------------
@@ -4296,6 +4390,28 @@ FAST_SET_BUDGET_NOTE = (
 #: therefore cannot drift into a second membership list — membership itself
 #: lives only on the registry markers.
 FAST_SET_CATCH = {
+    # t261102-12: this ticket's own membership declaration (the guard family
+    # t261009-16 B refuses a fast member without one — and that refusal is
+    # exactly what the integration gatekeeping round measured on main 9897c555,
+    # when this clause was missing and every fast-set face refused).
+    "t261102-12-named-read-state":
+        "the measured 261101 incident class - a finished ticket rendered as a "
+        "timeout, a false no_poller reported on a queue nobody polls, or an "
+        "unreadable ticket re-polled every beat - caught here in offline "
+        "seconds instead of at the next human look at the left column",
+    # t261030-36: this ticket's own membership declaration (the guard family
+    # t261009-16 B refuses a fast member without one; that missing declaration
+    # was the red arbitrate gen2 booked, and it took the whole patrol face down
+    # with it - the review face refuses before any leg runs).
+    "t261030-36-artifact-view-seam":
+        "the frame, the host and the view disagreeing about one declared "
+        "artifact - a row the frame offers bytes for that the host refuses, a "
+        "view that reads a row the frame put on the degrade card, or a view "
+        "model that resolves every kind to the external card because the frame "
+        "stopped projecting a field the view reads (the arbitrate gen0 defect: "
+        "every artifact row drew the metadata card and nothing was ever read) - "
+        "caught here in offline seconds instead of at the next host look at the "
+        "panel",
     # t261027-16: this ticket's own membership declaration (the guard family
     # t261009-16 B refuses a fast member without one).
     "t261027-16-cert-receipt-bounded":
@@ -4714,6 +4830,18 @@ FAST_SET_CATCH = {
         "page-embedded module-binding crash that blanks the period row (the "
         "261026 host report defects B/C + the arbitrate round-3 page crash), "
         "caught in offline seconds",
+    # t261102-09 (integration, arbitrate round 15): main's t261102-12 landing added
+    # this fast member WITHOUT its declaration, so --print-fast-set refused with
+    # "fast member has no fast-catch declaration" and EVERY closing run in this
+    # lane became a named zero-run receipt ("closing face unavailable") - the
+    # startup-level error that voided the previous pass. The clause below quotes
+    # that entry's own intent (its fast-catch sentence); the member's membership
+    # is unchanged.
+    "t261102-12-named-read-state":
+        "the measured incident class itself - a finished ticket rendered as a "
+        "timeout, a false no_poller on a queue nobody polls, or an unreadable "
+        "ticket re-polled every beat - caught here in seconds instead of at "
+        "the next human look at the left column",
 }
 
 
@@ -4785,6 +4913,21 @@ def validate_fast_set(registry=None):
             errors.append("[%s] fast member has no fast-catch declaration — "
                           "a member that catches nothing has stopped doing "
                           "its job" % e[0])
+        elif not str(FAST_SET_CATCH[e[0]] or "").strip():
+            # t261102-25: key presence alone would accept a placeholder, which
+            # is the same escape in a new dress (a member that declares
+            # nothing). The prefix keeps the face refusal naming the member.
+            errors.append("[%s] fast-catch declaration is empty — a member "
+                          "that catches nothing has stopped doing its job"
+                          % e[0])
+        elif "\n" in str(FAST_SET_CATCH[e[0]]):
+            # The declaration face prints the clause INLINE on one `member ...`
+            # line, and the engine parser counts member lines against the
+            # header. A multi-line clause would break the reader's count.
+            errors.append("[%s] fast-catch declaration spans several lines — "
+                          "the declaration face prints it inline on one member "
+                          "line, so the reader counts the member lines wrong"
+                          % e[0])
         pool = pool_of(e)
         if pool in ("exclusive", "browser"):
             errors.append("[%s] fast member in pool %s — the budget "
@@ -6492,6 +6635,16 @@ def _docker_hygiene():
     # 一律零接触，而本函数的设计意图（函数注：手工直跑/旧期残留的防御面）本就是「旧」
     # 对象，语义不缩水。容器侧改用 container prune（同带 label 过滤，只碰 compose 台），
     # 不再枚举后逐个 rm。
+    # t261102-40: ask the one bounded probe FIRST. A daemon that does not answer
+    # used to burn the 120 s prune timeout in every round (measured: a failing
+    # round's whole prelude was 140.2 s, and its fixture lanes died at their
+    # 120 s cap). Hygiene is best-effort by its own contract, so a silent skip is
+    # lawful - but it is NAMED, on stderr, once per round.
+    if not _docker_probe()["up"]:
+        sys.stderr.write("docker-hygiene: docker daemon did not answer within "
+                         "%.0fs - surface hygiene skipped this round "
+                         "(best-effort, never a gate)\n" % _DOCKER_PROBE_S)
+        return
     try:
         subprocess.run(
             ["docker", "container", "prune", "-f",
@@ -7954,18 +8107,42 @@ _TEST_TARGET = {"resolved": False, "value": "", "source": "", "note": "",
                 "down": None, "stopped": False}
 _TEST_TARGET_LOCK = threading.Lock()
 #: The bench module, loaded once (a battery substitutes a fake here).
-_BENCH = {"mod": None}
+#: "absent" carries the NAMED reason a load failed; the prelude degrades on it
+#: instead of raising (t261102-40): a lane that does not carry the module must
+#: still run its children.
+_BENCH = {"mod": None, "absent": ""}
 
 
 def _bench_module():
-    """integration/process_bench.py, loaded on first use."""
-    if _BENCH["mod"] is None:
-        here = os.path.dirname(os.path.abspath(__file__))
-        if here not in sys.path:
-            sys.path.insert(0, here)
+    """integration/process_bench.py, loaded on first use; ``None`` when unavailable.
+
+    An unavailable module is a NAMED absence, never an exception out of the
+    prelude (t261102-40: fixture lanes copy a subset of integration/, so the bare
+    import raised ModuleNotFoundError and the whole round died after a 140 s
+    prelude with no child started). The note separates "the file is not there"
+    from "the file is there and broke": the second one is a code fault, not an
+    environment absence.
+    """
+    if _BENCH.get("mod") is not None:
+        return _BENCH["mod"]
+    here = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(here, "process_bench.py")
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    try:
         import process_bench  # noqa: PLC0415 - only the target provision needs it
-        _BENCH["mod"] = process_bench
-    return _BENCH["mod"]
+    except Exception as exc:              # noqa: BLE001 - named here, never raised
+        if os.path.isfile(path):
+            _BENCH["absent"] = (
+                "process_bench.py present at %s but failed to import (%s: %s)"
+                % (path, type(exc).__name__, exc))
+        else:
+            _BENCH["absent"] = (
+                "process_bench.py missing at %s (%s: %s)"
+                % (path, type(exc).__name__, exc))
+        return None
+    _BENCH["mod"] = process_bench
+    return process_bench
 
 
 def _test_target_port() -> int:
@@ -8002,7 +8179,18 @@ def _provision_test_target() -> dict:
                              "started or stopped here)\n"
                              % (TEST_TARGET_ENV, ambient))
             return dict(st)
+        # t261102-40: an unavailable bench module states NOTHING and names why.
+        # This is the same named outcome the binary-absent branch below prints,
+        # so a lane that does not carry the module degrades instead of crashing
+        # before any child starts.
         bench = _bench_module()
+        if bench is None:
+            st.update(value="", source="absent", note=_BENCH["absent"])
+            sys.stderr.write("[provision] NO TEST TARGET for scenario children: "
+                             "%s (ambient env states none; the suite states NO "
+                             "address rather than a dead one - a case that needs a "
+                             "target books its own named ENV_FAIL)\n" % st["note"])
+            return dict(st)
         port = _test_target_port()
         if not bench.port_refuses(port):
             st.update(value=TEST_TARGET_DEFAULT, source="reused", port=port)
@@ -8069,6 +8257,17 @@ def _teardown_test_target():
     if st["source"] != "bench" or not st["pid"]:
         return st["down"]
     bench = _bench_module()
+    if bench is None:
+        # t261102-40: the module was loaded once and is no longer available.
+        # Judge it as residue with a NAMED error; never raise out of an exit path
+        # (the pool tail, the atexit backstop and both hard exits call this).
+        block = {"clean": False, "error": _BENCH["absent"]}
+        st["down"] = block
+        sys.stderr.write("[test-target] RESIDUE after down: %s - this suite "
+                         "started the bench at %s and cannot stop it: the bench "
+                         "module is no longer available\n"
+                         % (json.dumps(block, ensure_ascii=False), st["value"]))
+        return block
     try:
         block = bench.stop(port=st["port"], pid=st["pid"], db=st["db"])
     except Exception as _ex:                     # noqa: BLE001 - named, not raised
@@ -8160,6 +8359,28 @@ def _docker_daemon_up(timeout_s=20):
         return False
 
 
+#: One docker probe per round, bounded at the batch leg's own bound (t261102-40).
+#: Measured on this host: daemon up -> `docker info` answers in 0.21 s cold and
+#: 0.04 s warm; daemon cold-start -> 2.97 s; daemon down or still starting -> no
+#: answer at all (a 5 s and a 10 s bounded call timed out and an uncapped call was
+#: killed at 60 s). The gate measured the whole prelude of a failing round at
+#: 140.2 s: the 120 s prune timeout in _docker_hygiene plus the 20 s probe in
+#: batch_preboot. One memoized probe answers both legs, so the batch leg keeps its
+#: bound and the prunes are skipped when nothing answers.
+_DOCKER_PROBE_S = 20.0
+_DOCKER_PROBE = {"done": False, "up": False, "took": 0.0}
+
+
+def _docker_probe():
+    """The one docker daemon verdict for this process (bounded, memoized)."""
+    if not _DOCKER_PROBE["done"]:
+        _t0 = time.monotonic()
+        _DOCKER_PROBE["up"] = _docker_daemon_up(_DOCKER_PROBE_S)
+        _DOCKER_PROBE["took"] = round(time.monotonic() - _t0, 3)
+        _DOCKER_PROBE["done"] = True
+    return _DOCKER_PROBE
+
+
 def batch_preboot(consumers):
     """批台预起（stage_docker ensure --kind batch；清扫后、场景前）。零消费者轮=零建台
     零注入（打印留痕，最高频路径零回归）。失败=响亮 ENV_FAIL（调用方 exit 2 快速红：
@@ -8173,7 +8394,7 @@ def batch_preboot(consumers):
     # dependent cases are excluded from routine rounds through the known-red
     # roster, so this leg degrades to a NAMED skip instead of exit 2 (the old
     # refusal burned rounds while the daemon flapped; KI-381).
-    if not _docker_daemon_up():
+    if not _docker_probe()["up"]:
         print("batch-stage: docker daemon 未就绪——本轮零建台零注入（docker 已退役，"
               "宿主令 261027；docker 依赖用例已在已知红册排除，按需 --only 复跑）",
               flush=True)
@@ -8703,6 +8924,33 @@ def main(exclude_pools=None, only_scenarios=None, fast_set=None) -> int:
                 {"ran": 0, "missing": missing_only,
                  "error": "点名名单含不在册条目"}, ensure_ascii=False), flush=True)
             return 2
+        # t261029-18 (arbitration rounds 8-16): the documented rule is "a
+        # ticket's own declared scenarios are always in its gate run, whatever
+        # pool they live in". The engine's caliber also unions them
+        # (dev_lane 54308d93+), but a lane's serving worker may still be running
+        # pre-union code, so the executor guarantees the rule itself: append
+        # every declared own name the pointer omitted (dedupe, order kept). A
+        # round that already lists its own names is unaffected (no-op), and a
+        # declared own name absent from the registry keeps the fail-closed
+        # refusal family (named, nothing runs, no side effects).
+        if own_set:
+            _reg_names = {e[0] for e in SCENARIOS}
+            _own_absent = [n for n in own_names if n not in _reg_names]
+            if _own_absent:
+                print("REFUSED [__own_set__] declared own scenario(s) absent from "
+                      "the registry: %s - nothing ran (the own proof is this "
+                      "ticket's obligation; absence = supply bug, fail-closed)"
+                      % ",".join(_own_absent), flush=True)
+                print("SCENARIOS ran=0 pass=0 fail=0 env_fail=0 na=0 (0.0s)",
+                      flush=True)
+                return 2
+            _own_injected = [n for n in own_names if n not in only_names]
+            if _own_injected:
+                only_names = list(only_names) + _own_injected
+                print("INTEG_OWN_INJECT own scenario(s) joined the pointed face: "
+                      "%d (%s) - the executor guarantees the own proof runs "
+                      "(t261029-18)" % (len(_own_injected),
+                                        ",".join(_own_injected)), flush=True)
         # t261024-40：点名面的池排除逐条归因；自有场景（OWN）**不摘**——在被排除
         # 池里也照排进它自己的池（便宜的池=调度属性，不是少跑理由），并具名
         # own_kept。非自有点名名保持逐字旧语义（落被排除池=不跑，只记归因面）。
