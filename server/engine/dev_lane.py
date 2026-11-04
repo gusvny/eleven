@@ -1461,6 +1461,12 @@ GATE_RECEIPT_STATE_FRESH = "fresh"
 GATE_RECEIPT_STATE_STALE = "stale"
 GATE_RECEIPT_STATE_NO_RECEIPT = "no_receipt"
 GATE_RECEIPT_STATE_UNPROVABLE = "unprovable"
+#: t261104-03: a miss note explains exactly ONE attempt. When a later probe
+#: succeeds, the note is dropped and the drop is recorded under this additive
+#: meta key, so the earlier failure stays readable on the ticket face. The list
+#: is bounded (newest last).
+GATE_RECEIPT_NOTE_SUPERSEDED_KEY = "gate_receipt_note_superseded"
+GATE_RECEIPT_NOTE_SUPERSEDED_KEEP = 8
 
 
 def _gate_receipt_arm(wf, wf_self) -> bool:
@@ -1522,6 +1528,48 @@ def gate_receipt_freshness(receipt: Any, head_sha: Any,
     return GATE_RECEIPT_STATE_STALE, (
         "the lane HEAD moved after the receipt round (receipt %s, comparison "
         "base %s, lane HEAD %s)" % (r_sha[:12], base[:12], head[:12]))
+
+
+def gate_receipt_note_supersession(note: Any, probe_ok: Any, probe_sha: Any,
+                                   at: int = 0) -> Optional[Dict[str, Any]]:
+    """Does THIS successful probe supersede the recorded miss note? (pure)
+
+    `note` is `meta["gate_receipt_note"]`, the anchor-miss record. It explains
+    exactly one attempt: the resolver call that wrote it. `gate_receipt_freshness`
+    reads it FIRST and answers `unprovable` without looking at the head this
+    attempt just measured, so a note that outlives its attempt makes the stop
+    terminal: every later re-evaluation reads the same old error, and the named
+    `retry_qc` remedy can never reach an exit. The rule of this fix (t261104-03):
+    a SUCCESSFUL fresh observation supersedes a stale failure note, and a note
+    may only explain the attempt that wrote it.
+
+    Returns the supersession record when the note must be dropped, else None.
+    The record keeps the earlier failure readable (its face, reason, error and
+    timestamp sit under a `superseded` marker plus the sha this probe measured).
+
+    Only a successful probe supersedes: a failed or empty probe answers None, the
+    note stays as this attempt's explanation, and the state stays `unprovable`.
+    Malformed input never raises and never supersedes.
+    """
+    if not (isinstance(note, dict) and note.get("recorded") is False):
+        return None  # nothing to supersede (absent note, or a shape the judge ignores)
+    if not probe_ok:
+        return None  # the failure is still this attempt's: keep the note
+    _sha = probe_sha.strip() if isinstance(probe_sha, str) else ""
+    if not _sha:
+        return None  # an empty head is not a success (fail-closed, never a pass)
+    try:
+        _note_at = int(note.get("at") or 0)
+        _at = int(at or 0)
+    except (TypeError, ValueError):
+        _note_at, _at = 0, 0  # a malformed timestamp must not raise on this path
+    return {
+        "face": "gate_receipt",
+        "superseded": str(note.get("error") or note.get("reason") or "unknown"),
+        "reason": str(note.get("reason") or ""),
+        "note_at": _note_at,
+        "by_probe_sha": _sha,
+        "at": _at}
 
 
 def gate_receipt_void_text(state: str, reason: str, receipt_sha: str,
@@ -3548,7 +3596,8 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         Fail-closed: a resolver failure writes `meta["gate_receipt_note"]` and
         records no anchor. It never mints a receipt identity from an unresolved
         sha (same stance as the green-run recorder). A later success clears the
-        note.
+        note, and records the clearing as a supersession (t261104-03) instead of
+        dropping it silently.
 
         It does NOT reset the void counter: every void produces a new anchor, so
         a reset here would make the cap unreachable.
@@ -3584,11 +3633,55 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             # on the single-scope face: that shape stays byte-identical.
             _rec["anchor_scopes"] = [dict(x) for x in scopes]
         self.meta["gate_receipt"] = _rec
-        self.meta.pop("gate_receipt_note", None)
+        # t261104-03: the note is dropped by a successful resolve, and the drop is
+        # RECORDED here too (same rule and same marker as the guard), never a
+        # silent disappearance.
+        self._supersede_gate_receipt_note(True, sha)
         self._log("gate-receipt anchor recorded (sha=%s, surface=%s%s)"
                   % (sha[:12], str(surface or "unknown"),
                      ", closing" if closing else ""))
         return {"receipt_sha": sha, "receipt_at": _at, "surface": str(surface or "")}
+
+    def _supersede_gate_receipt_note(self, probe_ok: bool, probe_sha: str) -> Dict[str, Any]:
+        """Drop a stale miss note that a successful probe has superseded (t261104-03).
+
+        The miss note pre-empts the live head probe inside the pure judge, and its
+        only other clearing path (a later successful anchor recording) is
+        unreachable from the `unprovable` state, which spends no suite round. So
+        the note must go the moment this attempt proves the resolver works.
+
+        Observability, never a silent disappearance: the drop writes a log line
+        AND appends to `meta[GATE_RECEIPT_NOTE_SUPERSEDED_KEY]` (bounded, newest
+        last) the earlier failure's own words plus the sha this probe measured.
+
+        A cleared note is NOT a free pass. The void counter is untouched here, so
+        the state falls back to the designed `no_receipt`: exactly ONE round may
+        mint the anchor (MAX_GATE_RECEIPT_RERUNS_NO_RECEIPT), and a second miss
+        still stops for a human. A failing probe supersedes nothing: the note
+        stays this attempt's explanation (see the pure rule in
+        `gate_receipt_note_supersession`).
+
+        Returns the supersession record, or {} when nothing was superseded.
+        """
+        _note = self.meta.get("gate_receipt_note")
+        if not isinstance(_note, dict):
+            return {}  # the common path: no note, nothing to supersede
+        rec = gate_receipt_note_supersession(
+            _note, probe_ok, probe_sha, at=self._now_epoch())
+        if not rec:
+            return {}
+        self.meta.pop("gate_receipt_note", None)
+        _hist = self.meta.get(GATE_RECEIPT_NOTE_SUPERSEDED_KEY)
+        _hist = [dict(x) for x in _hist if isinstance(x, dict)] \
+            if isinstance(_hist, list) else []
+        _hist.append(rec)
+        self.meta[GATE_RECEIPT_NOTE_SUPERSEDED_KEY] = \
+            _hist[-GATE_RECEIPT_NOTE_SUPERSEDED_KEEP:]
+        self._log("gate-receipt miss note superseded: the live head probe answered "
+                  "%s (earlier error kept: %s)"
+                  % (str(rec.get("by_probe_sha") or "")[:12],
+                     str(rec.get("superseded") or "unknown")))
+        return rec
 
     async def _gate_receipt_guard(self) -> str:
         """Prove the gate receipt covers the tree that is about to merge.
@@ -3605,6 +3698,11 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
         Order: the tree is judged FIRST and the cap second, so a fresh
         evaluation always proceeds, even when the counter sits at the cap, and
         it resets the counter. `unprovable` never spends a suite round.
+
+        t261104-03: before the pure judge runs, a SUCCESSFUL live head probe
+        supersedes a stale `recorded=False` miss note, so the note can no longer
+        pre-empt the answer of the attempt that measured the tree. A FAILING
+        probe keeps the note (and its reason), exactly as before.
         """
         # The raw meta value goes to the pure judge: a malformed anchor must read
         # as `unprovable` (fail-closed), never as a fresh receipt or a silent
@@ -3615,9 +3713,28 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                   if isinstance(d, dict) and str(d.get("to") or "").strip()]
         base = str(deltas[-1].get("to") or "") if deltas else str(rec.get("receipt_sha") or "")
         ok, sha, err = (await self._lane_head())[:3]
+        # t261104-03: a SUCCESSFUL probe supersedes a stale miss note. The note
+        # explains the resolver call that wrote it and nothing else; the pure
+        # judge reads it FIRST, so a note that outlives its attempt traps the
+        # lane forever (the `unprovable` state spends no round, hence it never
+        # reaches the recorder that would clear the note) and the `retry_qc`
+        # remedy named by the stop copy re-evaluates into the same old error.
+        # Dropping it here falls back to the designed path: no receipt reads
+        # `no_receipt`, which is allowed exactly ONE round to mint the anchor
+        # (MAX_GATE_RECEIPT_RERUNS_NO_RECEIPT). The void counter is NOT reset, so
+        # a cleared note never becomes a free pass. A FAILING probe supersedes
+        # nothing: that keeps today's behaviour, note reason plus the live probe
+        # error, byte for byte.
+        _sup = self._supersede_gate_receipt_note(bool(ok and sha), sha if ok else "")
         state, reason = gate_receipt_freshness(
             _raw_rec, sha if ok else "", base_sha=base,
             note=self.meta.get("gate_receipt_note"))
+        _sup_txt = ""
+        if _sup:
+            _sup_txt = ("the earlier anchor-miss note was superseded by this "
+                        "successful probe (earlier error: %s)"
+                        % str(_sup.get("superseded") or "unknown"))
+            reason = ("%s | %s" % (reason, _sup_txt)) if reason else _sup_txt
         # F2 (acceptance round 1): a live head-probe failure must NAME its error,
         # not only report "unavailable". The anchor-note path already carries its
         # own error; this covers the probe that fails at the guard itself. The
@@ -3652,6 +3769,10 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             _line = ("gate receipt verified: measured %s; merge tree %s%s "
                      "(surface: %s)" % (receipt_sha[:12] or "none", sha[:12],
                                         _delta_txt, str(rec.get("surface") or "unknown")))
+            if _sup_txt:
+                # the fresh face names the note it just superseded: a reader sees
+                # why the old error is gone, not a silent disappearance
+                _line = "%s; %s" % (_line, _sup_txt)
             self._log(_line)
             self._handoff("run_integration_tests", _line)
             return ""

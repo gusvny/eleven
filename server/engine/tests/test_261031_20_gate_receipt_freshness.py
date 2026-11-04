@@ -23,6 +23,9 @@ The fix: a receipt is valid only for the tree it ran on. Layers pinned here:
      resolver failure writes `gate_receipt_note` and mints nothing (R5);
   g. guard: fresh / stale / no_receipt / unprovable, the caps (2 stale re-runs, 1
      no-receipt re-run, 0 unprovable rounds), the counter window and its resets;
+  g2. t261104-03: a successful live probe supersedes a stale miss note (the note
+     is dropped and the drop recorded), a failing probe keeps it, and a cleared
+     note still spends the one no-receipt round;
   h. the merge-line delta: written only when the head moved, `land_sha` refreshed (K2);
   i. the closing run replaces the face receipt in place, surface named;
   j. the real main loop: fresh -> merge; a main sync lands as a named delta and does not
@@ -279,6 +282,9 @@ def test_anchor_records_one_identity_and_clears_a_stale_note():
     assert wf.meta["gate_receipt"]["surface"] == "full suite"
     assert wf.meta["gate_receipt"]["green"] is False   # a red round is still anchored
     assert "gate_receipt_note" not in wf.meta
+    # t261104-03: the drop is recorded, not silent (same marker as the guard)
+    assert wf.meta["gate_receipt_note_superseded"][-1]["superseded"] == "old"
+    assert wf.meta["gate_receipt_note_superseded"][-1]["by_probe_sha"] == SHA_A
     assert state["commands"] == ["lane_head_sha"]
     # the recorder never resets the void counter (that would make the cap unreachable)
     assert wf._receipt_void_rounds == 0
@@ -413,17 +419,27 @@ def test_guard_reads_a_malformed_anchor_as_unprovable():
 
 
 def test_guard_unprovable_stops_without_a_suite_round():
+    """t261104-03: a FAILING probe still reads unprovable, and names both errors.
+
+    The note stands here because the probe failed too: a note explains the attempt
+    that wrote it, and this attempt did not prove the resolver works.
+    """
     note = {"recorded": False, "reason": "lane_head_sha failed",
             "error": "git rev-parse ut failed"}
-    wf, calls, _ = _guard_wf(ANCHOR, SHA_A, note=note)
+    probe = {"ok": False, "sha": "",
+             "error": "rev-parse ut: fatal: bad revision"}
+    wf, calls, _ = _guard_wf(ANCHOR, SHA_A, note=note, probe=probe)
     assert asyncio.run(wf._gate_receipt_guard()) == "stopped"
     assert [c[0] for c in calls] == ["merge_check"]
     assert "does not spend a suite round" in calls[0][1]
-    assert "git rev-parse ut failed" in calls[0][1]
+    assert "git rev-parse ut failed" in calls[0][1]          # the note's own error
+    assert "rev-parse ut: fatal: bad revision" in calls[0][1]  # F2: the live one
     assert wf._receipt_void_rounds == 0
-    # retry_qc re-arms the guard: the next evaluation sees no note and can be fresh
-    wf.meta.pop("gate_receipt_note")
-    wf.meta["gate_receipt"] = dict(ANCHOR)
+    # nothing was superseded: the note is still the readable explanation
+    assert wf.meta["gate_receipt_note"] == note
+    assert "gate_receipt_note_superseded" not in wf.meta
+    # retry_qc re-arms the guard: once the probe answers, the next evaluation can
+    # be fresh (and then it IS superseded - see the supersession tests below)
     wf2, calls2, _ = _guard_wf(ANCHOR, SHA_A)
     assert asyncio.run(wf2._gate_receipt_guard()) == ""
 
@@ -439,6 +455,133 @@ def test_guard_stale_twice_then_the_third_stale_state_stops():
     wf2, calls2, _ = _guard_wf(ANCHOR, SHA_A, void_rounds=2)
     assert asyncio.run(wf2._gate_receipt_guard()) == ""
     assert calls2 == [] and wf2._receipt_void_rounds == 0
+
+
+# ---------------------------------------------------------------------------
+# g2. t261104-03: a SUCCESSFUL probe supersedes a stale miss note
+#
+# Measured on project-vision t261103-08: after the resolver fix (t261104-01) the
+# live probe answered `lane HEAD sha256:1c39a`, and the blocked_reason still read
+# the OLD resolver miss - both facts at once. The note is judged FIRST, the
+# `unprovable` state spends no suite round, and the note's only clearing path (a
+# successful anchor recording) is unreachable from there. So the stop was
+# terminal and the named `retry_qc` remedy provably could not clear it.
+# ---------------------------------------------------------------------------
+def test_supersession_rule_truth_table():
+    """Pure: only a successful probe drops a `recorded=False` note; never a pass."""
+    f = dev_lane.gate_receipt_note_supersession
+    note = {"face": "gate_receipt", "recorded": False,
+            "reason": "lane_head_sha failed", "error": "resolver miss", "at": 7}
+    rec = f(note, True, SHA_A, at=9)
+    assert rec["face"] == "gate_receipt"
+    assert rec["superseded"] == "resolver miss"      # the earlier words survive
+    assert rec["reason"] == "lane_head_sha failed"
+    assert rec["note_at"] == 7 and rec["at"] == 9
+    assert rec["by_probe_sha"] == SHA_A
+    # a FAILING probe keeps the note: it is this attempt's explanation
+    assert f(note, False, "", at=9) is None
+    assert f(note, False, SHA_A, at=9) is None
+    # an empty head is not a success, and neither is a malformed one
+    assert f(note, True, "", at=9) is None
+    assert f(note, True, "   ", at=9) is None
+    assert f(note, True, 42, at=9) is None
+    # nothing to supersede: absent note, a recorded note, malformed shapes
+    assert f(None, True, SHA_A) is None
+    assert f({"recorded": True, "error": "x"}, True, SHA_A) is None
+    assert f("garbage", True, SHA_A) is None
+    assert f(["recorded"], True, SHA_A) is None
+    # a note without a named error still supersedes and stays readable
+    assert f({"recorded": False}, True, SHA_A)["superseded"] == "unknown"
+
+
+def test_guard_supersedes_a_stale_note_when_the_probe_succeeds():
+    """(a) note + successful probe -> note gone, NO_RECEIPT, one round allowed."""
+    note = {"face": "gate_receipt", "recorded": False,
+            "reason": "lane_head_sha failed",
+            "error": "lane branch 'lane/t261103-08' is not resolvable", "at": 5}
+    wf, calls, _ = _guard_wf(None, SHA_A, note=note)     # no anchor; probe answers
+    assert asyncio.run(wf._gate_receipt_guard()) == "rerun_gate"
+    assert calls == []                                   # no stop: the lane moves on
+    assert "gate_receipt_note" not in wf.meta            # the stale note is gone
+    void = wf.meta["gate_receipt_void"]
+    assert void["state"] == "no_receipt" and void["cap"] == 1
+    assert void["head_sha"] == SHA_A
+    assert wf._receipt_void_rounds == 1                  # the ONE allowed round
+    # the supersession is recorded (never a silent disappearance), and the earlier
+    # error is still readable
+    hist = wf.meta["gate_receipt_note_superseded"]
+    assert [h["superseded"] for h in hist] == \
+        ["lane branch 'lane/t261103-08' is not resolvable"]
+    assert hist[-1]["by_probe_sha"] == SHA_A
+    assert hist[-1]["note_at"] == 5
+    text = "\n".join(h["summary"] for h in wf.meta["handoffs"])
+    assert "superseded" in text, text
+    assert "lane branch 'lane/t261103-08' is not resolvable" in text, text
+    log = "\n".join(e["note"] for e in wf.meta["log"])
+    assert "gate-receipt miss note superseded" in log
+    assert "lane branch 'lane/t261103-08' is not resolvable" in log
+
+
+def test_guard_superseded_note_can_also_read_fresh():
+    """The measured case: a note plus an anchor whose sha the probe confirms."""
+    note = {"recorded": False, "reason": "lane_head_sha failed",
+            "error": "old resolver miss"}
+    wf, calls, _ = _guard_wf(ANCHOR, SHA_A, note=note)
+    assert asyncio.run(wf._gate_receipt_guard()) == ""
+    assert calls == [] and wf._receipt_void_rounds == 0
+    assert "gate_receipt_note" not in wf.meta
+    assert wf.meta["gate_receipt"]["merge_face"]["land_sha"] == SHA_A
+    line = wf.meta["handoffs"][-1]["summary"]
+    assert SHA_A[:12] in line and "superseded" in line
+    assert "old resolver miss" in line
+
+
+def test_guard_healthy_paths_are_unchanged():
+    """(c) + (d): fresh and stale judge exactly as before, no supersession key."""
+    wf, calls, _ = _guard_wf(ANCHOR, SHA_A)              # no note, fresh
+    assert asyncio.run(wf._gate_receipt_guard()) == ""
+    assert wf.meta["gate_receipt"].get("merge_face", {}).get("void") is None
+    assert "gate_receipt_note_superseded" not in wf.meta
+    wf2, calls2, _ = _guard_wf(ANCHOR, SHA_C)            # no note, moved head
+    assert asyncio.run(wf2._gate_receipt_guard()) == "rerun_gate"
+    assert wf2.meta["gate_receipt_void"]["state"] == "stale"
+    assert wf2.meta["gate_receipt_void"]["cap"] == 2
+    assert "gate_receipt_note_superseded" not in wf2.meta
+
+
+def test_guard_superseded_note_never_launders_a_malformed_anchor():
+    """Clearing the note is not a pass: an anchor we cannot read still stops."""
+    note = {"recorded": False, "reason": "lane_head_sha failed",
+            "error": "old resolver miss"}
+    wf, calls, _ = _guard_wf("not-an-anchor", SHA_A, note=note)
+    assert asyncio.run(wf._gate_receipt_guard()) == "stopped"
+    assert [c[0] for c in calls] == ["merge_check"]
+    why = calls[0][1]
+    assert "malformed gate-receipt face" in why, why
+    assert "old resolver miss" in why          # the history is still named
+    assert wf._receipt_void_rounds == 0        # unprovable spends no round
+
+
+def test_guard_superseded_note_still_spends_the_one_no_receipt_round():
+    """(e) the cap holds in the superseded path: one round, then a stop."""
+    wf, calls, _ = _guard_wf(None, SHA_A, note={
+        "recorded": False, "reason": "lane_head_sha failed",
+        "error": "miss one", "at": 1})
+    assert asyncio.run(wf._gate_receipt_guard()) == "rerun_gate"   # round 1 of 1
+    assert calls == [] and wf._receipt_void_rounds == 1
+    # the sanctioned round ran and missed the anchor again: a NEW note is written
+    wf.meta["gate_receipt_note"] = {"recorded": False,
+                                    "reason": "lane_head_sha failed",
+                                    "error": "miss two", "at": 2}
+    assert asyncio.run(wf._gate_receipt_guard()) == "rerun_gate"
+    assert [c[0] for c in calls] == ["merge_check"]      # over the cap: stop
+    why = calls[0][1]
+    assert "cap 1" in why, why
+    assert "miss two" in why              # the newest failure is named
+    assert "miss one" not in why          # superseded, not re-read (it is history)
+    assert wf._receipt_void_rounds == 0                   # reset after the wake
+    hist = wf.meta["gate_receipt_note_superseded"]
+    assert [h["superseded"] for h in hist] == ["miss one", "miss two"]
 
 
 # ---------------------------------------------------------------------------
