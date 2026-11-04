@@ -24,7 +24,7 @@ Too many parallel stages saturate the machine and the review surface; the number
 A TERMINAL ticket's slot must come back even when the ending caller cannot write
 the projects root (measured: an agent sandbox got `released:false` with a
 `PermissionError` on `concurrency-state.json.lock`, and four of five slots on
-dengzhufpv stayed held by TERMINATED workflows). Three arms, in order of
+project-vision stayed held by TERMINATED workflows). Three arms, in order of
 guarantee:
 
 1. **Natural completion** — the workflow releases its own slot on the terminal

@@ -102,8 +102,8 @@ try {
 
   {
     // withEpicProject（t260915-09）：epics 族调用统一穿参（真值表 + 畸形输入）
-    ok(withEpicProject('/sandbar-workbench/api/epics', 'dengzhufpv')
-      === '/sandbar-workbench/api/epics?project=dengzhufpv',
+    ok(withEpicProject('/sandbar-workbench/api/epics', 'project-vision')
+      === '/sandbar-workbench/api/epics?project=project-vision',
       'withEpicProject：基础拼参')
     ok(withEpicProject('/api/epics/demo-x/tickets?mode=fast', 'fpv-repo-split')
       === '/api/epics/demo-x/tickets?mode=fast&project=fpv-repo-split',

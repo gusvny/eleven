@@ -176,7 +176,7 @@ def test_config_non_covering_entry_ignored():
     d.mkdir()
     (d / "project.yaml").write_text(
         "schema: v1\nproject:\n  - key: otherproj\n    name: n\n    dirs:\n"
-        "      - /Users/user/Documents/dengzhufpv\nadmin_log:\n  keep_days: 1\n",
+        "      - /Users/user/Documents/project-vision\nadmin_log:\n  keep_days: 1\n",
         encoding="utf-8")
     audit._reset_config()
     assert audit._admin_log_config()["keep_days"] == 14
@@ -497,7 +497,7 @@ def test_write_failure_non_dict_receipt_no_raise(tmp_path, monkeypatch):
 
 def test_emit_audits_before_print_marker_reaches_stdout(tmp_path):
     """client.py _emit 序（review C4 偏差面）：审计先于打印——写失败 marker 必须
-    可达 stdout 回执（nusuyou/dengzhufpv 病灶回归锚）。真子进程跑未知子命令路径
+    可达 stdout 回执（project-content/project-vision 病灶回归锚）。真子进程跑未知子命令路径
     （不触 Temporal），日志路径=目录制造写失败。"""
     bad = tmp_path / "occupied"
     bad.mkdir()

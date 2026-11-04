@@ -212,7 +212,7 @@ def prepare(shared, aa, lane, project_root, entries, write_set, ticket):
 
 
 def mixed_project(prefix, gitignore=("repo_a/",)):
-    """混合形态项目：根仓（知识库仓）＋一层子仓 repo_a（dengzhufpv 形态）。
+    """混合形态项目：根仓（知识库仓）＋一层子仓 repo_a（project-vision 形态）。
 
     缺省 .gitignore 忽略子仓目录＝契约 advisory④ 的夹具落地（根树=泳道容器本身时，
     成员树落在根仓工作区内，必须被忽略，否则根仓 status 把成员 worktree 当未跟踪目录，

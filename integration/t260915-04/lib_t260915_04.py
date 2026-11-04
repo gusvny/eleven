@@ -99,7 +99,7 @@ def init_repo(path, files=None, gitignore=()):
 
 
 def build_mixed_project(base, members=("repo_a", "repo_b")):
-    """混合形态项目（dengzhufpv 现场形态：根亦 git 仓 + 子仓并存）。
+    """混合形态项目（project-vision 现场形态：根亦 git 仓 + 子仓并存）。
 
     根仓 .gitignore 忽略成员仓目录（现场同款，防根仓 status 把成员 worktree
     当未跟踪目录）。members 可注入任意仓名（如 'integration' 做边角夹具）。"""

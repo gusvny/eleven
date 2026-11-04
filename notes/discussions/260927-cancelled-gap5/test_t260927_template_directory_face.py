@@ -1,6 +1,6 @@
 """t260927 缺口 5——项目外置模板的目录面与拓扑导出面（宿主令直修，L2/L3 灰盒锁）。
 
-缺口（nusuyou 需求书三点九节）：项目外置模板（`paths.workflow_modules` 那一类）此前
+缺口（project-content 需求书三点九节）：项目外置模板（`paths.workflow_modules` 那一类）此前
 只接进了校验/创建/运行三面，**目录面（workflow.py list）与拓扑导出面（票面 topology）
 都没接**——外置模板的票在控制台里看不到泳道图：
   · `python3 server/tools/workflow.py '{"op":"list"}'` 只列 dev-lane ⇒ 前端
@@ -181,7 +181,7 @@ def test_list_without_declaration_keeps_narrow_default_face(tmp_path):
     root = _empty_registry(tmp_path / 'projects')
     rows, err = _run_workflow_list(root, tmp_path)
     assert [r['id'] for r in rows] == ['dev-lane'], (rows, err[-300:])
-    # 面外项目（本机真注册表里的 nusuyou 等）不得因「机器上有登记」漏进注入面
+    # 面外项目（本机真注册表里的 project-content 等）不得因「机器上有登记」漏进注入面
     assert 'content-studio' not in {r['id'] for r in rows}
 
 

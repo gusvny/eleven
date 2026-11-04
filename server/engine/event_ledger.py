@@ -178,7 +178,7 @@ def _dirs_cover_engine(text) -> bool:
 
     历史（t260928-13 合并后复核发现并修复）：本函数最初**没有落地**——`_find_engine
     _project_yaml` 当时用「有 `paths:` 段 + 任意列表项」冒充本守卫，于是按目录名稳定序
-    会命中**任意**恰好带 paths 段的项目（实测命中 dengzhufpv），引擎账本的 enabled 声明
+    会命中**任意**恰好带 paths 段的项目（实测命中 project-vision），引擎账本的 enabled 声明
     写了也不生效（静默失效）；且原 docstring 仍声称 dirs 规则，误导读者。"""
     repo = ENGINE_REPO
     in_dirs = False

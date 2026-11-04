@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """t260927 宿主实报回归锁：门回执是「说明行 + 回执行」的多对象 stdout 时，门必须被判对。
 
-实案（nusuyou content-studio `content-260808`，宿主机上实报「门绿了也判 blocked，票永远
+实案（project-content content-studio `content-260808`，宿主机上实报「门绿了也判 blocked，票永远
 收不了口」）：该段门脚本 `cs_publish_audit.py publish` 先打一行诊断 JSON、再打真回执：
 
     {"note": "含 marker 子串但非记名块形态的提交（不作判据数据源）：…"}

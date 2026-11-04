@@ -1577,7 +1577,7 @@
     },
     "server/engine/tests/test_t261019_41_line_default.py": {
       "anchor": "behaviour",
-      "note": "261019 integration L1 (host ruling a1): a single-repository project's declared line is the default for dev-lane intake - the truth table pins each limit to the machinery it feeds (single-repo line defaults; a multi-repository line is NEVER defaulted because per-ticket landing refuses it by name; two declared lines are ambiguous; a missing or unreadable declaration keeps the legacy path without failing intake; a foreign template never defaults), plus the live declarations read as they are (sandbar -> develop-buffer, dengzhufpv/nusuyou stay legacy).",
+      "note": "261019 integration L1 (host ruling a1): a single-repository project's declared line is the default for dev-lane intake - the truth table pins each limit to the machinery it feeds (single-repo line defaults; a multi-repository line is NEVER defaulted because per-ticket landing refuses it by name; two declared lines are ambiguous; a missing or unreadable declaration keeps the legacy path without failing intake; a foreign template never defaults), plus the live declarations read as they are (sandbar -> develop-buffer, project-vision/project-content stay legacy).",
       "sync_path": "server/engine/client.py (_default_line_for_project / lane_optin_intake), server/engine/develop_line.py (load_lines)"
     },
     "server/engine/tests/test_t261019_45_integ_root_resolution.py": {

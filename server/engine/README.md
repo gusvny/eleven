@@ -541,7 +541,7 @@ spawn、console 插件的 cwd 指向引擎自身，标识「被调用的引擎�
 ## 12. 巡检分项目归属（t260915-20）：声明带项目身份 + 起票盖 ProjectKey SA + repo_root 按项目解析
 
 巡检此前是**引擎级**的：声明实例无项目字段、起票不盖章 ProjectKey SA、repo_root
-缺省空=扫在 worker 自己的仓（引擎仓）——多项目即断（dengzhufpv 零巡检覆盖）。
+缺省空=扫在 worker 自己的仓（引擎仓）——多项目即断（project-vision 零巡检覆盖）。
 本票把「归属」建成巡检的一等身份，全部走声明面：
 
 ### 12.1 机制（四个面）
@@ -772,7 +772,7 @@ admin.log 不可写（权限/只读 fs/路径为目录等）时三通道留痕�
 raise：stderr（既有）+ `logging.getLogger('audit').warning`（已配 logging 的
 宿主进程自动出 WARN）+ 回执 dict 就地点名 `audit_write_failed`。为此
 `client.py _emit` 改为**审计先于打印**（t260916-21，范围偏差·有意：不改则
-marker 结构上不可达 stdout 回执——nusuyou/dengzhufpv 实测「写失败回执正常」
+marker 结构上不可达 stdout 回执——project-content/project-vision 实测「写失败回执正常」
 病灶）；ticket.py 直 spawn 路径本就先审计后打印，零改动受益。
 
 测试：`server/engine/tests/test_t260916_21_admin_log_rotation.py`（L1）；

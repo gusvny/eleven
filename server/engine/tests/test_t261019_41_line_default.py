@@ -18,7 +18,7 @@ machinery it feeds:
     defaulting a multi-repo project would refuse every ticket it opens;
   * a missing/unreadable declaration changes nothing (legacy, as before).
 
-Multi-repo projects (dengzhufpv) declare no line today, and this rule keeps them
+Multi-repo projects (project-vision) declare no line today, and this rule keeps them
 on the legacy path even if they did.
 """
 import json
@@ -90,5 +90,5 @@ def test_real_projects_land_where_they_should():
     """The live declarations, read as they are (no fixture): sandbar is the
     single-repo pilot, the two multi-repo/knowledge projects stay legacy."""
     assert cl._default_line_for_project("sandbar", "dev-lane") == "develop-buffer"
-    assert cl._default_line_for_project("dengzhufpv", "dev-lane") == ""
-    assert cl._default_line_for_project("nusuyou", "dev-lane") == ""
+    assert cl._default_line_for_project("project-vision", "dev-lane") == ""
+    assert cl._default_line_for_project("project-content", "dev-lane") == ""

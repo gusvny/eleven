@@ -57,7 +57,7 @@ def _enable(tmp_path):
 def _decoy(root, name='aaa-decoy', declare=True, dirs='/somewhere/else'):
     """干扰条目：目录名**字母序更早**、带 `paths:` 段与列表项、dirs **不覆盖**引擎仓根。
 
-    这正是 t260928-13 出厂版本的错误判据会误选的那种条目（实测命中 dengzhufpv）。"""
+    这正是 t260928-13 出厂版本的错误判据会误选的那种条目（实测命中 project-vision）。"""
     d = root / name
     d.mkdir(exist_ok=True)
     body = 'schema: v1\nproject:\n  - key: %s\n    dirs:\n      - %s\npaths:\n  - /somewhere\n' % (

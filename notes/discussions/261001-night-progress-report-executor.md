@@ -46,7 +46,7 @@
 - **R1**：开 t261001-20 / t261001-21；KI-175…179 落账（`79eabfb`）；确认执行器零写操作、主树零改动。
 - **R2**：落 L3 场景 `executor-authority-gate` + 注册表条目（`6135be5`）；账本补拷 60 行（新路径 1600 行）；发现执行器提问无交付面；三条泳道（19/20/21）**同时进闸**（并发争用风险在案）。
 - **R3**：**t261001-19 第 1 轮闸 = blocked**（301 ran / 293 pass / 6 fail / 2 env-red；本票账 4 条：`t260910-10-docs-ui-mock-v1`、`t260915-10-docs-follow-project`、`t260907-04-schedule-legacy-retire`、`t260926-05-inspection-report-ui-dom`）。**分诊＝台面/负载族**：签名全是 `ERR_CONNECTION_REFUSED`／"视图存活=false"／明写 `env-only console noise (stage console churn)`；而 19 改的是**守望者插件**，因果上碰不到 docs UI；该轮与 20/21 两条闸并发（load 25–44）。**处置**：等 20/21 收口后**单独**重跑 19（绝不并发重跑）。
-  **新发现（KI-180，已提交 `1bc5b4f`）**：`ledger_missing_rows` 报警拿**全项目看板**比本项目账本——不带 project 过滤的票数 **278** 与报警里的 N **逐一吻合**（sandbar 124 + dengzhufpv 61 + nusuyou 93），带 `project=sandbar` 只有 124 ⇒ 该数**永远不可能收敛**（275→278 是别项目在开票），是一条结构性假报警。**待开票**（今晚三条泳道在跑，不并发放第四条）。
+  **新发现（KI-180，已提交 `1bc5b4f`）**：`ledger_missing_rows` 报警拿**全项目看板**比本项目账本——不带 project 过滤的票数 **278** 与报警里的 N **逐一吻合**（sandbar 124 + project-vision 61 + project-content 93），带 `project=sandbar` 只有 124 ⇒ 该数**永远不可能收敛**（275→278 是别项目在开票），是一条结构性假报警。**待开票**（今晚三条泳道在跑，不并发放第四条）。
 - **R4**：KI-176 补**活体实证**（`6ee96a7`）：真执行器等提问静默 13 分钟、面板仍报 `advancing`/「静默 1 分钟」、`stall` 报警 0 条。核实 19 那轮是**全量面**（301 ran + 45 reused = 346），非收窄轮。
 - **R5**：登记 **KI-181**（`b0a10b9`）：执行器**提问通道与交付面未绑定**——面板有 `POST /api/requests`→`appendRequest`（api.ts:116 有路由），但执行器走的是会话级提问工具，两边零绑定 ⇒ 一问就把自己卡死且无人可见。
 - **R6**：**跨泳道对照拿到决定性证据**——19 那两条红名（`t260907-04-schedule-legacy-retire`、`t260926-05-inspection-report-ui-dom`）**在 21 的并发轮里 PASS**（同刻两条泳道、同一批名字一红一绿）⇒ 负载族抖动判据成立，19 的本票账 4 条**不是它的账**。据此挂后台：**等 20/21 收口且零活跃锁后，自动单独重跑 19**（绝不并发重跑）。
@@ -127,7 +127,7 @@
 | 执行器**零写操作** | 整份 transcript 里 `sign`/`retry_qc`/`rework`/`authorize` 调用 = **0**；main 里没有它的改动 |
 | 执行器**没有跟我要过任何东西** | 它首轮的动作：读票 → 查自己授权面 → 盯泳道 agent 进度（7 files/80 insertions）→ 独立复现 stall 缺陷 → 提问 |
 | 它**此刻没在起作用** | `turn/start=1 / turn/end=0`，末事件是 inbox 里排着的新唤醒 ⇒ **turn 1 从未结束，卡在等回答 23 分钟**（KI-181：提问的交付面是客户端 UI，本部署没有；KI-176：stall 又不可达 ⇒ 自锁且无人知） |
-| 第三个 actor | nusuyou 的运营会话（`session-8987b2ac`）**六动词全开、窗口到 2026-10-02 17:30**（宿主手工开的 night_tier） |
+| 第三个 actor | project-content 的运营会话（`session-8987b2ac`）**六动词全开、窗口到 2026-10-02 17:30**（宿主手工开的 night_tier） |
 
 ### 9.2 冲突面（四条，按危险度）
 
@@ -139,7 +139,7 @@
 ### 9.3 建议（宿主定，今晚可先不动）
 
 - **(a) 角色分工写死**：执行器＝看/报/问；签字与合并归 integration 岗（我）。**同一张票只允许一个操作者**。
-- **(b) 或按项目分域**：执行器盯 nusuyou/dengzhufpv，我盯 sandbar——但要注意 nusuyou 已经有一个全权运营会话，别又叠一个。
+- **(b) 或按项目分域**：执行器盯 project-content/project-vision，我盯 sandbar——但要注意 project-content 已经有一个全权运营会话，别又叠一个。
 - **(c) 机制兜底**：给它**最小 grants**（先只 `open-ticket`，**不给 `sign`**），并先把 **KI-181（提问面）**修好——**在"能问得到人"之前，它任何自主动作都以自锁收场**（今晚即实证）。
 
 ## 10. 收尾结论（R12；目标未完成，如实标注）

@@ -7,7 +7,7 @@
 
   ① **文件族整族漏了**：上一版清扫器只碰「真目录」，而最大的几族里 `sandbar-integ-run-*.lock`
      （同泳道单飞锁档）、`sandbar-admin-log-*.log`（影子）、`sandbar-credentials-*.yaml`
-     （凭据副本）、`nusuyou-integ-run-*.lock`（姊妹项目同款锁）全是**文件**——一条也删不到；  # naming-compat（姊妹项目同款前缀，非退役旧名）
+     （凭据副本）、`project-content-integ-run-*.lock`（姊妹项目同款锁）全是**文件**——一条也删不到；  # naming-compat（姊妹项目同款前缀，非退役旧名）
   ② **「登记了但没启用」的半态**：第二批 28 个前缀只写在 `CANDIDATE_PREFIXES_BATCH2`
      常量里没进白名单，其中 `t260907-12-act-/-ch-` 两个变体被 `-ut` 前缀盖不住（存量
      6,399 个）——正是「前缀盖不住」这一类洞。

@@ -40,7 +40,7 @@ def _touch(p: Path, text="x\n"):
 
 @pytest.fixture
 def mixed7(tmp_path):
-    """根仓+6 成员仓（dengzhufpv 260914 实测布局同形：repos_under 探到 7 仓，
+    """根仓+6 成员仓（project-vision 260914 实测布局同形：repos_under 探到 7 仓，
     混合形态=根有 .git 且旁边有成员仓）。"""
     root = tmp_path / "proj"
     root.mkdir()

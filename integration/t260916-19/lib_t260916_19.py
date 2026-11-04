@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """t260916-19 集成测试共享夹具与助手（非 sc_ 前缀＝共享代码，不进 SCENARIOS）。
 
-被测面＝**路径闸 blocked 死结三修**（工单 t260916-19，实案=dengzhufpv t260916-11）：
+被测面＝**路径闸 blocked 死结三修**（工单 t260916-19，实案=project-vision t260916-11）：
   B 越权处置按 porcelain 状态分流（?? 挪档 / M 回滚+diff 留档 / D·staged·rename 拒绝+人处 /
     protected 不动），处置后一轮复判使「下一次 settle 不再被同批文件复判」；
   C 声明=执法（arbitrate 测试面收 integration/ 顶层 sc_*.py|.mjs 与 README.md 登记表，

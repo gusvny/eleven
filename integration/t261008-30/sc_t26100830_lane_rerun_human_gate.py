@@ -3,7 +3,7 @@
 fire on a ticket parked at a human gate (t261008-30, grey-box L2/L3, offline
 seconds, pure stdlib, zero docker/Temporal/browser, never touches 3099).
 
-Incident face (261008 host report, live case t261005-11 / dengzhufpv): a ticket
+Incident face (261008 host report, live case t261005-11 / project-vision): a ticket
 at stage=merge, stage_state=awaiting-human, waiting two days for a signature,
 was reported as severity=high "stuck in the lane: re-ran the integration suite
 6 times (threshold 3)" with 42.6h quoted as per-round wall — a reader was sent
@@ -79,7 +79,7 @@ NOW = 1_800_000_000.0
 #: snapshot reader produces for stage=merge / awaiting-human / 6 suite rounds,
 #: converged 2 days ago, silent since).
 INCIDENT = {
-    "ticket_id": "t261005-11", "project": "dengzhufpv",
+    "ticket_id": "t261005-11", "project": "project-vision",
     "stage": "merge", "stage_state": "awaiting-human", "status": "dispatched",
     "suite_rounds": 6,
     "suite_entries": [NOW - 6 * DAY, NOW - 6 * DAY + 560, NOW - 5 * DAY,

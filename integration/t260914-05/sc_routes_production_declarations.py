@@ -5,7 +5,7 @@
 （~/.sandbar/projects/*/model-routes.yaml，红线禁改）或两项目的 paths 声明被误动。
 本场景以只读探针钉住生产口径：
 
-  · sandbar / dengzhufpv 两项目的注册条目仍声明 paths.model_routes，且解析 state=ok、
+  · sandbar / project-vision 两项目的注册条目仍声明 paths.model_routes，且解析 state=ok、
     roles.developer 的 provider/model 非空（验收 5 的机械口径；**只断性质不断具体值**——
     模型是运行时可调项，260910 宿主裁决心智：表值不快照）；
   · 解析路径落在引擎仓之外——「真源在机器级/声明面」的收口不变式；
@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import lib_t05_routes as lib  # noqa: E402
 
 NAME = "sc_routes_production_declarations"
-PROD_KEYS = ("sandbar", "dengzhufpv")
+PROD_KEYS = ("sandbar", "project-vision")
 LEGACY_REPO_TABLE = lib.REPO / "server" / "model-routes.yaml"
 
 

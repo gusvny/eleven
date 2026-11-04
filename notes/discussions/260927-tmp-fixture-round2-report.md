@@ -63,7 +63,7 @@
 | `sandbar-admin-log-` | 2,853（文件） | `integration/stage_docker.py:1332` | ✔（260926+本轮具名边界） | ✔ |
 | `sandbar-credentials-` | 2,518（文件） | 同上 `:1333` | ✔ | ✔ |
 | `sandbar-integ-run-` | 2,819（文件） | `integration/run_scenarios.py` `_run_lock_path`（file:line 3068↓） | **✔ 本轮修** | ✔ |
-| `nusuyou-integ-run-` | 1,836（文件） | **姊妹项目** `~/Documents/nusuyou/integration/run_scenarios.py:182`（同款代码旧前缀） | ✘ 本仓修不到（跨仓） | ✔ |
+| `project-content-integ-run-` | 1,836（文件） | **姊妹项目** `~/Documents/project-content/integration/run_scenarios.py:182`（同款代码旧前缀） | ✘ 本仓修不到（跨仓） | ✔ |
 | `venv-compat-` | 4,814 | `integration/t260907-10/sc_engine_venv_compat.py:56-58` | **✔ 本轮修** | ✔ |
 | `t26092114-` | 8,115 | `integration/t260921-14/lib_t26092114.py:131,156` | ✘ | ✔ |
 | `t26090704-lock` | 3,251 | `integration/t260907-04/sc_dispatcher_lock_fallback.py:35` | ✘ | ✔ |
@@ -118,16 +118,16 @@
 - 实况：`t260907-12-act-` 在 09-27 08:00 仍在新生（1,337 条 <6h），而 main 的生产者早已是 `mkdtemp_reclaimed`。
 - 证据链：`.lane/t260926-05/server/engine/tests/test_multirepo_root_activity.py` 仍是**修前版本**（3 处裸 `tempfile.mkdtemp`、0 处 reclaim），且它的 pytest 缓存 `.lane/t260926-05/out/pycache/…test_multirepo_root_activity…pyc` 的 mtime = **09-27 09:06**（正在跑）。
 - 含义：**「改 main」不等于「停止泄漏」**——每个在途泳道持有自己的码副本，直到该泳道 rebase/退休。故本轮把「前缀覆盖面」做成机械锁（`test_e1`：生产者字面前缀必须被白名单盖住），并建议泳道纪律补一条：*测试面共享 helper 的修复必须随泳道同步*。
-- 同理：`nusuyou-integ-run-*` 的生产者在姊妹项目仓（`~/Documents/nusuyou/integration/run_scenarios.py:182`），本仓修不到——建议同款修改回灌那个仓。
+- 同理：`project-content-integ-run-*` 的生产者在姊妹项目仓（`~/Documents/project-content/integration/run_scenarios.py:182`），本仓修不到——建议同款修改回灌那个仓。
 
 ### 5.3 文件族上一轮整族漏了
-`silent` 的形态：`sandbar-integ-run-*.lock` / `sandbar-admin-log-*.log` / `sandbar-credentials-*.yaml` / `nusuyou-integ-run-*.lock` / `sandbar-t26091202-*` 里共 **10,047 个文件**在旧判据（只碰真目录）下**一条也删不到**；本轮补文件族 + 「在用即不动」后已全清。
+`silent` 的形态：`sandbar-integ-run-*.lock` / `sandbar-admin-log-*.log` / `sandbar-credentials-*.yaml` / `project-content-integ-run-*.lock` / `sandbar-t26091202-*` 里共 **10,047 个文件**在旧判据（只碰真目录）下**一条也删不到**；本轮补文件族 + 「在用即不动」后已全清。
 
 ---
 
 ## 6. re-point 的既有断言（逐条）
 
-1. **`server/engine/tests/test_t260926_tmp_fixture_water.py::test_d3_whitelist_discipline_and_malformed_entries`**：样例条目 `nusuyou-integ-run-x.lock` → `nusuyou-scratch-x.lock`。原因：该锁族随第二批并入白名单，若保留原名，判据面 `dirs` 会从 3 变 4、`by_prefix` 多一槽。**intent 不变**（白名单外一律不计 + 畸形逐条点名）；已加注释说明改点。
+1. **`server/engine/tests/test_t260926_tmp_fixture_water.py::test_d3_whitelist_discipline_and_malformed_entries`**：样例条目 `project-content-integ-run-x.lock` → `project-content-scratch-x.lock`。原因：该锁族随第二批并入白名单，若保留原名，判据面 `dirs` 会从 3 变 4、`by_prefix` 多一槽。**intent 不变**（白名单外一律不计 + 畸形逐条点名）；已加注释说明改点。
 2. **`server/engine/tests/test_t260926_lane_watchdog.py::test_c4_activity_registered_and_readonly_source_lock`**：该测试对 `inspection_lane_watchdog.py` 装配只读源码锁（禁字面 `subprocess`/`open(`/`Path(`/`os.environ`）。我最初的注释里写了 `dsh-subprocess-*` 字面 → **该锁转红**；**改注释措辞**（改用「dsh 运行时自己的临时 spill 目录 + 指向清扫器 `EXCLUDED_PREFIXES`」，零代码改动）后绿。这是一次「既有闸逼出的措辞修正」，非判据放宽。
 3. **`integration/tools/sweep_tmp_fixtures.py` 内部形状（不是既有断言，但影响调用方）**：`scan()` 的 stale/live 元素由 `(name, mtime)` 变为 `FixtureEntry(name, mtime, kind)`；`estimate()` 行新增 `dirs/files/dir_avg_bytes`；摘要行加 `(dirs D / files F)` 与 `locks kept L`；`--prefix ""` 现在被剔除（空前缀=没有前缀闸，随后被空白名单闸拒收）。漂移锁 `test_f1` 的逐字断言（两份前缀元组相等、`DEFAULT_MAX_AGE_H` 同口径、源码含 `--apply`、`APPLY_MIN_AGE_H`、`not a real directory`）**全部仍绿**（实测）。
 4. **白名单条目变更**：`venv-compat-root` → `venv-compat-`（超集，只多盖 `venv-compat-home-*`）。除漂移锁的「两处逐字相同」外无测试锚定该键，实测 26 条水位测试全绿。
@@ -157,7 +157,7 @@
 
 1. **删除面不再擅自扩大**：`t26091013-*`（17,254 条）/ `sandbar-*` / `notes-gate-*` / `t260915-09-*` / `t260905-dp-*` / `t09-bump-*` / `sc-t26090510-*` / `q08-*` / `t08-*` / `stage-l1-*` / `t25-t03-*` / `t260901-14-*` 等**未覆盖族**本轮**只归因、未清**（宿主给的白名单之外不碰，一条未删）。它们全在本仓票号命名空间内、生产者可见——建议下一轮授权，或改成**机械派生白名单**（从 `mkdtemp(prefix="…")` 字面自动生成 + 现成 `EXCLUDED_PREFIXES` 兜底），从根上消灭「手抄白名单必然漏变体」这类洞。
 2. **L8 基线=泄漏发动机**：69 个文件 / 104 处「有 mkdtemp 零回收动词」仍在豁免名单里（本轮修掉 2 处），其中 `notes-gate-`、`q08-*`、`t08-*`、`sc-t26090510-*`、`stage-l1-*` 就是活水前列。建议按泄漏量排序分批改造（同款 3 行改法）。
-3. **跨仓**：`nusuyou-integ-run-*` 的生产者在姊妹仓（本仓已清存量，但新产会在那边继续）。
+3. **跨仓**：`project-content-integ-run-*` 的生产者在姊妹仓（本仓已清存量，但新产会在那边继续）。
 4. **泳道同步纪律**：见 §5.2；否则任何「改 main 的测试面 helper」都会被在途泳道的旧副本抵消。
 5. **水位面语义**：下一期巡检会因 10,496 个 <6h 目录越线（阈值 1000）出 med/high 发现——那是**真实当期水位**（活水速率），不是清扫失败；清扫后「≥6h 存量」这一支已归零，若仍报，报的就是活水。
 6. **未做**：不 commit、不开票、未动 `console(3099)`、未删白名单外任何东西（`EXCLUDED_PREFIXES` 一族未删）；真 docker 拆台路径未实跑（ENV_FAIL），改用桩级动态 + 静态锚覆盖。

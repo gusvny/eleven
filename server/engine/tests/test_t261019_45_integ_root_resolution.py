@@ -3,7 +3,7 @@
 """t261019-45 L1 truth table: the integ gate's NAMED multi-root declaration
 resolution.
 
-Measured defect (tickets t261019-08 / t261019-13, project dengzhufpv): a
+Measured defect (tickets t261019-08 / t261019-13, project project-vision): a
 multi-repo lane whose write set spans member repos reached run_integration_tests
 and the gate answered `verify.yaml missing` permanently, even though the
 declaration existed at the lane container and at the member trees — the gate

@@ -92,13 +92,13 @@ const row = (ticket, stageState) => parseLedgerLine(ledgerLine({ ticket, stage_s
   const { filterBoardRowsToProject } = await import('../src/host/reconcile.ts')
   const mixed = [
     { id: 'a', project: 'sandbar', stage_state: 'running' },
-    { id: 'b', project: 'dengzhufpv', stage_state: 'running' },
+    { id: 'b', project: 'project-vision', stage_state: 'running' },
     { id: 'c', stage_state: 'running' },            // 无 SA 标签的历史票
     { id: 'd', project: null, stage_state: 'running' },
   ]
   const kept = filterBoardRowsToProject(mixed, 'sandbar')
   assert(kept.length === 3 && kept.every(r => r.id !== 'b'), 'rows of other projects dropped; own + label-less kept')
-  assert(filterBoardRowsToProject(mixed, 'dengzhufpv').map(r => r.id).join(',') === 'b,c,d', 'per-project scope keeps only own + label-less rows')
+  assert(filterBoardRowsToProject(mixed, 'project-vision').map(r => r.id).join(',') === 'b,c,d', 'per-project scope keeps only own + label-less rows')
   assert(filterBoardRowsToProject([], 'sandbar').length === 0, 'empty board stays empty')
   // 缺行覆盖消费过滤后的行：别家票不再恒等「缺行」。
   const led = [row('a', 'running')]

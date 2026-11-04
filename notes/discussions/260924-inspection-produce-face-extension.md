@@ -34,7 +34,7 @@ updated: 2026-09-24
    - 现状面：`docs-sync`（doc 面）与 `simplify-face`（simplify 面）两个实例**在 sandbar 的声明里
      已启用**，但调度器上只有 test 面一条排程——它们从未跑过（台账零记录）。
    - 用户实据：宿主明确要 doc/simplify 巡检**产出 change 交人审**，而不是继续给建议。
-   - 通用性实据：同引擎下的其他项目（nusuyou 等）没有 `inspection.yaml`；而宿主明确要求
+   - 通用性实据：同引擎下的其他项目（project-content 等）没有 `inspection.yaml`；而宿主明确要求
      **其他项目也能开箱即用，甚至能加自己的巡检 workflow**。
 
 ## Requirement（需求）

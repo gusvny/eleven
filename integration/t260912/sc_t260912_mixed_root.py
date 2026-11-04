@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""t260907-12 场景①：根亦 git 仓的混合多仓项目全链（dengzhufpv 形态，灰盒 L2/L3）。
+"""t260907-12 场景①：根亦 git 仓的混合多仓项目全链（project-vision 形态，灰盒 L2/L3）。
 
 intent（守护的用户可感知行为/合同）：项目根=知识库 git 仓＋repos/* 子仓并存的
 项目（宿主决策「知识库要 git」后的真实形态）也能开票——repos_under 的

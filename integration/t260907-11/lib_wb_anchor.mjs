@@ -62,7 +62,7 @@ async function writeRegistry(root, repoA, repoB) {
   const regDir = join(root, 'projects')
   for (const [key, dir, body] of [
     ['sandbar', repoA, projectYaml('sandbar', 'sandbar fixture', repoA)],
-    ['fpv', repoB, projectYaml('fpv', 'dengzhufpv fixture', repoB)],
+    ['fpv', repoB, projectYaml('fpv', 'project-vision fixture', repoB)],
     // schema 缺失=畸形→该条目隔离（fail-closed），隔离文案透传注册表 error
     ['badproj', join(regDir, 'badproj'), 'project:\n  - key: badproj\n    name: 坏条目\n    dirs:\n      - /nonexistent\n'],
   ]) {

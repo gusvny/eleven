@@ -688,12 +688,12 @@ MAIN_SYNC_CONFLICT_HANDBACK_PATCH_ID = "t261022-12-main-sync-conflict-handback-v
 #: only made history-aware; both call sites (main-sync settle and conflict
 #: resolution) shipped atomically in one commit, so one id covers both.
 SETTLE_RERUN_PATCH_ID = "dev-lane-settle-rerun-v1"
-# 260930（宿主令·nusuyou 需求说明第六条·KI-099 实案）：**未知相位绝不 raise**。
+# 260930（宿主令·project-content 需求说明第六条·KI-099 实案）：**未知相位绝不 raise**。
 # 病根两段：① `_auto_rework` 的两条拒绝返回可能是**空串**（`str(meta["stage"] or fallback)`
 # 而 meta['stage'] 为空、fallback 又非法）——旧路径（`_apply_rework`，patched 未激活的
 # 在飞票）把它交回主循环；② 主循环尾对未知相位 `raise ValueError`（注释自称 unreachable），
 # 而引擎自己的注释写着「主循环是裸 while True，抛出去=打断工作流实例」⇒ 票面 status=None、
-# 快照/show/query 全查不到、**不可恢复**（nusuyou t260929-28 实案：照引擎拒收提示推荐的
+# 快照/show/query 全查不到、**不可恢复**（project-content t260929-28 实案：照引擎拒收提示推荐的
 # 别名 to_stage=acceptance 操作即踩雷）。
 # 修法：相位兜底夹到可进入值（候选全非法 ⇒ arbitrate 人门）+ 主循环尾改 blocked（可查、
 # 可唤醒、原因具名）。同形布尔门：老在途票 history 无此标记 → 旧路径逐字不变。
@@ -703,7 +703,7 @@ UNKNOWN_PHASE_BLOCK_PATCH_ID = "t260930-unknown-phase-block"
 REWORK_PHASE_FALLBACK = "arbitrate"
 #: **可打回相位集**（260930，与拒收提示同源）：PHASE_MAIN_CHAIN 里有几个值是主循环的
 #: **编排内部相位**（并行叉的两条边与汇合点），从外部 rework 直接落进去只会得到半套上下文
-#: （nusuyou 实案：提示里列了 acceptance，操作员照做就踩雷）。提示词表与合法性判定都取
+#: （project-content 实案：提示里列了 acceptance，操作员照做就踩雷）。提示词表与合法性判定都取
 #: 本集合——**词表里能打的，才是提示里能推的**。
 REWORK_ADMISSIBLE_PHASES = frozenset({
     "create_plan", "review_plan", "implement", "run_integration_tests",
@@ -727,7 +727,7 @@ ARB_ACC_PARALLEL_PATCH_ID = "dev-lane-arb-acc-parallel-v1"
 #   硬约束：query handler 整段 read-only）——snapshot 等读 self._detail_face_on
 #   缓存位（getattr 防御，UT 壳 object.__new__ 不跑 __init__）。
 DETAIL_FACE_PATCH_ID = "dev-lane-detail-face-v1"
-# t260916-19 ①：rework 打回出路的可达性（blocked 死结修复，实案=dengzhufpv
+# t260916-19 ①：rework 打回出路的可达性（blocked 死结修复，实案=project-vision
 # t260916-11）。门纪律同 DETAIL_FACE_PATCH_ID：唯一求值点=_init()，使用点读
 # self._rework_escape_on 缓存位（getattr 防御，UT 壳不跑 __init__）。
 REWORK_ESCAPE_PATCH_ID = "dev-lane-rework-escape-v1"
@@ -1831,7 +1831,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
             # Ticket t260910-08（t260910-07 实案收口）: the per-repo detail carried
             # through verbatim — the previous drop of this key left
             # meta.repo_worktrees permanently null and every multi-repo ticket
-            # materialized single-repo (dengzhufpv incident). Carried **raw** (no
+            # materialized single-repo (project-vision incident). Carried **raw** (no
             # per-entry rewrite): a malformed entry must reach the existing
             # _repo_worktrees_gate_error judge for a readable rejection, not blow up
             # here inside the workflow with a bare ValueError (base._init 既有同款).
@@ -2061,7 +2061,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
                               "the union is fed by the structured field, not "
                               "the prose — refill files_changed or the set "
                               "stays as-is")
-                # 260930（dengzhufpv E6／批次 A）：**两态区分 + 去掉会诱发空转的处方**。
+                # 260930（project-vision E6／批次 A）：**两态区分 + 去掉会诱发空转的处方**。
                 # 实测（t260929-15/-29/-31/-33 四次）：写集零污染、票自行跑完、**零交付损失**，
                 # 四次都不需要 rework——旧文案的「处置：rework 回 create_plan」把人引去一轮空转
                 # （与「报错必须精确」相抵）。故：降级为**提醒（非阻塞红）** + 说明两态 + 明确劝止。
@@ -3831,7 +3831,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
     def _safe_phase(self, *candidates: str) -> str:
         """候选相位 → 第一个**可进入**的（260930）：绝不把空串/未知值交回主循环。
 
-        主循环尾对未知相位 raise＝打断工作流实例（票不可查、不可恢复，nusuyou t260929-28
+        主循环尾对未知相位 raise＝打断工作流实例（票不可查、不可恢复，project-content t260929-28
         实案）。所以这里做最后一道兜底：候选（fallback / meta 现步）逐个验，全非法 ⇒
         `REWORK_PHASE_FALLBACK`（arbitrate 人门），并**响亮留痕**（refused + _log），
         夹相位这件事本身要能在票面/审计里看见，不静默。"""
@@ -7564,7 +7564,7 @@ class DevLaneWorkflow(ReworkHoldMixin, TicketPauseMixin, TicketCrossProjectMixin
 
             if not workflow.patched(UNKNOWN_PHASE_BLOCK_PATCH_ID):
                 raise ValueError("unknown phase %r" % phase)  # unreachable (the step chain is closed)
-            # 260930（宿主令·nusuyou 需求⑥）：未知相位**绝不 raise**——本文件自己写着「主循环
+            # 260930（宿主令·project-content 需求⑥）：未知相位**绝不 raise**——本文件自己写着「主循环
             # 是裸 while True，抛出去=打断工作流实例」，而 raise 的后果就是票面 status=None、
             # 快照/show/query 全不可读（t260929-28 实案，票作废不可恢复）。改成 blocked：
             # 可查、可唤醒（retry_qc/rework）、原因具名（点名合法相位词表），把「不可恢复坏态」

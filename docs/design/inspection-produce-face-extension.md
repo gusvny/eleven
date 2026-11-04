@@ -38,7 +38,7 @@ updated: 2026-09-28
    - Current state: the two instances `docs-sync` (doc face) and `simplify-face` (simplify face) **are already enabled in
      sandbar's declaration**, but only the test face has a schedule on the dispatcher — they have never run (zero ledger records).
    - User evidence: the host explicitly wants doc/simplify inspection to **produce a change for human review**, not to keep giving suggestions.
-   - Generalization evidence: other projects under the same engine (nusuyou and others) have no `inspection.yaml`; and the host explicitly requires that
+   - Generalization evidence: other projects under the same engine (project-content and others) have no `inspection.yaml`; and the host explicitly requires that
      **other projects work out of the box too, and can even add their own inspection workflow**.
 
 ## Requirement

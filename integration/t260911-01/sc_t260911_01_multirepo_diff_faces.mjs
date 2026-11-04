@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * sc_t260911_01_multirepo_diff_faces.mjs —— t260911-01 场景①（dengzhufpv 260910 缺陷 2a/2b 回归面）：
+ * sc_t260911_01_multirepo_diff_faces.mjs —— t260911-01 场景①（project-vision 260910 缺陷 2a/2b 回归面）：
  * 多仓票 diff 面逐仓可见 + 过程物过滤点名 + 单仓退化零回归 + 畸形明细不炸。
  *
  * intent（用户可感知面 / 验收 a–d 落点）：

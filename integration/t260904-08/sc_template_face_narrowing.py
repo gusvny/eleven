@@ -167,7 +167,7 @@ def main():
         else:
             # 260927（integration 岗）：ticket-start 半**必须同享本场景自持的注册根**——
             # 否则它读机器级真注册表：t260924-04 之后「当项目显式登记的模板」本就该出现在
-            # 「可用：」段（nusuyou 声明 content-studio 时文案=「可用：content-studio、dev-lane」），
+            # 「可用：」段（project-content 声明 content-studio 时文案=「可用：content-studio、dev-lane」），
             # 于是这条「恰列 dev-lane」的断言会随宿主机器上声明了什么而红（环境耦合假红）。
             # 断言**不放宽**（仍是「可用面恰等于真源」），只是把真源钉成场景自己的空注册根。
             for tid in lib.RETIRED_TEMPLATE_IDS:

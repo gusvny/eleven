@@ -5,7 +5,7 @@ sweep — engine-side dead-holder reclaim.
 Defect: a TERMINAL ticket's slot was released by the ending CALLER; when that
 caller could not write the projects root (agent sandbox, PermissionError on
 concurrency-state.json.lock) the receipt said released:false and nothing ever
-reclaimed the row — three of four leaked holders on dengzhufpv were human-hold
+reclaimed the row — three of four leaked holders on project-vision were human-hold
 rows for Terminated workflows, invisible to the heartbeat sweep by design.
 
 What this file pins (review_plan conditions included):

@@ -525,7 +525,7 @@ export function apply(ctx: Context, config?: SuyouWorkbenchConfig): void {
    * 调 engine client.py（Temporal TicketWorkflow：sign 审批签字走这里）。
    * KI-057（t260907-11）经评审裁定**保留引擎仓锚、不随项目走**：调用点仅 sign/retry-qc
    * 两个引擎语义操作（审批人工门 / blocked 重跑 signal），client.py 是引擎代码、
-   * Temporal 是引擎命名空间，dengzhufpv 的票同样跑在 sandbar 引擎的 Temporal 上；
+   * Temporal 是引擎命名空间，project-vision 的票同样跑在 sandbar 引擎的 Temporal 上；
    * 按项目解析会把今天能用的跨项目签署打断成 502（外部项目无引擎 clone）。若宿主
    * 真实意图是「外部项目各带引擎克隆、独立 Temporal」，那是整套引擎拓扑（worker/
    * namespace/端口）专门票，不随本票做。cwd 同保留引擎仓：两操作只带 id，无文件相对行为。

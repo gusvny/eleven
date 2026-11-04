@@ -9,7 +9,7 @@ verify_lane.RUNTIME_PREFIXES）跨语言无法 import 真源——本场景锁�
 .dsh/.sandbar/.suyou 已有覆盖**（丢了=引擎自管过程物回流人审 diff 面，2b 复发形态；naming-compat：断言面提及 legacy 泳道目录名，非消费面）。
 
 挂账面（可判定，不是注释）：engine 侧 SETTLE_PATHSPEC 现缺 out/__pycache__/
-node_modules/.venv 覆盖（out/pycache 误代落盘实案根因，dengzhufpv 260910）——根修
+node_modules/.venv 覆盖（out/pycache 误代落盘实案根因，project-vision 260910）——根修
 属引擎写集、本票挂账另票。本场景每次运行把「workbench 有而引擎表没有」的差集打成
 LEDGER 行（场景输出可见、转正时可判定：根修落地后 LEDGER 差集收空），不判红——
 红绿只由反向包含、派发白名单与 handler 透传三条闸决定。
@@ -120,7 +120,7 @@ def main() -> int:
     uncovered = sorted(wb_set - engine)
     if uncovered:
         print("LEDGER: 以下目录 workbench diff 面已过滤、引擎代落盘侧（SETTLE_PATHSPEC/RUNTIME_PREFIXES）尚未排除——"
-              "根修属引擎写集，本票挂账另票（dengzhufpv 260910 out/pycache 误代落盘同族）：")
+              "根修属引擎写集，本票挂账另票（project-vision 260910 out/pycache 误代落盘同族）：")
         for u in uncovered:
             print("LEDGER:   - %s" % u)
     else:

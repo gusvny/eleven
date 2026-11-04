@@ -52,7 +52,7 @@ def _init_repo(path, commit=True):
 
 @pytest.fixture
 def mixedrepo():
-    """混合形态夹具（dengzhufpv 形态，t260907-12 起）：根=git 仓且有子仓。"""
+    """混合形态夹具（project-vision 形态，t260907-12 起）：根=git 仓且有子仓。"""
     root = mkdtemp_reclaimed("t260908-02-ut-")
     _init_repo(root)  # 根仓
     a = _init_repo(root / "repo_a")

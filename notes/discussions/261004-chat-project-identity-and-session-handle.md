@@ -83,7 +83,7 @@
 `projects.yaml` 可声明 `color`/`shape` 覆盖。
 
 **mock 里的三例**（可切项目实时看，灰度截图也验过）：
-`sandbar = 空心五边形`、`suyou = 实心四角星`、`nusuyou = 双色盾`。
+`sandbar = 空心五边形`、`suyou = 实心四角星`、`project-content = 双色盾`。
 
 **尺寸**：左栏项目行 14px、会话行 11px、chat 身份带 13px——11px 下空心环的内孔仍有约 5px，
 不糊；`sparkle` 这类细尖形在小尺寸下退化为实心（不画洞）。

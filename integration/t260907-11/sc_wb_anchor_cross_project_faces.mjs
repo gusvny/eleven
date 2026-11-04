@@ -2,7 +2,7 @@
  * sc_wb_anchor_cross_project_faces.mjs —— t260907-11 场景①（KI-057）：
  * 跨项目三面取数对照＋撞码不互串＋审批写落项目根＋防穿越闸随项目根判界。
  *
- * intent（用户可感知面）：宿主在工单台选 dengzhufpv 视图时——①epics tab 看到的是
+ * intent（用户可感知面）：宿主在工单台选 project-vision 视图时——①epics tab 看到的是
  * fpv 仓的立项单（不是 sandbar 的，同代号也不串）；②审批意见 POST 落 fpv 仓
  * server/dsh/reviews/，sandbar 视图读不到；③变更 diff 按 fpv 项目根判界后泳道可见，
  * 而同一 worktree 路径换 sandbar 锚仍被防穿越闸拒（闸语义不弱化，判界基准随项目走，

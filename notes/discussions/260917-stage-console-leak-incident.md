@@ -10,8 +10,8 @@
 | --- | --- |
 | 09-16 21:24 | `/private/tmp/dsh-stage` 出现一个独立控制台（端口 3199、`DSH_HOME=/private/tmp/dsh-stage`、profile=`sandbar-stage`） |
 | 09-16 22:2x–22:3x | 一批票集体 blocked（worker 侧中断，见 §三 缺陷③） |
-| 09-16 23:xx | dengzhufpv `t260916-17` 的 merge 被劫、写 `.git/ORIG_HEAD.lock` 得 `EPERM` |
-| 09-17 01:28 | nusuyou `t260916-30` 卡 `workspace/blocked`：`Operation not permitted: /Users/user/Documents/nusuyou/.lane/...` |
+| 09-16 23:xx | project-vision `t260916-17` 的 merge 被劫、写 `.git/ORIG_HEAD.lock` 得 `EPERM` |
+| 09-17 01:28 | project-content `t260916-30` 卡 `workspace/blocked`：`Operation not permitted: /Users/user/Documents/project-content/.lane/...` |
 | 09-17 03:03 / 04:51 / 06:37 | 在飞 agent 段反复被 `CancelledError` + `Activity task timed out` 砍 |
 | 09-17 全天 | 多张票的 agent 段报 `dsh: corrupt Zstandard session log: complete frame contains a torn JSONL record`（会话拒读） |
 
@@ -20,7 +20,7 @@
 1. **测试台连生产 Temporal**：3199 台的 `temporal-tools` 插件加载后，其 keepalive 会给**生产 Temporal 上所有 running 票**起 worker（无项目过滤）。
 2. **worker 血统错挂**：这些 worker 的父进程是**测试台**（非生产 console），于是服务对象与实际执行上下文不一致 —— 例：`worker t260916-30` 的父 = 90670（3199 台），而 `worker t260916-23` 的父 = 80526（生产 console，正常）。
 3. **同一票被两个 worker 抢**：生产 console 的 keepalive 与测试台的 keepalive 各自给同一票起 worker → 同一队列两个 poller → **同一会话文件被两个进程交替写** → JSONL 记录交错 → 下一个恢复进程报 `torn JSONL record` 拒读。
-   - 受害实证：`t260917-01`（sandbar）、`t260916-30`（nusuyou）。
+   - 受害实证：`t260917-01`（sandbar）、`t260916-30`（project-content）。
    - **注意**：会话文件本身经 `zstd -t` 完整性 + 逐行 `json.loads` 双验证**全部健康**（6495 行全合法）——「损坏」是**多写者交错**造成的，不是文件坏了。
 4. **孤儿循环维持台不自灭**：起台的会话结束/被杀后，其 `bash` 循环逃逸成孤儿（父进程 = launchd(1)），**每 ~25 秒重起一次台**。实测：杀台 → 20 秒后新 pid 出现（90670 → 34907 → 36362），**只有杀掉那个孤儿 bash 才停止**。
    - 该逃逸与 **t260916-29** 所修缺陷同源：worker/agent 停机时**进程组未被干净收割**。
@@ -40,7 +40,7 @@
 | --- | --- | --- |
 | 停台 | 90670（3199）→ 34907 → 36360/36362 | 前两次均被孤儿循环重起 |
 | 断根 | 孤儿循环 bash（36360，父=launchd） | 停后 30 秒复核：3199 释放、无 `dsh-stage` 血缘进程 |
-| 停错挂 worker | 68413（nusuyou `t260916-30`）、31121（sandbar `t260917-01`） | 停后 `t260917-01` 由生产 console 补上正确血统 worker（pid 34921，父=80526） |
+| 停错挂 worker | 68413（project-content `t260916-30`）、31121（sandbar `t260917-01`） | 停后 `t260917-01` 由生产 console 补上正确血统 worker（pid 34921，父=80526） |
 | 会话处理 | `-26/-28/-01` 的会话文件改名 `.torn-backup-<ts>` | **未删除**，可一键回滚；只碰会话缓存，未碰代码/交付物/票面 |
 
 ## 五、未决与下一步
@@ -55,7 +55,7 @@
    - 泄漏台由 agent 会话侧进程起，因此**继承 DSH 沙箱**（授予面=被服务的会话工作区）→ 它派生的 worker 一碰其他项目目录即 `EPERM`；
    - 停掉泄漏台后，生产 console 补起的新 worker（pid 34922，父=80526）不再受该限制。
    ⇒ **「worker 的权限面＝起它的那个上下文」成立，继承源是泄漏台／agent 会话，而非 console。**
-   待验证：`t260916-18`（nusuyou）的 `unable to create temporary file` 是否同源（泄漏台血统的环境差异），重跑即知。
+   待验证：`t260916-18`（project-content）的 `unable to create temporary file` 是否同源（泄漏台血统的环境差异），重跑即知。
 
 ## 六、方法论备忘（本次踩到的两个坑）
 

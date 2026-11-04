@@ -1,7 +1,7 @@
 /**
  * tests/project-template-lane-map.mjs —— 项目外置模板的泳道图消费面（t260927 缺口 5）。
  *
- * 缺口（nusuyou 需求书三点九节）：外置模板（`paths.workflow_modules`）的票在控制台里
+ * 缺口（project-content 需求书三点九节）：外置模板（`paths.workflow_modules`）的票在控制台里
  * 看不到泳道/段序图——目录面（workflow.py list）只列 dev-lane，票面 topology=None，
  * 前端 `wfById[detail.workflow_id]` 查不到模板，`buildLaneMap` 无从取拓扑。
  *

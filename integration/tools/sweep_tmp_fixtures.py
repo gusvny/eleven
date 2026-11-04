@@ -83,8 +83,8 @@ TMP_FIXTURE_PREFIXES = (
     "sandbar-admin-log-",     #  2,854  265h  integration/stage_docker.py:1332（**文件**；两条拆台路径已回收）
     "sandbar-credentials-",   #  2,519  112h  同上 :1333（**文件**；凭据副本留在 $TMPDIR 属卫生面欠账）
     "sandbar-integ-run-",     #  2,820  204h  integration/run_scenarios.py 的 `_run_lock_path`（**文件** 单飞锁档；260927 已修）
-    "nusuyou-integ-run-",     #  1,836  106h  同款锁档的旧前缀——生产者在**姊妹项目**的同一份 runner（naming-compat）
-                              #               （~/Documents/nusuyou/integration/run_scenarios.py:182），本仓修不到；
+    "project-content-integ-run-",     #  1,836  106h  同款锁档的旧前缀——生产者在**姊妹项目**的同一份 runner（naming-compat）
+                              #               （~/Documents/project-content/integration/run_scenarios.py:182），本仓修不到；
                               #               存量由本表清（0 条 <6h = 已无新产）
     "venv-compat-",           #  4,814  346h  integration/t260907-10/sc_engine_venv_compat.py:56-58（root+home 两族；260927 已修，原表只覆盖 -root）
     "t26092114-",             #  8,115  132h  integration/t260921-14/lib_t26092114.py:131/156
@@ -129,7 +129,7 @@ TMP_FIXTURE_PREFIXES = (
 #: 不是第二份可独立增删的清单——白名单真源只有上面那一个）。
 BATCH2_MERGED_PREFIXES = (
     "t260907-12-act-", "t260907-12-ch", "sandbar-admin-log-", "sandbar-credentials-",
-    "sandbar-integ-run-", "nusuyou-integ-run-", "venv-compat-", "t26092114-",  # naming-compat（姊妹项目同款前缀，非退役旧名）
+    "sandbar-integ-run-", "project-content-integ-run-", "venv-compat-", "t26092114-",  # naming-compat（姊妹项目同款前缀，非退役旧名）
     "t26090704-lock", "t260904-18-mg", "t260910-10-", "t090506-",
     "t260904-13-itest", "sandbar-t26091202-", "detailred-e2e-", "sandbar-reg-",
     "t260915-10-", "t26092404-", "t260923-", "t260925-", "t260922-", "t260921-",

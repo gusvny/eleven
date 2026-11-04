@@ -8,7 +8,7 @@ updated: 2026-09-28
 
 # Project external workflow templates
 
-> Source: the nusuyou project document "Requirements for sandbar: project external workflow
+> Source: the project-content project document "Requirements for sandbar: project external workflow
 > templates" (the host's verbatim 260924 ruling: "don't chisel the gate open directly; write an
 > explanatory document and I'll send it to sandbar to open a ticket and do it").
 > This document graduated from `notes/discussions/260924-external-project-workflow-templates.md` (registered
@@ -43,7 +43,7 @@ updated: 2026-09-28
 3. **Evidence**:
    - Current state: template classes live inside the engine package; after 260904 the default
      available template face narrowed to a single built-in development flow.
-   - Requester's hard evidence: nusuyou will add a "content authoring" flow (an eight-stage chain
+   - Requester's hard evidence: project-content will add a "content authoring" flow (an eight-stage chain
      with two human gates), and that flow **will keep evolving** — under the present structure
      every process iteration becomes an engine ticket, so accounts are misaligned and schedules
      block each other.
@@ -174,6 +174,6 @@ cross-project reuse".
 ## Related documents
 
 - [Design doc writing guide](design-doc-writing-guide.md)
-- Requirements (source, nusuyou repo): `notes/discussions/260924-给sandbar需求说明-项目外置工作流模板.md`（that source note lives in the nusuyou repo, not in this one）
+- Requirements (source, project-content repo): `notes/discussions/260924-给sandbar需求说明-项目外置工作流模板.md`（that source note lives in the project-content repo, not in this one）
 - Discussion draft (the original before graduation): [Project external workflow templates (design draft)](../../notes/discussions/260924-external-project-workflow-templates.md)
 - [Known issues (KI)](../../notes/debts/known-issues.md) — KI-113 (worker frozen code topology) is directly related to the "effective granularity" item of this document

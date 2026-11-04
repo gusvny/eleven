@@ -32,7 +32,7 @@
 1. **解析放宽**：`paths.model_routes` 现只允许「项目主目录下的相对路径」（`_decl_rel`
    拦逃逸）——需支持机器级/绝对路径形态（建议：`~` 展开 + 绝对路径允许，仍拒绝 `..` 逃逸；
    相对路径语义不变）。
-2. **现有两项目迁移**：sandbar 与 dengzhufpv 各把表从仓内拷到机器级目标 + 落声明；
+2. **现有两项目迁移**：sandbar 与 project-vision 各把表从仓内拷到机器级目标 + 落声明；
    仓内那份随后删除（含引用清理）。
 3. **引用点一并改**（今日实测清单）：
    - `server/engine/shared.py`：`MODEL_ROUTES_FILE` 常量退场，`model_route_for` 收路径参数单点；

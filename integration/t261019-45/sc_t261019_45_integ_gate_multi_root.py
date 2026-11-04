@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """sc_t261019_45_integ_gate_multi_root.py -- t261019-45 L3 (system case).
 
-User-visible contract (ticket t261019-45, measured on project dengzhufpv
+User-visible contract (ticket t261019-45, measured on project project-vision
 tickets t261019-08 / t261019-13): a multi-repo lane whose write set spans
 member repos must NOT die permanently on `verify.yaml missing` when the
 declaration exists in a plausible root. The integ gate now resolves the

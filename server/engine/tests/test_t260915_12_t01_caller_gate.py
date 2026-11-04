@@ -22,13 +22,13 @@ import shared
 
 PROJ = [
     {"key": "sandbar", "dirs": ["/repo"]},
-    {"key": "dengzhufpv", "dirs": ["/Users/user/Documents/dengzhufpv",
-                                   "/Users/user/Documents/dengzhufpv/sub"]},
+    {"key": "project-vision", "dirs": ["/Users/user/Documents/project-vision",
+                                   "/Users/user/Documents/project-vision/sub"]},
 ]
 REPO_TREE = ("/repo",)
 PROJ2 = [
     {"key": "sandbar", "dirs": ["/repo"]},
-    {"key": "dengzhufpv", "dirs": ["/var/folders/x/repo-sub"]},  # 原文形（不 deref）
+    {"key": "project-vision", "dirs": ["/var/folders/x/repo-sub"]},  # 原文形（不 deref）
 ]
 
 
@@ -63,7 +63,7 @@ def test_stamp_fields_default_empty(cls):
 
 def test_key_for_dir_basic_and_longest_prefix():
     assert shared.project_key_for_dir("/repo/server/engine", PROJ, REPO_TREE) == ""
-    assert shared.project_key_for_dir("/Users/user/Documents/dengzhufpv/sub/x", PROJ, REPO_TREE) == "dengzhufpv"
+    assert shared.project_key_for_dir("/Users/user/Documents/project-vision/sub/x", PROJ, REPO_TREE) == "project-vision"
     assert shared.project_key_for_dir("/elsewhere", PROJ, REPO_TREE) == ""
 
 
@@ -74,14 +74,14 @@ def test_key_for_dir_repo_tree_excluded_whole_subtree():
     assert shared.project_key_for_dir("/repo/", PROJ, REPO_TREE) == ""
     assert shared.project_key_for_dir("/repo/a/b/c", PROJ, REPO_TREE) == ""
     # 排除树之外的注册目录照常推导
-    assert shared.project_key_for_dir("/Users/user/Documents/dengzhufpv", PROJ, REPO_TREE) == "dengzhufpv"
+    assert shared.project_key_for_dir("/Users/user/Documents/project-vision", PROJ, REPO_TREE) == "project-vision"
 
 
 def test_key_for_dir_symlink_dual_form():
     """符号链接稳健子用例：注册表条目锚定原文（/var 形），cwd realpath（/private/var 形）
     ——双侧 realpath 归一后仍要命中（bench.write_registry 刻意不 deref 的对侧）。"""
     assert shared.project_key_for_dir(
-        "/private/var/folders/x/repo-sub", PROJ2, ("/Users/repo",)) == "dengzhufpv"
+        "/private/var/folders/x/repo-sub", PROJ2, ("/Users/repo",)) == "project-vision"
 
 
 def test_key_for_dir_empty_and_prefix_confusion():
@@ -93,21 +93,21 @@ def test_key_for_dir_empty_and_prefix_confusion():
 # ---------- resolve_identity（解析顺序 + 形状白名单） ----------
 
 def test_resolve_arg_beats_env():
-    ident = caller_gate.resolve_identity("dengzhufpv", "sandbar",
-                                         cwd="/Users/user/Documents/dengzhufpv",
+    ident = caller_gate.resolve_identity("project-vision", "sandbar",
+                                         cwd="/Users/user/Documents/project-vision",
                                          exclude_trees=REPO_TREE, projects=PROJ)
-    assert ident == {"value": "dengzhufpv", "src": "arg", "identity_class": "declared"}
+    assert ident == {"value": "project-vision", "src": "arg", "identity_class": "declared"}
 
 
 def test_resolve_env():
-    ident = caller_gate.resolve_identity("", "dengzhufpv", projects=PROJ)
-    assert ident["src"] == "env" and ident["value"] == "dengzhufpv"
+    ident = caller_gate.resolve_identity("", "project-vision", projects=PROJ)
+    assert ident["src"] == "env" and ident["value"] == "project-vision"
 
 
 def test_resolve_cwd_narrow_and_none():
-    ident = caller_gate.resolve_identity("", "", cwd="/Users/user/Documents/dengzhufpv/x",
+    ident = caller_gate.resolve_identity("", "", cwd="/Users/user/Documents/project-vision/x",
                                          exclude_trees=REPO_TREE, projects=PROJ)
-    assert ident["src"] == "cwd" and ident["value"] == "dengzhufpv"
+    assert ident["src"] == "cwd" and ident["value"] == "project-vision"
     ident2 = caller_gate.resolve_identity("", "", cwd="/tmp/nowhere",
                                           exclude_trees=REPO_TREE, projects=PROJ)
     assert ident2 == {"value": "", "src": "none", "identity_class": "undeclared"}
@@ -176,13 +176,13 @@ def test_judge_same_project_pass():
 
 
 def test_judge_mismatch_no_flag_refuse():
-    v = caller_gate.judge_caller(_ident("dengzhufpv"), "sandbar", None)
+    v = caller_gate.judge_caller(_ident("project-vision"), "sandbar", None)
     assert v["decision"] == "refuse"
-    assert "dengzhufpv" in v["why"] and "sandbar" in v["why"]  # 人话点名谁动谁的票
+    assert "project-vision" in v["why"] and "sandbar" in v["why"]  # 人话点名谁动谁的票
 
 
 def test_judge_mismatch_with_flag_override():
-    v = caller_gate.judge_caller(_ident("dengzhufpv"), "sandbar",
+    v = caller_gate.judge_caller(_ident("project-vision"), "sandbar",
                                  {"by": "宿主", "reason": "代管收口"})
     assert v["decision"] == "pass_override" and v["override_used"] is True
     assert "宿主" in v["notice"] and "代管收口" in v["notice"]
@@ -221,7 +221,7 @@ def test_judge_undeclared_malformed_policy_refused(monkeypatch):
 
 def test_judge_engine_internal_target_empty():
     """cancel 打在无 ProjectKey SA 的引擎件上=无比对对象，恒放行。"""
-    v = caller_gate.judge_caller(_ident("dengzhufpv"), "", None)
+    v = caller_gate.judge_caller(_ident("project-vision"), "", None)
     assert v["decision"] == "pass"
 
 
@@ -236,16 +236,16 @@ def test_judge_registered_is_not_consulted():
 def test_wf_judge_unstamped_and_targetless_allow():
     assert shared.cross_project_judge("", "sandbar", "")["action"] == "allow"
     assert shared.cross_project_judge(shared.CALLER_UNDECLARED_MARK, "", "")["action"] == "allow"
-    assert shared.cross_project_judge("dengzhufpv", "", "")["action"] == "allow"
+    assert shared.cross_project_judge("project-vision", "", "")["action"] == "allow"
 
 
 def test_wf_judge_same_and_mismatch():
     assert shared.cross_project_judge("sandbar", "sandbar", "")["action"] == "allow"
-    g = shared.cross_project_judge("dengzhufpv", "sandbar", "")
-    assert g["action"] == "refuse" and "dengzhufpv" in g["why"] and "sandbar" in g["why"]
-    g2 = shared.cross_project_judge("dengzhufpv", "sandbar", "宿主代管")
+    g = shared.cross_project_judge("project-vision", "sandbar", "")
+    assert g["action"] == "refuse" and "project-vision" in g["why"] and "sandbar" in g["why"]
+    g2 = shared.cross_project_judge("project-vision", "sandbar", "宿主代管")
     assert g2["action"] == "allow_record"
-    assert g2["record"]["caller_project"] == "dengzhufpv"
+    assert g2["record"]["caller_project"] == "project-vision"
     assert g2["record"]["note"] == "宿主代管"
 
 
@@ -279,7 +279,7 @@ def test_wf_judge_malformed_policy_fail_closed():
 
 
 def test_wf_judge_note_truncated_into_record():
-    g = shared.cross_project_judge("dengzhufpv", "sandbar", "x" * 5000)
+    g = shared.cross_project_judge("project-vision", "sandbar", "x" * 5000)
     assert g["action"] == "allow_record"
     assert len(g["record"]["note"]) == 300  # 入账截断（防 note 巨物进 meta）
 
@@ -287,11 +287,11 @@ def test_wf_judge_note_truncated_into_record():
 # ---------- identity_receipt（回执键构造） ----------
 
 def test_receipt_keys_shape():
-    ident = _ident("dengzhufpv")
+    ident = _ident("project-vision")
     verdict = caller_gate.judge_caller(ident, "sandbar",
                                        {"by": "宿主", "reason": "r"})
     keys = caller_gate.identity_receipt(ident, verdict)
-    assert keys["caller_project"] == "dengzhufpv"
+    assert keys["caller_project"] == "project-vision"
     assert keys["identity_src"] == "env" and keys["identity_class"] == "declared"
     assert keys["cross_project_used"] is True and "cross_project_notice" in keys
 

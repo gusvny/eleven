@@ -56,11 +56,11 @@ ok(JSON.stringify(inspectionSidebarRows([null, 'x', 123, inspRow('k')])) === JSO
   '元素非对象剔除不抛')
 
 // ---- inspectionSplitByProject（分拣：有身份进组，空/非串/不在册→unowned）
-const reg = ['sandbar', 'dengzhufpv']
+const reg = ['sandbar', 'project-vision']
 const split = inspectionSplitByProject(rows, reg)
 ok(split.byProject.sandbar?.length === 1 && split.byProject.sandbar[0].id === 'inspection-b-20260916',
   '在册 key 归组')
-ok(split.byProject.dengzhufpv === undefined, '无行项目不产空组键')
+ok(split.byProject.project-vision === undefined, '无行项目不产空组键')
 ok(split.unowned.length === 1 && split.unowned[0].id === 'inspection-a-20260916', '空 project（老票）→ unowned')
 const split2 = inspectionSplitByProject([
   inspRow('i1', { project: 'quarantined-key' }), // 注册表隔离 key：不在 projects → 不进不存在的组

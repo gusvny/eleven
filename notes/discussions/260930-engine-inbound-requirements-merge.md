@@ -1,10 +1,10 @@
-# 引擎侧外来需求·合并件（nusuyou 九条 + dengzhufpv 七条）
+# 引擎侧外来需求·合并件（project-content 九条 + project-vision 七条）
 
 > 写入方：sandbar 集成把关岗（integration）。**核验基准＝引擎 HEAD `ab3a817`**（2026-09-30）。
 > 来源两份（各自的原文为准，本件只做归并+复核+定位）：
-> - nusuyou：`/Users/user/Documents/nusuyou/notes/discussions/260929-给sandbar需求说明-引擎侧五条.md`
+> - project-content：`/Users/user/Documents/project-content/notes/discussions/260929-给sandbar需求说明-引擎侧五条.md`
 >   （九条，文件名是初稿名）
-> - dengzhufpv：`/Users/user/Documents/dengzhufpv/notes/discussions/260930-engine-findings-handover.md`
+> - project-vision：`/Users/user/Documents/project-vision/notes/discussions/260930-engine-findings-handover.md`
 >   （E1–E7，已按 `ab3a817` 复核过）
 >
 > 归并口径：**按故障族合并**（同族只在一条里说清，避免同一个人被同一处代码绊两次）；每条带
@@ -72,7 +72,7 @@
 （F04 的检测面要能被看见，前提就是这条。）
 
 **F12（N⑥）已闭环** `rework to_stage=<引擎推荐的别名>` ⇒ `ValueError: 未知阶段 ''` ⇒ 工作流
-任务永久失败、票不可查、不可恢复（nusuyou `t260929-28` 作废）。已修 `ab3a817`：相位兜底
+任务永久失败、票不可查、不可恢复（project-content `t260929-28` 作废）。已修 `ab3a817`：相位兜底
 （空串/未知/done 一律夹到合法值+留痕）、主循环尾 `raise`→`blocked`、拒收提示只推可执行相位。
 
 ### 族 C：回执/报告面失真（丢信息或造信息）
@@ -125,7 +125,7 @@ schema＋判据做成**可导入单点**（门提供 `--schema`），回执**同
 "存量红"一词因此被滥用。项目侧已自建 `SKIP` 协议（打 `SKIP [名] prereq absent: … (registered:
 <票号>)` 并 exit 0，不产红、随 `output_tail` 落账可核）。
 → 取舍：**lane provisioning 按需补齐**（重、但红少） vs **统一"输入结构性缺席"表达**（轻、但要
-引擎给一个统一具名面）。**宿主定**；nusuyou 的 SKIP 形态可直接作为引擎侧统一面的候选。
+引擎给一个统一具名面）。**宿主定**；project-content 的 SKIP 形态可直接作为引擎侧统一面的候选。
 
 **F10（E7）`cancel` 判据未程序化** 文档写"判据（全部满足才 cancel）① blocked ② retry_qc 复现
 ③ 无在飞价值"，程序侧只校验 `who`/`reason` 非空 ⇒ 运行中的票也能被终结。
@@ -142,7 +142,7 @@ schema＋判据做成**可导入单点**（门提供 `--schema`），回执**同
 
 ## 四、未查明项（照抄两份，不冒充结论）
 
-1. **E4 的终结执行者**：不是任何 `ticket.py` 入口（`admin.log` 无记录），也不是 dengzhufpv 会话
+1. **E4 的终结执行者**：不是任何 `ticket.py` 入口（`admin.log` 无记录），也不是 project-vision 会话
    发的信号；理由串是照其 `pause` 备注改写的 agent 口吻文本。同期有另一会话在主仓活动
    （留下 `esc-work/`、并在同一时刻往主仓写了 `integration/t260929-31/lib.rs-registration-quarantine.diff`），
    但**没有直接证据**说明是它终结的。→ 我的判断：这属"引擎之外的写入"，引擎侧只能靠
@@ -172,6 +172,6 @@ schema＋判据做成**可导入单点**（门提供 `--schema`），回执**同
 9. F07(b) 写集可否 append；F08 契约/判据单点化与发布段职责；F09 lane 供给按需 vs 统一 SKIP 面；
    F10 cancel 默认强制 vs 改口径。
 
-> 与 KI 册的关系：两份来源的 KI 号（nusuyou 侧 KI-090/092/093/094/099、dengzhufpv 侧 KI-049 等）
+> 与 KI 册的关系：两份来源的 KI 号（project-content 侧 KI-090/092/093/094/099、project-vision 侧 KI-049 等）
 > **与 sandbar 册同名号不是同一批条目**，故本件不按号入册，只按**故障模式**核对；待批次落定后，
 > 由本岗按模式登记（含回归用例归属）。

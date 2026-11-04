@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """t260910-03 场景：正规入口多仓票全链 + 双保险丝（灰盒 L2/L3）。
 
-intent（守护的用户可感知行为/合同，dengzhufpv 260910 缺陷回归面）：
+intent（守护的用户可感知行为/合同，project-vision 260910 缺陷回归面）：
 - 正规入口创建链补传：ticket.py 同款 derive 调用（repo_write_set=写集）→ 多仓
   项目产出逐仓 repo_worktrees 明细（缺陷复现形态修复后必须双仓）；明细经
   ticket-start 二跳（dict workspace 转发）不丢（缺陷根因=此通道被堵死）；漏传=
@@ -116,7 +116,7 @@ def build_multirepo_project(base):
 
 
 def build_mixed_project(base):
-    """混合形态（dengzhufpv 缺陷现场形态：根亦 git 仓 + 子仓并存）：
+    """混合形态（project-vision 缺陷现场形态：根亦 git 仓 + 子仓并存）：
     根仓（.gitignore 忽略子仓=现场同款）+ repo_a/repo_b 两个子 git 仓。"""
     root = Path(base) / "mixed"
     root.mkdir(parents=True)

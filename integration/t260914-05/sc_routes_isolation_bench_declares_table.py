@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """sc_routes_isolation_bench_declares_table —— 隔离测试台自声明路由表（t260914-05 验收 3 的根因回归网）。
 
-用户场景（现场 B，260914 dengzhufpv 容器化首验）：隔离注册表没有 paths.model_routes 声明 →
+用户场景（现场 B，260914 project-vision 容器化首验）：隔离注册表没有 paths.model_routes 声明 →
 兜底读仓内旧表 → 真 agent 段撞 429 → 容器化 A 子用例 A4–A7 全 N/A，**85 断言全绿也没拦住**——
 因为旧链路把「静默用错」藏在 N/A 后面。本场景以零模型成本把现场 B 钉死：隔离台（e2e 夹具）
 生成的项目条目必须**自己声明**路由表，且声明指向的表：

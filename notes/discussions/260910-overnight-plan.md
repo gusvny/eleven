@@ -52,7 +52,7 @@
 | --- | --- | --- | --- |
 | T15《阶段闸 + 受保护路径闸》 | 13 到合并门（其改 merge_check 同面） | `server/engine/`、`server/tools/`、`integration/` | 审的环节（走查/合并检查/合并）零代码改动；共享守卫期望值只许 main 侧改（今日 06/08 就地改守卫的教训） |
 | T16《全链多仓旅程守卫》 | 08 落账 | `integration/`、`server/engine/` | 正规入口→真 workflow→真 merge→断言成员仓 main 落仓+内容一致+拆除后无残留（补 KI-071 那跳） |
-| T18《diff 面多仓 + 过程产物过滤》 | 05 落账（同动 workbench） | `server/plugins/workbench/`、`integration/` | dengzhufpv 报告 2a/2b |
+| T18《diff 面多仓 + 过程产物过滤》 | 05 落账（同动 workbench） | `server/plugins/workbench/`、`integration/` | project-vision 报告 2a/2b |
 | T19《巡检续票：触发 kind 接线 + docs-sync 第二实例》 | 11 落账（同动 inspection 面） | `server/engine/`、`integration/` | 宿主拍板②③：触发可声明（every-n-tickets/race-first 接线）、文档同步收编为第二实例 |
 | T20《KI-048 修复 + 详情人话状态卡》 | 13 落账（同动合并分类面） | `server/engine/`、`server/plugins/workbench/`、`integration/` | 合并失败正确分类+原因展示+人门展示原因；mock v5 H 块（人话状态卡）落地 |
 

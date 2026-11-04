@@ -3270,7 +3270,7 @@ class GateResult:
     exit_code: int
     checks: List[Dict[str, Any]] = field(default_factory=list)
     raw_head: str = ""
-    # t260927（宿主实报「门绿了也判 blocked，票永远收不了口」，实案 nusuyou content-260808）：
+    # t260927（宿主实报「门绿了也判 blocked，票永远收不了口」，实案 project-content content-260808）：
     # 判定三要素与回执解析状态**逐项带出**——因为老实现只用 red_count 拼文案，于是
     # 「回执没解析出来（parsed=False）」与「门真红 5 项」写出同一句「红灯 0 项 → blocked」，
     # 读日志的人分不清「门红」还是「没推进」，而这两种情况的处置完全不同。
@@ -3305,7 +3305,7 @@ def is_close_out_reason(text: str) -> bool:
 def gate_receipt_parse(stdout: str) -> Dict[str, Any]:
     """解析门/工具回执 stdout：**容忍「说明行 + 回执行」的多对象流**。
 
-    实案（t260927-16 / nusuyou content-260808）：`cs_publish_audit.py publish` 先打一行
+    实案（t260927-16 / project-content content-260808）：`cs_publish_audit.py publish` 先打一行
     诊断 JSON（`{"note": "含 marker 子串但非记名块形态的提交…"}`）、再打真回执
     （`{"ok": true, "result": {"green": …, "red_count": …}}`）。老实现整段 `json.loads`
     → `JSONDecodeError` → 返回 `{}` ⇒ 门被判非绿而 `red_count` 也是 0 ⇒ 票面写成
@@ -3649,8 +3649,8 @@ def scan_summary(items: List[ScanTicketItem]) -> Dict[str, int]:
 # 260927 宿主令「⑤a 选 (i)」：**缺省基准改为项目内** `<项目主目录>/.ticket-ws/<票号>`。
 # 为什么必须改：老缺省是 `/tmp/sandbar-ws/<票号>`，而创建链把引擎自己派生的这个绝对路径
 # 当成「显式传参」送进 `check_paths_under_project` ⇒ 它不在项目注册目录内 ⇒ **建票当场被
-# 引擎自己的闸拒收**（宿主实案：nusuyou content-studio 票报「workspace 路径
-# /tmp/sandbar-ws/tXXXX 不在项目 nusuyou 的注册目录内」，只能手工传项目内路径才建得起来）。
+# 引擎自己的闸拒收**（宿主实案：project-content content-studio 票报「workspace 路径
+# /tmp/sandbar-ws/tXXXX 不在项目 project-content 的注册目录内」，只能手工传项目内路径才建得起来）。
 # 引擎自己给的缺省值被自己那条「只该管调用方传参」的闸拦下=自相矛盾；改成项目内，路径
 # 按构造就在项目里，闸与缺省自洽，且内容票的账件（manifest/发布账/expect）落在项目内可持久。
 #
@@ -3658,7 +3658,7 @@ def scan_summary(items: List[ScanTicketItem]) -> Dict[str, int]:
 # 注：本模块级读数**只能**在 import 期发生（workflow 沙箱里读 os.environ 是违规访问，
 # KI-135 教训）；`ws_dir_default` 是纯函数，运行期不读 env。
 WS_DIR_BASE_OVERRIDE = os.environ.get("SANDBAR_WS_DIR_BASE") or ""
-#: 项目内缺省子目录名（nusuyou 仓 `.gitignore:58` 已忽略 `.ticket-ws/`，与该用法一致）
+#: 项目内缺省子目录名（project-content 仓 `.gitignore:58` 已忽略 `.ticket-ws/`，与该用法一致）
 WS_DIR_REL = ".ticket-ws"
 #: 老基准：仅在「无项目根」或显式 env 覆盖时还会用到（向后兼容面）
 WS_DIR_BASE = WS_DIR_BASE_OVERRIDE or "/tmp/sandbar-ws"
@@ -3994,7 +3994,7 @@ def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
         # 的根相对路径（如 "fpv-toolchain"；"fpv-toolchain/""fpv-toolchain//"
         # "fpv-toolchain/." 归一后同形）→ 拒收。根因：整仓条目运行期被
         # rebase_write_set 按前缀剥成空串，写集闸 fail-closed 判整仓禁写
-        # （dengzhufpv/t260911-07 整票作废形态）——在创建时刻拦下，不给静默失效
+        # （project-vision/t260911-07 整票作废形态）——在创建时刻拦下，不给静默失效
         # 留入口，与「嵌套仓 fail-closed」同族。归一结果只用于本判定：归属（最长
         # 前缀）与嵌套仓 fail-closed 逻辑零改动。
         norm = pp.as_posix()
@@ -4008,7 +4008,7 @@ def resolve_repos_for_paths(project_root, paths) -> Dict[str, List[str]]:
             raise ValueError(
                 "write-set entry %r equals %s — at runtime a whole-repo entry is "
                 "stripped by prefix into an empty string and the write-set gate "
-                "fail-closed bans the whole repo (dengzhufpv/t260911-07 voided-ticket "
+                "fail-closed bans the whole repo (project-vision/t260911-07 voided-ticket "
                 "shape). To cover a whole repo, enumerate subdirectory by subdirectory "
                 "plus root files (see that repo's .gitignore) %s"
                 % (raw, target, (", e.g. " + example) if example else ""))
@@ -4055,7 +4055,7 @@ def rebase_write_set(write_set, repo_rel: str) -> List[str]:
     if not repo_rel:
         return ws
     prefix = repo_rel + "/"
-    # t260914-02（dengzhufpv/t260911-07 实测）：剥前缀后**必须滤掉空串**。仓名条目
+    # t260914-02（project-vision/t260911-07 实测）：剥前缀后**必须滤掉空串**。仓名条目
     # （如 "fpv-toolchain/"，多仓票的常见写法：只想圈住成员仓、不逐子目录列）满足
     # startswith(prefix)，剥完剩 ""——而空白条目会被写集闸判「写集非法」fail-closed
     # （path_gates._entries / agent_activities._dirty_within_write_set 同立场），
@@ -4104,7 +4104,7 @@ def build_repo_worktrees(project_root, write_set, lane_dir_name: str) -> List[Di
 
 def multirepo_fuse_a_error(project_root, write_set, repo_worktrees) -> str:
     """保险丝A（开票拒收，工单 t260910-03）：多仓写集 × 空 repo_worktrees 的
-    fail-closed 背闸（dengzhufpv 260910 缺陷：ticket.py 预派生漏传 repo_write_set
+    fail-closed 背闸（project-vision 260910 缺陷：ticket.py 预派生漏传 repo_write_set
     → 单仓 workspace 显式转发 → 成员仓零落仓）。
 
     语义：写集条目经 resolve_repos_for_paths 归属到**非项目根本体**的成员仓，
@@ -4139,7 +4139,7 @@ def multirepo_fuse_a_error(project_root, write_set, repo_worktrees) -> str:
         return ("fuse A refusal (t260910-03): write-set entries hit member-repo paths "
                 "but project_root is missing (no ownership anchor) and the derived "
                 "repo_worktrees is empty — a multi-repo ticket without per-repo details "
-                "cannot be falsified = member repos land nowhere (the dengzhufpv 260910 "
+                "cannot be falsified = member repos land nowhere (the project-vision 260910 "
                 "defect shape); fail-closed refusal. %s. Use the regular creation chain "
                 "(do not pass workspace/worktree explicitly) and let "
                 "derive_lane_workspace produce the per-repo details from write-set "
@@ -4161,7 +4161,7 @@ def multirepo_fuse_a_error(project_root, write_set, repo_worktrees) -> str:
         return ""
     return ("fuse A refusal (t260910-03): write-set entries hit member-repo paths but "
             "the derived repo_worktrees is empty — a multi-repo ticket without per-repo "
-            "details = member repos land nowhere (the dengzhufpv 260910 defect shape); "
+            "details = member repos land nowhere (the project-vision 260910 defect shape); "
             "refused. %s. Use the regular creation chain (do not pass "
             "workspace/worktree explicitly) and let derive_lane_workspace produce the "
             "per-repo details from write-set ownership."
@@ -4872,7 +4872,7 @@ class TicketInput:
     # meta.project_root so the workflow's WorkspacePrep can feed prepare_workspace's
     # fallback ring ③ (write_set + project_root → per-repo derivation) — without it
     # the ring is dead and a multi-repo ticket silently materializes single-repo
-    # (the dengzhufpv t260910-07 incident). Default empty = existing RUNNING
+    # (the project-vision t260910-07 incident). Default empty = existing RUNNING
     # instances replay with the key missing and fall back, without breaking replay.
     project_root: str = ""
     worktree: str = ""
@@ -5639,7 +5639,7 @@ class MergeCheckArgs:
     # t261012-02/03/04). Defaulted empty so old events replay unchanged (same precedent
     # as path_gate / no_file_changes).
     base_other_ref: str = ""
-    # t260921-09 三态判据（实证 nusuyou t260920-04：多仓票某仓声明在写集但本票零改动，
+    # t260921-09 三态判据（实证 project-content t260920-04：多仓票某仓声明在写集但本票零改动，
     # 被逐仓「泳道分支有 commit」必判红，票在最后一道机械门前无正当出路）：建票声明
     # 「本票无文件改动」（allow_empty_write_set → meta.no_file_changes）时豁免整票零
     # commit 全局闸——与 review_gate_verdict 的豁免口径同源。defaulted False=老事件
@@ -6565,7 +6565,7 @@ def review_gate_verdict(git_error: str, lane_commits: int, shots_path_error: str
 
 
 # ---- t260921-09: 多仓 merge_check「泳道分支有 commit」三态判定（判据对齐票）----
-# 事实源：nusuyou t260920-04（4 仓 macOS 收口票，service 仓声明在写集但本票零改动）——
+# 事实源：project-content t260920-04（4 仓 macOS 收口票，service 仓声明在写集但本票零改动）——
 # 旧判据 green=(git log 成功 and n>0) 把「许可面」当「义务清单」（本文件 refresh_write_set
 # docstring 早已写明相反口径：白名单是允许写的上限，不是必须清单），某仓合法零改动被逐仓
 # 必判红，agent 只能伪造改动过闸或整票作废。对齐先例=本文件 review_gate_verdict 的整票级
@@ -8538,7 +8538,7 @@ def project_template_names_merged(root=None) -> Dict[str, str]:
     都不影响断言」）：起点按注入态分岔。root 注入=测试/自检钉面，起点取**内置∪夹具
     快照 `_PT_BUILTIN_KEYS`**；若沿用活的 `TEMPLATE_CLASS_NAMES`，导入期名面 glue 已把
     本机真实登记的项目 id 并进该表 → 注入形同虚设（t260924-04 的 A2/默认面收窄两锁在
-    「机器上有注册」时必红：t260925 复原 nusuyou 声明即触发）。root=None 走真实语义，
+    「机器上有注册」时必红：t260925 复原 project-content 声明即触发）。root=None 走真实语义，
     起点仍是活表（含 glue 并入项），行为逐字不变。"""
     if root is not None:
         names = {k: v for k, v in TEMPLATE_CLASS_NAMES.items() if k in _PT_BUILTIN_KEYS}

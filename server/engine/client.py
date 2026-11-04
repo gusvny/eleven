@@ -3178,7 +3178,7 @@ async def _terminal_face_last_signal(handle: Any) -> Dict[str, Any]:
     """终态票「最后一个信号名」（260930 批次 B，E5 的取证栏）：只读事件历史，失败=不可得。
 
     为什么是事件历史：终态后票面快照不可查（引擎有意如此），而信号事件**只**活在历史里——
-    「终结前有没有 cancel_notice 留痕」这个问题只有历史能答（dengzhufpv E4 实案：历史里
+    「终结前有没有 cancel_notice 留痕」这个问题只有历史能答（project-vision E4 实案：历史里
     只有 pause，理由串却写着「宿主当面决定」，靠翻历史才发现）。"""
     try:
         hist = await asyncio.wait_for(handle.fetch_history(),
@@ -3372,7 +3372,7 @@ async def _terminal_failure_face(tid: str, handle: Any, desc: Any,
         "close_ts": close_ts,
         "start_time_txt": _terminal_face_ts_txt(start_ts),
         "close_time_txt": _terminal_face_ts_txt(close_ts),
-        # 260930（dengzhufpv E5·批次 B）：**最后一个信号名**——复盘「谁终结的/终结前有没有
+        # 260930（project-vision E5·批次 B）：**最后一个信号名**——复盘「谁终结的/终结前有没有
         # 留痕」时第一眼要看的东西。读事件历史（只读），取不到=不可得（name 空 + note 说明），
         # 绝不编造。
         **sig_face,
@@ -4633,13 +4633,13 @@ NOTICE_MECHANISM_CUTOFF = "2026-09-23"
 
 
 async def cmd_cancel_audit(args: Dict[str, Any]) -> Dict[str, Any]:
-    """终结票「留痕对账」只读审计（260930 批次 B；dengzhufpv E4/E5 合并需求）。
+    """终结票「留痕对账」只读审计（260930 批次 B；project-vision E4/E5 合并需求）。
 
     契约（base.py::cancel_notice 的对账口径）：**先留痕、后终结**——`cancel_notice` 信号
     （载荷含 who + reason 原文）恒先于 `terminated` 事件，且 terminate 的 reason=**同一串**。
     于是「历史里有 terminated 却没有同串 notice」= 有人绕过正规入口（或引擎之外的 terminate）。
 
-    实案（dengzhufpv t260929-31）：历史里唯一的信号是 `pause`，而 terminate 的理由串却写着
+    实案（project-vision t260929-31）：历史里唯一的信号是 `pause`，而 terminate 的理由串却写着
     「宿主经…当面决定停掉本票」——**不实归因**；当时没有工具入口读历史，只能自己写 SDK 脚本。
 
     本命令只读：不发信号、不写状态、不推进任何票；`violations` 非空即 exit 1（fail-loud，
@@ -5367,7 +5367,7 @@ def _emit(sub: str, args: Dict[str, Any], result: Dict[str, Any]) -> None:
     admin.log 一行（claimed-source 可辨，连被拒收调用也记）→ 打印。审计**先于**
     打印（t260916-21 范围偏差·有意为之：client.py 在硬写集 server/engine/ 内；
     不改则验收⑤结构上不可达——打印在前则落盘失败的 audit_write_failed 点名
-    永远无处附着，nusuyou/dengzhufpv 实测「写失败回执正常」正是此序所致）。
+    永远无处附着，project-content/project-vision 实测「写失败回执正常」正是此序所致）。
     审计失败不吞回执。"""
     audit.attach_entry_hint(result)
     # t260915-12：跨项目闸身份键随行落账（键在外层——拒收/成功同层同形状；兼容读内层）。

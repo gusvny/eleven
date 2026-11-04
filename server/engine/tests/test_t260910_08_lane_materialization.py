@@ -55,7 +55,7 @@ def _init_repo(path, fname):
 
 @pytest.fixture
 def mixedrepo(tmp_path):
-    """混合形态夹具（dengzhufpv 形态）：根=git 仓且有子仓（根树 repo="" 条目）。"""
+    """混合形态夹具（project-vision 形态）：根=git 仓且有子仓（根树 repo="" 条目）。"""
     root = tmp_path / "proj"
     _init_repo(root, "notes/root.md")            # 根仓
     _init_repo(root / "repo_a", "src/a.py")      # 子仓
@@ -106,7 +106,7 @@ def test_dev_lane_init_carries_detail_and_project_root(mixedrepo, monkeypatch):
     project_root 搬进 meta（含 workflow_input 镜像），三环随即可用。"""
     _stub_workflow(monkeypatch, dev_lane)
     root = mixedrepo
-    write_set = ["notes/root.md", "repo_a/src/a.py"]  # 根树+子仓（dengzhufpv 形态）
+    write_set = ["notes/root.md", "repo_a/src/a.py"]  # 根树+子仓（project-vision 形态）
     lane, ws, worktree, branch, detail = _derive_split("t26091008dv", root, write_set)
     assert detail, "混合形态 derive 必须产出逐仓明细（含根树条目）"
     inp = TicketInput(ticket_id="t26091008dv", template_id="dev-lane", lane=lane,

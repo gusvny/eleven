@@ -120,26 +120,26 @@ def test_sign_same_project_stamped_and_pass(monkeypatch):
 def test_sign_mismatch_refused_no_signal(monkeypatch):
     h = FakeHandle()
     _patch_connect(monkeypatch, FakeClient(h))
-    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "dengzhufpv")
+    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "project-vision")
     r = _run(client.cmd_ticket({"op": "sign", "ticket_id": "t1",
                                 "input": {"who": "宿主"}}))
     assert r["ok"] is False and r["kind"] == "cross_project_refused"
     # 人话点名：双项目键 + 目标票号都在场（真链路场景相三判据）
-    assert "dengzhufpv" in r["error"] and "sandbar" in r["error"] and "t1" in r["error"]
+    assert "project-vision" in r["error"] and "sandbar" in r["error"] and "t1" in r["error"]
     assert h.signals == []  # fail-closed：信号不出手
-    assert r["caller_project"] == "dengzhufpv" and r["identity_class"] == "declared"
+    assert r["caller_project"] == "project-vision" and r["identity_class"] == "declared"
 
 
 def test_sign_mismatch_with_flag_passes_override(monkeypatch):
     h = FakeHandle()
     _patch_connect(monkeypatch, FakeClient(h))
-    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "dengzhufpv")
+    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "project-vision")
     r = _run(client.cmd_ticket({"op": "sign", "ticket_id": "t1",
                                 "input": {"who": "宿主"},
                                 "cross_project": {"by": "宿主", "reason": "代管收口"}}))
     assert r["ok"] and r["cross_project_used"] is True
     _, payload = h.signals[0]
-    assert payload.caller_project == "dengzhufpv"
+    assert payload.caller_project == "project-vision"
     assert payload.cross_project_note == "代管收口"
 
 
@@ -171,7 +171,7 @@ def test_query_transient_not_judged_as_cross_project(monkeypatch):
     _patch_connect(monkeypatch, FakeClient(h))
     monkeypatch.setattr(client, "_query_snapshot_with_retry",
                         lambda handle, **k: _raise(TimeoutError("deadline exceeded")))
-    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "dengzhufpv")
+    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "project-vision")
     r = _run(client.cmd_ticket({"op": "sign", "ticket_id": "t1", "input": {"who": "x"}}))
     assert r["ok"] is False and r["kind"] == "transient"
     assert "未执行任何动作" in r["error"] and h.signals == []
@@ -239,7 +239,7 @@ def test_pause_resume_stamped(monkeypatch):
 def test_cancel_sa_mismatch_refused_no_terminate(monkeypatch):
     h = FakeHandle(project="sandbar")
     _patch_connect(monkeypatch, FakeClient(h))
-    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "dengzhufpv")
+    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "project-vision")
     r = _run(client.cmd_cancel({"workflow_id": "t1", "reason": "清场"}))
     assert r["ok"] is False and r["kind"] == "cross_project_refused"
     assert h.terminated is None  # 绝不 fail-open
@@ -248,7 +248,7 @@ def test_cancel_sa_mismatch_refused_no_terminate(monkeypatch):
 def test_cancel_sa_mismatch_flag_terminates(monkeypatch):
     h = FakeHandle(project="sandbar")
     _patch_connect(monkeypatch, FakeClient(h))
-    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "dengzhufpv")
+    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "project-vision")
     r = _run(client.cmd_cancel({"workflow_id": "t1", "reason": "清场",
                                 "cross_project": {"by": "宿主", "reason": "代管清场"}}))
     assert r["ok"] and r["result"]["terminated"] is True
@@ -277,7 +277,7 @@ def test_cancel_transient_refused(monkeypatch):
 def test_ticket_start_mismatch_refused(monkeypatch, tmp_path):
     fc = FakeClient(FakeHandle())
     _patch_connect(monkeypatch, fc)
-    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "dengzhufpv")
+    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "project-vision")
     r = _run(client.cmd_ticket_start({"ticket_id": "t9", "template_id": "dev-lane",
                                       "project": "sandbar", "title": "x"}))
     assert r["ok"] is False and r["kind"] == "cross_project_refused"
@@ -290,11 +290,11 @@ def test_emit_writes_identity_row_keys(monkeypatch, tmp_path):
     log = tmp_path / "admin.log"
     monkeypatch.setenv("SANDBAR_ADMIN_LOG", str(log))
     receipt = {"ok": False, "error": "跨项目写操作拒收", "kind": "cross_project_refused",
-               "caller_project": "dengzhufpv", "identity_class": "declared",
+               "caller_project": "project-vision", "identity_class": "declared",
                "cross_project_used": True}
     client._emit("ticket", {}, receipt)
     rows = _rows(log)
-    assert rows and rows[-1]["caller_project"] == "dengzhufpv"
+    assert rows and rows[-1]["caller_project"] == "project-vision"
     assert rows[-1]["identity_class"] == "declared" and rows[-1]["override"] is True
 
 

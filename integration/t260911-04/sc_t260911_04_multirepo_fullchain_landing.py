@@ -480,7 +480,7 @@ def stage_legs():
             # 夹具与注册表已由台前构建（FIXTURES，t260910-08 同序：夹具先行、起台在后）
             mixed_main = Path(FIXTURES["mixed_main"])
             mixed_fuse = Path(FIXTURES["mixed_fuse"])
-            check("S1 夹具自证：混合形态×2=根仓+repo_a+repo_b（dengzhufpv 形态）",
+            check("S1 夹具自证：混合形态×2=根仓+repo_a+repo_b（project-vision 形态）",
                   shared.is_multi_repo_layout(mixed_main)
                   and shared.is_multi_repo_layout(mixed_fuse),
                   "mixed=%s/%s" % (mixed_main, mixed_fuse))

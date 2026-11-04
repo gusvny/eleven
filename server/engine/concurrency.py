@@ -644,7 +644,7 @@ def over_limit_face(limit: int, holders: int) -> Dict[str, Any]:
 
 # ---------- bounded liveness probe + dead-holder sweep (t261027-10, KI-378) ----------
 #
-# Measured fault: four of five slots on dengzhufpv were held by TERMINATED
+# Measured fault: four of five slots on project-vision were held by TERMINATED
 # workflows — three of them as `human-hold` rows. The only automatic backstop
 # (the heartbeat sweep below) deliberately never judges a human-hold holder,
 # and the only janitor was the manual reconcile entry, whose own probe had no

@@ -106,7 +106,7 @@ def init_repo(path, rel_file, content="base\n"):
 
 
 def build_mixed_project(base, name="mixed"):
-    """混合形态夹具（dengzhufpv 缺陷现场同款）：根亦 git 仓 + repo_a/repo_b 子仓
+    """混合形态夹具（project-vision 缺陷现场同款）：根亦 git 仓 + repo_a/repo_b 子仓
     （.gitignore 忽略子仓）。写集命中根+repo_a，repo_b=不串仓对照面。"""
     root = Path(base) / name
     root.mkdir(parents=True, exist_ok=True)

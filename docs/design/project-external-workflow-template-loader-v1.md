@@ -8,7 +8,7 @@ updated: 2026-09-28
 
 # Project external workflow template loader v1 (t260924-04, ticket 1)
 
-> Source: nusuyou's "Requirements for sandbar: project external workflow templates" (§six,
+> Source: project-content's "Requirements for sandbar: project external workflow templates" (§six,
 > interface shape) and the design draft
 > (`notes/discussions/260924-external-project-workflow-templates.md`). This document is the **loader's
 > implementation contract**: interface shape, rejection semantics, and the coding rules and
@@ -67,7 +67,7 @@ class MyFlow(TicketWorkflowBase):
         return await self._main(inp)
 ```
 
-The first consumer, nusuyou's `content-studio` (`ContentStudioWorkflow`), onboards in this shape;
+The first consumer, project-content's `content-studio` (`ContentStudioWorkflow`), onboards in this shape;
 if that id is taken, the requester renames it rather than contesting it (requirements §six remains
 in force as-is).
 

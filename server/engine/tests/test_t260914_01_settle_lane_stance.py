@@ -8,7 +8,7 @@ _lane_scopes，以及 shared.multi_manifest_path 的解析规则。
      ——守卫按「全量令牌」跳过它；`:!` 族必须且仅覆盖 .dsh+两名协调目录）、无重复；
      _SETTLE_RESET_PATHS 派生自 shared；MULTI_MANIFEST_REL 仍＝老名镜像相对路径。
   B. 纯老名泳道（只有老名协调目录）＋只产出协调目录产物的一段 → settle 返回「工作区
-     已干净」note、零 commit、不 raise（dengzhufpv/t260911-07 形态的结构回归锚）。
+     已干净」note、零 commit、不 raise（project-vision/t260911-07 形态的结构回归锚）。
   C. 空提交正反锁：判脏非空但撤下协调目录后暂存区为空 → 可辨 note 且不得出现
      RuntimeError（note 与干净态可区分、含判脏项数、不含 path_gate_reason= 键）；
      反向：add 真失败 / 暂存非空而 commit 真失败 / 暂存区探针自身报错 → 一律响亮。

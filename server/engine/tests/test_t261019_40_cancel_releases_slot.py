@@ -2,7 +2,7 @@
 """261019: cancelling a ticket returns its concurrency slot.
 
 Measured twice in one night: a TERMINATED ticket keeps its slot because
-terminate runs no cleanup and nothing else took the job. dengzhufpv: five
+terminate runs no cleanup and nothing else took the job. project-vision: five
 terminated tickets held all five slots while the only two live tickets queued
 for hours. sandbar: five of seven slots held by dead tickets, nine live tickets
 starved. The queue-side fix (heartbeat + live-head promotion) stops a corpse
@@ -37,8 +37,8 @@ def test_release_names_the_project_and_reports_the_promotion(monkeypatch):
                 "holders": 1, "waiting": 0}
 
     monkeypatch.setattr(cc, "release", fake_release)
-    out = cl._release_slot_after_cancel("dengzhufpv", "t1")
-    assert seen == {"project": "dengzhufpv", "ticket": "t1", "cause": "terminated"}
+    out = cl._release_slot_after_cancel("project-vision", "t1")
+    assert seen == {"project": "project-vision", "ticket": "t1", "cause": "terminated"}
     assert out["released"] is True and out["promoted"] == "next-up"
     assert out["dropped_stale"] == ["corpse"]
 

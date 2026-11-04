@@ -64,7 +64,7 @@ dsh 的 torn 判据严于引擎 `_session_jsonl_torn` 探针 → 引擎 spawn �
 4. `-23` 泳道内改到保护路径 `integration/baselines/sc_auto_rework_trace.mjs`：authorize 该文件，还是回 main 侧另票。
 5. dsh 升级三问（窗口 / npm 前缀 sudo 或用户级 / 容器镜像是否同升）。
 6. deadman 收窄票是否开（调度跳过监测 + 人门长挂不阻塞期次 + worker 陈旧检测）。
-7. 「越界资产只报不改」是否补进 arbitrate/走查角色 prompt（今夜三例实证：dengzhufpv t260916-11、`-21`、`-19`）。
+7. 「越界资产只报不改」是否补进 arbitrate/走查角色 prompt（今夜三例实证：project-vision t260916-11、`-21`、`-19`）。
 
 ## 六、纪律修正（本会话自我约束）
 

@@ -10,7 +10,7 @@
  * 0.1.1 时代 `startSession` 在 `ctx.workspaces` 上（本插件的 WorkspacesFace 即照它写的），
  * 升级后同一句调用变成 `TypeError: workspaces.startSession is not a function`——用户侧
  * 表现为「新建会话失败：请求异常（详情见控制台）」，且**所有项目一起坏**（260923 实报：
- * nusuyou/sandbar 都炸）。
+ * project-content/sandbar 都炸）。
  *
  * 解析口径（与 t260916-26 的 inject 纪律一致）：
  *   - **不得**把 `uiWorkspace` 写进插件 inject——声明某版不存在的服务 = 该 entry 永久

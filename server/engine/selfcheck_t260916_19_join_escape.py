@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """selfcheck_t260916_19_join_escape — 并行汇合段路径闸 blocked 死结的出路可达性
-（工单 t260916-19 验收①，实案=dengzhufpv t260916-11）。
+（工单 t260916-19 验收①，实案=project-vision t260916-11）。
 
 Runs against a real SDK instance (temporalio.testing.WorkflowEnvironment.
 start_local local test server — the time-skipping environment wedges when two

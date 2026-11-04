@@ -80,10 +80,10 @@ def test_seam_silent_on_ambiguous_multi_project_cwd():
 def test_seam_not_consulted_when_cwd_outside_exclude_trees():
     # The cwd hits normally (not inside an exclude tree) => the original cwd channel,
     # src stays "cwd" (the seam never takes over the main channel).
-    projects = [{"key": "dengzhufpv", "dirs": ["/work/dz"]}]
-    out = _resolve("/work/dz", {"dengzhufpv": ("s",)}, "s",
+    projects = [{"key": "project-vision", "dirs": ["/work/dz"]}]
+    out = _resolve("/work/dz", {"project-vision": ("s",)}, "s",
                    projects=projects, trees=("/repo",))
-    assert out == {"value": "dengzhufpv", "src": "cwd", "identity_class": "declared"}
+    assert out == {"value": "project-vision", "src": "cwd", "identity_class": "declared"}
 
 
 def test_arg_and_env_still_win_over_seam():
@@ -92,9 +92,9 @@ def test_arg_and_env_still_win_over_seam():
         caller_session="s", declared_sessions_by_key={"sandbar": ("s",)})
     assert out["src"] == "arg" and out["value"] == "sandbar"
     out = caller_gate.resolve_identity(
-        "", "dengzhufpv", cwd="/repo", exclude_trees=TREE, projects=PROJ,
+        "", "project-vision", cwd="/repo", exclude_trees=TREE, projects=PROJ,
         caller_session="s", declared_sessions_by_key={"sandbar": ("s",)})
-    assert out["src"] == "env" and out["value"] == "dengzhufpv"
+    assert out["src"] == "env" and out["value"] == "project-vision"
 
 
 def test_registry_missing_means_seam_absent_not_crash():

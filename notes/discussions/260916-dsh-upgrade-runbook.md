@@ -175,7 +175,7 @@
 | npm 全局权限/属主 | `--cache` 绕 cache 目录；前缀按 Q2 决策 |
 | 升级中宿主误用 dsh | 停 worker 后立即升级+重启，窗口短；或挑你不用 dsh 的时段 |
 | 混代双写（升级后旧 worker 还活着） | 步骤 1/6 串行保证；worker.pid 检查进 checklist |
-| **其它项目无 dsh 钉 → 裸 `dsh` 落坏套**（260923 查明） | 只有 sandbar 在 `~/.sandbar/projects/sandbar/project.yaml` 声明了 `paths.dsh_bin`；nusuyou/dengzhufpv 等处 worker spawn 走 `来源=default` 的裸 `dsh`（worker 日志实证），即**全局那套是它们唯一的面**——故全局 bits 出问题时坏的是所有项目的 agent 段，不只是 console。缓解＝全局安装保持指纹绿（本次已重装回已验证解析集） |
+| **其它项目无 dsh 钉 → 裸 `dsh` 落坏套**（260923 查明） | 只有 sandbar 在 `~/.sandbar/projects/sandbar/project.yaml` 声明了 `paths.dsh_bin`；project-content/project-vision 等处 worker spawn 走 `来源=default` 的裸 `dsh`（worker 日志实证），即**全局那套是它们唯一的面**——故全局 bits 出问题时坏的是所有项目的 agent 段，不只是 console。缓解＝全局安装保持指纹绿（本次已重装回已验证解析集） |
 | 回退后 v3 会话不可读 | §3.4：保留文件不删；T1 双名读侧保证下次升级可续 |
 
 ## 6. 当前就绪度快照（260923，integration 落笔；只记事实与判据）
@@ -227,7 +227,7 @@
      ③ 回归用例 `integration/tests/test_start_console_bits.py`（8 条，全离线、不占端口、不起服务）；
      ④ 验证口径：用 stage 台（独立端口 3288 + 独立 `DSH_HOME`）实起修复后的全局那套 → **干净 boot +
      `selfcheck` 全绿（pass 7 / red 0）**；起完即停、临时 home 已清、3099 全程未动。
-   - **附**：其它项目（nusuyou/dengzhufpv）未声明 `paths.dsh_bin`，worker spawn 走裸 `dsh`——
+   - **附**：其它项目（project-content/project-vision）未声明 `paths.dsh_bin`，worker spawn 走裸 `dsh`——
      全局 bits 坏掉时它们一起坏（见 §5 风险表末两行）。
 7. **GUI preset（机器级）重建流程（260923 立，0.1.1→0.1.5 实案）**：
    ① 先备份：`cp -a ~/.dsh/.agent-presets/<项目>-<角色> ~/.dsh/.agent-presets/<项目>-<角色>.bak-<日期>`；

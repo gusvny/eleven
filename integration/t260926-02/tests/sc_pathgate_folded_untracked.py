@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """KI-125·越权闸不认 git 折叠的未跟踪目录（t260926-02，灰盒 L2，真实 settle 单点直调）。
 
-用户可感知契约（nusuyou 260925 四缺口 gap1 实案）：票写集条目写成**新目录内具体
+用户可感知契约（project-content 260925 四缺口 gap1 实案）：票写集条目写成**新目录内具体
 文件**（`workflows/content_studio.py`，目录整体未跟踪被 git 折叠成 `?? workflows/`）
 时，合法交付**必须落地**，不得被 unauthorized_path 隔离进 .sandbar/quarantine/、
 票不得两轮落不了地。修复方向=判定前把折叠目录展开为文件级条目（数据收集端展开，

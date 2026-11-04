@@ -95,7 +95,7 @@ def test_builtin_export_unknown_still_none():
 
 _EXT_ROW = {'id': 'content-studio', 'name': 'Content Studio', 'lane': 'worktree',
             'stages': [{'id': 'draft', 'role': 'developer', 'name': '起草'}],
-            'project': 'nusuyou', 'topology': {'template': 'content-studio', 'nodes': [1]}}
+            'project': 'project-content', 'topology': {'template': 'content-studio', 'nodes': [1]}}
 _OTHER_ROW = {'id': 'other-proj-tpl', 'name': 'Other', 'lane': 'worktree',
               'stages': [{'id': 's1', 'role': '', 'name': 's1'}],
               'project': 'another', 'topology': None}
@@ -114,14 +114,14 @@ def test_list_merges_project_rows(monkeypatch):
     assert 'dev-lane' in ids                       # 内置面零回归
     assert 'content-studio' in ids                 # 项目模板并入
     row = next(w for w in out['workflows'] if w['id'] == 'content-studio')
-    assert row['stages'] and row['project'] == 'nusuyou'
+    assert row['stages'] and row['project'] == 'project-content'
     assert row['topology'] == {'template': 'content-studio', 'nodes': [1]}
     assert 'catalog_note' not in out               # 正常路径无缺席注记
 
 
 def test_list_project_filter_no_leakage(monkeypatch):
     _stub_rows(monkeypatch, [_EXT_ROW, _OTHER_ROW])
-    out = wf.run({'op': 'list', 'project': 'nusuyou'})
+    out = wf.run({'op': 'list', 'project': 'project-content'})
     ids = [w['id'] for w in out['workflows']]
     assert 'content-studio' in ids
     assert 'other-proj-tpl' not in ids             # 未声明方不可见（无全局泄漏）

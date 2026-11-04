@@ -36,13 +36,13 @@ ticket: t260921-09（2026-09-21 开票，dev-lane / role=developer；epic 未挂
 
 ⇒ **目录级空承诺是安全的，仓级空承诺才致命。** 修法**不得**改成「逐条目要求落盘」——那会把正确的东西改错。
 
-## 3 实证（另一项目 nusuyou 的 t260920-04，macOS 收口票）
+## 3 实证（另一项目 project-content 的 t260920-04，macOS 收口票）
 
 - 票面状态：`stage=merge_check` / `stage_state=blocked` / `status=dispatched`（**仍在飞，未关闭、零签字**）。
 - 阻断原文：`merge_check 红灯：[service] 泳道分支有 commit（952d4a4..lane/t260920-04-service）: 0 个 commit`
 - 全链其余全绿：implement / arbitrate / acceptance_walkthrough 各项 `done=true`（仲裁原文 `48 PASS / 0 FAIL / 1 ENV_FAIL`）。
 - 红灯唯一性：该次 merge_check 逐仓 7 项 × 4 仓 = 28 项，`red_count: 1`（其余 27 项绿）。
-- 独立复核（绕开票面自证）：`git -C <nusuyou>/service rev-parse lane/t260920-04-service` = `952d4a4…` 与 HEAD 同点，`log 952d4a4..lane/t260920-04-service` = 0 条 ⇒ **不是假红**。
+- 独立复核（绕开票面自证）：`git -C <project-content>/service rev-parse lane/t260920-04-service` = `952d4a4…` 与 HEAD 同点，`log 952d4a4..lane/t260920-04-service` = 0 条 ⇒ **不是假红**。
 - 预期终态佐证：该票方案即「service 零改动」（装配暂存目录落在既有白名单内；该文件是纯 JSON、无处加注释）。
 - **写集不可改的机械证据**：01:53:28 的裁定原文说「修正写集为原写集去掉 `service/config.json`」，而该票 `workflow_input.write_set` **至今仍含 `service/config.json`**（16 条不变）。
 - 实际处置：原票留在原地，另开窄写集票承接交付（`t260921-07`，写集 9 条逐条不含 `service/`，仓数由 4 降为 3）。
@@ -131,6 +131,6 @@ integration/                           # 回归场景（多仓 × 某仓合法 0
 
 ## 10 待办清单（本草案之外，独立事项）
 
-- [ ] **nusuyou t260920-04 仍在飞**（`dispatched`/`blocked`、零签字、未关闭）：不阻塞交付（搬运由 t260921-07 承接），但会一直挂看板。**跨项目写操作属红线**，本会话不得动；需宿主或该侧项目会话处置。
+- [ ] **project-content t260920-04 仍在飞**（`dispatched`/`blocked`、零签字、未关闭）：不阻塞交付（搬运由 t260921-07 承接），但会一直挂看板。**跨项目写操作属红线**，本会话不得动；需宿主或该侧项目会话处置。
 - [ ] **KI-094 欠账补登记**（见 §7）。
 - [ ] 若本票成立，收口后按台账约定流转条目状态（open → fixed，注明修复票）。

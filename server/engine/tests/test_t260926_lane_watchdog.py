@@ -379,7 +379,7 @@ def test_c1_entry_level_three_shapes_hit_and_counterexamples(monkeypatch):
     """入口级端到端：三张非终态票各命中一族 + 一张正常票零发现 + 一张查不到的票具名。"""
     wfs = [_FakeWF("t-hit-rerun", "sandbar"), _FakeWF("t-hit-loop", "sandbar"),
            _FakeWF("t-hit-zombie", "sandbar"), _FakeWF("t-clean", "sandbar"),
-           _FakeWF("t-unreadable", "sandbar"), _FakeWF("t-other-project", "nusuyou")]
+           _FakeWF("t-unreadable", "sandbar"), _FakeWF("t-other-project", "project-content")]
     snaps = {
         "t-hit-rerun": _snapshot(rounds=6, round_gap=3600, last_lag=60,
                                  stage="run_integration_tests"),
@@ -407,7 +407,7 @@ def test_c1_entry_level_three_shapes_hit_and_counterexamples(monkeypatch):
     assert any("t-unreadable" in e and "snapshot query failed" in e
                for e in meta["unreadable"])
     assert meta["errors"] and all("t-unreadable" not in e for e in meta["errors"])
-    assert any("nusuyou" in e for e in meta["errors"])           # 非注册项目点名（不静默）
+    assert any("project-content" in e for e in meta["errors"])           # 非注册项目点名（不静默）
     assert res["section"]["finding_count"] == 3
     assert res["section"]["threshold_source"] in (lw.THRESHOLD_SOURCE_DECL,
                                                  lw.THRESHOLD_SOURCE_DEFAULT)

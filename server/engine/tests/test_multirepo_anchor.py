@@ -160,7 +160,7 @@ def test_rebase_strips_prefix_and_drops_other_repo():
 def test_rebase_repo_name_entry_yields_no_blank_entry():
     """仓名形条目（"repo_a/"）剥前缀后是空串：必须**滤掉**而不是留下 ""。
 
-    实测出处 dengzhufpv/t260911-07：多仓票写集写 ['fpv-toolchain/', 'integration/']
+    实测出处 project-vision/t260911-07：多仓票写集写 ['fpv-toolchain/', 'integration/']
     （只圈成员仓、不逐子目录列），成员仓 rebased 写集得 [''] → 写集闸判
     write_set_missing fail-closed → 该仓整仓禁写、settle 卡死整票。
     文档语义＝「等于仓名的条目产出空」，本条锁住实现与文档一致。"""
@@ -274,7 +274,7 @@ def test_gate_error_repo_worktrees_shapes():
 
 @pytest.fixture
 def mixedrepo():
-    """混合夹具（dengzhufpv 形态）：项目根=git 仓（知识库仓）+ repos/* 两子仓并存。"""
+    """混合夹具（project-vision 形态）：项目根=git 仓（知识库仓）+ repos/* 两子仓并存。"""
     root = _init_repo(mkdtemp_reclaimed("t260907-12-ut-"))
     (root / "docs").mkdir()
     (root / "docs" / "kb.md").write_text("kb\n", encoding="utf-8")

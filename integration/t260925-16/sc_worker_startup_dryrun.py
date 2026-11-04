@@ -3,7 +3,7 @@
 """sc_worker_startup_dryrun.py — KI-121 集成场景：外置模板段 id 撞引擎活动名时，工人启动面 fail-loud 点名、不裸崩（t260925-16 场景①）。
 
 背景（KI-121 实证机制，与票面「双导入」假说不同）：外置模板的段 id（如事故版
-nusuyou content_studio 的 `ai-review`）撞引擎为历史回放保留的退役活动名
+project-content content_studio 的 `ai-review`）撞引擎为历史回放保留的退役活动名
 （agent_activities 的 propose/process/ai-review/publish），同名活动被组装两份，
 temporalio 注册期抛裸 ValueError → 中央工人起不来、共享队列无 poller。
 

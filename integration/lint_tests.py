@@ -1412,9 +1412,9 @@ HOME_PATH_RE = re.compile(r"(?<![\w.])/(?:Users|home)/[A-Za-z0-9._-]+/")
 L17_IN_SCOPE = ("server/engine/tests/", "integration/")
 L17_EXEMPT = {
     "server/engine/tests/test_t260915_12_t01_caller_gate.py":
-        [("/Users/user/Documents/dengzhufpv", "fixture domain data (foreign project path), never opened")],
+        [("/Users/user/Documents/project-vision", "fixture domain data (foreign project path), never opened")],
     "server/engine/tests/test_t260916_21_admin_log_rotation.py":
-        [("/Users/user/Documents/dengzhufpv", "fixture domain data (foreign project path), never opened")],
+        [("/Users/user/Documents/project-vision", "fixture domain data (foreign project path), never opened")],
     "server/engine/tests/test_260929_inspection_lane_residue_repair.py":
         [("git worktree add /Users/user/Documents/sandbar", "verbatim quoted REAL_OCCUPIED failure message")],
     "server/engine/tests/test_t260917_02_inspection_redirect.py":

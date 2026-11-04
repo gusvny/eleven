@@ -5,7 +5,7 @@
 intent（守护的用户可感知行为/契约）：
 - **老名泳道里「只产出协调目录产物」的段必须正常收口**：settle 返回可读回执、零代落盘
   commit、**绝不抛异常**（抛异常＝Temporal 判「agent 活动故障」→ 工单 blocked，而 agent
-  的产物其实是好的：dengzhufpv/t260911-07 每次重跑卡 create_plan 的真实形态）；
+  的产物其实是好的：project-vision/t260911-07 每次重跑卡 create_plan 的真实形态）；
 - **真实写集改动照旧代落盘**：修复判脏口径不得把真改动吞成「工作区已干净」（两态可辨）；
 - **协调目录产物零丢失**：settle 前后结果文件原样在场（该段产物是工单继续推进的前提）；
 - 两名协调目录（老名/新名）一律不算脏改，多仓形态下**逐仓**同样成立。
@@ -141,7 +141,7 @@ def main():
     # embedded 仓库暂存成 gitlink 提交进根树——那是与本票守护面无关的第三方脏源
     # （实测 T5 形态修复前后同形同因：提交内容都是 gitlink repo_a，非本次三修引入）。
     # 只忽略成员树、**不忽略两名协调目录**：协调目录"未 gitignore 时靠引擎判脏/撤下兜底"
-    # 正是本票要守的现场形态（dengzhufpv/t260911-07 的 .dsh/、老名目录都是未忽略态）。
+    # 正是本票要守的现场形态（project-vision/t260911-07 的 .dsh/、老名目录都是未忽略态）。
     proj = mixed_project("t260914-01a-mixed-", gitignore=("repo_a/",))
     lane_m = Path(proj) / ".lane" / TID_M
     make_lane_worktree(proj, lane_m, "lane/%s-root" % TID_M)

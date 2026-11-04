@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""t260916-19 场景②：dengzhufpv t260916-11 实案形态重演（灰盒 L2，真 git 夹具，无 docker 无 Temporal）。
+"""t260916-19 场景②：project-vision t260916-11 实案形态重演（灰盒 L2，真 git 夹具，无 docker 无 Temporal）。
 
 intent（守护的用户可感知行为/契约，工单修向 C＝声明=执法 + B/M 态解除）：
 - **实案工作区同批形态一次收口**：仲裁段（arbitrate，join 点 settle_lane，实案同一入口）工作区

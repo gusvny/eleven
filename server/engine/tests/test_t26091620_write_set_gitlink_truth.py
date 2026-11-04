@@ -1,6 +1,6 @@
 """t260916-20 验收②：gitlink 形态路径 × 写集条目真值表（锁引擎侧判定源归一语义）。
 
-背景（nusuyou t260916-08 实案）：gitlink 在 git diff/status 里的路径是目录名
+背景（project-content t260916-08 实案）：gitlink 在 git diff/status 里的路径是目录名
 （`content`，无尾斜杠），而写集条目惯写 `content/`（带尾斜杠）。引擎侧三处写集
 判定源中两处（path_gates._entries 经 _within、agent_activities._dirty_within_write_set）
 已对条目 `rstrip("/")` 归一——本表把该语义钉死防漂移（漂移=闸误判返场）。

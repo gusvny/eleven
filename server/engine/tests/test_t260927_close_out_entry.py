@@ -72,7 +72,7 @@ def test_notice_records_close_out_and_sets_closed_from_blocked():
     """核心面：blocked 态经本信号置 closed（A3.5 的正当旁路），并把原状态如实留痕。"""
     wf = _Shell({"status": "dispatched", "stage": "cs-publish", "stage_state": "blocked",
                  "blocked_reason": "脚本门 … 红灯 0 项", "blocked_detail": {"x": 1},
-                 "project": "nusuyou"})
+                 "project": "project-content"})
     wf.close_out_notice({"who": "宿主", "reason": "v000012 已上线且账目在册，人工收口",
                          "kind": "close_out"})
     m = wf.meta

@@ -6,7 +6,7 @@ guarantee-arm scenario; grey-box L3, real engine public module over an isolated
 SANDBAR_PROJECTS_DIR root, zero docker/Temporal/3099, no production-data writes;
 cost: seconds).
 
-Incident shape (host report 261027, dengzhufpv, limit 5): three human-hold
+Incident shape (host report 261027, project-vision, limit 5): three human-hold
 holders whose workflows were TERMINATED a week earlier plus one running holder
 TERMINATED 46 minutes earlier kept 4 of 5 slots. The age-based staleness sweep
 deliberately exempts human-hold at any age (a gate waiter has no heartbeat by

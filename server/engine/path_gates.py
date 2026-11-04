@@ -36,7 +36,7 @@
   日志层标签（t260916-19 ④）：_settle_worktree_lane 的 face 形参区分三个入口——
   agent（_settle_with_gate，generic 段自 settle）／heal（merge_check 自愈）／join
   （settle_lane 汇合统一落盘）——日志打 `agent-settle：/heal-settle：/join-settle：`，
-  免「同秒两条 settle 日志无法分辨哪层判定」的歧义（dengzhufpv t260916-11 实案）。
+  免「同秒两条 settle 日志无法分辨哪层判定」的歧义（project-vision t260916-11 实案）。
   未知段（键不在规则表）对 path_gate=True 一律 fail-closed 拒绝（reason=unknown_stage）；
   老在途票保护由 path_gate 缺省 False 承担（TicketInput 无此字段 → 永远 False，不追溯）。
 

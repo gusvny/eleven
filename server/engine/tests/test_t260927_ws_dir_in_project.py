@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """⑤a 回归锁（宿主令 260927 选项 i）：dir 型工作区缺省必须落在**项目注册目录内**。
 
-实案：nusuyou content-studio 票建票当场被拒——「workspace 路径 /tmp/sandbar-ws/tXXXX 不在
-项目 nusuyou 的注册目录内」。根因是**引擎自相矛盾**：`derive_lane_workspace` /
+实案：project-content content-studio 票建票当场被拒——「workspace 路径 /tmp/sandbar-ws/tXXXX 不在
+项目 project-content 的注册目录内」。根因是**引擎自相矛盾**：`derive_lane_workspace` /
 `base._init` 用缺省基准 `/tmp/sandbar-ws` 自己派生出绝对路径，随后创建链
 （`client.py` ticket-start）把这个「引擎派生值」当成「调用方显式传参」送进
 `check_paths_under_project` ⇒ 判它不在项目注册目录内 ⇒ 拒收。宿主只能手工传项目内路径。

@@ -94,7 +94,7 @@ def _act_name_rej(project, module, tid, sid, check, detail):
 def _filter_activity_name_collisions(res) -> None:
     """外置模板 agent 段 id 撞引擎注册活动名 → 模板级拒收（KI-121，t260925-16）。
 
-    事故实案：nusuyou content-studio 首版段 id `ai-review` 与引擎为历史回放保留的
+    事故实案：project-content content-studio 首版段 id `ai-review` 与引擎为历史回放保留的
     退役段活动（agent_activities.AGENT_STAGE_IDS）同名 → worker 组装注册表时同名
     活动定义两份，temporalio 注册期裸 ValueError，中央工人起不来。此处把冲突前移到
     加载期：撞名模板整体拒收（classes/module_names/module_deps/accepted 全撤），

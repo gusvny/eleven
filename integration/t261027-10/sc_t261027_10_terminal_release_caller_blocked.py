@@ -9,7 +9,7 @@ isolated SANDBAR_PROJECTS_DIR root, caller-side write physically blocked by
 dropping the project directory to read-only, zero docker/Temporal/3099, no
 production-data writes; cost: seconds).
 
-Incident shape (host report 261027, dengzhufpv): the cancel caller ran in an
+Incident shape (host report 261027, project-vision): the cancel caller ran in an
 agent sandbox with no write access to ~/.sandbar — the release failed with
 PermissionError on concurrency-state.json.lock, the receipt honestly said
 released:false, the workflow was terminated, and nothing ever reclaimed the row.

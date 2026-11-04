@@ -173,7 +173,7 @@
    本表刻意保留中文及原因）；归档设计文档的 `status: superseded` → `deprecated`
    （`superseded` 不在词表 `active|draft|deprecated` 内，语义等价）。
 5. **修掉翻译引入的 1 处真悬空**：`project-external-workflow-templates.md` 里一条 `notes/` 下
-   路径被顺带改了名（notes 不改名）→ 已改回原名并注明该来源件在 nusuyou 仓。
+   路径被顺带改了名（notes 不改名）→ 已改回原名并注明该来源件在 project-content 仓。
 
 ### 4.4 自检结果（260928，收口轮）
 

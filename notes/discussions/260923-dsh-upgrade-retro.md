@@ -41,7 +41,7 @@
 - **回退面未演练**：回 0.1.1 需要三件套同时回——① `npm i -g` 0.1.1 且**同样要钉 bits**（否则再吃一次依赖漂移）；
   ② GUI preset **换回 0.1.1 版**（现存 `~/.dsh/.agent-presets/sandbar-integration.bak-260923/` 正是它，
   但见 §四-4：备份放在扫描根内）；③ 容器 tag 切回 `…0.1.1-rc.2-s1`。
-- 其它项目（nusuyou/dengzhufpv）**无 `paths.dsh_bin` 钉** → worker spawn 走裸 `dsh`，即全局那套是它们唯一的面；
+- 其它项目（project-content/project-vision）**无 `paths.dsh_bin` 钉** → worker spawn 走裸 `dsh`，即全局那套是它们唯一的面；
   本轮全局坏时它们一起坏（worker 日志实证 `bin=dsh(→/opt/homebrew/bin/dsh) 来源=default`）。建议逐项目加钉。
 - 一个完整巡检周期（次日 07:30 调度 + 巡检 agent）未观察。
 
@@ -88,7 +88,7 @@
   建议：做成 `SANDBAR_DSH_CANDIDATES`（或读 project.yaml 的 `paths.dsh_bin`）＋文档标注。
 
 ### 6（不属于升级，但今天暴露）引擎 spawn 面 `embedded null byte`
-- nusuyou t260923-04（implement 段）连环失败真因：`ValueError: embedded null byte`
+- project-content t260923-04（implement 段）连环失败真因：`ValueError: embedded null byte`
   （`server/engine/agent_runtime.py:353` 的 `subprocess.Popen(cmd, cwd, env)`），
   **不是** dsh bits 问题（日志实证）。这是引擎侧缺陷，会咬任何项目；建议单独立项。
 

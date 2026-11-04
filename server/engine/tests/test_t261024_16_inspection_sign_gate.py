@@ -156,7 +156,7 @@ def test_declared_same_project_sign_accepted_without_record_row():
 
 def test_declared_mismatched_caller_still_refused():
     wf = _mk_wf()
-    _sign(wf, _sig("human-scenario", caller_project="dengzhufpv"))
+    _sign(wf, _sig("human-scenario", caller_project="project-vision"))
     assert wf._close_sig is None
     assert "cross-project" in wf._gate_err or "does not match" in wf._gate_err
 

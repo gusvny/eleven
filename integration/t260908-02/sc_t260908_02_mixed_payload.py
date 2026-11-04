@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 """t260908-02 场景：混合形态工单 payload 编解码缝（TicketInput/WorkspacePrep 一等字段，灰盒 L2/L3）。
 
-intent（守护的用户可感知行为/合同）：混合形态项目（根 git 仓+子仓，dengzhufpv
+intent（守护的用户可感知行为/合同）：混合形态项目（根 git 仓+子仓，project-vision
 形态）开票时，建票链推导出的多仓泳道明细（repo_worktrees）必须以**一等字段**
 （dataclass 显形注解）穿越 Temporal payload 编解码两跳——workflow 启动输入
 （TicketInput）与工作区准备 activity 入参（WorkspacePrep）——不再以 list 藏在
 workspace dict 值里撞类型注解（t260907-13 实锤：worker「Failed converting field
-workspace」，workflow 起不来=dengzhufpv T2 停摆）。拆分子用例：
+workspace」，workflow 起不来=project-vision T2 停摆）。拆分子用例：
 
 - 形状契约子用例（stdlib）：TicketInput/WorkspacePrep 均有 repo_worktrees 字段、
   带 default_factory=list 缺省（存量 RUNNING 实例重放缺键不破回放面）；derive

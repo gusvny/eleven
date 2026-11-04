@@ -1505,7 +1505,7 @@ def _result_gone_detail(where: str, rc, rfile, log_file) -> str:
     retry_qc（让本段重写）——旧文案只说「未写」，人无处下手。"""
     kind = _result_file_state(rfile)
     if kind == "unreadable":
-        # 260930（dengzhufpv E1 的 runbook 更正／批次 A）：**两步处置**。实测（t260929-15）
+        # 260930（project-vision E1 的 runbook 更正／批次 A）：**两步处置**。实测（t260929-15）
         # 只发 retry_qc 就自愈——重跑落到**新一代号文件名**，agent 的「文件在场=本段已完成」
         # 幂等锚点在新名字上自然失效；挪档要动泳道工作区，能不动就不动，故降为第二步。
         return ("%s agent 退出（rc=%s）但结果文件**在场却读不出**（JSON 坏/被撕裂/形状"
@@ -1531,7 +1531,7 @@ def _read_result(path: Path) -> Optional[StageResult]:
     # (absent/ok/malformed) so consumers can go visibly red on that basis.
     fc, fc_shape = normalize_files_changed(raw.get("files_changed"))
     legs, leg_shape, leg_dropped = normalize_handover_runs(raw.get("handover_runs"))
-    # 260930（nusuyou N⑦／批次 B）：**入账前语法自检**。契约要求移交命令「可直接在泳道根
+    # 260930（project-content N⑦／批次 B）：**入账前语法自检**。契约要求移交命令「可直接在泳道根
     # 执行」，而 t260929-38 实案里 18/18 带字面 `cd <lane_root> && …`（`<` 是重定向）⇒
     # 解析期即死、零执行，却因「单列计数、不进主口径」而**不拦票**（"一条都没跑"与"跑了但红"
     # 同形）。此处逐条 `sh -n` 判语法，不过者打 `syntax_bad` 标（不改内容、不丢命令——债表
@@ -2900,7 +2900,7 @@ def _dirty_within_write_set(files: List[str], write_set: Any) -> bool:
 
 
 # ---- 嵌套仓守卫纯判定（t260916-20）：泳道内从零建成员仓的丢失形态，闸前置 ----
-# 背景（nusuyou t260916-08 实案：600 文件不可恢复）：泳道内 git init 的子仓，带提交
+# 背景（project-content t260916-08 实案：600 文件不可恢复）：泳道内 git init 的子仓，带提交
 # 会被 add -A 暂存成 gitlink(160000) 落进泳道分支——squash 只搬树内条目，gitlink 内容
 # 无处可搬（静默丢）；0 提交子仓更被 add -A 整目录吞成普通文件错形入库（子仓未提交
 # 工作与 .git 身份丢失）。本组纯函数供 _settle_worktree_lane 与
@@ -2969,7 +2969,7 @@ def gitlink_risk_from_dirty(files: List[Any], tree: Path) -> List[Dict[str, str]
 _GITLINK_NEXT_ACTION = (
     "move the nested repo to the project root (copy, keeping the object store), "
     "then register meta.repo_worktrees as a normal multi-repo ticket, or confirm "
-    "the deletion manually; never strip the gitlink to work around it (nusuyou "
+    "the deletion manually; never strip the gitlink to work around it (project-content "
     "t260916-08 real case: after stripping, 600 files were unrecoverable with the "
     "lane split)")
 
@@ -2982,7 +2982,7 @@ def _gitlink_refusal_note(names: List[str]) -> str:
     reason_code=gitlink_nested_repo 为本票新码）。"""
     return ("嵌套仓守卫拒绝（%sgitlink_nested_repo）：泳道内出现嵌套仓（gitlink）：%s"
             "——引擎不支持在泳道内从零建成员仓：squash 只搬树内条目（gitlink 内容无处"
-            "可搬），拆道还会连带销毁其对象库（nusuyou t260916-08 实案：600 文件不可"
+            "可搬），拆道还会连带销毁其对象库（project-content t260916-08 实案：600 文件不可"
             "恢复）。成员仓必须在项目根下诞生：把该仓搬到项目根（保留对象库）后按普通"
             "多仓票登记 meta.repo_worktrees；勿摘 gitlink 绕行。本次拒绝代落盘/合并/"
             "拆除，现场保留交人工。" % (path_gates.PATH_GATE_REASON_KEY,
@@ -3416,7 +3416,7 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
     防再添第四入口时静默共用歧义标签）：日志层标签来源，取值 agent（generic 段
     _settle_with_gate）/ heal（merge_check 自愈）/ join（settle_lane 汇合统一落盘），
     日志打 `agent-settle：/heal-settle：/join-settle：`——同秒两条 settle 日志无法
-    分辨哪层判定是 dengzhufpv t260916-11 误诊「读旧记录」的直接根源。
+    分辨哪层判定是 project-vision t260916-11 误诊「读旧记录」的直接根源。
 
     Background: the headless agent's sandbox cannot write the real .git (a worktree's
     .git is a gitfile pointing at the main repo's .git/worktrees/<id>, outside the
@@ -3744,7 +3744,7 @@ def _settle_worktree_lane(cwd: Path, ticket_id: str, stage_id: str, gen: int,
         links = staged_gitlinks(p.stdout)
         if links:
             return _gitlink_refuse(ticket_id, stage_id, links, refusal, face=face)
-        # t260914-01（dengzhufpv/t260911-07 根因之二）：判脏非空但撤下协调目录后暂存区
+        # t260914-01（project-vision/t260911-07 根因之二）：判脏非空但撤下协调目录后暂存区
         # 可能为空——该段只产出协调目录产物时就是这种形态，「无改动可提交」是正常工作态，
         # 不是基础设施故障（旧版在此让 commit rc≠0 上抛 RuntimeError，被 Temporal 表现成
         # 「agent 活动故障」，归因噪声极大）。显式预检把两态分开：空暂存=可辨 note（含
@@ -4550,7 +4550,7 @@ def multirepo_materialization_error(lane_root: Path, write_set: Optional[List[st
                                     scopes: List[Dict[str, Any]],
                                     is_worktree_of=None) -> str:
     """保险丝B（合并红灯，工单 t260910-03）：多仓写集 × 未逐仓物化的 fail-closed
-    背闸（dengzhufpv 260910 缺陷：明细缺失时 _lane_scopes 静默回落单仓锚 → 成员仓
+    背闸（project-vision 260910 缺陷：明细缺失时 _lane_scopes 静默回落单仓锚 → 成员仓
     零落仓仍可全绿收口）。
 
     语义：写集经 resolve_repos_for_paths 归属出的**成员仓集合**（归属≠项目根本体），
@@ -9669,7 +9669,7 @@ async def teardown_lane(args: MergeArgs) -> MergeResult:
     # 拆除守卫（t260916-20）：任何破坏性命令前，扫泳道树内未注册嵌套仓——发现即
     # 整体 failed（blocked 交人工，一物不拆）。根树条目的 worktree remove --force
     # 对容器是整树带走，未注册嵌套仓（含其 .git 对象库）被连带销毁且不可恢复
-    # （nusuyou t260916-08 实案：600 文件静默丢失）。与「明细损坏→failed」同分支
+    # （project-content t260916-08 实案：600 文件静默丢失）。与「明细损坏→failed」同分支
     # （人工处置，绝不静默），与「git 清理失败→ok+点名」不同分支（残留=可回收垃圾；
     # 嵌套仓对象库=不可回收）。守卫自身 IO 故障 → 同样 failed 点名（守卫失效=放大
     # 面，绝不静默放拆）；容器已不在盘上 → 空清单放行（幂等重跑语义维持）。
@@ -10727,7 +10727,7 @@ async def run_handover_legs(handover_runs, cwd: Path) -> Dict[str, Any]:
 
     _rs = await asyncio.gather(*[_one(i, leg)
                                  for i, leg in enumerate(handover_runs or [])])
-    # 260930（nusuyou E2／批次 A）：**非零退出条目串行复核一次，报告以复核为准**。
+    # 260930（project-content E2／批次 A）：**非零退出条目串行复核一次，报告以复核为准**。
     # 并发的前提是「移交命令彼此独立」（见 docstring），而「发布/安装 + 校验其产物」这类天然
     # 有序的命令对在同批并发里必然对着**发布前**状态判 ⇒ 闸报假失败（t260929-20 实案：闸报
     # 15 跑 7 过 8 败、交付全绿；把关人逐条手跑 12/12 exit 0；产物落地时刻在闸窗口最末尾）。

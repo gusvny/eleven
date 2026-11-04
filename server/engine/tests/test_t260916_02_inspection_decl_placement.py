@@ -31,7 +31,7 @@ schema: v1
 instances:
   - id: nu-daily
     enabled: true
-    project_key: nusuyou
+    project_key: project-content
     schedule:
       kind: cron
       cron: 0 8 * * *
@@ -44,7 +44,7 @@ schema: v1
 instances:
   - id: dz-weekly
     enabled: true
-    project_key: dengzhufpv
+    project_key: project-vision
     scan_face: doc
     schedule:
       kind: cron
@@ -53,7 +53,7 @@ instances:
     template: inspection-lite
   - id: dz-drain
     enabled: false
-    project_key: dengzhufpv
+    project_key: project-vision
     schedule:
       kind: cron
       cron: 0 10 * * 1
@@ -92,17 +92,17 @@ def _write_registry_entry(root: Path, key: str, home: Path,
 
 @pytest.fixture
 def two_projects(monkeypatch, tmp_path):
-    """双项目隔离夹具：nusuyou（默认落位）/ dengzhufpv（指路 decl/inspect.yaml）。
+    """双项目隔离夹具：project-content（默认落位）/ project-vision（指路 decl/inspect.yaml）。
     返回 (registry_root, homes)。"""
     reg = tmp_path / "registry"
-    homes = {"nusuyou": tmp_path / "nusuyou-home", "dengzhufpv": tmp_path / "dz-home"}
-    homes["nusuyou"].mkdir(parents=True)
-    homes["dengzhufpv"].mkdir(parents=True)
-    _write_registry_entry(reg, "nusuyou", homes["nusuyou"])
-    _write_registry_entry(reg, "dengzhufpv", homes["dengzhufpv"],
+    homes = {"project-content": tmp_path / "project-content-home", "project-vision": tmp_path / "dz-home"}
+    homes["project-content"].mkdir(parents=True)
+    homes["project-vision"].mkdir(parents=True)
+    _write_registry_entry(reg, "project-content", homes["project-content"])
+    _write_registry_entry(reg, "project-vision", homes["project-vision"],
                           inspection_decl="decl/inspect.yaml")
-    (homes["nusuyou"] / "inspection.yaml").write_text(NU_DECL, encoding="utf-8")
-    custom = homes["dengzhufpv"] / "decl"
+    (homes["project-content"] / "inspection.yaml").write_text(NU_DECL, encoding="utf-8")
+    custom = homes["project-vision"] / "decl"
     custom.mkdir()
     (custom / "inspect.yaml").write_text(DZ_DECL, encoding="utf-8")
     monkeypatch.setenv("SANDBAR_PROJECTS_DIR", str(reg))
@@ -113,15 +113,15 @@ def two_projects(monkeypatch, tmp_path):
 # ---------- A. 布局：默认落位 + 指路 ----------
 
 def test_default_placement_dirs0_inspection_yaml(two_projects):
-    p = decl.resolve_project_decl_path("nusuyou")
+    p = decl.resolve_project_decl_path("project-content")
     assert p.name == "inspection.yaml" and p.is_file()
     d = decl.load_inspection_decl(p)
     assert [i.id for i in d.instances] == ["nu-daily"]
 
 
 def test_decl_pointer_routes_relative_and_absolute(two_projects):
-    p = decl.resolve_project_decl_path("dengzhufpv")
-    assert p == two_projects[1]["dengzhufpv"] / "decl" / "inspect.yaml"
+    p = decl.resolve_project_decl_path("project-vision")
+    assert p == two_projects[1]["project-vision"] / "decl" / "inspect.yaml"
     d = decl.load_inspection_decl(p)
     assert [i.id for i in d.instances] == ["dz-weekly", "dz-drain"]
 
@@ -165,9 +165,9 @@ def test_aggregate_whitelist_merges_both_projects(two_projects):
 
 def test_aggregate_load_decl_for_instance_routes_by_project(two_projects):
     d1, k1 = decl.load_decl_for_instance("nu-daily")
-    assert k1 == "nusuyou" and d1.instance("nu-daily").instance_project_key == "nusuyou"
+    assert k1 == "project-content" and d1.instance("nu-daily").instance_project_key == "project-content"
     d2, k2 = decl.load_decl_for_instance("dz-weekly")
-    assert k2 == "dengzhufpv" and d2.instance("dz-weekly").scan_face == "doc"
+    assert k2 == "project-vision" and d2.instance("dz-weekly").scan_face == "doc"
 
 
 def test_aggregate_duplicate_instance_id_across_projects_fail_closed(monkeypatch, tmp_path):
@@ -187,38 +187,38 @@ def test_aggregate_duplicate_instance_id_across_projects_fail_closed(monkeypatch
 
 def test_aggregate_iter_states_ok_absent(two_projects):
     reg, homes = two_projects
-    (homes["dengzhufpv"] / "decl" / "inspect.yaml").unlink()   # 指路锚在=指路成功；删掉变锚缺失
+    (homes["project-vision"] / "decl" / "inspect.yaml").unlink()   # 指路锚在=指路成功；删掉变锚缺失
     states = {st.project_key: st for st in decl.iter_project_decls()}
-    assert states["nusuyou"].state == "ok"
-    assert states["dengzhufpv"].state == "error"    # 指路锚缺失=fail-closed error 态
+    assert states["project-content"].state == "ok"
+    assert states["project-vision"].state == "error"    # 指路锚缺失=fail-closed error 态
     # absent（无指路、默认落位无文件）=该项目无巡检面
-    (homes["nusuyou"] / "inspection.yaml").unlink()
+    (homes["project-content"] / "inspection.yaml").unlink()
     states = {st.project_key: st for st in decl.iter_project_decls()}
-    assert states["nusuyou"].state == "absent"
+    assert states["project-content"].state == "absent"
 
 
 # ---------- C. fail-closed：坏形态项目级降级，不殃及他项目（验收4） ----------
 
 def test_aggregate_broken_decl_degrades_project_only(two_projects):
     reg, homes = two_projects
-    (homes["nusuyou"] / "inspection.yaml").write_text("schema: v9\ninstances: []\n",
+    (homes["project-content"] / "inspection.yaml").write_text("schema: v9\ninstances: []\n",
                                                       encoding="utf-8")
     ids, degraded, _cov = decl.enabled_instance_whitelist()
     assert ids == ("dz-weekly",)                    # 坏项目实例不收（收=静默编造）
-    assert len(degraded) == 1 and degraded[0][0] == "nusuyou" and "nusuyou" in degraded[0][2]
+    assert len(degraded) == 1 and degraded[0][0] == "project-content" and "project-content" in degraded[0][2]
     with pytest.raises(decl.DeclError) as ei:
         decl.load_decl_for_instance("nu-daily")
-    assert "nusuyou" in str(ei.value) and "未在任何项目声明中" in str(ei.value)
+    assert "project-content" in str(ei.value) and "未在任何项目声明中" in str(ei.value)
     # 他项目照常可用（绝不借用/绝不连带瘫痪）
     d, k = decl.load_decl_for_instance("dz-weekly")
-    assert k == "dengzhufpv"
+    assert k == "project-vision"
 
 
 def test_aggregate_unknown_instance_names_all_project_states(two_projects):
     with pytest.raises(decl.DeclError) as ei:
         decl.load_decl_for_instance("nope")
     msg = str(ei.value)
-    assert "nusuyou" in msg and "dengzhufpv" in msg      # 逐项目状态点名
+    assert "project-content" in msg and "project-vision" in msg      # 逐项目状态点名
     assert "绝不回落" in msg
 
 

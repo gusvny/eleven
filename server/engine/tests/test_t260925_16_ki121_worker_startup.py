@@ -14,7 +14,7 @@
     干净注册根绿 / 事故形态红（review 意见 4）＝合并闸「工人可启动 dry-run」。
 
 夹具=临时注册根（SANDBAR_PROJECTS_DIR 注入，shared.registry_root 每次现读）＋
-tmp 项目目录下的桩模板模块；不依赖真 nusuyou 仓、不依赖宿主声明状态。
+tmp 项目目录下的桩模板模块；不依赖真 project-content 仓、不依赖宿主声明状态。
 """
 import collections
 import importlib

@@ -1,6 +1,6 @@
-"""260930 单测（宿主令·nusuyou 需求说明第六条 / KI-099 实案）：未知相位**绝不打断工作流实例**。
+"""260930 单测（宿主令·project-content 需求说明第六条 / KI-099 实案）：未知相位**绝不打断工作流实例**。
 
-实案（nusuyou t260929-28，260929 夜）：验收段 agent 挂死后，操作员先 `retry_qc`（幂等不解），
+实案（project-content t260929-28，260929 夜）：验收段 agent 挂死后，操作员先 `retry_qc`（幂等不解），
 再 `rework to_stage=acceptance_walkthrough` —— **被拒收**，而拒收回执**自己推荐**了
 「可用别名 `to_stage=acceptance`」；照它改成 `acceptance` 后回执 `delivered: true`，随后票面
 `dev_lane.py ValueError: 未知阶段 ''`、`status=None`，连 `show`/`query` 都查不到
@@ -116,7 +116,7 @@ def test_admissible_vocabulary_is_a_subset_and_excludes_internal_phases(new_hist
     for internal in ("parallel_impl_design", "arb_acc_parallel", "integ_join",
                      "integration_review"):
         assert internal not in dl.REWORK_ADMISSIBLE_PHASES, internal
-    # 常用可打回面必须在（对齐 nusuyou 侧的需要：验收/仲裁/实现/集测）
+    # 常用可打回面必须在（对齐 project-content 侧的需要：验收/仲裁/实现/集测）
     for usable in ("implement", "acceptance", "arbitrate", "run_integration_tests"):
         assert usable in dl.REWORK_ADMISSIBLE_PHASES, usable
 

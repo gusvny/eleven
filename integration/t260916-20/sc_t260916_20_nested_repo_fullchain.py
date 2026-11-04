@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """t260916-20 场景：泳道内从零建成员仓的四道守卫（灰盒 L2，真 git 夹具+直调 activity）。
 
-intent（守护的用户可感知行为/合同；nusuyou t260916-08 实案=600 文件静默丢失）：
+intent（守护的用户可感知行为/合同；project-content t260916-08 实案=600 文件静默丢失）：
 - settle 双站点（主 settle + 冲突消解 settle）遇嵌套仓（untracked 目录折叠形态 ×
   .git 在场，或暂存区 160000 gitlink）→ fail-closed 拒绝代落盘，人话点名嵌套仓、
   现场保留（不 commit、不 reset、不删除），重试同拒（幂等红灯）；

@@ -454,7 +454,7 @@ class QueryError(ValueError):
     红线：查询失败（超时/连接/取消）绝不伪造成「工单不存在」——不存在语义只有
     client.py kind=not_found（describe 命中 NotFoundFailure）一个入水口。
 
-    face（260930 批次 B，dengzhufpv E5）：终态票的**可渲染失败面**随异常上送（additive：
+    face（260930 批次 B，project-vision E5）：终态票的**可渲染失败面**随异常上送（additive：
     缺省 None，老消费方零感知）。为什么加：终态后票面快照不可查（引擎有意如此），复盘
     「谁终结的/终结前有没有留痕」此前只能自己写 Temporal SDK 脚本读历史；face 里带
     terminate 理由原文 + **最后一个信号名**（`_terminal_failure_face` 现算），让正规入口
@@ -772,7 +772,7 @@ def _create(a):
     # t260903-05 实案：白名单拦得对、错在声明漏）——建单侧自动并入，防人工漏报。
     # t260910-03：write_set 组装（含 integration/ 自动并入）必须先于 derive——
     # derive_lane_workspace 的多仓派生以写集归属为唯一输入（repo_write_set），
-    # 组装滞后=并入条目不参与归属推导=成员仓明细缺失（dengzhufpv 260910 缺陷形态）。
+    # 组装滞后=并入条目不参与归属推导=成员仓明细缺失（project-vision 260910 缺陷形态）。
     write_set = list(a.get('write_set') or [])
     if wid == 'dev-lane' and 'integration/' not in write_set:
         # t260910-03：并入前先探归属——补传 repo_write_set 后，无 integration/
@@ -1149,7 +1149,7 @@ def _cancel(a):
 
 
 def _cancel_audit(a):
-    """终结票「留痕对账」只读审计（260930 批次 B；dengzhufpv E4/E5 合并需求）。
+    """终结票「留痕对账」只读审计（260930 批次 B；project-vision E4/E5 合并需求）。
 
     转发 engine/client.py cancel-audit。为什么要有：跨项目会话此前**没有读事件历史的
     工具入口**，遇到「terminate 理由写着宿主当面决定、历史里却只有 pause」这种不实归因，

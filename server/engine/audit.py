@@ -57,7 +57,7 @@ admin.log 轮转面（t260916-21，写路径唯一收口=_append_line）：
      自动出 WARN 记录；client.py 子进程内经 lastResort 落 stderr；
   c. 回执 dict 就地点名 audit_write_failed——打印回执的出口必须**先审计后
      打印**（client.py _emit 已按此序，t260916-21 改）：打印在前则写失败永远
-     无感（nusuyou/dengzhufpv 实测病灶）。
+     无感（project-content/project-vision 实测病灶）。
 
 自报家门标记（普通 env，非密钥、非安全语义——宿主 260910 拍板）：
   - env SANDBAR_CLIENT_ENTRY 精确等值 'ticket'（ticket.py _poc 注入）→ 回执

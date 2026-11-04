@@ -7,7 +7,7 @@ temporalio SDK 的掩码句 `UnboundLocalError: local variable 'pusher' referenc
 assignment`（SDK `_replayer.py:334` 的 `finally: pusher.close()`）——真因被吞掉，实际是：
 
     RuntimeError: Failed validating workflow ContentStudioWorkflow
-      ← ModuleNotFoundError: No module named 'sandbar_ext_nusuyou_content_studio'
+      ← ModuleNotFoundError: No module named 'sandbar_ext_project-content_content_studio'
 
 外置模板类是**运行期按名 importlib 装载**的（`project_templates.py` 生成别名
 `sandbar_ext_<key>_<stem>`），生产 worker 靠 `SandboxedWorkflowRunner(

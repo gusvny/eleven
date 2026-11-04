@@ -100,7 +100,7 @@ function inSpace(r) {
 }
 
 // --- B: determinism ---
-const probes = ['sandbar', 'suyou', 'nusuyou', 'console-ui', 'no-such-declared-project',
+const probes = ['sandbar', 'suyou', 'project-content', 'console-ui', 'no-such-declared-project',
   'a'.repeat(63), 'dir-with-dashes', 'UPPER', 'digits12345']
 let det = true
 for (const k of probes) {
@@ -167,7 +167,7 @@ async function declaredKeys() {
   } catch (e) {
     console.log('NOTE :: registry loader unavailable, seed keys: ' + e)
   }
-  return ['sandbar', 'suyou', 'nusuyou']
+  return ['sandbar', 'suyou', 'project-content']
 }
 function dupCheck(keys, label) {
   const seen = new Map()

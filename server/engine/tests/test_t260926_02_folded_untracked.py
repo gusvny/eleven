@@ -1,6 +1,6 @@
 """t260926-02（KI-125）：settle/merge_check 判脏展开 git 折叠未跟踪目录。
 
-事故形态（nusuyou t260925-06）：全新未跟踪目录在缺省 `git status --porcelain -z`
+事故形态（project-content t260925-06）：全新未跟踪目录在缺省 `git status --porcelain -z`
 下折叠成一条 `?? dir/`，写集条目写的是文件 `dir/file.py`——
 path_gates._within('dir/', ['dir/file.py']) 为 False → unauthorized_path，
 合法交付被隔离进 .sandbar/quarantine/，票两轮落不了地；同一形态用目录级条目

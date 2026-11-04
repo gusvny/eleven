@@ -148,14 +148,14 @@ def test_cancel_cross_project_with_flag_stamped_and_recorded(monkeypatch):
     """验收④带旗侧：越权旗放行 + 盖章随载荷下发（workflow 侧落 cross_project_uses）。"""
     h = FakeHandle()
     _patch_connect(monkeypatch, FakeClient(h))
-    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "dengzhufpv")
+    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "project-vision")
     r = _run(client.cmd_ticket_cancel({"ticket_id": "t1", "who": "integration",
                                        "reason": "代管清场残渣票",
                                        "cross_project": {"by": "integration",
                                                          "reason": "代管清场残渣票"}}))
     assert r["ok"] and r["cross_project_used"] is True
     _, payload = h.signals[0]
-    assert payload["caller_project"] == "dengzhufpv"
+    assert payload["caller_project"] == "project-vision"
     assert payload["cross_project_note"] == "代管清场残渣票"
     assert h.terminated == "代管清场残渣票"
 
@@ -205,10 +205,10 @@ def test_cancel_cross_project_refused_zero_side_effect(monkeypatch):
     """验收④无旗侧：declared 异项目 → cross_project_refused 点名双项目+票号，零写。"""
     h = FakeHandle()
     _patch_connect(monkeypatch, FakeClient(h))
-    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "dengzhufpv")
+    monkeypatch.setenv(shared.CALLER_PROJECT_ENV, "project-vision")
     r = _run(client.cmd_ticket_cancel({"ticket_id": "t1", "who": "ops", "reason": "r"}))
     assert r["ok"] is False and r["kind"] == "cross_project_refused"
-    assert "dengzhufpv" in r["error"] and "sandbar" in r["error"] and "t1" in r["error"]
+    assert "project-vision" in r["error"] and "sandbar" in r["error"] and "t1" in r["error"]
     assert h.events == []      # fail-closed：不留痕、不终结
 
 

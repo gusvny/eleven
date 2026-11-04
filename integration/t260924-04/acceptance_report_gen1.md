@@ -83,7 +83,7 @@ sys.path 装载使受限 importer 可寻址；② 兜底隔离——Worker 构�
 - **doc_sediment**：`want=true` 建议——target=`docs/design/项目外置工作流模板加载口v1.md`
   §五「clean-module 约束」段，补一行事实：**外置模板模块除模块自身约束外，还须
   能被 temporalio workflow sandbox 按其 `__module__` 名重执行；加载口文档 §三
-  拒收表宜增「沙箱重执行失败」一态**（本票缺陷 #3 的教训，对下一棒/nusuyou 接入
+  拒收表宜增「沙箱重执行失败」一态**（本票缺陷 #3 的教训，对下一棒/project-content 接入
   者是必知契约）。reason=本票两轮验收实证该面在离线深检之外、仅真 Worker 校验期
   可暴露，属「不写必再踩」的坑。
 - **doc_conflicts**：实际读过 docs/README.md 与加载口文档 v1（本轮）——加载口

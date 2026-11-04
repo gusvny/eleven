@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""t260907-12 集成测试共享夹具：根亦 git 仓的混合多仓项目（dengzhufpv 形态）。
+"""t260907-12 集成测试共享夹具：根亦 git 仓的混合多仓项目（project-vision 形态）。
 不带 sc_ 前缀 = 共享夹具代码，不进 SCENARIOS（run_scenarios 约定）。
 
 夹具红线（沿 t260907-06 lib 口径）：假项目只在测试 tmp 目录自建，
@@ -32,7 +32,7 @@ import shared  # noqa: E402  纯标准库（temporalio 仅函数内 lazy import�
 
 def build_mixed_project(prefix="t260907-12-mixed-", nested=False):
     """混合形态夹具（tmp 自建）：项目根=git 仓（知识库仓）+ 一层子仓并存
-    （票文口径「[根]+一层子仓集合」，dengzhufpv 形态）。
+    （票文口径「[根]+一层子仓集合」，project-vision 形态）。
 
       <root>/                 git 仓（基线提交含 README.md、docs/kb.md、
                               .gitignore 忽略子仓目录与两个协调目录名（naming-compat：含旧名清单镜像面））

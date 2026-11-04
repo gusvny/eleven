@@ -27,7 +27,7 @@ function fakeEngine(spec) {
         "a = sys.argv[2] if len(sys.argv) > 2 else ''",
         'out = {"ok": True, "result": {"count": 3, "tickets": [',
         '  {"id": "t-sb", "project": "sandbar", "stage_state": "running", "args": a},',
-        '  {"id": "t-other", "project": "dengzhufpv", "stage_state": "running"},',
+        '  {"id": "t-other", "project": "project-vision", "stage_state": "running"},',
         '  {"id": "t-nolabel", "stage_state": "running"}]}}',
         'sys.stdout.write(json.dumps(out))',
         '',
@@ -57,7 +57,7 @@ function fakeEngine(spec) {
 }
 // 行级兜底：即使引擎侧过滤被绕过（桩无视 args 回全机行），回执行仍裁到本项目。
 {
-  const r = await makeBoardReader(fakeEngine({ mode: 'echo' }), { project: 'nusuyou' })()
+  const r = await makeBoardReader(fakeEngine({ mode: 'echo' }), { project: 'project-content' })()
   t(r.ok === true && r.rows.map(x => String(x.id)).join(',') === 't-nolabel',
     'engine-side filter bypassed → row-level scope still drops labeled foreign rows (label-less kept)')
 }

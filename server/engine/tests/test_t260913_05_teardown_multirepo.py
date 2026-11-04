@@ -53,7 +53,7 @@ def _init_repo(path: Path, fname: str) -> None:
 
 @pytest.fixture
 def mixed(tmp_path):
-    """混合形态（dengzhufpv / t260911-04 同款）：根亦 git 仓 + repo_a 子仓。"""
+    """混合形态（project-vision / t260911-04 同款）：根亦 git 仓 + repo_a 子仓。"""
     root = tmp_path / "proj"
     _init_repo(root, "docs/root.md")
     (root / ".gitignore").write_text("repo_a/\n.suyou/\n.sandbar/\n", encoding="utf-8")  # naming-compat：.suyou/=旧名清单镜像目录，fixture 照造（t260911-04 同款）

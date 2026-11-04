@@ -361,7 +361,7 @@ const PROJECTS = {
     {id:'t260905-01', title:'Panel list conventions', stage:'merge', epic:'doc-lifecycle', st:'hold'},
     {id:'t260905-06', title:'Index the new reference page', stage:'create_plan', epic:'doc-lifecycle', st:'wait'},
   ]},
-  nusuyou: { cap: 1, tickets: [
+  project-content: { cap: 1, tickets: [
     {id:'t260930-04', title:'cs-publish pipeline: retry on 429', stage:'run_integration_tests', epic:'content', st:'run'},
     {id:'t260930-07', title:'Site rebuild for the new hero', stage:'create_plan', epic:'content', st:'wait'},
     {id:'t260930-09', title:'Move assets to the CDN', stage:'create_plan', epic:'content', st:'wait'},
@@ -381,7 +381,7 @@ const LOGOS = [
 ];
 let logoIdx = 2;   // 宿主 261004 选定：候选 C（斜沙洲）
 function renderLogo(){ const el = document.getElementById('logoMark'); if (el) el.innerHTML = LOGOS[logoIdx] }
-const PROJ_SHAPE = { sandbar: ['pentagon', 'ring'], suyou: ['sparkle', 'solid'], nusuyou: ['shield', 'half'] };
+const PROJ_SHAPE = { sandbar: ['pentagon', 'ring'], suyou: ['sparkle', 'solid'], project-content: ['shield', 'half'] };
 const PALETTE12 = ['#e76a6a','#e7936a','#e7c36a','#c6e76a','#8ae76a','#6ae79c','#6ae7d4','#6aabe7','#7f6ae7','#b56ae7','#e76ad0','#e76a92'];
 function polyPath(c, R, n, rot){
   const pts = [];
@@ -419,13 +419,13 @@ function shapeSVG(spec, color, size){
   return wrap('<path d="' + d + '" fill="' + color + '"/>');
 }
 const badge = (key, size) => shapeSVG(PROJ_SHAPE[key] || ['pentagon', 'solid'], PROJ_COLOR[key] || '#9ca3af', size);
-const PROJ_COLOR = { sandbar: '#e76a6a', suyou: '#6a9ce7', nusuyou: '#83e76a' };
+const PROJ_COLOR = { sandbar: '#e76a6a', suyou: '#6a9ce7', project-content: '#83e76a' };
 const SESSIONS = {
   sandbar: [{ code: '09ca', title: 'executor', role: 'executor' }, { code: '7f31', title: 'panel copy' }],
   suyou: [{ code: '4b71', title: 'executor', role: 'executor' }, { code: 'a90d', title: 'metrics docs' }],
-  nusuyou: [{ code: 'b2e8', title: 'executor', role: 'executor' }],
+  project-content: [{ code: 'b2e8', title: 'executor', role: 'executor' }],
 };
-let active = { sandbar: 0, suyou: 0, nusuyou: 0 };
+let active = { sandbar: 0, suyou: 0, project-content: 0 };
 let segCode = 0x1a00;
 function newSession(k){
   const codes = SESSIONS[k].map(x => x.code);
@@ -440,7 +440,7 @@ function toggleSessMenu(){ const m = document.getElementById('smenu'); if (m) m.
 const PROJ_SESS = {
   sandbar: { handle: 'executor', code: '09ca' },
   suyou: { handle: 'metrics-docs', code: '4b71' },
-  nusuyou: { handle: 'cs-publish', code: 'b2e8' },
+  project-content: { handle: 'cs-publish', code: 'b2e8' },
 };
 let cur = 'sandbar', dragId = null, view = 'executor', prevView = 'ticket', filter = 'all', openId = null, prog = 'dots', panelTab = 'overview', epicCode = null, dlgKind = null, fromEpic = false;
 function cycleProg(){ prog = prog === 'dots' ? 'bar' : prog === 'bar' ? 'off' : 'dots'; const b = document.getElementById('progBtn'); if (b) b.textContent = prog; render(); }

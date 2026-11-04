@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""t260910-08 场景：多仓票真开票后泳道磁盘逐仓物化终态（灰盒 L3，dengzhufpv 形态）。
+"""t260910-08 场景：多仓票真开票后泳道磁盘逐仓物化终态（灰盒 L3，project-vision 形态）。
 
 intent（守护的用户可感知行为/合同，工单 t260910-08 验收第 1 条的仪器）：
-- 正规入口 ticket.py create 真开票（dengzhufpv 形态写集：根仓+子仓各一条）→ 真专属
+- 正规入口 ticket.py create 真开票（project-vision 形态写集：根仓+子仓各一条）→ 真专属
   worker 跑 DevLaneWorkflow → prepare_workspace 真建泳道 → 泳道磁盘终态四件套：
   ① 泳道容器下逐成员仓工作区目录存在（repo="" 根树=容器本身是根仓已注册 worktree）；
   ② 每仓分支名 = lane/<票>-<seg>（根树 = lane/<票>-root）；
   ③ 清单 repo_worktrees.json 在引擎真写点位（shared.multi_manifest_path 解析位，
     t260914-01 起新泳道=新名协调目录），repo/name/branch 与派生明细逐条一致；
-  ④ meta.repo_worktrees 非空（ticket show 读面 = dengzhufpv 取证同一读面，
+  ④ meta.repo_worktrees 非空（ticket show 读面 = project-vision 取证同一读面，
     该字段此前恒 null 误导诊断）。
 - Temporal 持久化契约：TicketInput.repo_worktrees 双仓在起始事件 payload
   （probe_wf_input 读面，明细进 Temporal 面不丢）。
@@ -56,7 +56,7 @@ import shared  # noqa: E402  纯标准库依赖面（TARGET_HOST 已被上方 en
 TICKET = "t26091008lm"          # 多仓主子用例（混合形态：根树+repo_a 树）
 TICKET_SINGLE = "t26091008sg"   # 单仓对照子用例
 TICKET_BAD = "t26091008bd"      # 畸形明细子用例（ty=类型毁形 / sm=语义毁形）
-WS = ["docs/root.md", "repo_a/src/a.py"]   # dengzhufpv 形态：根仓+子仓各一条
+WS = ["docs/root.md", "repo_a/src/a.py"]   # project-vision 形态：根仓+子仓各一条
 PROJ_MULTI = "utmr08"
 PROJ_SINGLE = "utsg08"
 DISK_DEADLINE = 150.0           # 真链（create→worker→activity）磁盘终态等待上限
@@ -144,7 +144,7 @@ def _init_repo(path, rel_file):
 
 
 def build_mixed_project(base):
-    """混合形态（dengzhufpv 缺陷现场形态）：根亦 git 仓 + repo_a/repo_b 子仓
+    """混合形态（project-vision 缺陷现场形态）：根亦 git 仓 + repo_a/repo_b 子仓
     （.gitignore 忽略子仓=现场同款）。写集只命中根+repo_a（形态=双树）。"""
     root = Path(base) / "mixed"
     root.mkdir(parents=True)
@@ -306,7 +306,7 @@ try:
     # ---------- stdlib 子用例：夹具自证（夹具漂移=假红/假绿防线，恒跑） ----------
     mixed = build_mixed_project(tmp)
     single = build_single_project(tmp)
-    check("S1 夹具自证：混合形态=根仓+子仓并存（dengzhufpv 形态）",
+    check("S1 夹具自证：混合形态=根仓+子仓并存（project-vision 形态）",
           shared.is_multi_repo_layout(mixed)
           and (mixed / ".git").exists() and (mixed / "repo_a" / ".git").exists(),
           "mixed=%s" % mixed)
@@ -367,7 +367,7 @@ try:
             detail = shared.build_repo_worktrees(mixed, WS, lane_rel.rsplit("/", 1)[-1])
 
             def tk_show(tid, deadline_s=30.0):
-                """ticket show 读面（=dengzhufpv 取证同面）：轮询至可读，返回 meta 或 None。"""
+                """ticket show 读面（=project-vision 取证同面）：轮询至可读，返回 meta 或 None。"""
                 end = time.time() + deadline_s
                 last = None
                 while time.time() < end:

@@ -22,7 +22,7 @@
    - 违规＝**拿这个路径去读/写文件、去执行程序**；
    - 不算＝纯字符串函数的输入→输出对拍、夹具/样本值、注释文案（清单见 KI-075「边界」段）。
 4. **宿主侧实测**（只列文件名与存在与否，不读凭证内容）：
-   `~/.sandbar/projects/{suyou,sandbar,dengzhufpv}/credentials.yaml`、`~/.dsh/.agent-presets/*`、
+   `~/.sandbar/projects/{suyou,sandbar,project-vision}/credentials.yaml`、`~/.dsh/.agent-presets/*`、
    各泳道 `.dsh/.credentials.yaml`——用于区分「真会断」与「死码/冗余候选」。
 5. **时间归属**：`git log -1 -S "<字面量>" -- <file>`，避免把 260906 的老债记到昨晚账上
    （stage_docker 两条即由此判定为 t260904-19 引入、t260910-12 重写时未顺手清）。

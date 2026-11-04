@@ -133,7 +133,7 @@ async function declaredKeys() {
   } catch (e) {
     console.log('NOTE :: registry loader unavailable, seed keys: ' + e)
   }
-  return ['sandbar', 'suyou', 'nusuyou']
+  return ['sandbar', 'suyou', 'project-content']
 }
 const keys = await declaredKeys()
 let eq = true, eqDetail = ''
